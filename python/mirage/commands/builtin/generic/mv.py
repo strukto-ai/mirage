@@ -66,9 +66,9 @@ def parse_mv_flags(fl: FlagView) -> MvFlags:
         fl (FlagView): Flag view constructed with the mv spec.
     """
     update = update_mode("mv", fl)
-    suffix = fl.as_str("S") or fl.as_str("suffix")
+    suffix = fl.as_str("suffix")
     control = backup_control("mv", backup_raw(fl), suffix)
-    no_clobber = fl.as_bool("n") or fl.as_bool("no_clobber")
+    no_clobber = fl.as_bool("no_clobber")
     exchange = fl.as_bool("exchange")
     if control is not None and control != "none" and (exchange or no_clobber or
                                                       update == "none-fail"):
@@ -78,7 +78,7 @@ def parse_mv_flags(fl: FlagView) -> MvFlags:
     target_dir, no_target = target_flags("mv", fl)
     return MvFlags(
         no_clobber=no_clobber,
-        verbose=fl.as_bool("v") or fl.as_bool("verbose"),
+        verbose=fl.as_bool("verbose"),
         update=update,
         backup=control,
         suffix=suffix if suffix is not None else DEFAULT_BACKUP_SUFFIX,

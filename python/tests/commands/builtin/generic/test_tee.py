@@ -10,12 +10,15 @@ def _spec(path: str) -> PathSpec:
 
 
 def test_parse_flags_append_short_and_long():
-    assert parse_flags({"a": True}) == TeeFlags(append=True)
+    assert parse_flags({"append": True}) == TeeFlags(append=True)
     assert parse_flags({"append": True}) == TeeFlags(append=True)
 
 
 def test_parse_flags_i_and_p_are_noops():
-    assert parse_flags({"i": True, "p": True}) == TeeFlags(append=False)
+    assert parse_flags({
+        "ignore_interrupts": True,
+        "p": True
+    }) == TeeFlags(append=False)
 
 
 def test_parse_flags_valid_output_error_modes():

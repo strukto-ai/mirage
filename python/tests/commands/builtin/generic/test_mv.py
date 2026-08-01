@@ -53,8 +53,9 @@ def _make_backend(files: dict[str, bytes],
 
 async def _run(files, dirs, paths, *, readdir=None, mtimes=None, **kw):
     stat, rename = _make_backend(files, dirs, mtimes)
-    flags = kw.pop("flags", None) or MvFlags(no_clobber=kw.get("n", False),
-                                             verbose=kw.get("v", False))
+    flags = kw.pop("flags", None) or MvFlags(no_clobber=kw.get(
+        "no_clobber", False),
+                                             verbose=kw.get("verbose", False))
     return await mv([_spec(p) for p in paths],
                     strategy=NativeMove(rename=rename),
                     stat=stat,
@@ -148,7 +149,7 @@ async def test_multiple_sources_nondir_raises():
 @pytest.mark.asyncio
 async def test_no_clobber_preserves_source_and_target():
     files = {"/a.txt": b"NEW", "/d/a.txt": b"OLD"}
-    await _run(files, {"/d"}, ["/a.txt", "/d"], n=True)
+    await _run(files, {"/d"}, ["/a.txt", "/d"], no_clobber=True)
     assert files["/d/a.txt"] == b"OLD"
     assert files["/a.txt"] == b"NEW"
 
@@ -156,7 +157,7 @@ async def test_no_clobber_preserves_source_and_target():
 @pytest.mark.asyncio
 async def test_no_clobber_duplicate_basenames_keeps_skipped_source():
     files = {"/x/a.txt": b"FIRST", "/y/a.txt": b"SECOND", "/d/keep": b"K"}
-    await _run(files, {"/d"}, ["/x/a.txt", "/y/a.txt", "/d"], n=True)
+    await _run(files, {"/d"}, ["/x/a.txt", "/y/a.txt", "/d"], no_clobber=True)
     assert files["/d/a.txt"] == b"FIRST"
     assert "/x/a.txt" not in files
     assert files["/y/a.txt"] == b"SECOND"
@@ -262,14 +263,14 @@ async def _run_primitive(files,
                          dirs,
                          paths,
                          *,
-                         v=False,
+                         verbose=False,
                          flags=None,
                          **fail_kw):
     stat, strategy = _make_primitive(files, dirs, **fail_kw)
     return await mv([_spec(p) for p in paths],
                     strategy=strategy,
                     stat=stat,
-                    flags=flags or MvFlags(verbose=v))
+                    flags=flags or MvFlags(verbose=verbose))
 
 
 @pytest.mark.asyncio
@@ -388,7 +389,7 @@ async def test_primitive_verbose_skips_failed_moves():
     files = {"/src/a.txt": b"AAA", "/src/b.txt": b"BBB", "/d/keep": b"K"}
     out, _ = await _run_primitive(
         files, {"/src", "/d"}, ["/src/a.txt", "/src/b.txt", "/d"],
-        v=True,
+        verbose=True,
         unlink_fails={"/src/a.txt": PermissionError("/src/a.txt")})
     assert out == b"renamed '/src/b.txt' -> '/d/b.txt'\n"
 
@@ -618,16 +619,20 @@ def test_parse_mv_flags_conflicts_and_grammar():
         return FlagView(bag, spec=SPECS["mv"])
 
     with pytest.raises(UsageError) as exc:
-        parse_mv_flags(view({"b": True, "exchange": True}))
+        parse_mv_flags(view({"backup": True, "exchange": True}))
     assert "mv: cannot combine --backup with --exchange, -n, or " \
            "--update=none-fail" in str(exc.value)
     with pytest.raises(UsageError) as exc:
-        parse_mv_flags(view({"backup": True, "n": True}))
+        parse_mv_flags(view({"backup": True, "no_clobber": True}))
     assert "cannot combine --backup" in str(exc.value)
     with pytest.raises(UsageError) as exc:
-        parse_mv_flags(view({"t": "/d", "T": True}))
+        parse_mv_flags(
+            view({
+                "target_directory": "/d",
+                "no_target_directory": True
+            }))
     assert "cannot combine --target-directory" in str(exc.value)
-    parsed = parse_mv_flags(view({"u": True, "exchange": True}))
+    parsed = parse_mv_flags(view({"update": True, "exchange": True}))
     assert parsed.update == "older"
     assert parsed.exchange is True
     assert parse_mv_flags(view({"no_copy": True})).no_copy is True

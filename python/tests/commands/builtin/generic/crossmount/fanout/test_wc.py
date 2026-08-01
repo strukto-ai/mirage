@@ -45,7 +45,7 @@ def testcombine_wc_drops_per_run_totals_from_glob_operands():
         _op(b"2 /a/one.txt\n1 /a/two.txt\n3 total\n"),
         _op(b"1 /b/three.txt\n"),
     ]
-    out = combine_wc(runs, {"args_l": True}).decode()
+    out = combine_wc(runs, {"lines": True}).decode()
     assert out == ("2 /a/one.txt\n"
                    "1 /a/two.txt\n"
                    "1 /b/three.txt\n"
@@ -54,5 +54,5 @@ def testcombine_wc_drops_per_run_totals_from_glob_operands():
 
 def testcombine_wc_max_line_length_maxes_instead_of_summing():
     runs = [_op(b"9 /a/x\n"), _op(b"4 /b/y\n")]
-    out = combine_wc(runs, {"L": True}).decode()
+    out = combine_wc(runs, {"max_line_length": True}).decode()
     assert out.endswith("9 total\n")

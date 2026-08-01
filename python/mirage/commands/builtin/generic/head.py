@@ -23,17 +23,17 @@ class HeadFlags:
 
 def parse_flags(flags: Mapping[str, object]) -> HeadFlags:
     fl = FlagView(flags, spec=SPECS["head"])
-    n_raw = fl.as_str("n") or fl.as_str("lines")
-    c_raw = fl.as_str("c") or fl.as_str("bytes")
+    n_raw = fl.as_str("lines")
+    c_raw = fl.as_str("bytes")
     error = number_flag_error("head", n_raw, c_raw)
     if error is not None:
         raise ValueError(error)
     return HeadFlags(
         lines=int(n_raw) if n_raw is not None else None,
         bytes_=int(c_raw) if c_raw is not None else None,
-        quiet=(fl.as_bool("q") or fl.as_bool("quiet") or fl.as_bool("silent")),
-        verbose=fl.as_bool("v") or fl.as_bool("verbose"),
-        zero_terminated=(fl.as_bool("z") or fl.as_bool("zero_terminated")),
+        quiet=fl.as_bool("quiet") or fl.as_bool("silent"),
+        verbose=fl.as_bool("verbose"),
+        zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 

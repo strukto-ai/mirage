@@ -173,15 +173,20 @@ class FlagView:
 def spec_flag_names(spec: CommandSpec) -> frozenset[str]:
     """Collect the kwarg names a spec's options can produce.
 
+    One name per option: the long spelling when an option declares
+    both, matching the parser's canonical dest. Keeping the short
+    spelling here too would let a stale ``fl.as_bool("a")`` stay legal
+    and read False forever after dest unification; canonical-only
+    turns that silent miss into a KeyError.
+
     Args:
         spec (CommandSpec): command spec whose options to enumerate.
     """
     names: set[str] = set()
     for option in spec.options:
-        if option.short is not None:
-            names.add(flag_kwarg_name(option.short))
-        if option.long is not None:
-            names.add(flag_kwarg_name(option.long))
+        canonical = option.long if option.long is not None else option.short
+        if canonical is not None:
+            names.add(flag_kwarg_name(canonical))
     return frozenset(names)
 
 

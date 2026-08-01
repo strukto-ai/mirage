@@ -28,7 +28,7 @@ def test_parse_flags_reads_short_and_long_forms():
 
 @pytest.mark.asyncio
 async def test_truncate_set1_truncates_to_set2_length():
-    _, out = await _run(["abcde", "xy"], {"t": True}, b"abcde")
+    _, out = await _run(["abcde", "xy"], {"truncate_set1": True}, b"abcde")
     assert out == "xycde"
 
 

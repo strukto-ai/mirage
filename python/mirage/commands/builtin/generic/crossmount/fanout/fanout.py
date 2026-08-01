@@ -60,9 +60,13 @@ async def run_fanout(cmd_name: str,
     if cmd_name == Cmd.RG and not FlagView(
             flags, spec=SPECS[Cmd.RG]).as_bool("args_I"):
         flags["H"] = True
+    # head pairs -q/--quiet and -v/--verbose (canonical dests), tail
+    # declares them short-only.
+    quiet_key = "quiet" if cmd_name == Cmd.HEAD else "q"
+    verbose_key = "verbose" if cmd_name == Cmd.HEAD else "v"
     if cmd_name in (Cmd.HEAD, Cmd.TAIL) and not FlagView(
-            flags, spec=SPECS[cmd_name]).as_bool("q"):
-        flags["v"] = True
+            flags, spec=SPECS[cmd_name]).as_bool(quiet_key):
+        flags[verbose_key] = True
 
     results = await run_operands(run_single,
                                  cmd_name,
@@ -87,7 +91,7 @@ async def run_fanout(cmd_name: str,
     elif cmd_name == Cmd.TEE:
         body = stdin_bytes or b""
     elif (cmd_name in (Cmd.HEAD, Cmd.TAIL)
-          and FlagView(flags, spec=SPECS[cmd_name]).as_bool("v")) or (
+          and FlagView(flags, spec=SPECS[cmd_name]).as_bool(verbose_key)) or (
               cmd_name == Cmd.LS
               and FlagView(flags, spec=SPECS[Cmd.LS]).as_bool("R")):
         # Blank line between per-operand blocks, like one native run

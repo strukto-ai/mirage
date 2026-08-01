@@ -57,10 +57,10 @@ def _make_backend(files: dict[str, bytes],
 
 async def _run(files, dirs, paths, *, mtimes=None, readdir=None, **kw):
     stat, copy, find = _make_backend(files, dirs, mtimes)
-    flags = kw.pop("flags", None) or CpFlags(recursive=kw.get(
-        "recursive", False),
-                                             no_clobber=kw.get("n", False),
-                                             verbose=kw.get("v", False))
+    flags = kw.pop("flags", None) or CpFlags(
+        recursive=kw.get("recursive", False),
+        no_clobber=kw.get("no_clobber", False),
+        verbose=kw.get("verbose", False))
     return await cp([_spec(p) for p in paths],
                     strategy=NativeCopy(copy=copy, find=find),
                     find_type="f",
@@ -103,14 +103,14 @@ async def test_multiple_sources_nondir_raises():
 @pytest.mark.asyncio
 async def test_no_clobber_skips_existing():
     files = {"/a.txt": b"NEW", "/d/a.txt": b"OLD"}
-    await _run(files, {"/d"}, ["/a.txt", "/d"], n=True)
+    await _run(files, {"/d"}, ["/a.txt", "/d"], no_clobber=True)
     assert files["/d/a.txt"] == b"OLD"
 
 
 @pytest.mark.asyncio
 async def test_no_clobber_duplicate_basenames_first_wins():
     files = {"/x/a.txt": b"FIRST", "/y/a.txt": b"SECOND", "/d/keep": b"K"}
-    await _run(files, {"/d"}, ["/x/a.txt", "/y/a.txt", "/d"], n=True)
+    await _run(files, {"/d"}, ["/x/a.txt", "/y/a.txt", "/d"], no_clobber=True)
     assert files["/d/a.txt"] == b"FIRST"
 
 
@@ -132,7 +132,7 @@ async def test_recursive_into_directory():
 @pytest.mark.asyncio
 async def test_verbose_emits_arrow_lines():
     files = {"/a.txt": b"AAA"}
-    out, _ = await _run(files, set(), ["/a.txt", "/copy.txt"], v=True)
+    out, _ = await _run(files, set(), ["/a.txt", "/copy.txt"], verbose=True)
     assert out == b"'/a.txt' -> '/copy.txt'\n"
 
 
@@ -567,14 +567,18 @@ def test_parse_cp_flags_conflicts_and_grammar():
         return FlagView(bag, spec=SPECS["cp"])
 
     with pytest.raises(UsageError) as exc:
-        parse_cp_flags(view({"b": True, "n": True}))
+        parse_cp_flags(view({"backup": True, "no_clobber": True}))
     assert "cp: --backup is mutually exclusive with -n or " \
            "--update=none-fail" in str(exc.value)
     with pytest.raises(UsageError) as exc:
         parse_cp_flags(view({"backup": True, "update": "none-fail"}))
     assert "mutually exclusive" in str(exc.value)
     with pytest.raises(UsageError) as exc:
-        parse_cp_flags(view({"t": "/d", "T": True}))
+        parse_cp_flags(
+            view({
+                "target_directory": "/d",
+                "no_target_directory": True
+            }))
     assert "cannot combine --target-directory (-t) and " \
            "--no-target-directory (-T)" in str(exc.value)
     with pytest.raises(UsageError) as exc:
@@ -583,11 +587,11 @@ def test_parse_cp_flags_conflicts_and_grammar():
     with pytest.raises(UsageError) as exc:
         parse_cp_flags(view({"backup": "bogus"}))
     assert "invalid argument 'bogus' for 'backup type'" in str(exc.value)
-    assert parse_cp_flags(view({"u": True})).update == "older"
+    assert parse_cp_flags(view({"update": True})).update == "older"
     assert parse_cp_flags(view({"update": True})).update == "older"
     assert parse_cp_flags(view({"update": "all"})).update == "all"
     assert parse_cp_flags(view({})).update is None
-    parsed = parse_cp_flags(view({"S": ".bak"}))
+    parsed = parse_cp_flags(view({"suffix": ".bak"}))
     assert parsed.backup == "existing"
     assert parsed.suffix == ".bak"
     assert parse_cp_flags(view({"backup": "t"})).backup == "numbered"

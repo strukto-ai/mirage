@@ -25,17 +25,17 @@ def _parse_wc_row(line: str, columns: int) -> tuple[list[int], str]:
     return values, label
 
 
-def _wc_counts(values: list[int], *, args_l: bool, w: bool, c: bool, m: bool,
-               L: bool) -> WCCounts:
-    if L:
+def _wc_counts(values: list[int], *, lines: bool, words: bool, bytes_: bool,
+               chars: bool, max_line_length: bool) -> WCCounts:
+    if max_line_length:
         return WCCounts(max_line_length=values[0])
-    if args_l:
+    if lines:
         return WCCounts(lines=values[0])
-    if w:
+    if words:
         return WCCounts(words=values[0])
-    if c:
+    if bytes_:
         return WCCounts(bytes_=values[0])
-    if m:
+    if chars:
         return WCCounts(chars=values[0])
     return WCCounts(lines=values[0], words=values[1], bytes_=values[2])
 
@@ -54,11 +54,11 @@ def combine_wc(results: list[OperandRun], flag_kwargs: dict[str,
         flag_kwargs (dict): Flags parsed against the shared wc spec.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["wc"])
-    sel = dict(args_l=fl.as_bool("args_l"),
-               w=fl.as_bool("w"),
-               c=fl.as_bool("c"),
-               m=fl.as_bool("m"),
-               L=fl.as_bool("L"))
+    sel = dict(lines=fl.as_bool("lines"),
+               words=fl.as_bool("words"),
+               bytes_=fl.as_bool("bytes"),
+               chars=fl.as_bool("chars"),
+               max_line_length=fl.as_bool("max_line_length"))
     columns = 1 if any(sel.values()) else 3
     rows: list[tuple[WCCounts, str | None]] = []
     for run in results:

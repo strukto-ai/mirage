@@ -97,11 +97,9 @@ def update_mode(cmd_name: str, fl: FlagView) -> str | None:
 
     Args:
         cmd_name (str): Command name for the invalid-argument error.
-        fl (FlagView): Parsed flag view holding ``u``/``update``.
+        fl (FlagView): Parsed flag view holding ``update``.
     """
     value = fl.raw("update")
-    if value in (None, False):
-        value = fl.raw("u")
     if value in (None, False):
         return None
     if value is True:
@@ -121,15 +119,13 @@ def update_mode(cmd_name: str, fl: FlagView) -> str | None:
 def backup_raw(fl: FlagView) -> str | bool | None:
     """The raw ``-b``/``--backup`` value, absent shapes reading as None.
 
-    The parser mirrors the two spellings, so either key already carries
-    GNU's last-occurrence-wins value.
+    The parser lands both spellings on the canonical ``backup`` dest, so
+    the key already carries GNU's last-occurrence-wins value.
 
     Args:
-        fl (FlagView): Parsed flag view holding ``b``/``backup``.
+        fl (FlagView): Parsed flag view holding ``backup``.
     """
     value = fl.raw("backup")
-    if value in (None, False):
-        value = fl.raw("b")
     if isinstance(value, (str, bool)):
         return value
     return None
@@ -143,12 +139,10 @@ def target_flags(cmd_name: str,
         cmd_name (str): Command name for the conflict error.
         fl (FlagView): Parsed flag view.
     """
-    target_dir: object = fl.raw("t")
-    if target_dir is None:
-        target_dir = fl.raw("target_directory")
+    target_dir: object = fl.raw("target_directory")
     if not isinstance(target_dir, (PathSpec, str)):
         target_dir = None
-    no_target = fl.as_bool("T") or fl.as_bool("no_target_directory")
+    no_target = fl.as_bool("no_target_directory")
     if target_dir is not None and no_target:
         raise UsageError(
             f"{cmd_name}: cannot combine --target-directory (-t) and "
@@ -168,9 +162,9 @@ def parse_cp_flags(fl: FlagView) -> CpFlags:
         fl (FlagView): Flag view constructed with the cp spec.
     """
     update = update_mode("cp", fl)
-    suffix = fl.as_str("S") or fl.as_str("suffix")
+    suffix = fl.as_str("suffix")
     control = backup_control("cp", backup_raw(fl), suffix)
-    no_clobber = fl.as_bool("n") or fl.as_bool("no_clobber")
+    no_clobber = fl.as_bool("no_clobber")
     if control is not None and control != "none" and (no_clobber or update
                                                       == "none-fail"):
         raise UsageError(
@@ -178,10 +172,10 @@ def parse_cp_flags(fl: FlagView) -> CpFlags:
             "--update=none-fail\nTry 'cp --help' for more information.", 1)
     target_dir, no_target = target_flags("cp", fl)
     return CpFlags(
-        recursive=fl.as_bool("r") or fl.as_bool("R") or fl.as_bool("recursive")
-        or fl.as_bool("a") or fl.as_bool("archive"),
+        recursive=fl.as_bool("r") or fl.as_bool("recursive")
+        or fl.as_bool("archive"),
         no_clobber=no_clobber,
-        verbose=fl.as_bool("v") or fl.as_bool("verbose"),
+        verbose=fl.as_bool("verbose"),
         update=update,
         backup=control,
         suffix=suffix if suffix is not None else DEFAULT_BACKUP_SUFFIX,

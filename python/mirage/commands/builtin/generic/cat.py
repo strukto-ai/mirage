@@ -18,17 +18,15 @@ class CatFlags:
 
 def parse_flags(flags: Mapping[str, object]) -> CatFlags:
     fl = FlagView(flags, spec=SPECS["cat"])
-    show_all = fl.as_bool("A") or fl.as_bool("show_all")
+    show_all = fl.as_bool("show_all")
     return CatFlags(
-        number_lines=fl.as_bool("n") or fl.as_bool("number"),
-        number_nonblank=(fl.as_bool("b") or fl.as_bool("number_nonblank")),
-        show_ends=(fl.as_bool("E") or fl.as_bool("show_ends")
-                   or fl.as_bool("e") or show_all),
-        squeeze_blank=fl.as_bool("s") or fl.as_bool("squeeze_blank"),
-        show_tabs=(fl.as_bool("T") or fl.as_bool("show_tabs")
-                   or fl.as_bool("t") or show_all),
-        show_nonprinting=(fl.as_bool("v") or fl.as_bool("show_nonprinting")
-                          or fl.as_bool("e") or fl.as_bool("t") or show_all),
+        number_lines=fl.as_bool("number"),
+        number_nonblank=fl.as_bool("number_nonblank"),
+        show_ends=(fl.as_bool("show_ends") or fl.as_bool("e") or show_all),
+        squeeze_blank=fl.as_bool("squeeze_blank"),
+        show_tabs=(fl.as_bool("show_tabs") or fl.as_bool("t") or show_all),
+        show_nonprinting=(fl.as_bool("show_nonprinting") or fl.as_bool("e")
+                          or fl.as_bool("t") or show_all),
     )
 
 

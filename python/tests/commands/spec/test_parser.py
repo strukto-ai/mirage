@@ -285,11 +285,12 @@ def test_value_optional_never_consumes_next_token():
 
 def test_short_value_false_keeps_short_boolean_and_clusterable():
     # GNU cp -b never takes an argument: -bv is a cluster, never -b=v.
+    # Both spellings land on the canonical long dest.
     clustered = parse_command(SPECS["cp"], ["-bv", "/a", "/b"], "/")
-    assert clustered.flags["-b"] is True
-    assert clustered.flags["-v"] is True
+    assert clustered.flags["--backup"] is True
+    assert clustered.flags["--verbose"] is True
     bare = parse_command(SPECS["cp"], ["-u", "/a", "/b"], "/")
-    assert bare.flags["-u"] is True
+    assert bare.flags["--update"] is True
     assert bare.paths() == ["/a", "/b"]
     valued = parse_command(SPECS["cp"], ["--backup=numbered", "/a", "/b"], "/")
     assert valued.flags["--backup"] == "numbered"
@@ -299,10 +300,10 @@ def test_short_value_optional_uses_only_attached_value():
     bare = parse_command(SPECS["split"],
                          ["-d", "-l", "2", "/input", "/prefix"], "/")
     attached = parse_command(SPECS["split"], ["-d10", "/input"], "/")
-    assert bare.flags["-d"] is True
-    assert bare.flags["-l"] == "2"
+    assert bare.flags["--numeric-suffixes"] is True
+    assert bare.flags["--lines"] == "2"
     assert bare.paths() == ["/input", "/prefix"]
-    assert attached.flags["-d"] == "10"
+    assert attached.flags["--numeric-suffixes"] == "10"
 
 
 def test_overflow_operands_pass_through_like_last_slot():
@@ -314,33 +315,34 @@ def test_overflow_operands_pass_through_like_last_slot():
     assert [k for _, k in parsed.args] == [OperandKind.TEXT] * 3
 
 
-def test_optional_value_aliases_honor_command_line_order():
-    # GNU treats -u and --update as one option, so the last spelling on the
-    # line decides (pinned against GNU coreutils 9.7).
+def test_spellings_share_one_dest_and_honor_command_line_order():
+    # GNU treats -u and --update as one option, so the last occurrence on
+    # the line decides regardless of spelling (pinned against GNU
+    # coreutils 9.7). One canonical key, no per-spelling mirror.
     short_last = parse_command(SPECS["cp"], ["--update=all", "-u", "/a", "/b"],
                                "/")
     assert short_last.flags["--update"] is True
-    assert short_last.flags["-u"] is True
+    assert "-u" not in short_last.flags
     long_last = parse_command(SPECS["cp"], ["-u", "--update=all", "/a", "/b"],
                               "/")
-    assert long_last.flags["-u"] == "all"
     assert long_last.flags["--update"] == "all"
 
 
-def test_repeatable_aliases_are_not_mirrored():
-    # sort -k/--key accumulates; mirroring would double every keydef because
-    # the generic concatenates both spellings' lists.
-    parsed = parse_command(SPECS["sort"], ["-k1", "--key=2", "/f"], "/")
-    assert parsed.flags["-k"] == ["1"]
-    assert parsed.flags["--key"] == ["2"]
+def test_multiple_accumulates_across_spellings_in_line_order():
+    # sort -k/--key is ONE option: values interleave in true command-line
+    # order. The old per-spelling lists lost interleaving (-k1 --key=2 -k3
+    # concatenated as [1, 3, 2]).
+    parsed = parse_command(SPECS["sort"], ["-k1", "--key=2", "-k3", "/f"], "/")
+    assert parsed.flags["--key"] == ["1", "2", "3"]
+    assert "-k" not in parsed.flags
 
 
-def test_attached_short_value_also_mirrors_its_alias():
-    # The attached-value spelling (`-d10`) must mirror too, or last-wins
-    # would hold for `--long=` but not for the short form.
+def test_attached_short_value_lands_on_canonical_dest():
+    # The attached-value spelling (`-d10`) unifies too, so last-wins holds
+    # for `--long=` and the short form alike.
     attached = parse_command(SPECS["split"], ["-d10", "/in", "/pre"], "/")
-    assert attached.flags["-d"] == "10"
     assert attached.flags["--numeric-suffixes"] == "10"
+    assert "-d" not in attached.flags
     short_last = parse_command(SPECS["split"],
                                ["--numeric-suffixes=3", "-d10", "/in", "/p"],
                                "/")
@@ -348,4 +350,4 @@ def test_attached_short_value_also_mirrors_its_alias():
     long_last = parse_command(SPECS["split"],
                               ["-d10", "--numeric-suffixes=3", "/in", "/p"],
                               "/")
-    assert long_last.flags["-d"] == "3"
+    assert long_last.flags["--numeric-suffixes"] == "3"

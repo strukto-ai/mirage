@@ -310,14 +310,14 @@ def test_grep_spec_parses_correctly():
 def test_head_spec_parses_n_flag():
     spec = SPECS["head"]
     parsed = parse_command(spec, ["-n", "20", "file.txt"], cwd="/data")
-    assert parsed.flag("-n") == "20"
+    assert parsed.flag("--lines") == "20"
     assert parsed.paths() == ["/data/file.txt"]
 
 
 def test_head_spec_parses_joined_n():
     spec = SPECS["head"]
     parsed = parse_command(spec, ["-n20", "file.txt"], cwd="/")
-    assert parsed.flag("-n") == "20"
+    assert parsed.flag("--lines") == "20"
     assert parsed.paths() == ["/file.txt"]
 
 
@@ -390,10 +390,10 @@ def test_sort_spec():
     spec = SPECS["sort"]
     parsed = parse_command(spec, ["-k", "2", "-t", ",", "-rn", "data.csv"],
                            cwd="/")
-    assert parsed.flag("-k") == ["2"]
-    assert parsed.flag("-t") == ","
-    assert parsed.flag("-r") is True
-    assert parsed.flag("-n") is True
+    assert parsed.flag("--key") == ["2"]
+    assert parsed.flag("--field-separator") == ","
+    assert parsed.flag("--reverse") is True
+    assert parsed.flag("--numeric-sort") is True
     assert parsed.paths() == ["/data.csv"]
 
 
@@ -569,7 +569,8 @@ def test_parse_new_spec_aliased_option():
     assert parsed.flags == {"--recursive": True}
 
     parsed2 = parse_command(spec, ["-r", "dir/"], cwd="/")
-    assert parsed2.flags == {"-r": True}
+    # Both spellings land on the canonical long dest.
+    assert parsed2.flags == {"--recursive": True}
 
 
 def test_parse_new_spec_path_value_flag():
@@ -658,7 +659,7 @@ def test_numeric_shorthand_opt_in_only():
 
 def test_head_spec_supports_numeric_shorthand():
     parsed = parse_command(SPECS["head"], ["-3", "/file.txt"], cwd="/")
-    assert parsed.flags.get("-n") == "3"
+    assert parsed.flags.get("--lines") == "3"
     assert parsed.paths() == ["/file.txt"]
 
 

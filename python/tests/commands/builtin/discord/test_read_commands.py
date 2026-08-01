@@ -170,7 +170,7 @@ async def test_head(accessor):
         stream, io = await head(accessor,
                                 _make_glob(ABS_FILE),
                                 index=RAMIndexCacheStore(ttl=600),
-                                n="1")
+                                lines="1")
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"goodbye moon" not in data

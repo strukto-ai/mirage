@@ -21,11 +21,10 @@ class TrFlags:
 def parse_flags(flags: Mapping[str, object]) -> TrFlags:
     fl = FlagView(flags, spec=SPECS["tr"])
     return TrFlags(
-        delete=fl.as_bool("d") or fl.as_bool("delete"),
-        squeeze=fl.as_bool("s") or fl.as_bool("squeeze_repeats"),
-        complement=(fl.as_bool("c") or fl.as_bool("C")
-                    or fl.as_bool("complement")),
-        truncate_set1=fl.as_bool("t") or fl.as_bool("truncate_set1"),
+        delete=fl.as_bool("delete"),
+        squeeze=fl.as_bool("squeeze_repeats"),
+        complement=fl.as_bool("C") or fl.as_bool("complement"),
+        truncate_set1=fl.as_bool("truncate_set1"),
     )
 
 

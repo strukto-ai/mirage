@@ -31,11 +31,11 @@ def parse_flags(flags: Mapping[str, object]) -> WCFlags:
     if total not in _TOTAL_MODES:
         raise ValueError(f"wc: invalid argument '{total}' for '--total'")
     return WCFlags(
-        lines=fl.as_bool("args_l") or fl.as_bool("lines"),
-        words=fl.as_bool("w") or fl.as_bool("words"),
-        bytes_=fl.as_bool("c") or fl.as_bool("bytes"),
-        chars=fl.as_bool("m") or fl.as_bool("chars"),
-        max_line_length=(fl.as_bool("L") or fl.as_bool("max_line_length")),
+        lines=fl.as_bool("lines"),
+        words=fl.as_bool("words"),
+        bytes_=fl.as_bool("bytes"),
+        chars=fl.as_bool("chars"),
+        max_line_length=fl.as_bool("max_line_length"),
         total=total,
     )
 
@@ -130,25 +130,25 @@ async def wc_lines(src: bytes | AsyncIterator[bytes]) -> int:
 def _selected_values(
     counts: WCCounts,
     *,
-    args_l: bool = False,
-    w: bool = False,
-    c: bool = False,
-    m: bool = False,
-    L: bool = False,
+    lines: bool = False,
+    words: bool = False,
+    bytes_: bool = False,
+    chars: bool = False,
+    max_line_length: bool = False,
 ) -> list[int]:
-    selected = args_l or w or c or m or L
+    selected = lines or words or bytes_ or chars or max_line_length
     if not selected:
         return [counts.lines, counts.words, counts.bytes_]
     values: list[int] = []
-    if args_l:
+    if lines:
         values.append(counts.lines)
-    if w:
+    if words:
         values.append(counts.words)
-    if m:
+    if chars:
         values.append(counts.chars)
-    if c:
+    if bytes_:
         values.append(counts.bytes_)
-    if L:
+    if max_line_length:
         values.append(counts.max_line_length)
     return values
 
@@ -156,11 +156,11 @@ def _selected_values(
 def format_wc_lines(
     rows: list[tuple[WCCounts, str | None]],
     *,
-    args_l: bool = False,
-    w: bool = False,
-    c: bool = False,
-    m: bool = False,
-    L: bool = False,
+    lines: bool = False,
+    words: bool = False,
+    bytes_: bool = False,
+    chars: bool = False,
+    max_line_length: bool = False,
 ) -> list[str]:
     """Format a wc report in GNU style.
 
@@ -174,14 +174,19 @@ def format_wc_lines(
     Args:
         rows (list[tuple[WCCounts, str | None]]): One entry per output row
             (including any ``total`` row); ``None`` labels omit the name.
-        args_l (bool): Report line count only.
-        w (bool): Report word count only.
-        c (bool): Report byte count only.
-        m (bool): Report character count only.
-        L (bool): Report longest line length only.
+        lines (bool): Report line count only.
+        words (bool): Report word count only.
+        bytes_ (bool): Report byte count only.
+        chars (bool): Report character count only.
+        max_line_length (bool): Report longest line length only.
     """
-    values = [(_selected_values(counts, args_l=args_l, w=w, c=c, m=m,
-                                L=L), label) for counts, label in rows]
+    values = [(_selected_values(counts,
+                                lines=lines,
+                                words=words,
+                                bytes_=bytes_,
+                                chars=chars,
+                                max_line_length=max_line_length), label)
+              for counts, label in rows]
     if len(values) == 1 and len(values[0][0]) == 1:
         nums, label = values[0]
         body = str(nums[0])
@@ -201,19 +206,19 @@ def format_wc_lines(
 def format_wc(
     counts: WCCounts,
     *,
-    args_l: bool = False,
-    w: bool = False,
-    c: bool = False,
-    m: bool = False,
-    L: bool = False,
+    lines: bool = False,
+    words: bool = False,
+    bytes_: bool = False,
+    chars: bool = False,
+    max_line_length: bool = False,
     label: str | None = None,
 ) -> str:
     return format_wc_lines([(counts, label)],
-                           args_l=args_l,
-                           w=w,
-                           c=c,
-                           m=m,
-                           L=L)[0]
+                           lines=lines,
+                           words=words,
+                           bytes_=bytes_,
+                           chars=chars,
+                           max_line_length=max_line_length)[0]
 
 
 def format_count_rows(
@@ -224,11 +229,11 @@ def format_count_rows(
 ) -> bytes:
     if flags.total == "only":
         values = _selected_values(totals,
-                                  args_l=flags.lines,
-                                  w=flags.words,
-                                  c=flags.bytes_,
-                                  m=flags.chars,
-                                  L=flags.max_line_length)
+                                  lines=flags.lines,
+                                  words=flags.words,
+                                  bytes_=flags.bytes_,
+                                  chars=flags.chars,
+                                  max_line_length=flags.max_line_length)
         return (" ".join(str(value) for value in values) + "\n").encode()
     output_rows = list(rows)
     include_total = (flags.total == "always"
@@ -237,22 +242,22 @@ def format_count_rows(
         output_rows.append((totals, "total"))
     return format_records(
         format_wc_lines(output_rows,
-                        args_l=flags.lines,
-                        w=flags.words,
-                        c=flags.bytes_,
-                        m=flags.chars,
-                        L=flags.max_line_length))
+                        lines=flags.lines,
+                        words=flags.words,
+                        bytes_=flags.bytes_,
+                        chars=flags.chars,
+                        max_line_length=flags.max_line_length))
 
 
 async def format_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    args_l: bool = False,
-    w: bool = False,
-    c: bool = False,
-    m: bool = False,
-    L: bool = False,
+    lines: bool = False,
+    words: bool = False,
+    bytes_: bool = False,
+    chars: bool = False,
+    max_line_length: bool = False,
     total: str = "auto",
 ) -> tuple[bytes, bytes]:
     """Format wc output for multiple already-resolved paths.
@@ -289,11 +294,11 @@ async def format_multi(
             continue
         rows.append((counts, path.raw_path))
         totals.merge(counts)
-    flags = WCFlags(lines=args_l,
-                    words=w,
-                    bytes_=c,
-                    chars=m,
-                    max_line_length=L,
+    flags = WCFlags(lines=lines,
+                    words=words,
+                    bytes_=bytes_,
+                    chars=chars,
+                    max_line_length=max_line_length,
                     total=total)
     return format_count_rows(rows, totals, len(paths), flags), err
 
@@ -301,19 +306,19 @@ async def format_multi(
 def format_stdin(counts: WCCounts, flags: WCFlags) -> bytes:
     if flags.total == "only":
         values = _selected_values(counts,
-                                  args_l=flags.lines,
-                                  w=flags.words,
-                                  c=flags.bytes_,
-                                  m=flags.chars,
-                                  L=flags.max_line_length)
+                                  lines=flags.lines,
+                                  words=flags.words,
+                                  bytes_=flags.bytes_,
+                                  chars=flags.chars,
+                                  max_line_length=flags.max_line_length)
         return (" ".join(str(value) for value in values) + "\n").encode()
     rows: list[tuple[WCCounts, str | None]] = [(counts, None)]
     if flags.total == "always":
         rows.append((counts, "total"))
     return format_records(
         format_wc_lines(rows,
-                        args_l=flags.lines,
-                        w=flags.words,
-                        c=flags.bytes_,
-                        m=flags.chars,
-                        L=flags.max_line_length))
+                        lines=flags.lines,
+                        words=flags.words,
+                        bytes_=flags.bytes_,
+                        chars=flags.chars,
+                        max_line_length=flags.max_line_length))

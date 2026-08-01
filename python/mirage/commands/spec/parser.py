@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.compile import CompiledSpec, compile_spec
 from mirage.commands.spec.constants import NUMERIC_SHORT, flag_kwarg_name
 from mirage.commands.spec.types import CommandSpec, OperandKind, ParsedArgs
 from mirage.utils.path import resolve_path
@@ -19,12 +20,25 @@ from mirage.utils.path import resolve_path
 
 def _set_value_flag(
     flags: dict[str, str | bool | list[str]],
-    name: str,
+    cs: CompiledSpec,
+    spelling: str,
     value: str,
-    repeat_flags: set[str],
-    alias: dict[str, str] | None = None,
 ) -> None:
-    if name in repeat_flags:
+    """Record a value flag occurrence under its canonical dest.
+
+    Both spellings of one option land on the same key, so the last
+    occurrence wins regardless of spelling (GNU: ``cp --update=all -u``
+    is ``--update=older``) and ``multiple`` options accumulate in true
+    command-line order (``sort -k1 --key=2`` is ``[1, 2]``).
+
+    Args:
+        flags (dict): parsed flag bag, updated in place.
+        cs (CompiledSpec): compiled spec tables.
+        spelling (str): dashed spelling as typed.
+        value (str): the flag's value.
+    """
+    name = cs.dest_of(spelling)
+    if name in cs.multiple_dests:
         prev = flags.get(name)
         if isinstance(prev, list):
             prev.append(value)
@@ -32,70 +46,47 @@ def _set_value_flag(
             flags[name] = [value]
     else:
         flags[name] = value
-    _mirror_alias(flags, name, alias)
 
 
 def _set_bool_flag(
     flags: dict[str, str | bool | list[str]],
-    name: str,
-    alias: dict[str, str] | None = None,
+    cs: CompiledSpec,
+    spelling: str,
 ) -> None:
-    flags[name] = True
-    _mirror_alias(flags, name, alias)
-
-
-def _mirror_alias(
-    flags: dict[str, str | bool | list[str]],
-    name: str,
-    alias: dict[str, str] | None,
-) -> None:
-    """Copy a spelling's value onto its counterpart so the last one wins.
-
-    GNU treats ``-u`` and ``--update`` as one option, so the final
-    occurrence decides (``cp --update=all -u`` is ``--update=older``).
-    Flags are stored per spelling, which would otherwise let a fixed
-    short/long read order override command-line order. Only aliased for
-    optional-value options, whose two spellings genuinely disagree;
-    repeatable options accumulate instead and are never mirrored.
+    """Record a boolean flag occurrence under its canonical dest.
 
     Args:
-        flags (dict): Parsed flag bag, updated in place.
-        name (str): Spelling just written.
-        alias (dict[str, str] | None): Spelling to counterpart-spelling map.
+        flags (dict): parsed flag bag, updated in place.
+        cs (CompiledSpec): compiled spec tables.
+        spelling (str): dashed spelling as typed.
     """
-    if alias is None:
-        return
-    other = alias.get(name)
-    if other is not None:
-        flags[other] = flags[name]
+    flags[cs.dest_of(spelling)] = True
 
 
 def _match_mixed_cluster(
     tok: str,
-    bool_flags: set[str],
-    value_flags: set[str],
+    cs: CompiledSpec,
 ) -> tuple[list[str], str, str | None] | None:
     """Match a getopt-style cluster of bool flags ending in a value flag.
 
     Args:
         tok (str): token like "-ne" or "-nepat".
-        bool_flags (set[str]): single-dash boolean flag names.
-        value_flags (set[str]): single-dash value flag names.
+        cs (CompiledSpec): compiled spec tables.
 
     Returns:
-        tuple[list[str], str, str | None] | None: (bool flag names, value
-            flag name, attached value or None when the value comes from the
-            next token), or None when any character is unknown or no value
-            flag terminates the cluster.
+        tuple[list[str], str, str | None] | None: (bool flag spellings,
+            value flag spelling, attached value or None when the value
+            comes from the next token), or None when any character is
+            unknown or no value flag terminates the cluster.
     """
     bools: list[str] = []
     chars = tok[1:]
     for idx, ch in enumerate(chars):
         name = f"-{ch}"
-        if name in bool_flags:
+        if name in cs.bool_spellings:
             bools.append(name)
             continue
-        if name in value_flags:
+        if name in cs.value_spellings:
             rest = chars[idx + 1:]
             return bools, name, (rest if rest else None)
         return None
@@ -107,57 +98,7 @@ def parse_command(
     argv: list[str],
     cwd: str,
 ) -> ParsedArgs:
-    bool_flags: set[str] = set()
-    value_flags: set[str] = set()
-    attach_value_flags: set[str] = set()
-    long_bool_flags: set[str] = set()
-    long_value_flags: set[str] = set()
-    long_optional_flags: set[str] = set()
-    value_flag_kinds: dict[str, OperandKind] = {}
-    repeat_flags: set[str] = set()
-    # Spelling -> counterpart spelling, so an optional-value option's short
-    # and long forms stay in lockstep and the last one on the line wins.
-    alias: dict[str, str] = {}
-    numeric_shorthand_flag: str | None = None
-    for opt in spec.options:
-        if opt.short:
-            if opt.value_kind == OperandKind.NONE:
-                bool_flags.add(opt.short)
-            elif opt.value_optional:
-                bool_flags.add(opt.short)
-                if opt.short_value:
-                    attach_value_flags.add(opt.short)
-                value_flag_kinds[opt.short] = opt.value_kind
-            else:
-                value_flags.add(opt.short)
-                value_flag_kinds[opt.short] = opt.value_kind
-                if opt.repeatable:
-                    repeat_flags.add(opt.short)
-                if opt.numeric_shorthand:
-                    numeric_shorthand_flag = opt.short
-        if opt.long:
-            if opt.value_kind == OperandKind.NONE:
-                long_bool_flags.add(opt.long)
-            elif opt.value_optional:
-                # GNU optional argument: bare form is boolean, value only
-                # attaches via `=`; a detached next token is an operand.
-                long_bool_flags.add(opt.long)
-                long_optional_flags.add(opt.long)
-                value_flag_kinds[opt.long] = opt.value_kind
-            else:
-                long_value_flags.add(opt.long)
-                value_flag_kinds[opt.long] = opt.value_kind
-                if opt.repeatable:
-                    repeat_flags.add(opt.long)
-
-    for opt in spec.options:
-        if opt.short and opt.long and opt.value_optional \
-                and not opt.repeatable:
-            alias[opt.short] = opt.long
-            alias[opt.long] = opt.short
-
-    rest_kind: OperandKind | None = (spec.rest.kind
-                                     if spec.rest is not None else None)
+    cs = compile_spec(spec)
 
     cache_paths: list[str] = []
     filtered_argv: list[str] = []
@@ -196,7 +137,7 @@ def parse_command(
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
     # stray flag never corrupts pattern/path classification.
-    lenient_dash_operands = rest_kind == OperandKind.TEXT
+    lenient_dash_operands = cs.rest_kind == OperandKind.TEXT
     i = 0
     end_of_flags = False
 
@@ -215,21 +156,20 @@ def parse_command(
             continue
 
         if tok.startswith("--"):
-            if tok in long_bool_flags:
-                _set_bool_flag(flags, tok, alias)
+            if tok in cs.long_bool_spellings:
+                _set_bool_flag(flags, cs, tok)
                 i += 1
-            elif tok in long_value_flags and i + 1 < len(filtered_argv):
-                _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags,
-                                alias)
-                word_kinds[orig_indices[i + 1]] = value_flag_kinds[tok]
+            elif (tok in cs.long_value_spellings
+                  and i + 1 < len(filtered_argv)):
+                _set_value_flag(flags, cs, tok, filtered_argv[i + 1])
+                word_kinds[orig_indices[i + 1]] = cs.kind_of[tok]
                 i += 2
             else:
                 eq = tok.find("=")
-                if eq != -1 and (tok[:eq] in long_value_flags
-                                 or tok[:eq] in long_optional_flags):
-                    _set_value_flag(flags, tok[:eq], tok[eq + 1:],
-                                    repeat_flags, alias)
-                elif tok in long_value_flags:
+                if eq != -1 and (tok[:eq] in cs.long_value_spellings
+                                 or tok[:eq] in cs.long_optional_spellings):
+                    _set_value_flag(flags, cs, tok[:eq], tok[eq + 1:])
+                elif tok in cs.long_value_spellings:
                     # Declared value flag at end of line with no argument.
                     needs_value_options.append(tok)
                 elif lenient_dash_operands:
@@ -241,81 +181,76 @@ def parse_command(
             continue
 
         if tok.startswith("-") and len(tok) > 1:
-            if numeric_shorthand_flag is not None and NUMERIC_SHORT.match(tok):
-                flags[numeric_shorthand_flag] = tok[1:]
+            if cs.numeric_dest is not None and NUMERIC_SHORT.match(tok):
+                flags[cs.numeric_dest] = tok[1:]
                 i += 1
                 continue
             matched_optional = False
-            for vf in attach_value_flags:
+            for vf in cs.attach_spellings:
                 if tok.startswith(vf) and len(tok) > len(vf):
-                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags,
-                                    alias)
+                    _set_value_flag(flags, cs, vf, tok[len(vf):])
                     i += 1
                     matched_optional = True
                     break
             if matched_optional:
                 continue
             matched_value = False
-            for vf in value_flags:
+            for vf in cs.value_spellings:
                 if tok == vf and i + 1 < len(filtered_argv):
-                    _set_value_flag(flags, vf, filtered_argv[i + 1],
-                                    repeat_flags, alias)
-                    word_kinds[orig_indices[i + 1]] = value_flag_kinds[vf]
+                    _set_value_flag(flags, cs, vf, filtered_argv[i + 1])
+                    word_kinds[orig_indices[i + 1]] = cs.kind_of[vf]
                     i += 2
                     matched_value = True
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
-                    _set_value_flag(flags, vf, tok[len(vf):], repeat_flags,
-                                    alias)
+                    _set_value_flag(flags, cs, vf, tok[len(vf):])
                     i += 1
                     matched_value = True
                     break
             if matched_value:
                 continue
 
-            if tok in bool_flags:
-                _set_bool_flag(flags, tok, alias)
+            if tok in cs.bool_spellings:
+                _set_bool_flag(flags, cs, tok)
                 i += 1
                 continue
 
             all_bool = True
             for ch in tok[1:]:
-                if f"-{ch}" not in bool_flags:
+                if f"-{ch}" not in cs.bool_spellings:
                     all_bool = False
                     break
             if all_bool and len(tok) > 1:
                 for ch in tok[1:]:
-                    _set_bool_flag(flags, f"-{ch}", alias)
+                    _set_bool_flag(flags, cs, f"-{ch}")
                 i += 1
                 continue
 
-            mixed = _match_mixed_cluster(tok, bool_flags, value_flags)
+            mixed = _match_mixed_cluster(tok, cs)
             if mixed is not None:
                 cluster_bools, vflag, attached = mixed
                 if attached is not None:
                     for name in cluster_bools:
-                        _set_bool_flag(flags, name, alias)
-                    _set_value_flag(flags, vflag, attached, repeat_flags,
-                                    alias)
+                        _set_bool_flag(flags, cs, name)
+                    _set_value_flag(flags, cs, vflag, attached)
                     i += 1
                     continue
                 if i + 1 < len(filtered_argv):
                     for name in cluster_bools:
-                        _set_bool_flag(flags, name, alias)
-                    _set_value_flag(flags, vflag, filtered_argv[i + 1],
-                                    repeat_flags, alias)
-                    word_kinds[orig_indices[i + 1]] = value_flag_kinds[vflag]
+                        _set_bool_flag(flags, cs, name)
+                    _set_value_flag(flags, cs, vflag, filtered_argv[i + 1])
+                    word_kinds[orig_indices[i + 1]] = cs.kind_of[vflag]
                     i += 2
                     continue
 
             if lenient_dash_operands or NUMERIC_SHORT.match(tok):
                 raw_args.append(tok)
                 raw_indices.append(orig_indices[i])
-            elif tok in value_flags or (mixed is not None
-                                        and mixed[2] is None):
+            elif tok in cs.value_spellings or (mixed is not None
+                                               and mixed[2] is None):
                 # A declared value flag (alone or ending a cluster) with no
                 # argument left on the line. GNU reports the flag character.
-                if tok in value_flags:
+                if tok in cs.value_spellings:
                     needy = tok[1:]
                 else:
                     assert mixed is not None
@@ -325,8 +260,8 @@ def parse_command(
                 # GNU reports the first offending character, not the token.
                 bad = tok[1:2]
                 for ch in tok[1:]:
-                    if (f"-{ch}" not in bool_flags
-                            and f"-{ch}" not in value_flags):
+                    if (f"-{ch}" not in cs.bool_spellings
+                            and f"-{ch}" not in cs.value_spellings):
                         bad = ch
                         break
                 invalid_options.append(bad)
@@ -337,10 +272,9 @@ def parse_command(
         raw_indices.append(orig_indices[i])
         i += 1
 
-    positional: tuple[OperandKind,
-                      ...] = tuple(op.kind for op in spec.positional
-                                   if not any(name in flags
-                                              for name in op.provided_by))
+    positional: tuple[OperandKind, ...] = tuple(
+        op.kind for op in spec.positional
+        if not any(cs.dest_of(name) in flags for name in op.provided_by))
 
     # Overflow operands past the declared positional slots pass through
     # classified like the last slot (TEXT when there is none), so a
@@ -353,8 +287,8 @@ def parse_command(
     for j, arg in enumerate(raw_args):
         if j < len(positional):
             kind = positional[j]
-        elif rest_kind is not None:
-            kind = rest_kind
+        elif cs.rest_kind is not None:
+            kind = cs.rest_kind
         else:
             kind = overflow_kind
         if kind == OperandKind.PATH:
@@ -366,7 +300,7 @@ def parse_command(
         word_kinds[raw_indices[j]] = kind
 
     path_flag_values: list[str] = []
-    for flag_name, kind in value_flag_kinds.items():
+    for flag_name, kind in cs.kind_by_dest.items():
         if kind != OperandKind.PATH or flag_name not in flags:
             continue
         value = flags[flag_name]
@@ -380,7 +314,7 @@ def parse_command(
             path_flag_values.append(resolved)
 
     text_flag_values: list[str] = []
-    for flag_name, kind in value_flag_kinds.items():
+    for flag_name, kind in cs.kind_by_dest.items():
         if kind != OperandKind.TEXT or flag_name not in flags:
             continue
         value = flags[flag_name]

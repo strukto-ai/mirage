@@ -25,7 +25,7 @@ def parse_flags(flags: Mapping[str, object]) -> TeeFlags:
             f"tee: invalid argument '{mode}' for '--output-error'\n"
             f"Valid arguments are:\n{valid}\n"
             "Try 'tee --help' for more information.")
-    return TeeFlags(append=fl.as_bool("a") or fl.as_bool("append"))
+    return TeeFlags(append=fl.as_bool("append"))
 
 
 async def write_output(

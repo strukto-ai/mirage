@@ -69,7 +69,7 @@ async def test_cat_bytes_stdin():
 @pytest.mark.asyncio
 async def test_cat_number_lines(backend):
     await backend.write(_ps("/tmp/f.txt"), data=b"aaa\nbbb\n")
-    stdout, io = await cat(backend.accessor, [_ps("/tmp/f.txt")], n=True)
+    stdout, io = await cat(backend.accessor, [_ps("/tmp/f.txt")], number=True)
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert b"1" in collected
@@ -164,7 +164,7 @@ async def test_grep_count_only():
 async def test_head_file_returns_async_iterator(backend):
     lines = b"\n".join(f"line{i}".encode() for i in range(20))
     await backend.write(_ps("/tmp/f.txt"), data=lines)
-    stdout, io = await head(backend.accessor, [_ps("/tmp/f.txt")], n="3")
+    stdout, io = await head(backend.accessor, [_ps("/tmp/f.txt")], lines="3")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"line0\nline1\nline2\n"
@@ -173,7 +173,7 @@ async def test_head_file_returns_async_iterator(backend):
 @pytest.mark.asyncio
 async def test_head_stdin_streaming():
     source = _chunks([b"a\nb\nc\nd\ne\n"])
-    stdout, io = await head(_NOOP, [], stdin=source, n="2")
+    stdout, io = await head(_NOOP, [], stdin=source, lines="2")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"a\nb\n"
@@ -189,7 +189,7 @@ async def test_head_early_termination():
             pull_count += 1
             yield f"line{i}\n".encode()
 
-    stdout, io = await head(_NOOP, [], stdin=_infinite(), n="3")
+    stdout, io = await head(_NOOP, [], stdin=_infinite(), lines="3")
     collected = b"".join([chunk async for chunk in stdout])
     lines = collected.strip().split(b"\n")
     assert len(lines) == 3
@@ -208,7 +208,7 @@ async def test_head_default_10_lines():
 @pytest.mark.asyncio
 async def test_head_bytes_mode():
     source = _chunks([b"hello world, this is a long string"])
-    stdout, io = await head(_NOOP, [], stdin=source, c="5")
+    stdout, io = await head(_NOOP, [], stdin=source, bytes="5")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"hello"
@@ -220,7 +220,7 @@ async def test_head_bytes_mode():
 @pytest.mark.asyncio
 async def test_cut_stdin_streaming():
     source = _chunks([b"a,b,c\nd,e,f\n"])
-    stdout, io = await cut(_NOOP, [], stdin=source, d=",", f="2")
+    stdout, io = await cut(_NOOP, [], stdin=source, delimiter=",", fields="2")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"b\ne\n"
@@ -229,7 +229,9 @@ async def test_cut_stdin_streaming():
 @pytest.mark.asyncio
 async def test_cut_file_returns_async_iterator(backend):
     await backend.write(_ps("/tmp/f.txt"), data=b"a,b,c\nd,e,f\n")
-    stdout, io = await cut(backend.accessor, [_ps("/tmp/f.txt")], d=",", f="2")
+    stdout, io = await cut(backend.accessor, [_ps("/tmp/f.txt")],
+                           delimiter=",",
+                           fields="2")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"b\ne\n"
@@ -250,7 +252,7 @@ async def test_uniq_stdin_streaming():
 @pytest.mark.asyncio
 async def test_uniq_count():
     source = _chunks([b"a\na\nb\n"])
-    stdout, io = await uniq(_NOOP, [], stdin=source, c=True)
+    stdout, io = await uniq(_NOOP, [], stdin=source, count=True)
     collected = b"".join([chunk async for chunk in stdout])
     assert b"2" in collected
     assert b"a" in collected
@@ -284,7 +286,7 @@ async def test_tr_stdin_streaming():
 @pytest.mark.asyncio
 async def test_tr_delete():
     source = _chunks([b"hello world"])
-    stdout, io = await tr(_NOOP, [], "lo", stdin=source, d=True)
+    stdout, io = await tr(_NOOP, [], "lo", stdin=source, delete=True)
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"he wrd"
 

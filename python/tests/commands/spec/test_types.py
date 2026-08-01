@@ -53,11 +53,14 @@ def test_flag_view_with_spec_rejects_unknown_names():
         fl.as_list("patterns")
 
 
-def test_spec_flag_names_includes_short_long_and_ambiguous():
+def test_spec_flag_names_are_canonical_and_ambiguous_mapped():
+    # One name per option: the long spelling wins when both exist, so a
+    # stale short-name read raises through FlagView instead of silently
+    # reading False after dest unification.
     spec = CommandSpec(options=(
         Option(short="l"),
         Option(short="m", long="--max-count", value_kind=OperandKind.TEXT),
         Option(long="--hidden"),
     ))
     names = spec_flag_names(spec)
-    assert names == frozenset({"args_l", "m", "max_count", "hidden"})
+    assert names == frozenset({"args_l", "max_count", "hidden"})

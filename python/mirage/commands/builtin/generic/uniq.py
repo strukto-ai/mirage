@@ -36,10 +36,6 @@ def _parse_count(value: str | None) -> int | None:
     return count
 
 
-def _string_alias(fl: FlagView, short: str, long: str) -> str | None:
-    return fl.as_str(short) or fl.as_str(long)
-
-
 def parse_flags(flags: Mapping[str, object]) -> UniqFlags:
     fl = FlagView(flags, spec=SPECS["uniq"])
     raw_all = fl.raw("all_repeated")
@@ -55,9 +51,9 @@ def parse_flags(flags: Mapping[str, object]) -> UniqFlags:
     group = "separate" if raw_group is True else raw_group
     if group not in (None, "separate", "prepend", "append", "both"):
         raise ValueError(f"uniq: invalid argument '{group}' for '--group'")
-    count = fl.as_bool("c") or fl.as_bool("count")
-    duplicates_only = fl.as_bool("d") or fl.as_bool("repeated")
-    unique_only = fl.as_bool("u") or fl.as_bool("unique")
+    count = fl.as_bool("count")
+    duplicates_only = fl.as_bool("repeated")
+    unique_only = fl.as_bool("unique")
     if group is not None and (count or duplicates_only or unique_only
                               or all_repeated is not None):
         raise ValueError(
@@ -69,13 +65,13 @@ def parse_flags(flags: Mapping[str, object]) -> UniqFlags:
         count=count,
         duplicates_only=duplicates_only,
         unique_only=unique_only,
-        skip_fields=_parse_count(_string_alias(fl, "f", "skip_fields")) or 0,
-        skip_chars=_parse_count(_string_alias(fl, "s", "skip_chars")) or 0,
-        ignore_case=fl.as_bool("i") or fl.as_bool("ignore_case"),
-        check_chars=_parse_count(_string_alias(fl, "w", "check_chars")),
+        skip_fields=_parse_count(fl.as_str("skip_fields")) or 0,
+        skip_chars=_parse_count(fl.as_str("skip_chars")) or 0,
+        ignore_case=fl.as_bool("ignore_case"),
+        check_chars=_parse_count(fl.as_str("check_chars")),
         all_repeated=all_repeated,
         group=group,
-        zero_terminated=fl.as_bool("z") or fl.as_bool("zero_terminated"),
+        zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 

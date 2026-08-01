@@ -104,7 +104,7 @@ def test_run_fanout_forces_head_headers_and_blank_line_joins():
     })
     out, _ = _run(
         run_fanout("head", [_scope("/a/x"), _scope("/b/y")], [], {}, rs))
-    assert all(c["flags"].get("v") is True for c in rs.calls)
+    assert all(c["flags"].get("verbose") is True for c in rs.calls)
     assert _run(materialize(out)) == b"==> /a/x <==\n1\n\n==> /b/y <==\n2\n"
 
 
