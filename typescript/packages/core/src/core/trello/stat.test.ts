@@ -176,3 +176,34 @@ describe('trello stat unknown path', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
+
+describe('trello stat parent-listing failures', () => {
+  class FailingTransport implements TrelloTransport {
+    constructor(private readonly err: Error) {}
+    call(): Promise<unknown> {
+      return Promise.reject(this.err)
+    }
+  }
+
+  it('propagates a backend failure instead of reporting ENOENT', async () => {
+    const boom = Object.assign(new Error('401 invalid key'), { status: 401 })
+    await expect(
+      stat(
+        new TrelloAccessor(new FailingTransport(boom)),
+        spec('/mnt/trello/workspaces/w1/workspace.json', '/mnt/trello'),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toThrow('401 invalid key')
+  })
+
+  it('still reports ENOENT when the parent is genuinely missing', async () => {
+    const gone = Object.assign(new Error('/mnt/trello/workspaces'), { code: 'ENOENT' })
+    await expect(
+      stat(
+        new TrelloAccessor(new FailingTransport(gone)),
+        spec('/mnt/trello/workspaces/w1/workspace.json', '/mnt/trello'),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})

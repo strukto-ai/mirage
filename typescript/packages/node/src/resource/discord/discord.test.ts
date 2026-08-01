@@ -139,6 +139,24 @@ describe('normalizeDiscordConfig', () => {
   it('passes token through unchanged', () => {
     expect(normalizeDiscordConfig({ token: 'a' })).toEqual({ token: 'a' })
   })
+
+  it('maps the python-parity base_url key onto baseUrl', () => {
+    // normalizeFields snake-to-camels every key by default, so no explicit
+    // rename is needed. Pinned because a silent miss here would send YAML
+    // and registry configs to the public API instead of the configured one.
+    expect(normalizeDiscordConfig({ token: 'a', base_url: 'http://127.0.0.1:5099' })).toEqual({
+      token: 'a',
+      baseUrl: 'http://127.0.0.1:5099',
+    })
+  })
+
+  it('reaches the resource through the registry', async () => {
+    const r = (await buildResource('discord', {
+      token: 'bot-x',
+      base_url: 'http://127.0.0.1:5099',
+    })) as DiscordResource
+    expect(r.config.baseUrl).toBe('http://127.0.0.1:5099')
+  })
 })
 
 describe('node registry: discord', () => {

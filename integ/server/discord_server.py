@@ -90,19 +90,27 @@ class FakeDiscord:
             messages.sort(key=lambda m: int(m["id"]))
             self.channel_messages[cid] = messages
             channels.append({
-                "id": cid,
-                "type": channel.get("type", 0),
-                "guild_id": gid,
-                "name": channel.get("name", ""),
-                "position": channel.get("position", 0),
-                "topic": channel.get("topic"),
-                "parent_id": None,
-                "last_message_id": messages[-1]["id"] if messages else None,
+                "id":
+                cid,
+                "type":
+                channel.get("type", 0),
+                "guild_id":
+                gid,
+                "name":
+                channel.get("name", ""),
+                "position":
+                channel.get("position", 0),
+                "topic":
+                channel.get("topic"),
+                "parent_id":
+                None,
+                "last_message_id":
+                messages[-1]["id"] if messages else None,
             })
         self.guild_channels[gid] = channels
 
-    def _seed_message(self, channel_id: str,
-                      raw: dict[str, Any]) -> dict[str, Any]:
+    def _seed_message(self, channel_id: str, raw: dict[str,
+                                                       Any]) -> dict[str, Any]:
         author_id = raw["author"]
         author = self._user(author_id)
         attachments = []
@@ -166,7 +174,9 @@ class FakeDiscord:
         message = {
             "id": snowflake_at(POST_SNOWFLAKE_BASE + self._post_seq * 1000),
             "channel_id": channel_id,
-            "author": dict(self.bot_user) | {"bot": True},
+            "author": dict(self.bot_user) | {
+                "bot": True
+            },
             "content": content,
             "timestamp": "2026-06-03T00:00:00.000000+00:00",
             "edited_timestamp": None,
@@ -219,8 +229,7 @@ class DiscordServer:
         self.state.seed(json.loads(FIXTURE.read_text()))
         return web.json_response({"ok": True})
 
-    async def current_user_guilds(self,
-                                  request: web.Request) -> web.Response:
+    async def current_user_guilds(self, request: web.Request) -> web.Response:
         if not self._authed(request):
             return unauthorized()
         after = request.query.get("after", "0")
@@ -249,8 +258,8 @@ class DiscordServer:
         after = request.query.get("after", "0")
         limit = clamp(request.query.get("limit"), 1, MEMBERS_MAX_LIMIT)
         rows = [
-            m for m in members if int(m.get("user", {}).get("id", 0)) > int(
-                after)
+            m for m in members
+            if int(m.get("user", {}).get("id", 0)) > int(after)
         ]
         # Documented as ordered by user id, ascending.
         rows.sort(key=lambda m: int(m["user"]["id"]))
@@ -314,11 +323,11 @@ class DiscordServer:
         mid = request.match_info["message_id"]
         if not any(m["id"] == mid
                    for m in self.state.channel_messages.get(cid, [])):
-            return web.json_response({
-                "message": "Unknown Message",
-                "code": 10008
-            },
-                                     status=404)
+            return web.json_response(
+                {
+                    "message": "Unknown Message",
+                    "code": 10008
+                }, status=404)
         self.state.reactions.append({
             "channel_id": cid,
             "message_id": mid,
@@ -331,8 +340,7 @@ class DiscordServer:
         if body is None:
             return web.Response(status=404)
         # The CDN serves attachments without the Authorization header.
-        return web.Response(body=body,
-                            content_type="application/octet-stream")
+        return web.Response(body=body, content_type="application/octet-stream")
 
 
 def build_app(server: DiscordServer) -> web.Application:

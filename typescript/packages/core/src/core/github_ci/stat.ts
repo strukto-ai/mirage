@@ -18,7 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent, isMissingPath } from '../../utils/errors.ts'
 
 const VIRTUAL_DIRS = new Set(['workflows', 'runs', 'jobs', 'artifacts'])
 
@@ -44,8 +44,11 @@ async function lookupWithFallback(
       }),
       index,
     )
-  } catch {
-    // parent listing failed — fall through
+  } catch (err) {
+    // Only a genuinely absent parent falls through to not-found. Auth,
+    // rate-limit and transport failures must propagate instead of reading
+    // back as ENOENT, which is what the Python side catches too.
+    if (!isMissingPath(err)) throw err
   }
   return await index.get(virtualKey)
 }

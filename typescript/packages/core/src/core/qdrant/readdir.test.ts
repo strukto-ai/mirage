@@ -70,7 +70,7 @@ describe('qdrant readdir sizes', () => {
     const txt = await idx.get('/animals/cat/big/1.txt')
     expect(txt.entry?.size).toBe(renderText(ROW, config).byteLength)
     const blob = await idx.get('/animals/cat/big/1.png')
-    expect(blob.entry?.size).toBe(blobBytes(ROW['image_bytes']).byteLength)
+    expect(blob.entry?.size).toBe(blobBytes(ROW.image_bytes).byteLength)
   })
 
   it('lists without an index when none is given', async () => {

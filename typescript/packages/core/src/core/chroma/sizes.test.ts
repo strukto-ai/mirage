@@ -90,9 +90,7 @@ describe('chroma ensureDirSizes', () => {
   it('does not rescan once every file is sized', async () => {
     const collection = new FakeCollection(CHUNKS)
     const index = new RAMIndexCacheStore()
-    await index.setDir('/knowledge/guides', [
-      ['auth', fileEntry('auth', 'guides/auth')],
-    ])
+    await index.setDir('/knowledge/guides', [['auth', fileEntry('auth', 'guides/auth')]])
 
     await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
     await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
@@ -103,9 +101,7 @@ describe('chroma ensureDirSizes', () => {
   it('leaves a page with no chunks unsized', async () => {
     const collection = new FakeCollection({})
     const index = new RAMIndexCacheStore()
-    await index.setDir('/knowledge/guides', [
-      ['gone', fileEntry('gone', 'guides/gone')],
-    ])
+    await index.setDir('/knowledge/guides', [['gone', fileEntry('gone', 'guides/gone')]])
 
     await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
 

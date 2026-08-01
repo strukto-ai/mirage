@@ -254,3 +254,34 @@ describe('stat unknown', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
+
+describe('discord stat parent-listing failures', () => {
+  class FailingTransport implements DiscordTransport {
+    constructor(private readonly err: Error) {}
+    call(): Promise<DiscordResponse> {
+      return Promise.reject(this.err)
+    }
+  }
+
+  it('propagates a backend failure instead of reporting ENOENT', async () => {
+    const boom = Object.assign(new Error('401 Unauthorized'), { status: 401 })
+    await expect(
+      stat(
+        new DiscordAccessor(new FailingTransport(boom)),
+        spec('/mnt/discord/guild-a', '/mnt/discord'),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toThrow('401 Unauthorized')
+  })
+
+  it('still reports ENOENT when the parent is genuinely missing', async () => {
+    const gone = Object.assign(new Error('/mnt/discord'), { code: 'ENOENT' })
+    await expect(
+      stat(
+        new DiscordAccessor(new FailingTransport(gone)),
+        spec('/mnt/discord/guild-a', '/mnt/discord'),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
