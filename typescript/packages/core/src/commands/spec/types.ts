@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { flagKwargName } from './constants.ts'
+
 // Command names the spec layer references by value. Not a registry of
 // every command: only names that appear away from their own module
 // (usage message shapes, arity guards). Members are their plain string
@@ -213,5 +215,78 @@ export class ParsedArgs {
     fallback: string | boolean | string[] | null = null,
   ): string | boolean | string[] | null {
     return this.flags[name] ?? fallback
+  }
+}
+
+/**
+ * Collect the kwarg names a spec's options can produce.
+ *
+ * Mirrors Python's `spec_flag_names`.
+ */
+export function specFlagNames(spec: CommandSpec): ReadonlySet<string> {
+  const names = new Set<string>()
+  for (const option of spec.options) {
+    if (option.short !== null) names.add(flagKwargName(option.short))
+    if (option.long !== null) names.add(flagKwargName(option.long))
+  }
+  return names
+}
+
+export type FlagValue = string | boolean | string[]
+
+/**
+ * Typed read-only view over raw flag kwargs.
+ *
+ * Commands receive flags as an untyped record from the dispatcher; this
+ * view is the one sanctioned way to read them, replacing ad-hoc
+ * `flags.x === true` checks and typeof chains. Mirrors Python's
+ * `FlagView`.
+ *
+ * When constructed with a spec, reading a name the spec does not declare
+ * throws. A missing key is otherwise indistinguishable from "flag not
+ * passed", so a typo in the name would silently read as false/undefined.
+ */
+export class FlagView {
+  private readonly flags: Readonly<Record<string, FlagValue>>
+  private readonly allowed: ReadonlySet<string> | null
+
+  constructor(flags?: Readonly<Record<string, FlagValue>>, spec?: CommandSpec) {
+    this.flags = flags ?? {}
+    this.allowed = spec === undefined ? null : specFlagNames(spec)
+  }
+
+  private key(name: string): string {
+    if (this.allowed !== null && !this.allowed.has(name)) {
+      throw new Error(
+        `flag '${name}' is not declared by the command spec ` +
+          `(known: ${[...this.allowed].sort().join(', ')})`,
+      )
+    }
+    return name
+  }
+
+  asBool(name: string): boolean {
+    return this.flags[this.key(name)] === true
+  }
+
+  asInt(name: string): number | undefined {
+    const value = this.flags[this.key(name)]
+    return typeof value === 'string' ? Number.parseInt(value, 10) : undefined
+  }
+
+  asStr(name: string): string | undefined {
+    const value = this.flags[this.key(name)]
+    return typeof value === 'string' ? value : undefined
+  }
+
+  asList(name: string): string[] {
+    const value = this.flags[this.key(name)]
+    if (Array.isArray(value)) return value.filter((v) => typeof v === 'string')
+    if (typeof value === 'string') return [value]
+    return []
+  }
+
+  raw(name: string): FlagValue | undefined {
+    return this.flags[this.key(name)]
   }
 }

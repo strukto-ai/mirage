@@ -21,6 +21,18 @@ export const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
 
 // Numeric shorthand token like `-5` (head/tail count), never a flag
 // cluster or a path.
+/**
+ * Map a flag name to its dispatcher kwarg name.
+ *
+ * Mirrors Python's `flag_kwarg_name`. The dispatcher spells flags without
+ * their dashes and with dashes turned into underscores, so this is the one
+ * place that translation lives.
+ */
+export function flagKwargName(flag: string): string {
+  const clean = flag.replace(/^-+/, '').replaceAll('-', '_')
+  return AMBIGUOUS_NAMES[clean] ?? clean
+}
+
 export const NUMERIC_SHORT = /^-\d+$/
 
 // GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils

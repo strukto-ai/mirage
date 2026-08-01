@@ -17,6 +17,8 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -26,10 +28,9 @@ export interface TeeOptions {
   append: boolean
 }
 
-export function parseTeeFlags(
-  flags: Record<string, string | boolean | string[]>,
-): TeeOptions | string {
-  const mode = flags.output_error
+export function parseTeeFlags(flags: Record<string, FlagValue>): TeeOptions | string {
+  const fl = new FlagView(flags, specOf('tee'))
+  const mode = fl.raw('output_error')
   if (typeof mode === 'string' && !OUTPUT_ERROR_MODES.includes(mode)) {
     const valid = OUTPUT_ERROR_MODES.map((m) => `  - '${m}'`).join('\n')
     return (
@@ -38,7 +39,7 @@ export function parseTeeFlags(
       "Try 'tee --help' for more information.\n"
     )
   }
-  return { append: flags.a === true || flags.append === true }
+  return { append: fl.asBool('a') || fl.asBool('append') }
 }
 
 export async function teeGeneric(
