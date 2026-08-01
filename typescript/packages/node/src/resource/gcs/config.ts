@@ -19,8 +19,10 @@ export const GCS_ENDPOINT = 'https://storage.googleapis.com'
 
 export interface GCSConfig {
   bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
+  profile?: string
   endpoint?: string
   region?: string
   timeoutMs?: number
@@ -31,8 +33,10 @@ export interface GCSConfig {
 
 export interface GCSConfigRedacted {
   bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
+  profile?: string
   endpoint: string
   region: string
   timeoutMs?: number
@@ -43,8 +47,10 @@ export interface GCSConfigRedacted {
 
 const GCSConfigSchema = z.object({
   bucket: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
+  accessKeyId: secretStr().optional(),
+  secretAccessKey: secretStr().optional(),
+  sessionToken: secretStr().optional(),
+  profile: z.string().optional(),
   endpoint: z.string(),
   region: z.string(),
   timeoutMs: z.number().optional(),
@@ -58,8 +64,10 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
     bucket: config.bucket,
     region: config.region ?? 'auto',
     endpoint: config.endpoint ?? GCS_ENDPOINT,
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
+    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
+    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
+    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
+    ...(config.profile !== undefined ? { profile: config.profile } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
@@ -80,6 +88,8 @@ export function normalizeGcsConfig(input: Record<string, unknown>): GCSConfig {
     rename: {
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
+      session_token: 'sessionToken',
+      aws_profile: 'profile',
       endpoint_url: 'endpoint',
       path_style: 'forcePathStyle',
       key_prefix: 'keyPrefix',

@@ -12,84 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-import type { S3Config } from '../s3/config.ts'
+import { makeRegionAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
 
-export interface ScalewayConfig {
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+export interface ScalewayConfig extends S3AliasConfig {
   region: string
-  endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
 }
 
-export interface ScalewayConfigRedacted {
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
-  region: string
-  endpoint: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
+export type ScalewayConfigRedacted = S3AliasConfigRedacted
 
-const ScalewayConfigSchema = z.object({
-  bucket: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
-  region: z.string(),
-  endpoint: z.string(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
-})
+const alias = makeRegionAlias<ScalewayConfig, ScalewayConfigRedacted>(
+  (config) => `https://s3.${config.region}.scw.cloud`,
+)
 
-export function resolvedScalewayEndpoint(config: ScalewayConfig): string {
-  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
-  const region = config.region
-  return `https://s3.${region}.scw.cloud`
-}
-
-export function scalewayToS3Config(config: ScalewayConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region,
-    endpoint: resolvedScalewayEndpoint(config),
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactScalewayConfig(config: ScalewayConfig): ScalewayConfigRedacted {
-  return redactConfigWithSchema(ScalewayConfigSchema, {
-    ...config,
-    endpoint: resolvedScalewayEndpoint(config),
-  }) as unknown as ScalewayConfigRedacted
-}
-
-export function normalizeScalewayConfig(input: Record<string, unknown>): ScalewayConfig {
-  return normalizeFields(input, {
-    rename: {
-      access_key_id: 'accessKeyId',
-      secret_access_key: 'secretAccessKey',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      key_prefix: 'keyPrefix',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as ScalewayConfig
-}
+export const resolvedScalewayEndpoint = alias.resolvedEndpoint
+export const scalewayToS3Config = alias.toS3Config
+export const redactScalewayConfig = alias.redact
+export const normalizeScalewayConfig = alias.normalize

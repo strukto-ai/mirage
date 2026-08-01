@@ -12,79 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-import type { S3Config } from '../s3/config.ts'
+import { makeFixedAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
 
-export interface CephConfig {
-  bucket: string
+export interface CephConfig extends S3AliasConfig {
   endpoint: string
-  accessKeyId: string
-  secretAccessKey: string
-  region?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
 }
 
-export interface CephConfigRedacted {
-  bucket: string
-  endpoint: string
-  accessKeyId: string
-  secretAccessKey: string
-  region: string
-  forcePathStyle: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
+export type CephConfigRedacted = S3AliasConfigRedacted
 
-const CephConfigSchema = z.object({
-  bucket: z.string(),
-  endpoint: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
-  region: z.string(),
-  forcePathStyle: z.boolean(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
-})
+const alias = makeFixedAlias<CephConfig, CephConfigRedacted>()
 
-export function cephToS3Config(config: CephConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region ?? 'us-east-1',
-    endpoint: config.endpoint,
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    forcePathStyle: config.forcePathStyle ?? true,
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactCephConfig(config: CephConfig): CephConfigRedacted {
-  return redactConfigWithSchema(CephConfigSchema, {
-    ...config,
-    region: config.region ?? 'us-east-1',
-    forcePathStyle: config.forcePathStyle ?? true,
-  }) as unknown as CephConfigRedacted
-}
-
-export function normalizeCephConfig(input: Record<string, unknown>): CephConfig {
-  return normalizeFields(input, {
-    rename: {
-      access_key_id: 'accessKeyId',
-      secret_access_key: 'secretAccessKey',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      key_prefix: 'keyPrefix',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as CephConfig
-}
+export const cephToS3Config = alias.toS3Config
+export const redactCephConfig = alias.redact
+export const normalizeCephConfig = alias.normalize

@@ -61,3 +61,10 @@ suppresses a live divergence, not merely by being listed.
 asserts that every `*_COMMANDS` declared by a builtin command module is
 reachable. A backend that defines commands but forgets the re-export used to
 drop out of the dump silently; now generation fails.
+
+`gen_specs.py` has the same hazard from the other direction: a command module
+that will not import registers nothing, so a venv missing the optional extras
+quietly drops every backend behind them. Regenerating in that state looks like
+a legitimate deletion of thousands of committed lines. Generation now names
+the modules that failed to import and exits without writing, so run
+`cd python && uv sync --all-extras --no-extra camel` first.

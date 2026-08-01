@@ -12,84 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-import type { S3Config } from '../s3/config.ts'
+import { makeRegionAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
 
-export interface QingStorConfig {
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+export interface QingStorConfig extends S3AliasConfig {
   region: string
-  endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
 }
 
-export interface QingStorConfigRedacted {
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
-  region: string
-  endpoint: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
+export type QingStorConfigRedacted = S3AliasConfigRedacted
 
-const QingStorConfigSchema = z.object({
-  bucket: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
-  region: z.string(),
-  endpoint: z.string(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
-})
+const alias = makeRegionAlias<QingStorConfig, QingStorConfigRedacted>(
+  (config) => `https://s3.${config.region}.qingstor.com`,
+)
 
-export function resolvedQingStorEndpoint(config: QingStorConfig): string {
-  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
-  const region = config.region
-  return `https://s3.${region}.qingstor.com`
-}
-
-export function qingStorToS3Config(config: QingStorConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region,
-    endpoint: resolvedQingStorEndpoint(config),
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactQingStorConfig(config: QingStorConfig): QingStorConfigRedacted {
-  return redactConfigWithSchema(QingStorConfigSchema, {
-    ...config,
-    endpoint: resolvedQingStorEndpoint(config),
-  }) as unknown as QingStorConfigRedacted
-}
-
-export function normalizeQingStorConfig(input: Record<string, unknown>): QingStorConfig {
-  return normalizeFields(input, {
-    rename: {
-      access_key_id: 'accessKeyId',
-      secret_access_key: 'secretAccessKey',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      key_prefix: 'keyPrefix',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as QingStorConfig
-}
+export const resolvedQingStorEndpoint = alias.resolvedEndpoint
+export const qingStorToS3Config = alias.toS3Config
+export const redactQingStorConfig = alias.redact
+export const normalizeQingStorConfig = alias.normalize

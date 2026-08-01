@@ -50,12 +50,19 @@ export interface MakeGenericOpsOptions {
   /** Op names to skip because the backend registers an irregular wrapper. */
   overrides?: ReadonlySet<string>
   /**
-   * Forward `kwargs.index` into read/readdir/stat (default true). Mutable
-   * local backends (ram/disk/redis/ssh) historically call their cores
-   * index-less: their readdir caches listings into the index store while
-   * mutations never invalidate them, so forwarding would serve stale
-   * listings after mkdir/rmdir/write. Python has no such knob — its
-   * cores invalidate the index through the cache context on mutation.
+   * Forward `kwargs.index` into read/readdir/stat (default true). Off for
+   * the mutable local backends (ram/disk/redis/ssh), whose non-zero index
+   * TTL would otherwise let a cached listing outlive the mutation.
+   *
+   * `ws.dispatch` is safe on its own: the dispatcher calls
+   * `invalidateAfterWriteByPath` after every write op. `WorkspaceFS` is
+   * not. It reaches `OpsRegistry.call` directly, so a forwarded index is
+   * never evicted and readdir replays the pre-mutation listing for the
+   * whole TTL. Python has no such knob because its `Ops` facade takes an
+   * `on_write` hook (`Ops(..., on_write=self._invalidate_after_write_by_path)`)
+   * and fires it on the same path; giving `WorkspaceFS` that hook is what
+   * would retire this option. `packages/node/src/ops/index_invalidation.test.ts`
+   * pins both halves.
    */
   forwardIndex?: boolean
 }

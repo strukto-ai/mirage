@@ -142,12 +142,14 @@ def make_generic_ops(
     once. Ops whose table field is None are omitted, mirroring how the
     command factory skips write commands on read-only backends.
 
-    Parity with TS ``makeGenericOps``: there is deliberately no
-    ``forward_index`` knob here — Python cores invalidate the index
-    store through the cache context on mutation, so forwarding
-    ``index`` into read/readdir/stat is always safe, whereas the TS
-    ram/disk/redis/ssh cores cache listings that mutations never
-    invalidate and need ``forwardIndex: false``.
+    ``index`` is forwarded into read/readdir/stat for every backend, so
+    there is deliberately no ``forward_index`` knob here. Both write
+    paths evict the parent listing: ``dispatch`` through
+    :meth:`Dispatcher.invalidate_after_write`, and the VFS/FUSE surface
+    through the ``on_write`` hook :class:`Ops` is built with. TS keeps a
+    ``forwardIndex: false`` for ram/disk/redis/ssh because its
+    ``WorkspaceFS`` has no equivalent of that hook and reaches the ops
+    registry directly, so a forwarded index there is never evicted.
 
     Every op emitted here is filetype-agnostic. To serve one extension
     differently, register a filetype-scoped op on the mount; the mount

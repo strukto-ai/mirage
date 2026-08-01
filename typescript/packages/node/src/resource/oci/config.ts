@@ -19,8 +19,10 @@ export interface OCIConfig {
   bucket: string
   namespace: string
   region: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
+  profile?: string
   endpoint?: string
   keyPrefix?: string
   timeoutMs?: number
@@ -31,8 +33,10 @@ export interface OCIConfigRedacted {
   bucket: string
   namespace: string
   region: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
+  profile?: string
   endpoint: string
   keyPrefix?: string
   timeoutMs?: number
@@ -43,8 +47,10 @@ const OCIConfigSchema = z.object({
   bucket: z.string(),
   namespace: z.string(),
   region: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
+  accessKeyId: secretStr().optional(),
+  secretAccessKey: secretStr().optional(),
+  sessionToken: secretStr().optional(),
+  profile: z.string().optional(),
   endpoint: z.string(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
@@ -61,8 +67,10 @@ export function ociToS3Config(config: OCIConfig): S3Config {
     bucket: config.bucket,
     region: config.region,
     endpoint: resolvedOciEndpoint(config),
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
+    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
+    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
+    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
+    ...(config.profile !== undefined ? { profile: config.profile } : {}),
     forcePathStyle: true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
@@ -82,6 +90,8 @@ export function normalizeOciConfig(input: Record<string, unknown>): OCIConfig {
     rename: {
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
+      session_token: 'sessionToken',
+      aws_profile: 'profile',
       endpoint_url: 'endpoint',
       key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',

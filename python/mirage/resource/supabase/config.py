@@ -12,24 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
-
-from mirage.resource.s3 import S3Config
+from mirage.resource.s3_alias import RegionEndpointConfig
 
 
-class SupabaseConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class SupabaseConfig(RegionEndpointConfig):
+    """Supabase Storage's S3 gateway, addressed by project reference."""
 
-    bucket: str
-    region: str
     project_ref: str | None = None
-    endpoint_url: str | None = None
-    access_key_id: SecretStr
-    secret_access_key: SecretStr
-    session_token: SecretStr | None = None
-    key_prefix: str | None = None
-    timeout: int = 30
-    proxy: SecretStr | None = None
+    path_style: bool = True
 
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:
@@ -39,17 +29,3 @@ class SupabaseConfig(BaseModel):
                 f"https://{self.project_ref}.storage.supabase.co/storage/v1/s3"
             )
         raise ValueError("SupabaseConfig requires project_ref or endpoint_url")
-
-    def to_s3_config(self) -> S3Config:
-        return S3Config(
-            bucket=self.bucket,
-            region=self.region,
-            endpoint_url=self.resolved_endpoint_url(),
-            aws_access_key_id=self.access_key_id,
-            aws_secret_access_key=self.secret_access_key,
-            aws_session_token=self.session_token,
-            path_style=True,
-            key_prefix=self.key_prefix,
-            timeout=self.timeout,
-            proxy=self.proxy,
-        )

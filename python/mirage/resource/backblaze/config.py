@@ -12,38 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
-
-from mirage.resource.s3 import S3Config
+from mirage.resource.s3_alias import RegionEndpointConfig
 
 
-class BackblazeConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class BackblazeConfig(RegionEndpointConfig):
 
-    bucket: str
-    region: str
-    endpoint_url: str | None = None
-    access_key_id: SecretStr
-    secret_access_key: SecretStr
-    path_style: bool = False
-    key_prefix: str | None = None
-    timeout: int = 30
-    proxy: SecretStr | None = None
-
-    def resolved_endpoint_url(self) -> str:
-        if self.endpoint_url:
-            return self.endpoint_url
-        return f"https://s3.{self.region}.backblazeb2.com"
-
-    def to_s3_config(self) -> S3Config:
-        return S3Config(
-            bucket=self.bucket,
-            region=self.region,
-            endpoint_url=self.resolved_endpoint_url(),
-            aws_access_key_id=self.access_key_id,
-            aws_secret_access_key=self.secret_access_key,
-            path_style=self.path_style,
-            key_prefix=self.key_prefix,
-            timeout=self.timeout,
-            proxy=self.proxy,
-        )
+    ENDPOINT = "https://s3.{region}.backblazeb2.com"

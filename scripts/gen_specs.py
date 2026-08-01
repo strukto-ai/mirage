@@ -30,13 +30,26 @@ logger = logging.getLogger(__name__)
 OUT = Path(__file__).resolve().parent.parent / "spec" / "python" / "general"
 
 
-def _walk_pkg(pkg: Any) -> None:
+def _walk_pkg(pkg: Any) -> list[str]:
+    """Import every builtin command module, reporting the ones that failed.
+
+    A module that will not import registers nothing, so its resources
+    silently vanish from the dump. That reads as a legitimate deletion in
+    the committed spec rather than as the under-provisioned environment it
+    actually is, so the caller turns any failure into a hard error.
+
+    Args:
+        pkg (Any): the package to walk.
+    """
+    failed: list[str] = []
     for _finder, name, _ispkg in pkgutil.walk_packages(pkg.__path__,
                                                        pkg.__name__ + "."):
         try:
             importlib.import_module(name)
         except ImportError as e:
             logger.debug("skip %s: %s", name, e)
+            failed.append(f"{name}: {e}")
+    return failed
 
 
 def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
@@ -117,7 +130,13 @@ def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
 
 
 def main() -> None:
-    _walk_pkg(mirage.commands.builtin)
+    failed = _walk_pkg(mirage.commands.builtin)
+    if failed:
+        raise SystemExit(
+            "command modules failed to import, so their registrations would "
+            "be missing from the dump:\n  " + "\n  ".join(failed) +
+            "\n\nInstall the optional dependencies first:\n"
+            "  cd python && uv sync --all-extras --no-extra camel")
     registry = _collect_registrations()
     OUT.mkdir(parents=True, exist_ok=True)
     for name, spec in sorted(SPECS.items()):

@@ -12,35 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
-
-from mirage.resource.s3 import S3Config
+from mirage.resource.s3_alias import RegionEndpointConfig
 
 GCS_ENDPOINT = "https://storage.googleapis.com"
 
 
-class GCSConfig(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class GCSConfig(RegionEndpointConfig):
+    """Google Cloud Storage's S3 interoperability endpoint.
 
-    bucket: str
-    access_key_id: SecretStr
-    secret_access_key: SecretStr
+    One global host rather than a per-region one, so the endpoint is a
+    default rather than a rule and the region is only a signing hint.
+    """
+
     endpoint_url: str = GCS_ENDPOINT
     region: str = "auto"
-    path_style: bool = False
-    key_prefix: str | None = None
-    timeout: int = 30
-    proxy: SecretStr | None = None
-
-    def to_s3_config(self) -> S3Config:
-        return S3Config(
-            bucket=self.bucket,
-            region=self.region,
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key_id,
-            aws_secret_access_key=self.secret_access_key,
-            path_style=self.path_style,
-            key_prefix=self.key_prefix,
-            timeout=self.timeout,
-            proxy=self.proxy,
-        )

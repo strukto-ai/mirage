@@ -167,6 +167,15 @@ describe('makeGenericOps', () => {
     expect(ops.filter((o) => o.name === 'truncate')).toHaveLength(1)
   })
 
+  it('forwards the index into reads by default', async () => {
+    const table = makeTable()
+    const ops = makeGenericOps('x', table)
+    const index = {} as never
+    const readdir = ops.find((o) => o.name === 'readdir')
+    await readdir?.fn(ACCESSOR, PATH, [], { index })
+    expect(table.readdir).toHaveBeenCalledWith(ACCESSOR, PATH, index)
+  })
+
   it('forwardIndex false keeps reads index-less', async () => {
     const table = makeTable()
     const ops = makeGenericOps('x', table, { forwardIndex: false })
