@@ -1275,6 +1275,45 @@
         "stdout": "90 match\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_discord_every_member_size_matches_read",
+      "seq": 700102,
+      "targets": [
+        "discord"
+      ],
+      "command": "n=0; for f in /discord/*/members/*.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_every_chat_day_size_matches_read",
+      "seq": 700103,
+      "targets": [
+        "discord"
+      ],
+      "command": "n=0; for f in /discord/*/channels/*/*/chat.jsonl; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "60 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_every_attachment_size_matches_read",
+      "seq": 700104,
+      "targets": [
+        "discord"
+      ],
+      "command": "n=0; for f in /discord/*/channels/*/*/files/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 match\n",
+        "stderr": ""
+      }
     }
   ]
 }
