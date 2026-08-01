@@ -43,7 +43,12 @@ function diskWorkspace(): { ws: Workspace; cleanup: () => void } {
 }
 
 const names = (entries: unknown): string[] =>
-  (entries as string[]).map((e) => e.replace(/\/$/, '').split('/').pop() as string).sort()
+  (entries as string[])
+    .map((e) => {
+      const parts = e.replace(/\/$/, '').split('/')
+      return parts[parts.length - 1] ?? ''
+    })
+    .sort()
 
 describe('dispatcher evicts the index after a write op', () => {
   it('readdir sees a directory created after the listing was cached', async () => {

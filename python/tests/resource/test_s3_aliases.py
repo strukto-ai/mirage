@@ -182,7 +182,10 @@ def test_gcs_uses_a_fixed_endpoint():
 
 
 def test_oci_endpoint_uses_namespace_and_region():
-    cfg = OCIConfig(bucket="b", namespace="ns", region="us-ashburn-1", **_CREDS)
+    cfg = OCIConfig(bucket="b",
+                    namespace="ns",
+                    region="us-ashburn-1",
+                    **_CREDS)
     assert cfg.resolved_endpoint_url() == (
         "https://ns.compat.objectstorage.us-ashburn-1.oci.customer-oci.com")
 

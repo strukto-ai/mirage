@@ -91,14 +91,13 @@ const ALIAS_SCHEMA = z.object({
   proxy: secretStr().optional(),
 })
 
-
 export interface Alias<C extends S3AliasConfig, R> {
   toS3Config: (config: C) => S3Config
   redact: (config: C) => R
   normalize: (input: Record<string, unknown>) => C
 }
 
-const optional = <C extends S3AliasConfig>(config: C): Partial<S3Config> => ({
+const optional = (config: S3AliasConfig): Partial<S3Config> => ({
   ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
   ...(config.profile !== undefined ? { profile: config.profile } : {}),
   ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
@@ -125,9 +124,7 @@ export function makeRegionAlias<C extends S3AliasConfig & { region: string }, R>
       region: config.region,
       endpoint: resolvedEndpoint(config),
       ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-      ...(config.secretAccessKey !== undefined
-        ? { secretAccessKey: config.secretAccessKey }
-        : {}),
+      ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
       ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
       ...optional(config),
     }),
@@ -147,10 +144,7 @@ export function makeRegionAlias<C extends S3AliasConfig & { region: string }, R>
  * ceph, minio and seaweedfs have no public region to derive from, so the
  * region and path-style defaults are materialized rather than omitted.
  */
-export function makeFixedAlias<C extends S3AliasConfig & { endpoint: string }, R>(): Alias<
-  C,
-  R
-> {
+export function makeFixedAlias<C extends S3AliasConfig & { endpoint: string }, R>(): Alias<C, R> {
   const region = (config: C): string => config.region ?? 'us-east-1'
   const pathStyle = (config: C): boolean => config.forcePathStyle ?? true
   return {
@@ -159,9 +153,7 @@ export function makeFixedAlias<C extends S3AliasConfig & { endpoint: string }, R
       region: region(config),
       endpoint: config.endpoint,
       ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
-      ...(config.secretAccessKey !== undefined
-        ? { secretAccessKey: config.secretAccessKey }
-        : {}),
+      ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
       forcePathStyle: pathStyle(config),
       ...optional(config),
     }),
