@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
@@ -88,9 +90,10 @@ const TRUNCATED_NOTE = 'du: walk stopped early: the reported sizes are incomplet
  * parsed. All three exit 1, du's usage-error code.
  */
 export function parseDuFlags(opts: CommandOpts): DuFlags {
-  const s = opts.flags.s === true
-  const a = opts.flags.a === true
-  const raw = opts.flags.max_depth ?? opts.flags.d
+  const fl = new FlagView(opts.flags, specOf('du'))
+  const s = fl.asBool('s')
+  const a = fl.asBool('a')
+  const raw = fl.asStr('max_depth') ?? fl.asStr('d')
   let maxDepth: number | null = null
   if (typeof raw === 'string') {
     maxDepth = parseDepth(raw)
@@ -116,8 +119,8 @@ export function parseDuFlags(opts: CommandOpts): DuFlags {
   return {
     s,
     a,
-    h: opts.flags.h === true,
-    c: opts.flags.c === true,
+    h: fl.asBool('h'),
+    c: fl.asBool('c'),
     maxDepth,
     ...(warning === undefined ? {} : { warning }),
   }

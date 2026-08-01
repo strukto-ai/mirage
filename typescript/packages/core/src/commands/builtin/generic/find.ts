@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { isEnoent, modifiedTs } from '../../../core/generic/find.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
@@ -130,14 +132,15 @@ export async function findGeneric(
   find: (root: PathSpec, options: FindOptions) => Promise<string[]>,
   stat?: (spec: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
-  const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
-  const typeFlag = typeof opts.flags.type === 'string' ? opts.flags.type : null
-  const pathFlag = typeof opts.flags.path === 'string' ? opts.flags.path : null
-  const maxDepthFlag = typeof opts.flags.maxdepth === 'string' ? opts.flags.maxdepth : null
-  const minDepthFlag = typeof opts.flags.mindepth === 'string' ? opts.flags.mindepth : null
-  const sizeFlag = typeof opts.flags.size === 'string' ? opts.flags.size : null
-  const mtimeFlag = typeof opts.flags.mtime === 'string' ? opts.flags.mtime : null
+  const fl = new FlagView(opts.flags, specOf('find'))
+  const nameFlag = (fl.asStr('name') ?? null)
+  const inameFlag = (fl.asStr('iname') ?? null)
+  const typeFlag = (fl.asStr('type') ?? null)
+  const pathFlag = (fl.asStr('path') ?? null)
+  const maxDepthFlag = (fl.asStr('maxdepth') ?? null)
+  const minDepthFlag = (fl.asStr('mindepth') ?? null)
+  const sizeFlag = (fl.asStr('size') ?? null)
+  const mtimeFlag = (fl.asStr('mtime') ?? null)
   const targets =
     paths.length > 0
       ? paths
@@ -164,7 +167,7 @@ export async function findGeneric(
   if (badArg !== null) return invalidFindArg(badArg[0], badArg[1])
   const nameExclude = extractNotName(texts)
   const orNames = extractOrNames(nameFlag, texts)
-  const emptyFlag = opts.flags.empty === true
+  const emptyFlag = fl.asBool('empty')
   const expr = texts.length > 0 ? parseFindExpression(texts) : null
   // With a stat wired, the mtime window is applied by the overlay-
   // aware post-filter below, not pushed into the core: backend cores

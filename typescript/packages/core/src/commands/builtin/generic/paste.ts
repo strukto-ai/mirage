@@ -70,7 +70,7 @@ export async function pasteGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('paste'))
-  const delimiterValue = opts.flags.d ?? opts.flags.delimiters
+  const delimiterValue = fl.asStr('d') ?? fl.asStr('delimiters')
   const delimiters = decodeDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\t')
   const serial = fl.asBool('s') || fl.asBool('serial')
   const zeroTerminated = fl.asBool('z') || fl.asBool('zero_terminated')

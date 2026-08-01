@@ -127,7 +127,7 @@ export async function commGeneric(
   const suppress3 = opts.flags['3'] === true
   const merged = commMerge(lines1, lines2)
   const delimiter =
-    typeof opts.flags.output_delimiter === 'string' ? opts.flags.output_delimiter : '\t'
+    (fl.asStr('output_delimiter') ?? '\t')
   const output = formatComm(
     merged,
     suppress1,

@@ -75,8 +75,8 @@ export async function columnGeneric(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('column'))
   const tMode = fl.asBool('t')
-  const sFlag = typeof opts.flags.s === 'string' ? opts.flags.s : null
-  const oFlag = typeof opts.flags.o === 'string' ? opts.flags.o : '  '
+  const sFlag = (fl.asStr('s') ?? null)
+  const oFlag = (fl.asStr('o') ?? '  ')
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]

@@ -161,7 +161,7 @@ export async function patchGeneric(
   const stripCount = typeof opts.flags.p === 'string' ? Number.parseInt(opts.flags.p, 10) : 0
   const reverseMode = fl.asBool('R')
   const forwardOnly = fl.asBool('N')
-  const iFlag = typeof opts.flags.i === 'string' ? opts.flags.i : null
+  const iFlag = (fl.asStr('i') ?? null)
   const mountPrefix = opts.mountPrefix ?? ''
   let patchData: Uint8Array | null = null
   if (iFlag !== null) {

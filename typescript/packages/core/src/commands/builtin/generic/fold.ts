@@ -87,7 +87,7 @@ export async function foldGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('fold'))
-  const widthValue = opts.flags.w ?? opts.flags.width
+  const widthValue = fl.asStr('w') ?? fl.asStr('width')
   const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80
   const breakSpaces = fl.asBool('s') || fl.asBool('spaces')
   const countBytes = fl.asBool('b') || fl.asBool('bytes')

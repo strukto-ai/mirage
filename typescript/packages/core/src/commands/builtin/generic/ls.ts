@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -281,6 +283,7 @@ export async function lsGeneric(
   readdir: Readdir,
   stat: Stat,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('ls'))
   const targets: PathSpec[] =
     paths.length > 0
       ? paths
@@ -292,14 +295,14 @@ export async function lsGeneric(
             resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
-  const long = opts.flags.args_l === true && opts.flags.args_1 !== true
-  const all = opts.flags.a === true || opts.flags.A === true
-  const human = opts.flags.h === true
-  const reverse = opts.flags.r === true
-  const classify = opts.flags.F === true
-  const recursive = opts.flags.R === true
-  const listDirItself = opts.flags.d === true
-  const sortBy: SortBy = opts.flags.t === true ? 'time' : opts.flags.S === true ? 'size' : 'name'
+  const long = fl.asBool('args_l') && !fl.asBool('args_1')
+  const all = fl.asBool('a') || fl.asBool('A')
+  const human = fl.asBool('h')
+  const reverse = fl.asBool('r')
+  const classify = fl.asBool('F')
+  const recursive = fl.asBool('R')
+  const listDirItself = fl.asBool('d')
+  const sortBy: SortBy = fl.asBool('t') ? 'time' : fl.asBool('S') ? 'size' : 'name'
   const warnings: LsWarning[] = []
   const lines: string[] = []
 

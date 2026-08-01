@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -48,9 +50,10 @@ function detectCompression(data: Uint8Array): Compression {
 }
 
 function compressionOf(opts: CommandOpts): Compression {
-  if (opts.flags.z === true) return 'gzip'
-  if (opts.flags.j === true) return 'bzip2'
-  if (opts.flags.J === true) return 'xz'
+  const fl = new FlagView(opts.flags, specOf('tar'))
+  if (fl.asBool('z')) return 'gzip'
+  if (fl.asBool('j')) return 'bzip2'
+  if (fl.asBool('J')) return 'xz'
   return null
 }
 
@@ -78,11 +81,12 @@ export async function tarGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   mkdir: (p: PathSpec) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const create = opts.flags.c === true
-  const extract = opts.flags.x === true
-  const list = opts.flags.t === true
+  const fl = new FlagView(opts.flags, specOf('tar'))
+  const create = fl.asBool('c')
+  const extract = fl.asBool('x')
+  const list = fl.asBool('t')
   const compression = compressionOf(opts)
-  const verbose = opts.flags.v === true
+  const verbose = fl.asBool('v')
   // gzip is built in; bzip2 (-j) / xz (-J) need a codec registered by the
   // runtime package. Unregistered (e.g. browser core) -> not supported.
   if (
@@ -94,13 +98,13 @@ export async function tarGeneric(
       new IOResult({ exitCode: 1, stderr: ENC.encode('tar: bzip2/xz not supported\n') }),
     ]
   }
-  const fFlag = typeof opts.flags.f === 'string' ? opts.flags.f : null
-  const CFlag = typeof opts.flags.C === 'string' ? opts.flags.C : null
+  const fFlag = (fl.asStr('f') ?? null)
+  const CFlag = (fl.asStr('C') ?? null)
   const stripN =
     typeof opts.flags.strip_components === 'string'
       ? Number.parseInt(opts.flags.strip_components, 10)
       : 0
-  const exclude = typeof opts.flags.exclude === 'string' ? opts.flags.exclude : null
+  const exclude = (fl.asStr('exclude') ?? null)
   const mountPrefix = opts.mountPrefix ?? ''
   const archivePath = fFlag
   const destPath = CFlag ?? '/'

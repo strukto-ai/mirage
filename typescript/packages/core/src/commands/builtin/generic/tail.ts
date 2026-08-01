@@ -46,8 +46,8 @@ export async function tailGeneric(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('tail'))
   stream = cacheAwareStreamEager(stream)
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
+  const nRaw = (fl.asStr('n') ?? null)
+  const cRaw = (fl.asStr('c') ?? null)
   const numErr = numberFlagError('tail', nRaw, cRaw)
   if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(numErr) })]
   const qFlag = fl.asBool('q')

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import { isoToEpoch } from '../../../utils/dates.ts'
@@ -204,15 +206,11 @@ export async function statGeneric(
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('stat'))
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('stat: missing operand\n') })]
   }
-  const fmt =
-    typeof opts.flags.c === 'string'
-      ? opts.flags.c
-      : typeof opts.flags.f === 'string'
-        ? opts.flags.f
-        : null
+  const fmt = fl.asStr('c') ?? fl.asStr('f') ?? null
   const lines: string[] = []
   let err = ''
   for (const p of paths) {

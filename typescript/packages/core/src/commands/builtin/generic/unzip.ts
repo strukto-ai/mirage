@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -98,6 +100,7 @@ export async function unzipGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('unzip'))
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('unzip: missing operand\n') })]
   }
@@ -106,12 +109,12 @@ export async function unzipGeneric(
   const data = await materialize(stream(archivePath))
   const entries = await readZipEntries(data)
 
-  const listMode = opts.flags.args_l === true
-  const testMode = opts.flags.t === true
-  const pipeMode = opts.flags.p === true
-  const quiet = opts.flags.q === true
+  const listMode = fl.asBool('args_l')
+  const testMode = fl.asBool('t')
+  const pipeMode = fl.asBool('p')
+  const quiet = fl.asBool('q')
   const mountPrefix = mountPrefixOf(archivePath.virtual, archivePath.resourcePath)
-  const destRaw = typeof opts.flags.d === 'string' ? opts.flags.d : '/'
+  const destRaw = (fl.asStr('d') ?? '/')
   const dest =
     mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
       ? destRaw.slice(mountPrefix.length)

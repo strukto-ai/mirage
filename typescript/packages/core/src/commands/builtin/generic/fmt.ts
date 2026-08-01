@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -123,15 +125,16 @@ export async function fmtGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const widthValue = opts.flags.w ?? opts.flags.width
-  const goalValue = opts.flags.g ?? opts.flags.goal
-  const prefixValue = opts.flags.p ?? opts.flags.prefix
+  const fl = new FlagView(opts.flags, specOf('fmt'))
+  const widthValue = fl.asStr('w') ?? fl.asStr('width')
+  const goalValue = fl.asStr('g') ?? fl.asStr('goal')
+  const prefixValue = fl.asStr('p') ?? fl.asStr('prefix')
   const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 75
   const goal = typeof goalValue === 'string' ? Number.parseInt(goalValue, 10) : null
   const prefix = typeof prefixValue === 'string' ? prefixValue : null
-  const splitOnly = opts.flags.s === true || opts.flags.split_only === true
-  const tagged = opts.flags.t === true || opts.flags.tagged_paragraph === true
-  const crown = opts.flags.c === true || opts.flags.crown_margin === true
+  const splitOnly = fl.asBool('s') || fl.asBool('split_only')
+  const tagged = fl.asBool('t') || fl.asBool('tagged_paragraph')
+  const crown = fl.asBool('c') || fl.asBool('crown_margin')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still format (GNU fmt).

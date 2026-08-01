@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -61,25 +63,24 @@ export async function shufGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const countValue = opts.flags.n ?? opts.flags.head_count
-  const rangeValue = opts.flags.i ?? opts.flags.input_range
-  const outputValue = opts.flags.o ?? opts.flags.output
-  const nFlag = typeof countValue === 'string' ? Number.parseInt(countValue, 10) : null
-  const inputRange = typeof rangeValue === 'string' ? rangeValue : null
+  const fl = new FlagView(opts.flags, specOf('shuf'))
+  const countValue = fl.asStr('n') ?? fl.asStr('head_count')
+  const rangeValue = fl.asStr('i') ?? fl.asStr('input_range')
+  const outputValue = fl.asStr('o') ?? fl.asStr('output')
+  const nFlag = countValue === undefined ? null : Number.parseInt(countValue, 10)
+  const inputRange = rangeValue ?? null
   const output =
-    outputValue instanceof PathSpec
-      ? outputValue
-      : typeof outputValue === 'string'
-        ? new PathSpec({
-            virtual: outputValue,
-            directory: outputValue,
-            resourcePath: mountKey(outputValue, opts.mountPrefix ?? ''),
-            resolved: true,
-          })
-        : null
-  const echoMode = opts.flags.e === true || opts.flags.echo === true
-  const zeroSep = opts.flags.z === true || opts.flags.zero_terminated === true
-  const repeat = opts.flags.r === true || opts.flags.repeat === true
+    outputValue === undefined
+      ? null
+      : new PathSpec({
+          virtual: outputValue,
+          directory: outputValue,
+          resourcePath: mountKey(outputValue, opts.mountPrefix ?? ''),
+          resolved: true,
+        })
+  const echoMode = fl.asBool('e') || fl.asBool('echo')
+  const zeroSep = fl.asBool('z') || fl.asBool('zero_terminated')
+  const repeat = fl.asBool('r') || fl.asBool('repeat')
   const sep = zeroSep ? '\x00' : '\n'
 
   let items: string[]

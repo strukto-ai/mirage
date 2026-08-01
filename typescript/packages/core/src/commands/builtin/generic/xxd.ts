@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -153,6 +155,7 @@ export async function xxdGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('xxd'))
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
@@ -172,9 +175,9 @@ export async function xxdGeneric(
     const limit = limitFlag > 0 ? limitFlag : Number.MAX_SAFE_INTEGER
     source = applyLimits(source, skip, limit)
   }
-  const uppercase = opts.flags.u === true
-  if (opts.flags.r === true) return [xxdReverseStream(source), new IOResult({ cache })]
-  if (opts.flags.p === true) return [xxdPlainStream(source, uppercase), new IOResult({ cache })]
+  const uppercase = fl.asBool('u')
+  if (fl.asBool('r')) return [xxdReverseStream(source), new IOResult({ cache })]
+  if (fl.asBool('p')) return [xxdPlainStream(source, uppercase), new IOResult({ cache })]
   const cols = toInt(opts.flags.c) > 0 ? toInt(opts.flags.c) : 16
   const group = toInt(opts.flags.g) > 0 ? toInt(opts.flags.g) : 2
   return [xxdDumpStream(source, cols, group, uppercase), new IOResult({ cache })]

@@ -55,7 +55,7 @@ export async function tacGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('tac'))
-  const separatorValue = opts.flags.s ?? opts.flags.separator
+  const separatorValue = fl.asStr('s') ?? fl.asStr('separator')
   const separator = typeof separatorValue === 'string' ? separatorValue : '\n'
   const before = fl.asBool('b') || fl.asBool('before')
   const regex = fl.asBool('r') || fl.asBool('regex')

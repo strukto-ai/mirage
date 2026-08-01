@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -46,12 +48,13 @@ export async function mktempGeneric(
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('mktemp'))
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
-  const tFlag = opts.flags.t === true
-  const directory = opts.flags.d === true || opts.flags.directory === true
-  const dryRun = opts.flags.u === true || opts.flags.dry_run === true
-  const suffix = typeof opts.flags.suffix === 'string' ? opts.flags.suffix : ''
-  const tmpdirValue: unknown = opts.flags.p ?? opts.flags.tmpdir
+  const tFlag = fl.asBool('t')
+  const directory = fl.asBool('d') || fl.asBool('directory')
+  const dryRun = fl.asBool('u') || fl.asBool('dry_run')
+  const suffix = (fl.asStr('suffix') ?? '')
+  const tmpdirValue: unknown = fl.raw('p') ?? fl.raw('tmpdir')
   const templateArg = texts[0]
   let template = templateArg !== undefined && templateArg !== '' ? templateArg : 'tmp.XXXXXXXXXX'
   let parent: string
@@ -83,7 +86,7 @@ export async function mktempGeneric(
   const path = `${rstripSlash(parent)}/${name}`
   if (!dryRun) {
     const mountPrefix = opts.mountPrefix ?? ''
-    const quiet = opts.flags.q === true || opts.flags.quiet === true
+    const quiet = fl.asBool('q') || fl.asBool('quiet')
     try {
       await mkdir(makePathSpec(parent, mountPrefix), true)
       if (directory) {

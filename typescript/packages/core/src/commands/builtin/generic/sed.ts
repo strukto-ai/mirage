@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -30,6 +32,7 @@ export async function sedGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('sed'))
   // The script comes from -e expressions and -f script files (joined with
   // newlines, -e then -f as grep does) when any were given, otherwise from the
   // first positional operand.
@@ -57,10 +60,10 @@ export async function sedGeneric(
   if (script === undefined) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('sed: missing script\n') })]
   }
-  const suppress = opts.flags.n === true
-  const inPlace = opts.flags.i === true
+  const suppress = fl.asBool('n')
+  const inPlace = fl.asBool('i')
   // -E / -r select Extended Regular Expressions; without them sed is BRE.
-  const extended = opts.flags.E === true || opts.flags.r === true
+  const extended = fl.asBool('E') || fl.asBool('r')
   let commands: SedCommand[]
   try {
     if (script.includes(';') || script.includes('{') || script.includes('\n')) {
