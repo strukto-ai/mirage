@@ -1,0 +1,81 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { CommandSpec, Operand, OperandKind, Option } from '../types.ts'
+
+export const SPECS: Record<string, CommandSpec> = {
+  gunzip: new CommandSpec({
+    options: [
+      new Option({ short: '-k' }),
+      new Option({ short: '-f' }),
+      new Option({ short: '-c' }),
+      new Option({ short: '-t' }),
+    ],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  gzip: new CommandSpec({
+    options: [
+      new Option({ short: '-d' }),
+      new Option({ short: '-k' }),
+      new Option({ short: '-f' }),
+      new Option({ short: '-c' }),
+      new Option({ short: '-1' }),
+      new Option({ short: '-2' }),
+      new Option({ short: '-3' }),
+      new Option({ short: '-4' }),
+      new Option({ short: '-5' }),
+      new Option({ short: '-6' }),
+      new Option({ short: '-7' }),
+      new Option({ short: '-8' }),
+      new Option({ short: '-9' }),
+    ],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  tar: new CommandSpec({
+    options: [
+      new Option({ short: '-c' }),
+      new Option({ short: '-x' }),
+      new Option({ short: '-t' }),
+      new Option({ short: '-z' }),
+      new Option({ short: '-j' }),
+      new Option({ short: '-J' }),
+      new Option({ short: '-v' }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH }),
+      new Option({ short: '-C', valueKind: OperandKind.PATH }),
+      new Option({ long: '--strip-components', valueKind: OperandKind.TEXT }),
+      new Option({ long: '--exclude', valueKind: OperandKind.TEXT }),
+    ],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  unzip: new CommandSpec({
+    options: [
+      new Option({ short: '-o' }),
+      new Option({ short: '-l' }),
+      new Option({ short: '-d', valueKind: OperandKind.PATH }),
+      new Option({ short: '-q' }),
+      new Option({ short: '-p' }),
+      new Option({ short: '-t' }),
+    ],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+  zcat: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
+  zip: new CommandSpec({
+    options: [
+      new Option({ short: '-r' }),
+      new Option({ short: '-j' }),
+      new Option({ short: '-q' }),
+    ],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  }),
+}
