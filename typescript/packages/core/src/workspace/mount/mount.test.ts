@@ -21,7 +21,7 @@ import type { Accessor } from '../../accessor/base.ts'
 import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { CommandSafeguard, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 
 class StubResource implements Resource {
@@ -206,6 +206,23 @@ describe('Mount.executeCmd', () => {
     m.register(cmd)
     await m.executeCmd('cat', [PathSpec.fromStrPath('/ram/hello.txt')], [], {})
     expect(seenPrefix).toBe('/ram')
+  })
+
+  it('a null safeguardOverride does not shadow the mount own table', async () => {
+    // The override carries the origin mount's cap across a warm-cache
+    // redirect; a path-less command from an unmounted cwd resolves no
+    // origin and passes null, which must fall through to the serving
+    // mount's command_safeguards (python always reads the serving
+    // mount's own table).
+    const m = makeMount()
+    m.commandSafeguards.set('cat', new CommandSafeguard({ timeoutSeconds: 0.05 }))
+    const hang: CommandFn = () => new Promise(() => undefined)
+    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: hang })
+    if (cmd === undefined) throw new Error('missing')
+    m.register(cmd)
+    await expect(
+      m.executeCmd('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, { safeguardOverride: null }),
+    ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
 })
 

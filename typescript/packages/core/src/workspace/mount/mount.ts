@@ -475,13 +475,17 @@ export class MountEntry {
               // mount-resolved timeout must also bound the command
               // body: eager commands do their work inside cmd.fn,
               // where the stream-consumption guard never runs.
+              // safeguardOverride carries the origin mount's cap across
+              // a warm-cache redirect; a null one is "no opinion" and
+              // must not shadow the serving mount's own table (a
+              // path-less command with cwd outside every mount resolves
+              // no origin, but the serving mount's cap still applies —
+              // python always reads the serving mount).
               const resolvedSafeguard = resolveSafeguard(
                 cmdName,
                 [],
                 cmd.safeguard,
-                opts.safeguardOverride !== undefined
-                  ? opts.safeguardOverride
-                  : (this.commandSafeguards.get(cmdName) ?? null),
+                opts.safeguardOverride ?? this.commandSafeguards.get(cmdName) ?? null,
               )
               const cmdTimeout =
                 resolvedSafeguard !== null ? resolvedSafeguard.timeoutSeconds : null
