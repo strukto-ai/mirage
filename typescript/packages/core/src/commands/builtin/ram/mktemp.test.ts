@@ -50,7 +50,7 @@ describe('mktemp', () => {
   })
 
   it('-d creates a temp directory under /tmp', async () => {
-    const { out, resource } = await runMktemp({ d: true })
+    const { out, resource } = await runMktemp({ directory: true })
     const path = out.trim()
     expect(path.startsWith('/tmp/')).toBe(true)
     expect(resource.store.dirs.has(path)).toBe(true)
@@ -64,7 +64,7 @@ describe('mktemp', () => {
   })
 
   it('-d uses the directory of an explicit path template', async () => {
-    const { out, resource } = await runMktemp({ d: true }, ['/data/mtd/t.XXXX'])
+    const { out, resource } = await runMktemp({ directory: true }, ['/data/mtd/t.XXXX'])
     const path = out.trim()
     expect(path.startsWith('/data/mtd/t.')).toBe(true)
     expect(resource.store.dirs.has(path)).toBe(true)

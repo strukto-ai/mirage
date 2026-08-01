@@ -62,10 +62,10 @@ export async function base64Generic(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('base64'))
   if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
-  const decode = fl.asBool('d') || fl.asBool('D') || fl.asBool('decode')
-  const wrapValue = fl.asStr('w') ?? fl.asStr('wrap')
+  const decode = fl.asBool('D') || fl.asBool('decode')
+  const wrapValue = fl.asStr('wrap')
   const wrap = typeof wrapValue === 'string' ? Number.parseInt(wrapValue, 10) : null
-  const ignoreGarbage = fl.asBool('i') || fl.asBool('ignore_garbage')
+  const ignoreGarbage = fl.asBool('ignore_garbage')
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {

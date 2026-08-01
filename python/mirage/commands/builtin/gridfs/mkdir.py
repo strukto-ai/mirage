@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic_bind.provision import \
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.core.gridfs.mkdir import mkdir as mkdir_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -34,20 +35,21 @@ async def mkdir(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    p: bool = False,
-    v: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["mkdir"])
+    parents = fl.as_bool("parents")
+    verbose = fl.as_bool("verbose")
     if not paths:
         raise ValueError("mkdir: missing operand")
     paths = await resolve_glob(accessor, paths, index)
     lines: list[str] = []
     writes: dict[str, ByteSource] = {}
     for path in paths:
-        await mkdir_impl(accessor, path, parents=p)
+        await mkdir_impl(accessor, path, parents=parents)
         writes[path.mount_path] = b""
-        if v:
+        if verbose:
             lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
     return output, IOResult(writes=writes)

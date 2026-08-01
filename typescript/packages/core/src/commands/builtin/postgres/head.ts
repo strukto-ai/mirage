@@ -54,9 +54,9 @@ async function headCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
+  const nRaw = typeof opts.flags.lines === 'string' ? opts.flags.lines : null
   const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
-  const pushdown = typeof opts.flags.c !== 'string' && lines > 0
+  const pushdown = typeof opts.flags.bytes !== 'string' && lines > 0
   return headGeneric(
     resolved,
     texts,

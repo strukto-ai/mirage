@@ -168,7 +168,7 @@ describe('curl', () => {
 
   it('-f turns a 404 into exit 22 and writes nothing', async () => {
     mockFetch('not found', 404)
-    const r = await runCurl(['https://x.test/missing'], { f: true, o: '/tmp/e.txt' })
+    const r = await runCurl(['https://x.test/missing'], { fail: true, o: '/tmp/e.txt' })
     expect(r.exitCode).toBe(22)
     expect(r.err).toContain('curl: (22) The requested URL returned error: 404')
     expect(Object.keys(r.writes)).toHaveLength(0)
@@ -176,14 +176,14 @@ describe('curl', () => {
 
   it('-sf keeps exit 22 but silences the message', async () => {
     mockFetch('not found', 404)
-    const r = await runCurl(['https://x.test/missing'], { f: true, s: true })
+    const r = await runCurl(['https://x.test/missing'], { fail: true, s: true })
     expect(r.exitCode).toBe(22)
     expect(r.err).toBe('')
   })
 
   it('-sSf restores the message', async () => {
     mockFetch('not found', 404)
-    const r = await runCurl(['https://x.test/missing'], { f: true, s: true, S: true })
+    const r = await runCurl(['https://x.test/missing'], { fail: true, s: true, S: true })
     expect(r.exitCode).toBe(22)
     expect(r.err).toContain('curl: (22)')
   })

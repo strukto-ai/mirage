@@ -65,7 +65,7 @@ describe('nl', () => {
   it('-b a numbers all lines including empty', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('hello\n\nworld\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { b: 'a' })
+    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { body_numbering: 'a' })
     const lines = r.out.split('\n')
     expect(lines[0]).toContain('1')
     expect(lines[1]).toContain('2')
@@ -75,7 +75,7 @@ describe('nl', () => {
   it('-b n emits no line numbers', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('hello\nworld\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { b: 'n' })
+    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { body_numbering: 'n' })
     const lines = r.out.split('\n')
     for (const line of lines) {
       if (line === '') continue
@@ -89,8 +89,8 @@ describe('nl', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('hello\n'))
     const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      w: '3',
-      s: ':',
+      number_width: '3',
+      number_separator: ':',
     })
     expect(r.out).toContain('  1:hello')
   })
@@ -99,8 +99,8 @@ describe('nl', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc\n'))
     const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      v: '10',
-      i: '5',
+      starting_line_number: '10',
+      line_increment: '5',
     })
     const lines = r.out.split('\n')
     expect(lines[0]).toContain('10')

@@ -144,7 +144,7 @@ describe('du walk fallback (no native du op)', () => {
   })
 
   it('-d is another spelling of --max-depth', async () => {
-    expect(await runDu([PathSpec.fromStrPath('/db')], { d: '0' })).toEqual(['5\t/db'])
+    expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
     expect(await runDu([PathSpec.fromStrPath('/db')], { max_depth: '0' })).toEqual(['5\t/db'])
   })
 

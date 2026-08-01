@@ -68,8 +68,8 @@ function makeBackend(
 }
 
 interface RunOpts {
-  n?: boolean
-  v?: boolean
+  no_clobber?: boolean
+  verbose?: boolean
   flags?: MvFlags
   mtimes?: Map<string, string>
   readdir?: ReaddirFn
@@ -82,7 +82,8 @@ async function run(
   opts: RunOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
   const { stat, rename } = makeBackend(files, dirs, opts.mtimes)
-  const flags = opts.flags ?? mvFlags({ noClobber: opts.n === true, verbose: opts.v === true })
+  const flags =
+    opts.flags ?? mvFlags({ noClobber: opts.no_clobber === true, verbose: opts.verbose === true })
   return mvGeneric(paths.map(spec), stat, { rename }, flags, undefined, undefined, opts.readdir)
 }
 
@@ -212,7 +213,7 @@ describe('mvGeneric guards', () => {
       ['/a.txt', new Uint8Array([9])],
       ['/d/a.txt', new Uint8Array([1])],
     ])
-    await run(files, new Set(['/d']), ['/a.txt', '/d'], { n: true })
+    await run(files, new Set(['/d']), ['/a.txt', '/d'], { no_clobber: true })
     expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
     expect(files.get('/a.txt')).toEqual(new Uint8Array([9]))
   })
@@ -222,7 +223,7 @@ describe('mvGeneric guards', () => {
       ['/x/a.txt', new Uint8Array([1])],
       ['/y/a.txt', new Uint8Array([2])],
     ])
-    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'], { n: true })
+    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'], { no_clobber: true })
     expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
     expect(files.has('/x/a.txt')).toBe(false)
     expect(files.get('/y/a.txt')).toEqual(new Uint8Array([2]))
@@ -711,15 +712,19 @@ describe('mvGeneric -t/-T', () => {
 
 describe('parseMvFlags', () => {
   it('rejects conflicting combinations', () => {
-    expect(() => parseMvFlags({ b: true, exchange: true })).toThrow(
+    expect(() => parseMvFlags({ backup: true, exchange: true })).toThrow(
       'mv: cannot combine --backup with --exchange, -n, or --update=none-fail',
     )
-    expect(() => parseMvFlags({ backup: true, n: true })).toThrow('cannot combine --backup')
-    expect(() => parseMvFlags({ t: '/d', T: true })).toThrow('cannot combine --target-directory')
+    expect(() => parseMvFlags({ backup: true, no_clobber: true })).toThrow(
+      'cannot combine --backup',
+    )
+    expect(() => parseMvFlags({ target_directory: '/d', no_target_directory: true })).toThrow(
+      'cannot combine --target-directory',
+    )
   })
 
   it('resolves the update and exchange grammars', () => {
-    const parsed = parseMvFlags({ u: true, exchange: true })
+    const parsed = parseMvFlags({ update: true, exchange: true })
     expect(parsed.update).toBe('older')
     expect(parsed.exchange).toBe(true)
     expect(parseMvFlags({ no_copy: true }).noCopy).toBe(true)

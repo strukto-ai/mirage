@@ -37,35 +37,16 @@ interface SortFlags {
   zeroTerminated: boolean
 }
 
-function boolAlias(
-  flags: Record<string, string | boolean | string[]>,
-  short: string,
-  long: string,
-): boolean {
-  return flags[short] === true || flags[long] === true
-}
-
-function stringAlias(
-  flags: Record<string, string | boolean | string[]>,
-  short: string,
-  long: string,
-): string | null {
-  const value = typeof flags[short] === 'string' ? flags[short] : flags[long]
+function flagStr(flags: Record<string, string | boolean | string[]>, name: string): string | null {
+  const value = flags[name]
   return typeof value === 'string' ? value : null
 }
 
-function listAlias(
-  flags: Record<string, string | boolean | string[]>,
-  short: string,
-  long: string,
-): string[] {
-  const out: string[] = []
-  for (const name of [short, long]) {
-    const value = flags[name]
-    if (typeof value === 'string') out.push(value)
-    else if (Array.isArray(value)) out.push(...value)
-  }
-  return out
+function flagList(flags: Record<string, string | boolean | string[]>, name: string): string[] {
+  const value = flags[name]
+  if (typeof value === 'string') return [value]
+  if (Array.isArray(value)) return [...value]
+  return []
 }
 
 function parseFlags(flags: Record<string, string | boolean | string[]>): SortFlags | string {
@@ -79,28 +60,27 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): SortFla
   ) {
     return `sort: invalid argument '${String(rawCheck)}' for '--check'\n`
   }
-  const keys = listAlias(flags, 'k', 'key')
   return {
     normalized: {
-      r: boolAlias(flags, 'r', 'reverse'),
-      n: boolAlias(flags, 'n', 'numeric_sort'),
-      u: boolAlias(flags, 'u', 'unique'),
-      f: boolAlias(flags, 'f', 'ignore_case'),
-      k: keys,
-      t: stringAlias(flags, 't', 'field_separator') ?? '',
-      h: boolAlias(flags, 'h', 'human_numeric_sort'),
-      V: boolAlias(flags, 'V', 'version_sort'),
-      s: boolAlias(flags, 's', 'stable'),
-      M: boolAlias(flags, 'M', 'month_sort'),
-      b: boolAlias(flags, 'b', 'ignore_leading_blanks'),
-      d: boolAlias(flags, 'd', 'dictionary_order'),
-      g: boolAlias(flags, 'g', 'general_numeric_sort'),
-      i: boolAlias(flags, 'i', 'ignore_nonprinting'),
+      r: flags.reverse === true,
+      n: flags.numeric_sort === true,
+      u: flags.unique === true,
+      f: flags.ignore_case === true,
+      k: flagList(flags, 'key'),
+      t: flagStr(flags, 'field_separator') ?? '',
+      h: flags.human_numeric_sort === true,
+      V: flags.version_sort === true,
+      s: flags.stable === true,
+      M: flags.month_sort === true,
+      b: flags.ignore_leading_blanks === true,
+      d: flags.dictionary_order === true,
+      g: flags.general_numeric_sort === true,
+      i: flags.ignore_nonprinting === true,
     },
     check: flags.c === true || rawCheck !== undefined,
     checkQuiet: rawCheck === 'quiet' || rawCheck === 'silent',
-    output: stringAlias(flags, 'o', 'output'),
-    zeroTerminated: boolAlias(flags, 'z', 'zero_terminated'),
+    output: flagStr(flags, 'output'),
+    zeroTerminated: flags.zero_terminated === true,
   }
 }
 

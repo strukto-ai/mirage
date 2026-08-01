@@ -74,9 +74,9 @@ export async function unexpandGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('unexpand'))
-  const tabsValue = fl.asStr('t') ?? fl.asStr('tabs')
+  const tabsValue = fl.asStr('tabs')
   const tabsize = tabsValue === undefined ? 8 : Number.parseInt(tabsValue, 10)
-  const allSpaces = (fl.asBool('a') || fl.asBool('all')) && !fl.asBool('first_only')
+  const allSpaces = fl.asBool('all') && !fl.asBool('first_only')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still unexpand (GNU unexpand).

@@ -51,8 +51,8 @@ export async function mktempGeneric(
   const fl = new FlagView(opts.flags, specOf('mktemp'))
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
   const tFlag = fl.asBool('t')
-  const directory = fl.asBool('d') || fl.asBool('directory')
-  const dryRun = fl.asBool('u') || fl.asBool('dry_run')
+  const directory = fl.asBool('directory')
+  const dryRun = fl.asBool('dry_run')
   const suffix = fl.asStr('suffix') ?? ''
   const tmpdirValue: unknown = fl.raw('p') ?? fl.raw('tmpdir')
   const templateArg = texts[0]
@@ -86,7 +86,7 @@ export async function mktempGeneric(
   const path = `${rstripSlash(parent)}/${name}`
   if (!dryRun) {
     const mountPrefix = opts.mountPrefix ?? ''
-    const quiet = fl.asBool('q') || fl.asBool('quiet')
+    const quiet = fl.asBool('quiet')
     try {
       await mkdir(makePathSpec(parent, mountPrefix), true)
       if (directory) {

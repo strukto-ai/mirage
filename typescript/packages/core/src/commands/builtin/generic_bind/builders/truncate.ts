@@ -6,7 +6,7 @@ export const TRUNCATE_BUILDER: Builder = {
   write: true,
   requirements: ['truncate'],
   fn: async (ops, accessor, paths, _texts, opts) => {
-    const sizeValue = opts.flags.s ?? opts.flags.size
+    const sizeValue = opts.flags.size
     if (typeof sizeValue !== 'string') {
       throw new Error("truncate: you must specify either '--size' or '-s'")
     }

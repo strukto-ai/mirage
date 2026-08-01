@@ -95,19 +95,19 @@ describe('displayLines flags', () => {
   }
 
   it('-E marks line ends', async () => {
-    expect(await run('a\tb\nx\n', { E: true })).toBe('a\tb$\nx$\n')
+    expect(await run('a\tb\nx\n', { show_ends: true })).toBe('a\tb$\nx$\n')
   })
 
   it('-T renders tabs as ^I', async () => {
-    expect(await run('a\tb\nx\n', { T: true })).toBe('a^Ib\nx\n')
+    expect(await run('a\tb\nx\n', { show_tabs: true })).toBe('a^Ib\nx\n')
   })
 
   it('-A combines -vET', async () => {
-    expect(await run('a\tb\nx\n', { A: true })).toBe('a^Ib$\nx$\n')
+    expect(await run('a\tb\nx\n', { show_all: true })).toBe('a^Ib$\nx$\n')
   })
 
   it('-v uses caret and meta notation', async () => {
     // TextEncoder emits UTF-8, so \u00ff arrives as the two bytes C3 BF.
-    expect(await run('\x01\x7f\u00ff\n', { v: true })).toBe('^A^?M-CM-?\n')
+    expect(await run('\x01\x7f\u00ff\n', { show_nonprinting: true })).toBe('^A^?M-CM-?\n')
   })
 })

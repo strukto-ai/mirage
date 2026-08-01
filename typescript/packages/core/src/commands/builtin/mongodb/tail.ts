@@ -85,7 +85,7 @@ async function tailCommand(
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   const first = resolved[0]
   if (
-    opts.flags.f === true &&
+    opts.flags.follow === true &&
     resolved.length === 1 &&
     first !== undefined &&
     detectScope(first).level === ScopeLevel.DOCUMENTS

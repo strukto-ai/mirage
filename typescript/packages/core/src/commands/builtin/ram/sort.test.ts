@@ -70,28 +70,28 @@ describe('sort', () => {
   it('-r reverses sort order', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\ncherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { r: true })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { reverse: true })
     expect(r.lines).toEqual(['cherry', 'banana', 'apple'])
   })
 
   it('-n numeric sort', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('10\n2\n30\n1'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: true })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { numeric_sort: true })
     expect(r.lines).toEqual(['1', '2', '10', '30'])
   })
 
   it('-u deduplicates', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\nbanana\napple\ncherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { u: true })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { unique: true })
     expect(r.lines).toEqual(['apple', 'banana', 'cherry'])
   })
 
   it('-f ignores case', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('Banana\napple\nCherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { f: true })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { ignore_case: true })
     expect(r.lines).toEqual(['apple', 'Banana', 'Cherry'])
   })
 
@@ -99,8 +99,8 @@ describe('sort', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a 10\nb 2\nc 30'))
     const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      k: '2',
-      n: true,
+      key: '2',
+      numeric_sort: true,
     })
     expect(r.lines).toEqual(['b 2', 'a 10', 'c 30'])
   })
@@ -109,9 +109,9 @@ describe('sort', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a:10\nb:2\nc:30'))
     const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      t: ':',
-      k: '2',
-      n: true,
+      field_separator: ':',
+      key: '2',
+      numeric_sort: true,
     })
     expect(r.lines).toEqual(['b:2', 'a:10', 'c:30'])
   })
@@ -120,8 +120,8 @@ describe('sort', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('10\n2\n30\n1'))
     const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      n: true,
-      r: true,
+      numeric_sort: true,
+      reverse: true,
     })
     expect(r.lines).toEqual(['30', '10', '2', '1'])
   })
@@ -137,23 +137,28 @@ describe('sort', () => {
   it('multiple keys with per-key modifiers', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a 2 z\nb 2 a\nc 1 m\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { k: ['2,2n', '1,1r'] })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+      key: ['2,2n', '1,1r'],
+    })
     expect(r.lines).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
   })
 
   it('global reverse combined with a per-key numeric key', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('z 2\nm 2\na 2\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { r: true, k: '2,2n' })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+      reverse: true,
+      key: '2,2n',
+    })
     expect(r.lines).toEqual(['z 2', 'm 2', 'a 2'])
   })
 
   it('-k field extends to EOL, differing from a bounded range', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a 2 z\nb 2 a\nc 1 m\n'))
-    const eol = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { k: '2' })
+    const eol = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '2' })
     expect(eol.lines).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
-    const range = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { k: '2,2' })
+    const range = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '2,2' })
     expect(range.lines).toEqual(['c 1 m', 'a 2 z', 'b 2 a'])
   })
 
@@ -161,8 +166,8 @@ describe('sort', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('apple:12\nbee:3\ncat:100\n'))
     const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      t: ':',
-      k: '1.2,1.3',
+      field_separator: ':',
+      key: '1.2,1.3',
     })
     expect(r.lines).toEqual(['cat:100', 'bee:3', 'apple:12'])
   })
@@ -170,14 +175,17 @@ describe('sort', () => {
   it('-s keeps input order on ties', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('z 2\nm 2\na 2\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { s: true, k: '2,2n' })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+      stable: true,
+      key: '2,2n',
+    })
     expect(r.lines).toEqual(['z 2', 'm 2', 'a 2'])
   })
 
   it('zero field number exits 2', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { k: '0' })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '0' })
     expect(r.exitCode).toBe(2)
     expect(r.lines).toEqual([])
   })
@@ -185,14 +193,18 @@ describe('sort', () => {
   it('-g parses infinity as numeric and hex as non-numeric', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('inf\n5\n-3\nnan\nabc'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { g: true })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+      general_numeric_sort: true,
+    })
     expect(r.lines).toEqual(['abc', 'nan', '-3', '5', 'inf'])
   })
 
   it('-g treats hex strings as non-numeric', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('0x10\n5'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { g: true })
+    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+      general_numeric_sort: true,
+    })
     expect(r.lines).toEqual(['0x10', '5'])
   })
 })

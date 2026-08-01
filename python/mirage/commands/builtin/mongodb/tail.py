@@ -44,7 +44,7 @@ async def tail(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    f: bool = False,
+    follow: bool = False,
     index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -59,7 +59,7 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index=index)
-        if (f and len(paths) == 1
+        if (follow and len(paths) == 1
                 and detect_scope(paths[0]).level == ScopeLevel.DOCUMENTS):
             return watch_stream(accessor, paths[0], index), IOResult()
         # Collections fetch only the last N documents server-side (sort by

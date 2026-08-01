@@ -77,19 +77,15 @@ interface CatDisplay {
 }
 
 function parseFlags(flags: Record<string, string | boolean | string[]>): CatDisplay {
-  const showAll = flags.A === true || flags.show_all === true
+  const showAll = flags.show_all === true
   return {
-    numberLines: flags.n === true || flags.number === true,
-    numberNonblank: flags.b === true || flags.number_nonblank === true,
-    showEnds: flags.E === true || flags.show_ends === true || flags.e === true || showAll,
-    showTabs: flags.T === true || flags.show_tabs === true || flags.t === true || showAll,
+    numberLines: flags.number === true,
+    numberNonblank: flags.number_nonblank === true,
+    showEnds: flags.show_ends === true || flags.e === true || showAll,
+    showTabs: flags.show_tabs === true || flags.t === true || showAll,
     showNonprinting:
-      flags.v === true ||
-      flags.show_nonprinting === true ||
-      flags.e === true ||
-      flags.t === true ||
-      showAll,
-    squeezeBlank: flags.s === true || flags.squeeze_blank === true,
+      flags.show_nonprinting === true || flags.e === true || flags.t === true || showAll,
+    squeezeBlank: flags.squeeze_blank === true,
   }
 }
 

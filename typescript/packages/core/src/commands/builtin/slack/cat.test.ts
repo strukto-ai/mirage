@@ -105,7 +105,7 @@ describe('slack cat', () => {
           ),
         }),
       ],
-      { n: true },
+      { number: true },
       { index: idx, transport },
     )
     expect(out.startsWith('     1\t')).toBe(true)

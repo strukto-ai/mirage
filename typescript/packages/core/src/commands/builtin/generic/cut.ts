@@ -76,11 +76,11 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): CutOpti
     mode,
     delimiter: explicitDelimiter ?? '\t',
     complement: flags.complement === true,
-    onlyDelimited: flags.s === true || flags.only_delimited === true,
+    onlyDelimited: flags.only_delimited === true,
     whitespace,
-    noPartial: flags.n === true || flags.no_partial === true,
+    noPartial: flags.no_partial === true,
     outputDelimiter,
-    zeroTerminated: flags.z === true || flags.zero_terminated === true,
+    zeroTerminated: flags.zero_terminated === true,
   }
 }
 

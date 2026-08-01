@@ -104,21 +104,21 @@ export async function csplitGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('csplit'))
-  const prefixValue = fl.asStr('f') ?? fl.asStr('prefix')
+  const prefixValue = fl.asStr('prefix')
   const rawPrefix = typeof prefixValue === 'string' ? prefixValue : 'xx'
   const prefix = new PathSpec({
     virtual: rawPrefix,
     directory: rawPrefix,
     resourcePath: mountKey(rawPrefix, opts.mountPrefix ?? ''),
   }).mountPath
-  const digitsValue = fl.asStr('n') ?? fl.asStr('digits')
-  const suffixValue = fl.asStr('b') ?? fl.asStr('suffix_format')
+  const digitsValue = fl.asStr('digits')
+  const suffixValue = fl.asStr('suffix_format')
   const digits = typeof digitsValue === 'string' ? Number.parseInt(digitsValue, 10) : 2
   const suffixFormat = typeof suffixValue === 'string' ? suffixValue : null
-  const quiet = fl.asBool('s') || fl.asBool('quiet') || fl.asBool('silent')
-  const keep = fl.asBool('k') || fl.asBool('keep_files')
+  const quiet = fl.asBool('quiet') || fl.asBool('silent')
+  const keep = fl.asBool('keep_files')
   const suppressMatched = fl.asBool('suppress_matched')
-  const elideEmpty = fl.asBool('z') || fl.asBool('elide_empty_files')
+  const elideEmpty = fl.asBool('elide_empty_files')
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]

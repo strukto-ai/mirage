@@ -93,7 +93,7 @@ export function parseDuFlags(opts: CommandOpts): DuFlags {
   const fl = new FlagView(opts.flags, specOf('du'))
   const s = fl.asBool('s')
   const a = fl.asBool('a')
-  const raw = fl.asStr('max_depth') ?? fl.asStr('d')
+  const raw = fl.asStr('max_depth')
   let maxDepth: number | null = null
   if (typeof raw === 'string') {
     maxDepth = parseDepth(raw)

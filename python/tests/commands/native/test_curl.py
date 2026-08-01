@@ -89,21 +89,21 @@ def test_404_prints_body_and_exits_zero(monkeypatch):
 
 def test_fail_flag_turns_404_into_exit_22(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"not found", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", f=True)
+    _body, io = _run("http://x.test/missing", fail=True)
     assert io.exit_code == 22
     assert b"curl: (22) The requested URL returned error: 404" in io.stderr
 
 
 def test_silent_keeps_exit_22_without_message(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"x", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", f=True, s=True)
+    _body, io = _run("http://x.test/missing", fail=True, s=True)
     assert io.exit_code == 22
     assert io.stderr == b""
 
 
 def test_show_error_restores_message(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"x", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", f=True, s=True, S=True)
+    _body, io = _run("http://x.test/missing", fail=True, s=True, S=True)
     assert io.exit_code == 22
     assert b"curl: (22)" in io.stderr
 
@@ -139,7 +139,7 @@ def test_o_on_404_writes_the_error_body(monkeypatch):
 
 def test_fail_flag_writes_nothing(monkeypatch):
     _stub(monkeypatch, resp=_ok(b"not found", 404, "Not Found"))
-    _body, io = _run("http://x.test/missing", o="/tmp/e.txt", f=True)
+    _body, io = _run("http://x.test/missing", o="/tmp/e.txt", fail=True)
     assert io.exit_code == 22
     assert io.writes == {}
 

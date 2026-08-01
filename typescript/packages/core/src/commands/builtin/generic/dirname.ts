@@ -23,6 +23,6 @@ const ENC = new TextEncoder()
 export const dirnameFn: CommandFn = (_accessor, _paths, texts, opts) => {
   const lines = texts.map((t) => gnuDirname(t))
   const fl = new FlagView(opts.flags, specOf('dirname'))
-  const separator = fl.asBool('z') || fl.asBool('zero') ? '\0' : '\n'
+  const separator = fl.asBool('zero') ? '\0' : '\n'
   return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

@@ -57,7 +57,7 @@ async function runShuf(
 describe('shuf', () => {
   it('-e echoes args in random order', async () => {
     const resource = new RAMResource()
-    const r = await runShuf(resource, [], { e: true }, null, ['a', 'b', 'c'])
+    const r = await runShuf(resource, [], { echo: true }, null, ['a', 'b', 'c'])
     expect(r.exitCode).toBe(0)
     const lines = r.out.trim().split('\n')
     expect(lines.length).toBe(3)
@@ -66,7 +66,13 @@ describe('shuf', () => {
 
   it('-n limits output count', async () => {
     const resource = new RAMResource()
-    const r = await runShuf(resource, [], { e: true, n: '2' }, null, ['a', 'b', 'c', 'd', 'e'])
+    const r = await runShuf(resource, [], { echo: true, head_count: '2' }, null, [
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+    ])
     expect(r.exitCode).toBe(0)
     const lines = r.out.trim().split('\n')
     expect(lines.length).toBe(2)
@@ -74,7 +80,11 @@ describe('shuf', () => {
 
   it('-r repeats items with -n count', async () => {
     const resource = new RAMResource()
-    const r = await runShuf(resource, [], { r: true, e: true, n: '5' }, null, ['a', 'b', 'c'])
+    const r = await runShuf(resource, [], { repeat: true, echo: true, head_count: '5' }, null, [
+      'a',
+      'b',
+      'c',
+    ])
     expect(r.exitCode).toBe(0)
     const lines = r.out.trim().split('\n')
     expect(lines.length).toBe(5)

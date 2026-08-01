@@ -69,9 +69,9 @@ export async function expandGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('expand'))
-  const tabsValue = fl.asStr('t') ?? fl.asStr('tabs')
+  const tabsValue = fl.asStr('tabs')
   const tabsize = tabsValue === undefined ? 8 : Number.parseInt(tabsValue, 10)
-  const leadingOnly = fl.asBool('i') || fl.asBool('initial')
+  const leadingOnly = fl.asBool('initial')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still expand (GNU expand).

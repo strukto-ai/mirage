@@ -376,10 +376,10 @@ describe('parseCommand — optional-value short options', () => {
   it('uses only an attached value and leaves the next option intact', () => {
     const bare = parseCommand(specOf('split'), ['-d', '-l', '2', '/input', '/prefix'], '/')
     const attached = parseCommand(specOf('split'), ['-d10', '/input'], '/')
-    expect(bare.flags['-d']).toBe(true)
-    expect(bare.flags['-l']).toBe('2')
+    expect(bare.flags['--numeric-suffixes']).toBe(true)
+    expect(bare.flags['--lines']).toBe('2')
     expect(bare.paths()).toEqual(['/input', '/prefix'])
-    expect(attached.flags['-d']).toBe('10')
+    expect(attached.flags['--numeric-suffixes']).toBe('10')
   })
 })
 
@@ -532,13 +532,13 @@ describe('shortValue: false keeps the short boolean and clusterable', () => {
   it('clusters cp -bv instead of eating v as the backup control', () => {
     // GNU cp -b never takes an argument: -bv is a cluster, never -b=v.
     const clustered = parseCommand(specOf('cp'), ['-bv', '/a', '/b'], '/')
-    expect(clustered.flags['-b']).toBe(true)
-    expect(clustered.flags['-v']).toBe(true)
+    expect(clustered.flags['--backup']).toBe(true)
+    expect(clustered.flags['--verbose']).toBe(true)
   })
 
   it('keeps bare -u boolean and its operands intact', () => {
     const bare = parseCommand(specOf('cp'), ['-u', '/a', '/b'], '/')
-    expect(bare.flags['-u']).toBe(true)
+    expect(bare.flags['--update']).toBe(true)
     expect(bare.paths()).toEqual(['/a', '/b'])
   })
 
@@ -548,36 +548,36 @@ describe('shortValue: false keeps the short boolean and clusterable', () => {
   })
 })
 
-describe('optional-value aliases honor command-line order', () => {
-  it('lets the last spelling win when -u follows --update=all', () => {
-    // GNU treats -u and --update as one option, so the last spelling on the
-    // line decides (pinned against GNU coreutils 9.7).
+describe('spellings share one dest and honor command-line order', () => {
+  it('lets the last occurrence win when -u follows --update=all', () => {
+    // GNU treats -u and --update as one option, so the last occurrence on
+    // the line decides regardless of spelling (pinned against GNU
+    // coreutils 9.7). One canonical key, no per-spelling mirror.
     const shortLast = parseCommand(specOf('cp'), ['--update=all', '-u', '/a', '/b'], '/')
     expect(shortLast.flags['--update']).toBe(true)
-    expect(shortLast.flags['-u']).toBe(true)
+    expect('-u' in shortLast.flags).toBe(false)
   })
 
-  it('lets the last spelling win when --update=all follows -u', () => {
+  it('lets the last occurrence win when --update=all follows -u', () => {
     const longLast = parseCommand(specOf('cp'), ['-u', '--update=all', '/a', '/b'], '/')
-    expect(longLast.flags['-u']).toBe('all')
     expect(longLast.flags['--update']).toBe('all')
   })
 
-  it('never mirrors repeatable aliases', () => {
-    // sort -k/--key accumulates; mirroring would double every keydef because
-    // the generic concatenates both spellings' lists.
-    const parsed = parseCommand(specOf('sort'), ['-k1', '--key=2', '/f'], '/')
-    expect(parsed.flags['-k']).toEqual(['1'])
-    expect(parsed.flags['--key']).toEqual(['2'])
+  it('accumulates multiple values across spellings in line order', () => {
+    // sort -k/--key is ONE option: values interleave in true command-line
+    // order. The old per-spelling lists lost interleaving.
+    const parsed = parseCommand(specOf('sort'), ['-k1', '--key=2', '-k3', '/f'], '/')
+    expect(parsed.flags['--key']).toEqual(['1', '2', '3'])
+    expect('-k' in parsed.flags).toBe(false)
   })
 })
 
-describe('attached short values mirror their alias', () => {
-  it('mirrors -d10 onto --numeric-suffixes and honors order both ways', () => {
-    // Otherwise last-wins would hold for `--long=` but not the short form.
+describe('attached short values land on the canonical dest', () => {
+  it('unifies -d10 onto --numeric-suffixes and honors order both ways', () => {
+    // Last-wins holds for `--long=` and the short form alike.
     const attached = parseCommand(specOf('split'), ['-d10', '/in', '/pre'], '/')
-    expect(attached.flags['-d']).toBe('10')
     expect(attached.flags['--numeric-suffixes']).toBe('10')
+    expect('-d' in attached.flags).toBe(false)
 
     const shortLast = parseCommand(
       specOf('split'),
@@ -591,6 +591,6 @@ describe('attached short values mirror their alias', () => {
       ['-d10', '--numeric-suffixes=3', '/in', '/p'],
       '/',
     )
-    expect(longLast.flags['-d']).toBe('3')
+    expect(longLast.flags['--numeric-suffixes']).toBe('3')
   })
 })

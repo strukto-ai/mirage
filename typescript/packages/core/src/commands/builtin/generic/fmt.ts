@@ -126,15 +126,15 @@ export async function fmtGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('fmt'))
-  const widthValue = fl.asStr('w') ?? fl.asStr('width')
-  const goalValue = fl.asStr('g') ?? fl.asStr('goal')
-  const prefixValue = fl.asStr('p') ?? fl.asStr('prefix')
+  const widthValue = fl.asStr('width')
+  const goalValue = fl.asStr('goal')
+  const prefixValue = fl.asStr('prefix')
   const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 75
   const goal = typeof goalValue === 'string' ? Number.parseInt(goalValue, 10) : null
   const prefix = typeof prefixValue === 'string' ? prefixValue : null
-  const splitOnly = fl.asBool('s') || fl.asBool('split_only')
-  const tagged = fl.asBool('t') || fl.asBool('tagged_paragraph')
-  const crown = fl.asBool('c') || fl.asBool('crown_margin')
+  const splitOnly = fl.asBool('split_only')
+  const tagged = fl.asBool('tagged_paragraph')
+  const crown = fl.asBool('crown_margin')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still format (GNU fmt).

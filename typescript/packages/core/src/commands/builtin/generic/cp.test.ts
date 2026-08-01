@@ -88,8 +88,8 @@ function makeBackend(
 
 interface RunOpts {
   recursive?: boolean
-  n?: boolean
-  v?: boolean
+  no_clobber?: boolean
+  verbose?: boolean
   flags?: CpFlags
   mtimes?: Map<string, string>
   readdir?: ReaddirFn
@@ -106,8 +106,8 @@ async function run(
     opts.flags ??
     cpFlags({
       recursive: opts.recursive === true,
-      noClobber: opts.n === true,
-      verbose: opts.v === true,
+      noClobber: opts.no_clobber === true,
+      verbose: opts.verbose === true,
     })
   return cpGeneric(paths.map(spec), stat, { copy, find }, flags, undefined, undefined, opts.readdir)
 }
@@ -237,7 +237,7 @@ describe('cpGeneric guards', () => {
 
   it('emits quoted verbose lines', async () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
-    const [out] = await run(files, new Set(), ['/a.txt', '/copy.txt'], { v: true })
+    const [out] = await run(files, new Set(), ['/a.txt', '/copy.txt'], { verbose: true })
     expect(DEC.decode((out as Uint8Array | null) ?? new Uint8Array())).toBe(
       "'/a.txt' -> '/copy.txt'\n",
     )
@@ -277,7 +277,7 @@ describe('cpGeneric guards', () => {
       ['/a.txt', new Uint8Array([9])],
       ['/d/a.txt', new Uint8Array([1])],
     ])
-    await run(files, new Set(['/d']), ['/a.txt', '/d'], { n: true })
+    await run(files, new Set(['/d']), ['/a.txt', '/d'], { no_clobber: true })
     expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
   })
 
@@ -286,7 +286,7 @@ describe('cpGeneric guards', () => {
       ['/x/a.txt', new Uint8Array([1])],
       ['/y/a.txt', new Uint8Array([2])],
     ])
-    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'], { n: true })
+    await run(files, new Set(['/d']), ['/x/a.txt', '/y/a.txt', '/d'], { no_clobber: true })
     expect(files.get('/d/a.txt')).toEqual(new Uint8Array([1]))
   })
 
@@ -757,11 +757,11 @@ describe('cpGeneric -t/-T', () => {
 
 describe('parseCpFlags', () => {
   it('rejects conflicting and invalid combinations', () => {
-    expect(() => parseCpFlags({ b: true, n: true })).toThrow(
+    expect(() => parseCpFlags({ backup: true, no_clobber: true })).toThrow(
       'cp: --backup is mutually exclusive with -n or --update=none-fail',
     )
     expect(() => parseCpFlags({ backup: true, update: 'none-fail' })).toThrow('mutually exclusive')
-    expect(() => parseCpFlags({ t: '/d', T: true })).toThrow(
+    expect(() => parseCpFlags({ target_directory: '/d', no_target_directory: true })).toThrow(
       'cannot combine --target-directory (-t) and --no-target-directory (-T)',
     )
     expect(() => parseCpFlags({ update: 'bogus' })).toThrow(
@@ -773,11 +773,11 @@ describe('parseCpFlags', () => {
   })
 
   it('resolves the GNU update and backup grammars', () => {
-    expect(parseCpFlags({ u: true }).update).toBe('older')
+    expect(parseCpFlags({ update: true }).update).toBe('older')
     expect(parseCpFlags({ update: true }).update).toBe('older')
     expect(parseCpFlags({ update: 'all' }).update).toBe('all')
     expect(parseCpFlags({}).update).toBeNull()
-    const parsed = parseCpFlags({ S: '.bak' })
+    const parsed = parseCpFlags({ suffix: '.bak' })
     expect(parsed.backup).toBe('existing')
     expect(parsed.suffix).toBe('.bak')
     expect(parseCpFlags({ backup: 't' }).backup).toBe('numbered')

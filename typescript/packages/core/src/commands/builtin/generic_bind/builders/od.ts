@@ -20,10 +20,10 @@ export const OD_BUILDER: Builder = {
       resolved.length === 0
         ? resolveSource(opts.stdin)
         : concatSources(resolved.map((p) => ops.readStream(accessor, p, index)))
-    const addressValue = opts.flags.A ?? opts.flags.address_radix
-    const skipValue = opts.flags.j ?? opts.flags.skip_bytes
-    const limitValue = opts.flags.N ?? opts.flags.read_bytes
-    const formatValue = opts.flags.t ?? opts.flags.format
+    const addressValue = opts.flags.address_radix
+    const skipValue = opts.flags.skip_bytes
+    const limitValue = opts.flags.read_bytes
+    const formatValue = opts.flags.format
     const formats = Array.isArray(formatValue)
       ? formatValue
       : typeof formatValue === 'string'

@@ -76,7 +76,7 @@ describe('FlagView', () => {
 })
 
 describe('specFlagNames', () => {
-  it('includes short, long and disambiguated spellings', () => {
+  it('returns canonical names only, ambiguous spellings mapped', () => {
     const spec = new CommandSpec({
       options: [
         new Option({ short: 'l' }),
@@ -84,7 +84,9 @@ describe('specFlagNames', () => {
         new Option({ long: '--hidden' }),
       ],
     })
-    expect([...specFlagNames(spec)].sort()).toEqual(['args_l', 'hidden', 'm', 'max_count'])
+    // One name per option: the long spelling wins when both exist, so a
+    // stale short-name read throws instead of silently reading false.
+    expect([...specFlagNames(spec)].sort()).toEqual(['args_l', 'hidden', 'max_count'])
   })
 })
 

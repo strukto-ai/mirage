@@ -215,8 +215,11 @@ def make_head_tail_provision(
                 precision=Precision.UNKNOWN,
             )
         # A byte-count -c only; boolean -c flags (e.g. file -c) don't cap.
-        if c is not None and not isinstance(c, bool):
-            c_bytes = int(c)
+        # head spells the cap 'bytes' (the canonical -c/--bytes dest);
+        # tail declares -c short-only, so its cap still arrives as 'c'.
+        cap = c if c is not None else kwargs.get("bytes")
+        if cap is not None and not isinstance(cap, bool):
+            c_bytes = int(cap)
             total = sum(min(c_bytes, size) for _, size in resolved)
             return ProvisionResult(
                 command=command,

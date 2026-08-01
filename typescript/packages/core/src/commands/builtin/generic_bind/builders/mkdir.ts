@@ -27,9 +27,9 @@ export const MKDIR_BUILDER: Builder = {
   write: true,
   requirements: ['mkdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
-    const parents = opts.flags.p === true || opts.flags.parents === true
-    const verbose = opts.flags.v === true || opts.flags.verbose === true
-    const modeFlag = opts.flags.m ?? opts.flags.mode
+    const parents = opts.flags.parents === true
+    const verbose = opts.flags.verbose === true
+    const modeFlag = opts.flags.mode
     const modeText = typeof modeFlag === 'string' ? modeFlag : null
     if (paths.length === 0) {
       return [

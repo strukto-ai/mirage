@@ -114,7 +114,7 @@ describe('discord wc', () => {
           ),
         }),
       ],
-      { args_l: true },
+      { lines: true },
       { index: idx, transport },
     )
     expect(out).toBe('2 /mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl\n')

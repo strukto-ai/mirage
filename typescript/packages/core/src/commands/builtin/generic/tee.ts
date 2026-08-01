@@ -39,7 +39,7 @@ export function parseTeeFlags(flags: Record<string, FlagValue>): TeeOptions | st
       "Try 'tee --help' for more information.\n"
     )
   }
-  return { append: fl.asBool('a') || fl.asBool('append') }
+  return { append: fl.asBool('append') }
 }
 
 export async function teeGeneric(

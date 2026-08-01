@@ -20,12 +20,12 @@ const DEC = new TextDecoder()
 
 describe('parseTeeFlags', () => {
   it('accepts -a / --append', () => {
-    expect(parseTeeFlags({ a: true })).toEqual({ append: true })
+    expect(parseTeeFlags({ append: true })).toEqual({ append: true })
     expect(parseTeeFlags({ append: true })).toEqual({ append: true })
   })
 
   it('treats -i / -p as accepted no-ops', () => {
-    expect(parseTeeFlags({ i: true, p: true })).toEqual({ append: false })
+    expect(parseTeeFlags({ ignore_interrupts: true, p: true })).toEqual({ append: false })
   })
 
   it('accepts valid --output-error modes', () => {

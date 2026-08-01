@@ -22,15 +22,15 @@ const ENC = new TextEncoder()
 
 export const basenameFn: CommandFn = (_accessor, _paths, texts, opts) => {
   const fl = new FlagView(opts.flags, specOf('basename'))
-  const suffixValue = fl.asStr('s') ?? fl.asStr('suffix')
+  const suffixValue = fl.asStr('suffix')
   const suffix = typeof suffixValue === 'string' ? suffixValue : undefined
-  const multiple = fl.asBool('a') || fl.asBool('multiple') || suffix !== undefined
+  const multiple = fl.asBool('multiple') || suffix !== undefined
   const lines =
     suffix !== undefined
       ? texts.map((text) => gnuBasename(text, suffix))
       : texts.length === 2 && !multiple
         ? [gnuBasename(texts[0] ?? '', texts[1])]
         : texts.map((text) => gnuBasename(text))
-  const separator = fl.asBool('z') || fl.asBool('zero') ? '\0' : '\n'
+  const separator = fl.asBool('zero') ? '\0' : '\n'
   return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

@@ -62,7 +62,7 @@ async function jsCommand(
   const eFlag = opts.flags.e
   const code = typeof eFlag === 'string' ? eFlag : null
   const hasCode = code !== null
-  const module = opts.flags.m === true || opts.flags.module === true
+  const module = opts.flags.module === true
   let scriptPath: PathSpec | null = null
   let argStrs: string[]
   if (hasCode) {

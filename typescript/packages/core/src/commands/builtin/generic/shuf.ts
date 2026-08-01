@@ -64,9 +64,9 @@ export async function shufGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('shuf'))
-  const countValue = fl.asStr('n') ?? fl.asStr('head_count')
-  const rangeValue = fl.asStr('i') ?? fl.asStr('input_range')
-  const outputValue = fl.asStr('o') ?? fl.asStr('output')
+  const countValue = fl.asStr('head_count')
+  const rangeValue = fl.asStr('input_range')
+  const outputValue = fl.asStr('output')
   const nFlag = countValue === undefined ? null : Number.parseInt(countValue, 10)
   const inputRange = rangeValue ?? null
   const output =
@@ -78,9 +78,9 @@ export async function shufGeneric(
           resourcePath: mountKey(outputValue, opts.mountPrefix ?? ''),
           resolved: true,
         })
-  const echoMode = fl.asBool('e') || fl.asBool('echo')
-  const zeroSep = fl.asBool('z') || fl.asBool('zero_terminated')
-  const repeat = fl.asBool('r') || fl.asBool('repeat')
+  const echoMode = fl.asBool('echo')
+  const zeroSep = fl.asBool('zero_terminated')
+  const repeat = fl.asBool('repeat')
   const sep = zeroSep ? '\x00' : '\n'
 
   let items: string[]

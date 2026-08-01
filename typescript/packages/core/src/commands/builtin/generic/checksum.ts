@@ -48,11 +48,11 @@ function algorithmName(name: string): string {
 
 function hashLine(digest: string, label: string, name: string, opts: CommandOpts): string {
   const fl = new FlagView(opts.flags, specOf(name))
-  const terminator = fl.asBool('z') || fl.asBool('zero') ? '\0' : '\n'
+  const terminator = fl.asBool('zero') ? '\0' : '\n'
   if (fl.asBool('tag')) {
     return `${algorithmName(name)} (${label}) = ${digest}${terminator}`
   }
-  const marker = fl.asBool('b') || fl.asBool('binary') ? '*' : ' '
+  const marker = fl.asBool('binary') ? '*' : ' '
   return `${digest} ${marker}${label}${terminator}`
 }
 
@@ -103,7 +103,7 @@ async function checkFile(
       failed = true
     }
   }
-  if (malformed > 0 && (fl.asBool('w') || fl.asBool('warn'))) {
+  if (malformed > 0 && fl.asBool('warn')) {
     const count = malformed === 1 ? '1 line is' : `${String(malformed)} lines are`
     errors.push(`WARNING: ${count} improperly formatted`)
   }
@@ -134,7 +134,7 @@ export async function checksumGeneric(
   name: string,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf(name))
-  const check = fl.asBool('c') || fl.asBool('check')
+  const check = fl.asBool('check')
   if (check && paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]

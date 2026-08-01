@@ -124,13 +124,13 @@ export async function splitGeneric(
   const fl = new FlagView(opts.flags, specOf('split'))
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
   const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].mountPath : 'x'
-  const linesValue = fl.asStr('args_l') ?? fl.asStr('lines')
-  const bytesValue = fl.asStr('b') ?? fl.asStr('bytes')
-  const numberValue = fl.asStr('n') ?? fl.asStr('number')
-  const lengthValue = fl.asStr('a') ?? fl.asStr('suffix_length')
-  const numericValue = fl.raw('d') ?? fl.raw('numeric_suffixes')
-  const hexValue = fl.raw('x') ?? fl.raw('hex_suffixes')
-  const separatorValue = fl.asStr('t') ?? fl.asStr('separator')
+  const linesValue = fl.asStr('lines')
+  const bytesValue = fl.asStr('bytes')
+  const numberValue = fl.asStr('number')
+  const lengthValue = fl.asStr('suffix_length')
+  const numericValue = fl.raw('numeric_suffixes')
+  const hexValue = fl.raw('hex_suffixes')
+  const separatorValue = fl.asStr('separator')
   const linesFlag = typeof linesValue === 'string' ? linesValue : null
   const bFlag = typeof bytesValue === 'string' ? bytesValue : null
   const nFlag = typeof numberValue === 'string' ? numberValue : null

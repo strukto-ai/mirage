@@ -49,9 +49,9 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): HeadFla
   return {
     lines: nRaw !== null ? Number.parseInt(nRaw, 10) : 10,
     bytesMode: cRaw !== null ? Number.parseInt(cRaw, 10) : null,
-    quiet: flags.q === true || flags.quiet === true || flags.silent === true,
-    verbose: flags.v === true || flags.verbose === true,
-    zeroTerminated: flags.z === true || flags.zero_terminated === true,
+    quiet: flags.quiet === true || flags.silent === true,
+    verbose: flags.verbose === true,
+    zeroTerminated: flags.zero_terminated === true,
   }
 }
 

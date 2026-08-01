@@ -55,10 +55,10 @@ export async function tacGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('tac'))
-  const separatorValue = fl.asStr('s') ?? fl.asStr('separator')
+  const separatorValue = fl.asStr('separator')
   const separator = typeof separatorValue === 'string' ? separatorValue : '\n'
-  const before = fl.asBool('b') || fl.asBool('before')
-  const regex = fl.asBool('r') || fl.asBool('regex')
+  const before = fl.asBool('before')
+  const regex = fl.asBool('regex')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still reverse (GNU tac).

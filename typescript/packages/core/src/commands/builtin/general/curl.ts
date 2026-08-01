@@ -62,7 +62,7 @@ async function curlCommand(
   const F = typeof opts.flags.F === 'string' ? opts.flags.F : null
   const o = typeof opts.flags.o === 'string' ? opts.flags.o : null
   const L = opts.flags.L === true
-  const failOnError = opts.flags.f === true
+  const failOnError = opts.flags.fail === true
   // -s silences the message, -S puts it back. Neither changes the exit code.
   const quiet = opts.flags.s === true && opts.flags.S !== true
 

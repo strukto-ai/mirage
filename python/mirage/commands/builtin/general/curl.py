@@ -64,7 +64,7 @@ async def curl(
     F: str | None = None,
     o: str | None = None,
     L: bool = False,
-    f: bool = False,
+    fail: bool = False,
     s: bool = False,
     S: bool = False,
     dispatch: Callable[..., Any] | None = None,
@@ -107,7 +107,7 @@ async def curl(
             f"{exc.port}: Could not connect to server\n").encode()
         return None, IOResult(exit_code=EXIT_CONNECT, stderr=err)
     # Only -f makes an error status an error, and then nothing is written.
-    if f and resp.is_error:
+    if fail and resp.is_error:
         err = b"" if quiet else (
             f"curl: ({EXIT_HTTP_ERROR}) The requested URL returned error: "
             f"{resp.status}\n").encode()

@@ -60,7 +60,7 @@ describe('expand', () => {
 
   it('-t 4', async () => {
     const resource = new RAMResource()
-    const r = await runCmd(RAM_EXPAND, resource, [], { t: '4' }, ENC.encode('a\tb'))
+    const r = await runCmd(RAM_EXPAND, resource, [], { tabs: '4' }, ENC.encode('a\tb'))
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('a   b')
   })
@@ -69,7 +69,13 @@ describe('expand', () => {
 describe('unexpand', () => {
   it('-a -t 4', async () => {
     const resource = new RAMResource()
-    const r = await runCmd(RAM_UNEXPAND, resource, [], { a: true, t: '4' }, ENC.encode('    hello'))
+    const r = await runCmd(
+      RAM_UNEXPAND,
+      resource,
+      [],
+      { all: true, tabs: '4' },
+      ENC.encode('    hello'),
+    )
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('\thello')
   })

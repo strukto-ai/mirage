@@ -48,7 +48,7 @@ describe('split', () => {
     const r = await runSplit(
       resource,
       [PathSpec.fromStrPath('/f.txt'), PathSpec.fromStrPath('/chunk_')],
-      { args_l: '2' },
+      { lines: '2' },
     )
     expect(r.exitCode).toBe(0)
     const aa = resource.store.files.get('/chunk_aa')
@@ -65,7 +65,7 @@ describe('split', () => {
     const r = await runSplit(
       resource,
       [PathSpec.fromStrPath('/f.bin'), PathSpec.fromStrPath('/p_')],
-      { b: '2' },
+      { bytes: '2' },
     )
     expect(r.exitCode).toBe(0)
     expect(DEC.decode(resource.store.files.get('/p_aa'))).toBe('AB')
@@ -79,7 +79,7 @@ describe('split', () => {
     const r = await runSplit(
       resource,
       [PathSpec.fromStrPath('/f.txt'), PathSpec.fromStrPath('/part')],
-      { d: true, l: '2' },
+      { numeric_suffixes: true, l: '2' },
     )
     expect(r.exitCode).toBe(0)
     expect(resource.store.files.has('/part00')).toBe(true)

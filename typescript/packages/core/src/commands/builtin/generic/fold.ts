@@ -87,10 +87,10 @@ export async function foldGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('fold'))
-  const widthValue = fl.asStr('w') ?? fl.asStr('width')
+  const widthValue = fl.asStr('width')
   const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80
-  const breakSpaces = fl.asBool('s') || fl.asBool('spaces')
-  const countBytes = fl.asBool('b') || fl.asBool('bytes')
+  const breakSpaces = fl.asBool('spaces')
+  const countBytes = fl.asBool('bytes')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still fold (GNU fold).

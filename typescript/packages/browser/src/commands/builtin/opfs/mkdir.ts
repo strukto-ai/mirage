@@ -36,8 +36,8 @@ async function mkdirCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const parents = opts.flags.p === true
-  const verbose = opts.flags.v === true
+  const parents = opts.flags.parents === true
+  const verbose = opts.flags.verbose === true
   if (paths.length === 0) {
     return [
       null,

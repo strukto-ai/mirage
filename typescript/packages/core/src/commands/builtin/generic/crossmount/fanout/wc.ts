@@ -35,13 +35,13 @@ export function combineWc(
   flagKwargs: Record<string, string | boolean | string[]>,
 ): Uint8Array {
   const single =
-    flagKwargs.args_l === true ||
-    flagKwargs.w === true ||
-    flagKwargs.c === true ||
-    flagKwargs.m === true ||
-    flagKwargs.L === true
+    flagKwargs.lines === true ||
+    flagKwargs.words === true ||
+    flagKwargs.bytes === true ||
+    flagKwargs.chars === true ||
+    flagKwargs.max_line_length === true
   const columns = single ? 1 : 3
-  const maxMode = flagKwargs.L === true
+  const maxMode = flagKwargs.max_line_length === true
   const rows: WcRow[] = []
   for (const run of results) {
     let body = DEC.decode(run.data)

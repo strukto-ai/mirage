@@ -221,13 +221,17 @@ export class ParsedArgs {
 /**
  * Collect the kwarg names a spec's options can produce.
  *
- * Mirrors Python's `spec_flag_names`.
+ * One name per option: the long spelling when an option declares both,
+ * matching the parser's canonical dest. Keeping the short spelling here
+ * too would let a stale `fl.asBool('a')` stay legal and read false
+ * forever after dest unification; canonical-only turns that silent miss
+ * into a throw. Mirrors Python's `spec_flag_names`.
  */
 export function specFlagNames(spec: CommandSpec): ReadonlySet<string> {
   const names = new Set<string>()
   for (const option of spec.options) {
-    if (option.short !== null) names.add(flagKwargName(option.short))
-    if (option.long !== null) names.add(flagKwargName(option.long))
+    const canonical = option.long ?? option.short
+    if (canonical !== null) names.add(flagKwargName(canonical))
   }
   return names
 }

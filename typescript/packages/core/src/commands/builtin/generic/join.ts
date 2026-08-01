@@ -178,10 +178,10 @@ export async function joinGeneric(
   const oFlag = fl.asStr('o') ?? null
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const zeroTerminated = fl.asBool('z') || fl.asBool('zero_terminated')
+  const zeroTerminated = fl.asBool('zero_terminated')
   const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data1)
   const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data2)
-  const ignoreCase = fl.asBool('i') || fl.asBool('ignore_case')
+  const ignoreCase = fl.asBool('ignore_case')
   const headerLines: string[] = []
   if (fl.asBool('header') && lines1.length > 0 && lines2.length > 0) {
     const first1 = splitFields(lines1.shift() ?? '', sep)

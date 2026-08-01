@@ -114,8 +114,7 @@ export function backupDisplaces(control: string | null): boolean {
 
 // Resolve -u/--update[=UPDATE] to a GNU update mode.
 export function updateMode(cmdName: string, flags: Flags): string | null {
-  let value: unknown = flags.update
-  if (value === undefined || value === false) value = flags.u
+  const value: unknown = flags.update
   if (value === undefined || value === false) return null
   if (value === true) return 'older'
   if (typeof value === 'string' && (UPDATE_MODES as readonly string[]).includes(value)) {
@@ -135,11 +134,10 @@ export function updateMode(cmdName: string, flags: Flags): string | null {
 }
 
 // The raw -b/--backup value, absent shapes reading as undefined. The parser
-// mirrors the two spellings, so either key already carries GNU's
-// last-occurrence-wins value.
+// lands both spellings on the canonical `backup` dest, so the key already
+// carries GNU's last-occurrence-wins value.
 export function backupRaw(flags: Flags): string | boolean | undefined {
-  let value: unknown = flags.backup
-  if (value === undefined || value === false) value = flags.b
+  const value: unknown = flags.backup
   if (typeof value === 'string' || typeof value === 'boolean') return value
   return undefined
 }
@@ -147,11 +145,10 @@ export function backupRaw(flags: Flags): string | boolean | undefined {
 // -t values arrive as PathSpec on the single-mount dispatch path and as
 // resolved virtual-path strings on the cross-mount relay path; accept both.
 export function targetFlags(cmdName: string, flags: Flags): [PathSpec | string | null, boolean] {
-  let raw: unknown = flags.t
-  if (raw === undefined) raw = flags.target_directory
+  const raw: unknown = flags.target_directory
   const targetDir: PathSpec | string | null =
     raw instanceof PathSpec || typeof raw === 'string' ? raw : null
-  const noTarget = flags.T === true || flags.no_target_directory === true
+  const noTarget = flags.no_target_directory === true
   if (targetDir !== null && noTarget) {
     throw new UsageError(
       `${cmdName}: cannot combine --target-directory (-t) and --no-target-directory (-T)`,
@@ -167,9 +164,9 @@ export function targetFlags(cmdName: string, flags: Flags): [PathSpec | string |
 // because PathSpec already normalizes trailing slashes.
 export function parseCpFlags(flags: Flags): CpFlags {
   const update = updateMode('cp', flags)
-  const suffix = firstStr(flags.S, flags.suffix)
+  const suffix = firstStr(flags.suffix)
   const control = backupControl('cp', backupRaw(flags), suffix)
-  const noClobber = flags.n === true || flags.no_clobber === true
+  const noClobber = flags.no_clobber === true
   if (control !== null && control !== 'none' && (noClobber || update === 'none-fail')) {
     throw new UsageError(
       'cp: --backup is mutually exclusive with -n or --update=none-fail\n' +
@@ -179,14 +176,9 @@ export function parseCpFlags(flags: Flags): CpFlags {
   }
   const [targetDir, noTargetDir] = targetFlags('cp', flags)
   return cpFlags({
-    recursive:
-      flags.r === true ||
-      flags.R === true ||
-      flags.recursive === true ||
-      flags.a === true ||
-      flags.archive === true,
+    recursive: flags.r === true || flags.recursive === true || flags.archive === true,
     noClobber,
-    verbose: flags.v === true || flags.verbose === true,
+    verbose: flags.verbose === true,
     update,
     backup: control,
     suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,

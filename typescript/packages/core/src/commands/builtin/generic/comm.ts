@@ -114,7 +114,7 @@ export async function commGeneric(
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const zeroTerminated = fl.asBool('z') || fl.asBool('zero_terminated')
+  const zeroTerminated = fl.asBool('zero_terminated')
   const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data1)
   const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data2)
   let stderr = ''

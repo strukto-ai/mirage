@@ -77,8 +77,12 @@ export async function runFanout(
   if (cmdName === Cmd.RG && flags.args_I !== true) {
     flags.H = true
   }
-  if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags.q !== true) {
-    flags.v = true
+  // head pairs -q/--quiet and -v/--verbose (canonical dests), tail declares
+  // them short-only.
+  const quietKey = cmdName === Cmd.HEAD ? 'quiet' : 'q'
+  const verboseKey = cmdName === Cmd.HEAD ? 'verbose' : 'v'
+  if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[quietKey] !== true) {
+    flags[verboseKey] = true
   }
 
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
@@ -99,7 +103,7 @@ export async function runFanout(
   } else if (cmdName === Cmd.TEE) {
     body = stdinBytes ?? new Uint8Array()
   } else if (
-    ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags.v === true) ||
+    ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[verboseKey] === true) ||
     (cmdName === Cmd.LS && flagKwargs.R === true)
   ) {
     // Blank line between per-operand blocks, like one native run separates

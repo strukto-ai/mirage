@@ -89,9 +89,9 @@ function isPrimitiveMove(strategy: MoveStrategy): strategy is PrimitiveMove {
 // because PathSpec already normalizes trailing slashes.
 export function parseMvFlags(flags: Flags): MvFlags {
   const update = updateMode('mv', flags)
-  const suffix = firstStr(flags.S, flags.suffix)
+  const suffix = firstStr(flags.suffix)
   const control = backupControl('mv', backupRaw(flags), suffix)
-  const noClobber = flags.n === true || flags.no_clobber === true
+  const noClobber = flags.no_clobber === true
   const exchange = flags.exchange === true
   if (control !== null && control !== 'none' && (exchange || noClobber || update === 'none-fail')) {
     throw new UsageError(
@@ -103,7 +103,7 @@ export function parseMvFlags(flags: Flags): MvFlags {
   const [targetDir, noTargetDir] = targetFlags('mv', flags)
   return mvFlags({
     noClobber,
-    verbose: flags.v === true || flags.verbose === true,
+    verbose: flags.verbose === true,
     update,
     backup: control,
     suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,

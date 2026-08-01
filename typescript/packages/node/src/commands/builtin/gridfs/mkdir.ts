@@ -42,8 +42,8 @@ async function mkdirCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('mkdir: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const verbose = opts.flags.v === true
-  const parents = opts.flags.p === true
+  const verbose = opts.flags.verbose === true
+  const parents = opts.flags.parents === true
   const lines: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {

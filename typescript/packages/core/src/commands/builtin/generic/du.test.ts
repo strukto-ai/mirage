@@ -307,7 +307,7 @@ describe('parseDuFlags', () => {
   })
 
   it('reads -d as another spelling of --max-depth', () => {
-    expect(parseDuFlags(opts({ d: '2' })).maxDepth).toBe(2)
+    expect(parseDuFlags(opts({ max_depth: '2' })).maxDepth).toBe(2)
   })
 })
 

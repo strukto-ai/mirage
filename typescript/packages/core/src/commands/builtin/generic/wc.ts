@@ -59,11 +59,11 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): WcFlags
     return `wc: invalid argument '${rawTotal}' for '--total'\n`
   }
   return {
-    lines: flags.args_l === true || flags.lines === true,
-    words: flags.w === true || flags.words === true,
-    bytes: flags.c === true || flags.bytes === true,
-    chars: flags.m === true || flags.chars === true,
-    maxLineLength: flags.L === true || flags.max_line_length === true,
+    lines: flags.lines === true,
+    words: flags.words === true,
+    bytes: flags.bytes === true,
+    chars: flags.chars === true,
+    maxLineLength: flags.max_line_length === true,
     total: rawTotal as WcFlags['total'],
   }
 }

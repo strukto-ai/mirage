@@ -68,9 +68,9 @@ function optionalMethod(
 }
 
 function parseFlags(flags: Record<string, string | boolean | string[]>): UniqFlags {
-  const count = flags.c === true || flags.count === true
-  const duplicatesOnly = flags.d === true || flags.repeated === true
-  const uniqueOnly = flags.u === true || flags.unique === true
+  const count = flags.count === true
+  const duplicatesOnly = flags.repeated === true
+  const uniqueOnly = flags.unique === true
   const allRepeated = optionalMethod(
     flags.D === true ? true : flags.all_repeated,
     'none',
@@ -96,10 +96,10 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): UniqFla
     skipFields: parseCount(stringAlias(flags, 'f', 'skip_fields')) ?? 0,
     skipChars: parseCount(stringAlias(flags, 's', 'skip_chars')) ?? 0,
     checkChars: parseCount(stringAlias(flags, 'w', 'check_chars')),
-    ignoreCase: flags.i === true || flags.ignore_case === true,
+    ignoreCase: flags.ignore_case === true,
     allRepeated,
     group,
-    zeroTerminated: flags.z === true || flags.zero_terminated === true,
+    zeroTerminated: flags.zero_terminated === true,
   }
 }
 
