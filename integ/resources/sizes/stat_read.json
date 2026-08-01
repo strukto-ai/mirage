@@ -1249,6 +1249,32 @@
         "stdout": "29\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_slack_every_user_size_matches_read",
+      "seq": 700100,
+      "targets": [
+        "slack"
+      ],
+      "command": "n=0; for f in /slack/users/*.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "11 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_every_channel_day_size_matches_read",
+      "seq": 700101,
+      "targets": [
+        "slack"
+      ],
+      "command": "n=0; for f in /slack/channels/general__C1/*/chat.jsonl; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "90 match\n",
+        "stderr": ""
+      }
     }
   ]
 }

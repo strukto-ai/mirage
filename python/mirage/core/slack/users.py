@@ -72,8 +72,14 @@ def user_json_bytes(user: dict[str, Any]) -> bytes:
     """Render one user object as its .json byte content.
 
     The single renderer behind both read and the readdir-time size.
-    users.list members are payload-identical to users.info responses
-    (verified live), so sizing from the listing is exact.
+    readdir sizes a user from the users.list member; read renders the
+    users.info response. Sizing is exact only while those two payloads
+    encode identically, which was verified live on 2026-08-01: every real
+    user in a live workspace matched byte for byte, key order included.
+
+    The integ battery cannot catch a regression here. The fake server
+    builds users.list and users.info from one row through one helper, so
+    they agree by construction; only a live call tests the assumption.
 
     Args:
         user (dict): user object from users.list or users.info.
