@@ -158,10 +158,10 @@ export async function patchGeneric(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('patch'))
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
-  const stripCount = typeof opts.flags.p === 'string' ? Number.parseInt(opts.flags.p, 10) : 0
+  const stripCount = fl.asInt('p') ?? 0
   const reverseMode = fl.asBool('R')
   const forwardOnly = fl.asBool('N')
-  const iFlag = (fl.asStr('i') ?? null)
+  const iFlag = fl.asStr('i') ?? null
   const mountPrefix = opts.mountPrefix ?? ''
   let patchData: Uint8Array | null = null
   if (iFlag !== null) {

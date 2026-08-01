@@ -133,14 +133,14 @@ export async function findGeneric(
   stat?: (spec: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('find'))
-  const nameFlag = (fl.asStr('name') ?? null)
-  const inameFlag = (fl.asStr('iname') ?? null)
-  const typeFlag = (fl.asStr('type') ?? null)
-  const pathFlag = (fl.asStr('path') ?? null)
-  const maxDepthFlag = (fl.asStr('maxdepth') ?? null)
-  const minDepthFlag = (fl.asStr('mindepth') ?? null)
-  const sizeFlag = (fl.asStr('size') ?? null)
-  const mtimeFlag = (fl.asStr('mtime') ?? null)
+  const nameFlag = fl.asStr('name') ?? null
+  const inameFlag = fl.asStr('iname') ?? null
+  const typeFlag = fl.asStr('type') ?? null
+  const pathFlag = fl.asStr('path') ?? null
+  const maxDepthFlag = fl.asStr('maxdepth') ?? null
+  const minDepthFlag = fl.asStr('mindepth') ?? null
+  const sizeFlag = fl.asStr('size') ?? null
+  const mtimeFlag = fl.asStr('mtime') ?? null
   const targets =
     paths.length > 0
       ? paths

@@ -123,11 +123,10 @@ export async function commGeneric(
     else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
   }
   const suppress1 = fl.asBool('args_1')
-  const suppress2 = opts.flags['2'] === true
-  const suppress3 = opts.flags['3'] === true
+  const suppress2 = fl.asBool('2')
+  const suppress3 = fl.asBool('3')
   const merged = commMerge(lines1, lines2)
-  const delimiter =
-    (fl.asStr('output_delimiter') ?? '\t')
+  const delimiter = fl.asStr('output_delimiter') ?? '\t'
   const output = formatComm(
     merged,
     suppress1,

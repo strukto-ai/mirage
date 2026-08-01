@@ -169,8 +169,8 @@ export async function xxdGeneric(
   }
   const toInt = (v: string | boolean | string[] | undefined): number =>
     typeof v === 'string' ? Number.parseInt(v, 10) : 0
-  const skip = toInt(opts.flags.s)
-  const limitFlag = toInt(opts.flags.args_l)
+  const skip = toInt(fl.raw('s'))
+  const limitFlag = toInt(fl.raw('args_l'))
   if (skip > 0 || limitFlag > 0) {
     const limit = limitFlag > 0 ? limitFlag : Number.MAX_SAFE_INTEGER
     source = applyLimits(source, skip, limit)
@@ -178,7 +178,7 @@ export async function xxdGeneric(
   const uppercase = fl.asBool('u')
   if (fl.asBool('r')) return [xxdReverseStream(source), new IOResult({ cache })]
   if (fl.asBool('p')) return [xxdPlainStream(source, uppercase), new IOResult({ cache })]
-  const cols = toInt(opts.flags.c) > 0 ? toInt(opts.flags.c) : 16
-  const group = toInt(opts.flags.g) > 0 ? toInt(opts.flags.g) : 2
+  const cols = toInt(fl.raw('c')) > 0 ? toInt(fl.raw('c')) : 16
+  const group = toInt(fl.raw('g')) > 0 ? toInt(fl.raw('g')) : 2
   return [xxdDumpStream(source, cols, group, uppercase), new IOResult({ cache })]
 }

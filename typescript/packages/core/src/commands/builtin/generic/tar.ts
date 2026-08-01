@@ -98,13 +98,10 @@ export async function tarGeneric(
       new IOResult({ exitCode: 1, stderr: ENC.encode('tar: bzip2/xz not supported\n') }),
     ]
   }
-  const fFlag = (fl.asStr('f') ?? null)
-  const CFlag = (fl.asStr('C') ?? null)
-  const stripN =
-    typeof opts.flags.strip_components === 'string'
-      ? Number.parseInt(opts.flags.strip_components, 10)
-      : 0
-  const exclude = (fl.asStr('exclude') ?? null)
+  const fFlag = fl.asStr('f') ?? null
+  const CFlag = fl.asStr('C') ?? null
+  const stripN = fl.asInt('strip_components') ?? 0
+  const exclude = fl.asStr('exclude') ?? null
   const mountPrefix = opts.mountPrefix ?? ''
   const archivePath = fFlag
   const destPath = CFlag ?? '/'

@@ -143,8 +143,7 @@ export async function splitGeneric(
       : typeof hexValue === 'string'
         ? Number.parseInt(hexValue, 10)
         : 0
-  const additionalSuffix =
-    (fl.asStr('additional_suffix') ?? '')
+  const additionalSuffix = fl.asStr('additional_suffix') ?? ''
   const separator =
     separatorValue === '\\0'
       ? 0

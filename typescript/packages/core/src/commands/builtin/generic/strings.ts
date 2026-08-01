@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -45,7 +47,8 @@ export async function stringsGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const minLen = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 4
+  const fl = new FlagView(opts.flags, specOf('strings'))
+  const minLen = fl.asInt('n') ?? 4
   // Each operand is scanned independently and the matches concatenate in
   // operand order, like GNU strings.
   if (paths.length > 0) {

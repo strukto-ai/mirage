@@ -114,7 +114,7 @@ export async function unzipGeneric(
   const pipeMode = fl.asBool('p')
   const quiet = fl.asBool('q')
   const mountPrefix = mountPrefixOf(archivePath.virtual, archivePath.resourcePath)
-  const destRaw = (fl.asStr('d') ?? '/')
+  const destRaw = fl.asStr('d') ?? '/'
   const dest =
     mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
       ? destRaw.slice(mountPrefix.length)

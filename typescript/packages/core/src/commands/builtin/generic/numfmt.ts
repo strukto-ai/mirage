@@ -110,9 +110,9 @@ export async function numfmtGeneric(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('numfmt'))
-  const toMode = (fl.asStr('to') ?? 'none')
-  const fromMode = (fl.asStr('from') ?? 'none')
-  const suffix = (fl.asStr('suffix') ?? '')
+  const toMode = fl.asStr('to') ?? 'none'
+  const fromMode = fl.asStr('from') ?? 'none'
+  const suffix = fl.asStr('suffix') ?? ''
   const grouping = fl.asBool('grouping')
   let output: string[]
   if (texts.length > 0) {

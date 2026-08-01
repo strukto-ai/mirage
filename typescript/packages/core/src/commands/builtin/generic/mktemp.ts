@@ -53,7 +53,7 @@ export async function mktempGeneric(
   const tFlag = fl.asBool('t')
   const directory = fl.asBool('d') || fl.asBool('directory')
   const dryRun = fl.asBool('u') || fl.asBool('dry_run')
-  const suffix = (fl.asStr('suffix') ?? '')
+  const suffix = fl.asStr('suffix') ?? ''
   const tmpdirValue: unknown = fl.raw('p') ?? fl.raw('tmpdir')
   const templateArg = texts[0]
   let template = templateArg !== undefined && templateArg !== '' ? templateArg : 'tmp.XXXXXXXXXX'

@@ -58,13 +58,15 @@ export async function cmpGeneric(
     // unreadable operand) is exit 2.
     return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', err, paths) })]
   }
-  if (typeof opts.flags.i === 'string') {
-    const skip = Number.parseInt(opts.flags.i, 10)
+  const skipRaw = fl.asInt('i')
+  if (skipRaw !== undefined) {
+    const skip = skipRaw
     data1 = data1.slice(skip)
     data2 = data2.slice(skip)
   }
-  if (typeof opts.flags.n === 'string') {
-    const limit = Number.parseInt(opts.flags.n, 10)
+  const limitRaw = fl.asInt('n')
+  if (limitRaw !== undefined) {
+    const limit = limitRaw
     data1 = data1.slice(0, limit)
     data2 = data2.slice(0, limit)
   }

@@ -114,8 +114,8 @@ export async function iconvGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('iconv'))
-  const fromName = (fl.asStr('f') ?? 'utf-8')
-  const toName = (fl.asStr('t') ?? 'utf-8')
+  const fromName = fl.asStr('f') ?? 'utf-8'
+  const toName = fl.asStr('t') ?? 'utf-8'
   const fromEnc = normalizeEncoding(fromName)
   const toEnc = normalizeEncoding(toName)
   if (fromEnc === null) {
@@ -144,7 +144,7 @@ export async function iconvGeneric(
   }
   const decoded = decodeBytes(raw, fromEnc)
   const encoded = encodeText(decoded, toEnc)
-  const outPath = (fl.asStr('o') ?? null)
+  const outPath = fl.asStr('o') ?? null
   if (outPath !== null) {
     const spec = PathSpec.fromStrPath(outPath, mountKey(outPath, opts.mountPrefix ?? ''))
     await write(spec, encoded)

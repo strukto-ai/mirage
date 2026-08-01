@@ -124,9 +124,9 @@ export async function treeGeneric(
             resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
-  const depthRaw = (fl.asStr('L') ?? null)
-  const ignoreRaw = (fl.asStr('args_I') ?? null)
-  const matchRaw = (fl.asStr('P') ?? null)
+  const depthRaw = fl.asStr('L') ?? null
+  const ignoreRaw = fl.asStr('args_I') ?? null
+  const matchRaw = fl.asStr('P') ?? null
   const treeOpts: TreeOpts = {
     showHidden: fl.asBool('a'),
     maxDepth: depthRaw === null ? null : Number.parseInt(depthRaw, 10),

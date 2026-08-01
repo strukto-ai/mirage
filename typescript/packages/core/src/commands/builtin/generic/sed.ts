@@ -36,10 +36,8 @@ export async function sedGeneric(
   // The script comes from -e expressions and -f script files (joined with
   // newlines, -e then -f as grep does) when any were given, otherwise from the
   // first positional operand.
-  const eVals = opts.flags.e
-  const eList = Array.isArray(eVals) ? eVals : typeof eVals === 'string' ? [eVals] : []
-  const fVals = opts.flags.f
-  const fList = Array.isArray(fVals) ? fVals : typeof fVals === 'string' ? [fVals] : []
+  const eList = fl.asList('e')
+  const fList = fl.asList('f')
   const scriptParts = [...eList]
   const firstPath = paths[0]
   const scriptPrefix =

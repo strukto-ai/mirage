@@ -129,7 +129,7 @@ export async function zgrepGeneric(
   const filesOnly = fl.asBool('args_l')
   const forceH = fl.asBool('H')
   const hideH = fl.asBool('h')
-  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  const maxCount = fl.asInt('m') ?? null
   void extendedRegex
   const pattern = compilePattern(rawPattern, ignoreCase, fixedString, wholeWord)
 

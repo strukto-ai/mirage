@@ -29,12 +29,10 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 function parseFlags(opts: CommandOpts): AwkFlags {
   const fl = new FlagView(opts.flags, specOf('awk'))
-  const rawV = opts.flags.v
-  const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
-  const rawF = opts.flags.f
-  const programFiles = Array.isArray(rawF) ? rawF : typeof rawF === 'string' ? [rawF] : []
+  const assignments = fl.asList('v')
+  const programFiles = fl.asList('f')
   return {
-    fieldSeparator: (fl.asStr('F') ?? null),
+    fieldSeparator: fl.asStr('F') ?? null,
     assignments,
     programFiles,
   }

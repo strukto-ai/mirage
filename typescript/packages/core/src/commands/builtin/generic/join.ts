@@ -168,18 +168,14 @@ export async function joinGeneric(
   const p1 = paths[0]
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
-  const commonField = typeof opts.flags.j === 'string' ? Number.parseInt(opts.flags.j, 10) : null
-  const field1 =
-    (commonField ??
-      (typeof opts.flags.args_1 === 'string' ? Number.parseInt(opts.flags.args_1, 10) : 1)) - 1
-  const field2 =
-    (commonField ??
-      (typeof opts.flags['2'] === 'string' ? Number.parseInt(opts.flags['2'], 10) : 1)) - 1
-  const sep = (fl.asStr('t') ?? null)
-  const aFlag = (fl.asStr('a') ?? null)
-  const vFlag = (fl.asStr('v') ?? null)
-  const eFlag = (fl.asStr('e') ?? null)
-  const oFlag = (fl.asStr('o') ?? null)
+  const commonField = fl.asInt('j') ?? null
+  const field1 = (commonField ?? fl.asInt('args_1') ?? 1) - 1
+  const field2 = (commonField ?? fl.asInt('2') ?? 1) - 1
+  const sep = fl.asStr('t') ?? null
+  const aFlag = fl.asStr('a') ?? null
+  const vFlag = fl.asStr('v') ?? null
+  const eFlag = fl.asStr('e') ?? null
+  const oFlag = fl.asStr('o') ?? null
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
   const zeroTerminated = fl.asBool('z') || fl.asBool('zero_terminated')
