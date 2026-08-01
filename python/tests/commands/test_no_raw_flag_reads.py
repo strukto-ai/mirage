@@ -40,5 +40,6 @@ def test_commands_never_read_the_flag_bag_directly():
         for number, line in enumerate(path.read_text().splitlines(), 1):
             if RAW_READ.search(line):
                 offenders.append(f"{rel}:{number}: {line.strip()}")
-    assert not offenders, ("read flags through FlagView(flags, spec=SPECS[...]) "
-                          "or a typed parameter:\n" + "\n".join(offenders))
+    assert not offenders, (
+        "read flags through FlagView(flags, spec=SPECS[...]) "
+        "or a typed parameter:\n" + "\n".join(offenders))
