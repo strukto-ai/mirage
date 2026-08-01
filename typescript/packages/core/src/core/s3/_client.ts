@@ -103,6 +103,11 @@ export async function createS3Client(config: S3Config): Promise<S3Client> {
   if (config.region !== undefined) options.region = config.region
   if (config.endpoint !== undefined) options.endpoint = config.endpoint
   if (config.forcePathStyle === true) options.forcePathStyle = true
+  // The SDK treats `profile` as a per-client AWS_PROFILE: the default
+  // credential chain resolves from that profile in the shared credentials
+  // file. Explicit keys below still win, which is the precedence Python
+  // gets from `aioboto3.Session(profile_name=...)` plus client kwargs.
+  if (config.profile !== undefined) options.profile = config.profile
   if (config.accessKeyId !== undefined && config.secretAccessKey !== undefined) {
     options.credentials = {
       accessKeyId: config.accessKeyId,
