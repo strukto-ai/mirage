@@ -159,6 +159,9 @@ export {
   AMBIGUOUS_NAMES,
   CommandSpec,
   type CommandSpecInit,
+  type FlagValue,
+  flagKwargName,
+  FlagView,
   Operand,
   type OperandInit,
   OperandKind,
@@ -168,6 +171,7 @@ export {
   type ParsedArgsInit,
   parseCommand,
   parseToKwargs,
+  specFlagNames,
   specOf,
   SPECS,
 } from './commands/spec/index.ts'

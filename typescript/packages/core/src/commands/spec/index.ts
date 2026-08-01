@@ -14,11 +14,13 @@
 
 export { BUILTIN_SPECS as SPECS, specOf } from './builtins.ts'
 
-export { AMBIGUOUS_NAMES } from './constants.ts'
+export { AMBIGUOUS_NAMES, flagKwargName } from './constants.ts'
 export { parseCommand, parseToKwargs } from './parser.ts'
 export {
   CommandSpec,
   type CommandSpecInit,
+  type FlagValue,
+  FlagView,
   Operand,
   type OperandInit,
   OperandKind,
@@ -26,4 +28,5 @@ export {
   type OptionInit,
   ParsedArgs,
   type ParsedArgsInit,
+  specFlagNames,
 } from './types.ts'

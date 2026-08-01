@@ -271,7 +271,17 @@ export class FlagView {
 
   asInt(name: string): number | undefined {
     const value = this.flags[this.key(name)]
-    return typeof value === 'string' ? Number.parseInt(value, 10) : undefined
+    if (typeof value !== 'string') return undefined
+    // Python's int() is all-or-nothing: it accepts surrounding whitespace
+    // and underscore separators and raises on anything else. parseInt would
+    // instead take the numeric prefix of '5x' and hand back NaN for 'abc',
+    // and NaN still satisfies `number`, so a bad value would flow onward as
+    // a number rather than being rejected.
+    const text = value.trim()
+    if (!/^[+-]?\d+(?:_\d+)*$/.test(text)) {
+      throw new Error(`flag '${name}' expects an integer, got '${value}'`)
+    }
+    return Number.parseInt(text.replaceAll('_', ''), 10)
   }
 
   asStr(name: string): string | undefined {

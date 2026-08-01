@@ -32,6 +32,23 @@ describe('FlagView', () => {
     expect(fl.asList('f')).toEqual([])
   })
 
+  // Python's as_int calls int(), which raises on a partial or junk value.
+  // parseInt would take the '5' out of '5x' and return NaN for 'abc', and
+  // NaN is still a number, so a bad value would flow on undetected.
+  it('rejects a value that is not wholly an integer', () => {
+    expect(() => new FlagView({ m: '5x' }).asInt('m')).toThrow(/expects an integer/)
+    expect(() => new FlagView({ m: 'abc' }).asInt('m')).toThrow(/expects an integer/)
+    expect(() => new FlagView({ m: '' }).asInt('m')).toThrow(/expects an integer/)
+    expect(() => new FlagView({ m: '1.5' }).asInt('m')).toThrow(/expects an integer/)
+  })
+
+  it('accepts the forms Python int() accepts', () => {
+    expect(new FlagView({ m: ' 42 ' }).asInt('m')).toBe(42)
+    expect(new FlagView({ m: '-7' }).asInt('m')).toBe(-7)
+    expect(new FlagView({ m: '+7' }).asInt('m')).toBe(7)
+    expect(new FlagView({ m: '1_0' }).asInt('m')).toBe(10)
+  })
+
   it('coerces a single string to a one-element list', () => {
     expect(new FlagView({ e: 'solo' }).asList('e')).toEqual(['solo'])
   })
