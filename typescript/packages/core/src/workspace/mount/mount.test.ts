@@ -38,6 +38,7 @@ const BASIC_SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH 
 
 const OK_CMD: CommandFn = () => [null, new IOResult({ exitCode: 0 })]
 const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IOResult()]
+const HANG_CMD: CommandFn = () => new Promise(() => undefined)
 
 function makeMount(mode: MountMode = MountMode.WRITE): MountEntry {
   return new MountEntry({ prefix: '/ram/', resource: new StubResource(), mode })
@@ -216,8 +217,7 @@ describe('Mount.executeCmd', () => {
     // mount's own table).
     const m = makeMount()
     m.commandSafeguards.set('cat', new CommandSafeguard({ timeoutSeconds: 0.05 }))
-    const hang: CommandFn = () => new Promise(() => undefined)
-    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: hang })
+    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     await expect(
