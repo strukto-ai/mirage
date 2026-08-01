@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty, quietMatch } from '../../../io/stream.ts'
@@ -118,6 +120,7 @@ export async function grepGeneric(
   readdir: Readdir,
   stream: Stream,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('grep'))
   stream = cacheAwareStream(stream)
   const resolution = await resolvePatternFromFlags(
     name,
@@ -142,7 +145,7 @@ export async function grepGeneric(
   }
   const f = parseFlags(opts.flags)
   if (resolution.neverMatch) f.fixedString = false
-  const recursive = opts.flags.r === true || opts.flags.R === true
+  const recursive = fl.asBool('r') || fl.asBool('R')
 
   if (paths.length > 0) {
     const first = paths[0]

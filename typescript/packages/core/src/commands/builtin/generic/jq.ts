@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import {
   concatBytes,
   evalJsonlStream,
@@ -36,9 +38,10 @@ export async function jqGeneric(
 ): Promise<CommandFnResult> {
   // GNU jq defaults the filter to "." when no expression is given
   const expression = texts[0] ?? '.'
-  const raw = opts.flags.r === true
-  const compact = opts.flags.c === true
-  const slurp = opts.flags.s === true
+  const fl = new FlagView(opts.flags, specOf('jq'))
+  const raw = fl.asBool('r')
+  const compact = fl.asBool('c')
+  const slurp = fl.asBool('s')
 
   if (paths.length > 0) {
     const first = paths[0]

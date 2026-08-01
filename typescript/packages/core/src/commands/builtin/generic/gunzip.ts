@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -49,9 +51,10 @@ export async function gunzipGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const keep = opts.flags.k === true
-  const stdoutMode = opts.flags.c === true
-  const testMode = opts.flags.t === true
+  const fl = new FlagView(opts.flags, specOf('gunzip'))
+  const keep = fl.asBool('k')
+  const stdoutMode = fl.asBool('c')
+  const testMode = fl.asBool('t')
 
   if (paths.length === 0) {
     let source: AsyncIterable<Uint8Array>

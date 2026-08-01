@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { deflateRaw } from '../../../utils/compress.ts'
@@ -142,6 +144,7 @@ export async function zipGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('zip'))
   if (paths.length < 2) {
     return [
       null,
@@ -154,8 +157,8 @@ export async function zipGeneric(
   const archivePath = paths[0]
   const filePaths = paths.slice(1)
   if (archivePath === undefined) return [null, new IOResult()]
-  const junkPaths = opts.flags.j === true
-  const quiet = opts.flags.q === true
+  const junkPaths = fl.asBool('j')
+  const quiet = fl.asBool('q')
 
   const items: ZipItem[] = []
   const outputLines: string[] = []

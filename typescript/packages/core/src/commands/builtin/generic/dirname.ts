@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { CommandFn } from '../../config.ts'
 import { gnuDirname } from '../../../utils/path.ts'
@@ -20,6 +22,7 @@ const ENC = new TextEncoder()
 
 export const dirnameFn: CommandFn = (_accessor, _paths, texts, opts) => {
   const lines = texts.map((t) => gnuDirname(t))
-  const separator = opts.flags.z === true || opts.flags.zero === true ? '\0' : '\n'
+  const fl = new FlagView(opts.flags, specOf('dirname'))
+  const separator = fl.asBool('z') || fl.asBool('zero') ? '\0' : '\n'
   return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

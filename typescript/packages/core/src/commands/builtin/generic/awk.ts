@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -26,12 +28,11 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 function parseFlags(opts: CommandOpts): AwkFlags {
-  const rawV = opts.flags.v
-  const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
-  const rawF = opts.flags.f
-  const programFiles = Array.isArray(rawF) ? rawF : typeof rawF === 'string' ? [rawF] : []
+  const fl = new FlagView(opts.flags, specOf('awk'))
+  const assignments = fl.asList('v')
+  const programFiles = fl.asList('f')
   return {
-    fieldSeparator: typeof opts.flags.F === 'string' ? opts.flags.F : null,
+    fieldSeparator: fl.asStr('F') ?? null,
     assignments,
     programFiles,
   }

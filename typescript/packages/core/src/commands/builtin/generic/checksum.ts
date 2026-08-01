@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -45,11 +47,12 @@ function algorithmName(name: string): string {
 }
 
 function hashLine(digest: string, label: string, name: string, opts: CommandOpts): string {
-  const terminator = opts.flags.z === true || opts.flags.zero === true ? '\0' : '\n'
-  if (opts.flags.tag === true) {
+  const fl = new FlagView(opts.flags, specOf(name))
+  const terminator = fl.asBool('z') || fl.asBool('zero') ? '\0' : '\n'
+  if (fl.asBool('tag')) {
     return `${algorithmName(name)} (${label}) = ${digest}${terminator}`
   }
-  const marker = opts.flags.b === true || opts.flags.binary === true ? '*' : ' '
+  const marker = fl.asBool('b') || fl.asBool('binary') ? '*' : ' '
   return `${digest} ${marker}${label}${terminator}`
 }
 
@@ -69,6 +72,7 @@ async function checkFile(
   name: string,
   opts: CommandOpts,
 ): Promise<[Uint8Array | null, Uint8Array | null, number]> {
+  const fl = new FlagView(opts.flags, specOf(name))
   const data = DEC.decode(await materialize(stream(p)))
   const mountPrefix = mountPrefixOf(p.virtual, p.resourcePath)
   const output: string[] = []
@@ -87,23 +91,23 @@ async function checkFile(
     try {
       digest = await hashStream(stream(makePathSpec(filename, mountPrefix)), hasher)
     } catch (error) {
-      if (opts.flags.ignore_missing === true && isMissingError(error)) continue
-      if (opts.flags.status !== true) output.push(`${filename}: FAILED open or read`)
+      if (fl.asBool('ignore_missing') && isMissingError(error)) continue
+      if (!fl.asBool('status')) output.push(`${filename}: FAILED open or read`)
       failed = true
       continue
     }
     if (digest === expected) {
-      if (opts.flags.status !== true && opts.flags.quiet !== true) output.push(`${filename}: OK`)
+      if (!fl.asBool('status') && !fl.asBool('quiet')) output.push(`${filename}: OK`)
     } else {
-      if (opts.flags.status !== true) output.push(`${filename}: FAILED`)
+      if (!fl.asBool('status')) output.push(`${filename}: FAILED`)
       failed = true
     }
   }
-  if (malformed > 0 && (opts.flags.w === true || opts.flags.warn === true)) {
+  if (malformed > 0 && (fl.asBool('w') || fl.asBool('warn'))) {
     const count = malformed === 1 ? '1 line is' : `${String(malformed)} lines are`
     errors.push(`WARNING: ${count} improperly formatted`)
   }
-  if (malformed > 0 && opts.flags.strict === true) failed = true
+  if (malformed > 0 && fl.asBool('strict')) failed = true
   const stdout = output.length > 0 ? ENC.encode(`${output.join('\n')}\n`) : null
   const stderr = errors.length > 0 ? ENC.encode(`${errors.join('\n')}\n`) : null
   return [stdout, stderr, failed ? 1 : 0]
@@ -129,7 +133,8 @@ export async function checksumGeneric(
   hasher: Hasher,
   name: string,
 ): Promise<CommandFnResult> {
-  const check = opts.flags.c === true || opts.flags.check === true
+  const fl = new FlagView(opts.flags, specOf(name))
+  const check = fl.asBool('c') || fl.asBool('check')
   if (check && paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]

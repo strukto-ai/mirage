@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -119,15 +121,16 @@ export async function splitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('split'))
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
   const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].mountPath : 'x'
-  const linesValue = opts.flags.args_l ?? opts.flags.lines
-  const bytesValue = opts.flags.b ?? opts.flags.bytes
-  const numberValue = opts.flags.n ?? opts.flags.number
-  const lengthValue = opts.flags.a ?? opts.flags.suffix_length
-  const numericValue = opts.flags.d ?? opts.flags.numeric_suffixes
-  const hexValue = opts.flags.x ?? opts.flags.hex_suffixes
-  const separatorValue = opts.flags.t ?? opts.flags.separator
+  const linesValue = fl.asStr('args_l') ?? fl.asStr('lines')
+  const bytesValue = fl.asStr('b') ?? fl.asStr('bytes')
+  const numberValue = fl.asStr('n') ?? fl.asStr('number')
+  const lengthValue = fl.asStr('a') ?? fl.asStr('suffix_length')
+  const numericValue = fl.raw('d') ?? fl.raw('numeric_suffixes')
+  const hexValue = fl.raw('x') ?? fl.raw('hex_suffixes')
+  const separatorValue = fl.asStr('t') ?? fl.asStr('separator')
   const linesFlag = typeof linesValue === 'string' ? linesValue : null
   const bFlag = typeof bytesValue === 'string' ? bytesValue : null
   const nFlag = typeof numberValue === 'string' ? numberValue : null
@@ -140,8 +143,7 @@ export async function splitGeneric(
       : typeof hexValue === 'string'
         ? Number.parseInt(hexValue, 10)
         : 0
-  const additionalSuffix =
-    typeof opts.flags.additional_suffix === 'string' ? opts.flags.additional_suffix : ''
+  const additionalSuffix = fl.asStr('additional_suffix') ?? ''
   const separator =
     separatorValue === '\\0'
       ? 0

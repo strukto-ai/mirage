@@ -1,3 +1,5 @@
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -107,10 +109,11 @@ export async function numfmtGeneric(
   texts: readonly string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const toMode = typeof opts.flags.to === 'string' ? opts.flags.to : 'none'
-  const fromMode = typeof opts.flags.from === 'string' ? opts.flags.from : 'none'
-  const suffix = typeof opts.flags.suffix === 'string' ? opts.flags.suffix : ''
-  const grouping = opts.flags.grouping === true
+  const fl = new FlagView(opts.flags, specOf('numfmt'))
+  const toMode = fl.asStr('to') ?? 'none'
+  const fromMode = fl.asStr('from') ?? 'none'
+  const suffix = fl.asStr('suffix') ?? ''
+  const grouping = fl.asBool('grouping')
   let output: string[]
   if (texts.length > 0) {
     output = texts.map((value) => convertField(value, toMode, fromMode, suffix, grouping))

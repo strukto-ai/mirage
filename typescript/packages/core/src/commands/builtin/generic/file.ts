@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -29,8 +31,9 @@ export async function fileGeneric(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('file: missing operand\n') })]
   }
-  const brief = opts.flags.b === true
-  const mime = opts.flags.i === true
+  const fl = new FlagView(opts.flags, specOf('file'))
+  const brief = fl.asBool('b')
+  const mime = fl.asBool('i')
   const lines: string[] = []
   for (const p of paths) {
     const s = await stat(p)

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolvePath } from '../../utils/path.ts'
-import { AMBIGUOUS_NAMES, NUMERIC_SHORT } from './constants.ts'
+import { flagKwargName, NUMERIC_SHORT } from './constants.ts'
 import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
 
 // Copy a spelling's value onto its counterpart so the last one wins. GNU
@@ -426,9 +426,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 export function parseToKwargs(parsed: ParsedArgs): Record<string, string | boolean | string[]> {
   const result: Record<string, string | boolean | string[]> = {}
   for (const [key, value] of Object.entries(parsed.flags)) {
-    let clean = key.replace(/^-+/, '').replaceAll('-', '_')
-    clean = AMBIGUOUS_NAMES[clean] ?? clean
-    result[clean] = value
+    result[flagKwargName(key)] = value
   }
   return result
 }
