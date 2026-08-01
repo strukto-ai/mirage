@@ -27,8 +27,8 @@ const MODULES = [archive, fsMutate, hashing, listing, net, runtime, search, text
 
 export const SPECS: Record<string, CommandSpec> = {}
 for (const module of MODULES) {
-  for (const name of Object.keys(module)) {
+  for (const [name, spec] of Object.entries(module)) {
     if (name in SPECS) throw new Error(`duplicate command spec: ${name}`)
-    SPECS[name] = module[name] as CommandSpec
+    SPECS[name] = spec
   }
 }
