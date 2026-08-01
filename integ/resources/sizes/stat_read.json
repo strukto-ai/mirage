@@ -1314,6 +1314,58 @@
         "stdout": "1 match\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_email_every_message_size_matches_read",
+      "seq": 700105,
+      "targets": [
+        "email"
+      ],
+      "command": "n=0; for f in /mail/INBOX/*/*.email.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_every_attachment_size_matches_read",
+      "seq": 700106,
+      "targets": [
+        "email"
+      ],
+      "command": "n=0; for f in /mail/INBOX/*/*/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_every_message_size_matches_read",
+      "seq": 700107,
+      "targets": [
+        "gmail"
+      ],
+      "command": "n=0; for f in /mail/*/*/*.gmail.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "11 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_every_attachment_size_matches_read",
+      "seq": 700108,
+      "targets": [
+        "gmail"
+      ],
+      "command": "n=0; for f in /mail/*/*/*/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "6 match\n",
+        "stderr": ""
+      }
     }
   ]
 }
