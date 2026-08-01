@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, stripMount } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -154,10 +156,11 @@ export async function patchGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('patch'))
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
   const stripCount = typeof opts.flags.p === 'string' ? Number.parseInt(opts.flags.p, 10) : 0
-  const reverseMode = opts.flags.R === true
-  const forwardOnly = opts.flags.N === true
+  const reverseMode = fl.asBool('R')
+  const forwardOnly = fl.asBool('N')
   const iFlag = typeof opts.flags.i === 'string' ? opts.flags.i : null
   const mountPrefix = opts.mountPrefix ?? ''
   let patchData: Uint8Array | null = null

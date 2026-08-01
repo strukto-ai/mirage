@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -49,9 +51,10 @@ export async function gzipGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const decompress = opts.flags.d === true
-  const keep = opts.flags.k === true
-  const stdoutMode = opts.flags.c === true
+  const fl = new FlagView(opts.flags, specOf('gzip'))
+  const decompress = fl.asBool('d')
+  const keep = fl.asBool('k')
+  const stdoutMode = fl.asBool('c')
 
   if (paths.length === 0) {
     let source: AsyncIterable<Uint8Array>

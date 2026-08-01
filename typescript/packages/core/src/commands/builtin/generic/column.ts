@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -71,7 +73,8 @@ export async function columnGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const tMode = opts.flags.t === true
+  const fl = new FlagView(opts.flags, specOf('column'))
+  const tMode = fl.asBool('t')
   const sFlag = typeof opts.flags.s === 'string' ? opts.flags.s : null
   const oFlag = typeof opts.flags.o === 'string' ? opts.flags.o : '  '
   let raw: Uint8Array

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { CommandFn } from '../../config.ts'
 import { gnuBasename } from '../../../utils/path.ts'
@@ -19,15 +21,16 @@ import { gnuBasename } from '../../../utils/path.ts'
 const ENC = new TextEncoder()
 
 export const basenameFn: CommandFn = (_accessor, _paths, texts, opts) => {
-  const suffixValue = opts.flags.s ?? opts.flags.suffix
+  const fl = new FlagView(opts.flags, specOf('basename'))
+  const suffixValue = fl.asStr('s') ?? fl.asStr('suffix')
   const suffix = typeof suffixValue === 'string' ? suffixValue : undefined
-  const multiple = opts.flags.a === true || opts.flags.multiple === true || suffix !== undefined
+  const multiple = fl.asBool('a') || fl.asBool('multiple') || suffix !== undefined
   const lines =
     suffix !== undefined
       ? texts.map((text) => gnuBasename(text, suffix))
       : texts.length === 2 && !multiple
         ? [gnuBasename(texts[0] ?? '', texts[1])]
         : texts.map((text) => gnuBasename(text))
-  const separator = opts.flags.z === true || opts.flags.zero === true ? '\0' : '\n'
+  const separator = fl.asBool('z') || fl.asBool('zero') ? '\0' : '\n'
   return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

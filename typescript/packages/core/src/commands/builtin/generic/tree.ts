@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
@@ -110,6 +112,7 @@ export async function treeGeneric(
   readdir: (p: PathSpec) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('tree'))
   const targets =
     paths.length > 0
       ? paths
@@ -125,10 +128,10 @@ export async function treeGeneric(
   const ignoreRaw = typeof opts.flags.args_I === 'string' ? opts.flags.args_I : null
   const matchRaw = typeof opts.flags.P === 'string' ? opts.flags.P : null
   const treeOpts: TreeOpts = {
-    showHidden: opts.flags.a === true,
+    showHidden: fl.asBool('a'),
     maxDepth: depthRaw === null ? null : Number.parseInt(depthRaw, 10),
     ignorePattern: ignoreRaw,
-    dirsOnly: opts.flags.d === true,
+    dirsOnly: fl.asBool('d'),
     matchPattern: matchRaw,
   }
   const lines: string[] = []

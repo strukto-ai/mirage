@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -38,7 +40,8 @@ export async function lookGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('look: missing prefix\n') })]
   }
   const prefix = texts[0] ?? ''
-  const caseInsensitive = opts.flags.f === true
+  const fl = new FlagView(opts.flags, specOf('look'))
+  const caseInsensitive = fl.asBool('f')
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]

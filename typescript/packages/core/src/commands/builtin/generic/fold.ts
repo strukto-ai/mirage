@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -84,10 +86,11 @@ export async function foldGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('fold'))
   const widthValue = opts.flags.w ?? opts.flags.width
   const width = typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80
-  const breakSpaces = opts.flags.s === true || opts.flags.spaces === true
-  const countBytes = opts.flags.b === true || opts.flags.bytes === true
+  const breakSpaces = fl.asBool('s') || fl.asBool('spaces')
+  const countBytes = fl.asBool('b') || fl.asBool('bytes')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still fold (GNU fold).
