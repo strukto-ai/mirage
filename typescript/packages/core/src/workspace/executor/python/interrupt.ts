@@ -51,7 +51,10 @@ interface WatchdogPort {
 }
 
 // The watchdog body, identical logic in both hosts: one pending
-// countdown at a time, generation-checked at the deadline.
+// countdown at a time, generation-checked at the deadline. The reason
+// cell is stored BEFORE the interrupt cell: the interrupt write can
+// wake pyodide immediately, and disarm() must never observe the trip
+// without its reason (it would report a timeout as a plain failure).
 const WATCHDOG_BODY = `
 let timer = null;
 function onMessage(msg) {
@@ -61,8 +64,8 @@ function onMessage(msg) {
     const gen = msg.gen;
     timer = setTimeout(() => {
       if (Atomics.load(cells, 2) === gen) {
-        Atomics.store(cells, 0, 2);
         Atomics.store(cells, 1, 1);
+        Atomics.store(cells, 0, 2);
       }
     }, msg.delayMs);
   }
@@ -89,7 +92,9 @@ async function createNodeWatchdog(): Promise<WatchdogPort | null> {
     // The watchdog must never keep the process alive on its own.
     worker.unref()
     return {
-      post: (message) => worker.postMessage(message),
+      post: (message) => {
+        worker.postMessage(message)
+      },
       terminate: () => void worker.terminate(),
     }
   } catch {
