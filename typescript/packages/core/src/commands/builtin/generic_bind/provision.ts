@@ -247,7 +247,9 @@ export function makeHeadTailProvision<A extends Accessor>(
         precision: Precision.UNKNOWN,
       })
     }
-    const c = opts.flags.c
+    // head spells the byte cap 'bytes' (the canonical -c/--bytes dest);
+    // tail declares -c short-only, so its cap still arrives as 'c'.
+    const c = opts.flags.c ?? opts.flags.bytes
     if (typeof c === 'string') {
       const cBytes = Number.parseInt(c, 10)
       const total = resolved.reduce((acc, [, size]) => acc + Math.min(cBytes, size), 0)
