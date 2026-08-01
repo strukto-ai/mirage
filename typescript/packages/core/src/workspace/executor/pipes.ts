@@ -22,7 +22,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import type { JobTable } from '../../shell/job_table.ts'
-import type { Session } from '../session/session.ts'
+import { ownRecord, type Session } from '../session/session.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground } from './jobs.ts'
@@ -256,12 +256,12 @@ export async function handleSubshell(
   agentId: string | null = null,
 ): Promise<Result> {
   const savedCwd = session.cwd
-  const savedEnv = { ...session.env }
+  const savedEnv = ownRecord(session.env)
   const savedOptions = { ...session.shellOptions }
   const savedReadonly = new Set(session.readonlyVars)
-  const savedArrays: Record<string, ShellArray> = {}
+  const savedArrays: Record<string, ShellArray> = ownRecord()
   for (const [k, v] of Object.entries(session.arrays)) savedArrays[k] = [...v]
-  const savedFunctions = { ...session.functions }
+  const savedFunctions = ownRecord(session.functions)
   const savedPositional = [...session.positionalArgs]
   const savedLastBgJob = session.lastBgJobId
   const savedGetoptsPos = session.getoptsPos

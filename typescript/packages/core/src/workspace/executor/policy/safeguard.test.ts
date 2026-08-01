@@ -101,3 +101,11 @@ describe('resolveAcrossMounts', () => {
     expect(merged?.maxLines).toBe(10)
   })
 })
+
+describe('prototype-colliding command names', () => {
+  it('falls through to the fallback instead of an Object.prototype member', () => {
+    const sg = resolveSafeguard('toString')
+    expect(sg).toBe(FALLBACK_SAFEGUARD)
+    expect(resolveSafeguard('constructor')).toBe(FALLBACK_SAFEGUARD)
+  })
+})

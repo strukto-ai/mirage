@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../../../commands/builtin/utils/safeguard.ts'
 import { Runtime } from '../../runtime.ts'
 import { EvalError } from '../../runtime_errors.ts'
 import { EVALUATOR, type Evaluator } from '../../runtime_mixin.ts'
@@ -23,6 +24,7 @@ import type {
   RunResult,
   RuntimeOptions,
 } from '../../runtime_types.ts'
+import { createPyodideInterrupter, type PyodideInterrupter } from '../interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
 import {
   createMirageBridge,
@@ -112,6 +114,11 @@ const PYODIDE_CONFIG_KEYS: readonly string[] = [
   'home',
 ]
 
+// One-shot eval is bounded like quickjs's: nothing above the runtime
+// can stop a hung guest on this thread, so the runtime owns its own
+// interrupt. Console (repl) sessions stay unbounded, matching python.
+const EVAL_INTERRUPT_SECONDS = 10
+
 export class PyodideRuntime extends Runtime implements Evaluator {
   readonly name = PYODIDE_RUNTIME
   readonly [EVALUATOR] = true as const
@@ -128,6 +135,11 @@ export class PyodideRuntime extends Runtime implements Evaluator {
   private listMounts: () => string[] = () => []
   private readonly home: string | null
   private bridge: MirageBridge | null = null
+  // The guest executes on this event loop, so only the watchdog-backed
+  // interrupt buffer can stop a busy loop (see interrupt.ts); null
+  // where SharedArrayBuffer/workers are unavailable (runs unbounded).
+  private interrupter: PyodideInterrupter | null = null
+  private interrupterTried = false
 
   constructor(options: RuntimeOptions<PyodideConfig> = {}) {
     super(options, PyodideRuntime.commands, PYODIDE_CONFIG_KEYS)
@@ -183,8 +195,12 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     const inputsPy = pyodide.toPy(opts.inputs ?? {})
     pyodide.globals.set('_user_code', code)
     pyodide.globals.set('_eval_inputs', inputsPy)
+    const armed = this.interrupter !== null ? this.interrupter.arm(EVAL_INTERRUPT_SECONDS) : null
     try {
       await pyodide.runPythonAsync(PYTHON_EVAL_WRAPPER)
+      if (armed?.disarm() === 'deadline') {
+        throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
+      }
       const resultProxy = pyodide.globals.get('_eval_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -211,7 +227,15 @@ export class PyodideRuntime extends Runtime implements Evaluator {
         exitCode: 0,
         status: 'complete',
       }
+    } catch (err) {
+      if (armed?.disarm() === 'deadline') {
+        throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`, {
+          cause: err,
+        })
+      }
+      throw err
     } finally {
+      armed?.disarm()
       pyodide.globals.delete?.('_user_code')
       pyodide.globals.delete?.('_eval_inputs')
       pyodide.globals.delete?.('_eval_result')
@@ -234,12 +258,23 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     this.pyodide = null
     this.initPromise = null
     this.bridge = null
+    this.interrupter?.close()
+    this.interrupter = null
+    this.interrupterTried = false
+  }
+
+  private async wireInterruptIfNeeded(pyodide: PyodideInterface): Promise<void> {
+    if (this.interrupterTried || pyodide.setInterruptBuffer === undefined) return
+    this.interrupterTried = true
+    this.interrupter = await createPyodideInterrupter()
+    if (this.interrupter !== null) pyodide.setInterruptBuffer(this.interrupter.view)
   }
 
   private async ensureLoaded(): Promise<PyodideInterface> {
     if (this.pyodide !== null) {
       if (this.bootstrapPromise !== null) await this.bootstrapPromise
       await this.wireBridgeIfNeeded(this.pyodide)
+      await this.wireInterruptIfNeeded(this.pyodide)
       return this.pyodide
     }
     this.initPromise ??= loadPyodideRuntime(this.home ?? undefined)
@@ -260,6 +295,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       await this.bootstrapPromise
     }
     await this.wireBridgeIfNeeded(this.pyodide)
+    await this.wireInterruptIfNeeded(this.pyodide)
     return this.pyodide
   }
 
@@ -302,8 +338,18 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     pyodide.globals.set('_stdin_bytes', stdinBytes)
     pyodide.globals.set('_user_globals', userGlobalsPy)
 
+    // Deadline trip -> exit 124 via CommandTimeoutError; a kill signal
+    // raises KeyboardInterrupt in the guest, whose wrapper-reported
+    // exit code (1) stands, like the local runtime's killed child.
+    const armed =
+      this.interrupter !== null
+        ? this.interrupter.arm(args.timeoutSeconds ?? null, args.signal)
+        : null
     try {
       await pyodide.runPythonAsync(PYTHON_WRAPPER)
+      if (armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
+        throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+      }
       const resultProxy = pyodide.globals.get('_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -327,7 +373,15 @@ export class PyodideRuntime extends Runtime implements Evaluator {
         stderr: bridgeStderr(arr[1]),
         exitCode: arr[2],
       }
+    } catch (err) {
+      // The interrupt can also fire between wrapper statements, where
+      // KeyboardInterrupt escapes as a rejection instead of a result.
+      if (armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
+        throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+      }
+      throw err
     } finally {
+      armed?.disarm()
       pyodide.globals.delete?.('_user_code')
       pyodide.globals.delete?.('_argv')
       pyodide.globals.delete?.('_merged_env')

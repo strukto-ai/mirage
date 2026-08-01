@@ -242,7 +242,11 @@ export async function decideLine(
         })
       }
       return {
-        bindings: { ...staticBindings, ...overlay },
+        bindings: Object.assign(
+          Object.create(null) as Record<string, Runtime>,
+          staticBindings,
+          overlay,
+        ),
         fallback: catchAll(entries),
       }
     }
@@ -254,8 +258,12 @@ export async function decideLine(
     if (wants) willing.push(entry)
   }
   // Every captured command resolves: to its first willing capturer, or
-  // to null (all capturers refused -> admission failure).
-  const bindings: Record<string, Runtime | null> = {}
+  // to null (all capturers refused -> admission failure). Null
+  // prototype: captures are arbitrary command names.
+  const bindings: Record<string, Runtime | null> = Object.create(null) as Record<
+    string,
+    Runtime | null
+  >
   for (const entry of entries) {
     for (const command of entry.captures) bindings[command] = null
   }

@@ -22,12 +22,18 @@ import { QuickJsRuntime } from './js/quickjs.ts'
 // is derived from each class's captures, never hand-maintained.
 export const RUNTIMES = [PyodideRuntime, MontyRuntime, QuickJsRuntime] as const
 
-const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = {
-  pyodide: PyodideRuntime,
-  monty: MontyRuntime,
-  quickjs: QuickJsRuntime,
-  vfs: VfsRuntime,
-}
+// Null prototype: runtime names come from config, and a name like
+// `constructor` must miss instead of resolving an `Object.prototype`
+// member as a runtime class.
+const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = Object.assign(
+  Object.create(null) as Record<string, new (options?: RuntimeOptions<never>) => Runtime>,
+  {
+    pyodide: PyodideRuntime,
+    monty: MontyRuntime,
+    quickjs: QuickJsRuntime,
+    vfs: VfsRuntime,
+  },
+)
 
 /** The runtime classes that capture a command, preference order. */
 export function candidates(command: string): (typeof RUNTIMES)[number][] {

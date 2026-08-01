@@ -46,6 +46,7 @@ export interface PyodideInterface {
   loadPackagesFromImports?: (code: string, options?: Record<string, unknown>) => Promise<unknown>
   registerJsModule: (name: string, module: unknown) => void
   unregisterJsModule?: (name: string) => void
+  setInterruptBuffer?: (buffer: Int32Array | Uint8Array) => void
   FS: PyodideFS
 }
 

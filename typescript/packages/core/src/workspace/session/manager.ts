@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Session } from './session.ts'
+import { ownRecord, Session } from './session.ts'
 import { RAMSessionStore } from './ram.ts'
 import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
 import type { MountMode } from '../../types.ts'
@@ -92,7 +92,7 @@ export class SessionManager {
   }
 
   set env(value: Record<string, string>) {
-    this.defaultSession().env = value
+    this.defaultSession().env = ownRecord(value)
   }
 
   /**

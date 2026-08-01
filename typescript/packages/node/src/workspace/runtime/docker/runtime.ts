@@ -66,6 +66,12 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
           code: code ?? 1,
         })
       })
+      // EPIPE means the container command exited without draining its
+      // stdin (`head`-like); python's communicate() suppresses the
+      // matching BrokenPipeError, so it is not an error here either.
+      child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EPIPE') reject(error)
+      })
       if (stdin !== null) child.stdin.write(stdin)
       child.stdin.end()
     })

@@ -543,7 +543,11 @@ export class Workspace {
         })
       }
       return {
-        bindings: { ...this.runtimeBindings, ...overlay },
+        bindings: Object.assign(
+          Object.create(null) as Record<string, Runtime>,
+          this.runtimeBindings,
+          overlay,
+        ),
         fallback: catchAll(this.runtimeEntries),
       }
     }

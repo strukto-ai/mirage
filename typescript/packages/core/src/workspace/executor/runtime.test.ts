@@ -84,6 +84,28 @@ describe('bindCommands', () => {
       /duplicate runtime entry: 'fake'/,
     )
   })
+
+  it('captures named after Object.prototype members bind like any other', () => {
+    class ProtoRuntime extends Runtime {
+      readonly name = 'proto'
+
+      constructor() {
+        super({ captures: ['toString', 'constructor'] })
+      }
+
+      run(_args: RunArgs): Promise<RunResult> {
+        return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
+      }
+    }
+    const rt = new ProtoRuntime()
+    const bindings = bindCommands([rt, new VfsRuntime()])
+    // A helper defeats TS resolving `.toString` to the Object method.
+    const bound = (record: Record<string, Runtime>, name: string): Runtime | undefined =>
+      record[name]
+    expect(bound(bindings, 'toString')).toBe(rt)
+    expect(bound(bindings, 'constructor')).toBe(rt)
+    expect(bound(runtimeBindingsFor([rt], 'proto'), 'toString')).toBe(rt)
+  })
 })
 
 describe('buildRuntime option validation', () => {

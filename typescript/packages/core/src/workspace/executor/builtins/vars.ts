@@ -24,7 +24,7 @@ import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
-import { sessionEntry } from '../../session/session.ts'
+import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../command.ts'
@@ -315,7 +315,7 @@ export async function handleEnv(
 
   const dropSet = new Set(unset)
   const source = ignoreEnv ? {} : session.env
-  const base: Record<string, string> = {}
+  const base: Record<string, string> = ownRecord()
   for (const [k, v] of Object.entries(source)) {
     if (!dropSet.has(k)) base[k] = v
   }

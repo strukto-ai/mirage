@@ -114,7 +114,8 @@ describe('command timeout', () => {
 
 // python3 is guarded like any other command: the same safeguard surface,
 // the same enforcement point, exit 124. ~2s of interpreter work against a
-// 0.25s budget; monty's worker finishes in the background before close.
+// 0.25s budget; the deadline SIGKILLs monty's worker, so close() never
+// waits on it.
 const SLOW_SCRIPT = "printf 'n = 0\\nfor i in range(100000000):\\n    n = n + 1\\n' > /data/slow.py"
 
 describe('python3 command timeout', () => {
@@ -201,6 +202,47 @@ describe('python3 command timeout', () => {
       expect(r.exitCode).toBe(124)
       expect(probe.aborted).toBe(true)
     } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('a busy pyodide loop trips the safeguard instead of wedging the event loop', async () => {
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.EXEC,
+        ops: registry,
+        shellParser: parser,
+        runtimes: ['pyodide', 'vfs'],
+        commandSafeguards: {
+          '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.5 }) },
+        },
+      },
+    )
+    try {
+      const started = Date.now()
+      const r = await ws.execute('cd /data && python3 -c "while True: pass"')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('timed out')
+      expect(Date.now() - started).toBeLessThan(60_000)
+    } finally {
+      await ws.close()
+    }
+  }, 120_000)
+
+  it('a busy monty loop trips the safeguard and the worker is reclaimed', async () => {
+    const ws = buildPyWs({
+      '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.25 }) },
+    })
+    try {
+      const r = await ws.execute('cd /data && python3 -c "while True: pass"')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+    } finally {
+      // close() must not hang on the killed worker's session.
       await ws.close()
     }
   }, 60_000)

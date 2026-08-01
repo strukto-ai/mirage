@@ -17,14 +17,20 @@ import { CommandSafeguard } from '../../../types.ts'
 const DEFAULT_MAX_LINES = 2000
 const DEFAULT_TIMEOUT_SECONDS = 600
 
-export const DEFAULT_COMMAND_SAFEGUARDS: Record<string, CommandSafeguard> = Object.fromEntries(
-  ['cat', 'grep', 'rg', 'head', 'tail'].map((name) => [
-    name,
-    new CommandSafeguard({
-      maxLines: DEFAULT_MAX_LINES,
-      timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-    }),
-  ]),
+// Null prototype: command names are script-controlled, so a name like
+// `toString` must fall through to the fallback instead of resolving an
+// `Object.prototype` member as a safeguard.
+export const DEFAULT_COMMAND_SAFEGUARDS: Record<string, CommandSafeguard> = Object.assign(
+  Object.create(null) as Record<string, CommandSafeguard>,
+  Object.fromEntries(
+    ['cat', 'grep', 'rg', 'head', 'tail'].map((name) => [
+      name,
+      new CommandSafeguard({
+        maxLines: DEFAULT_MAX_LINES,
+        timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+      }),
+    ]),
+  ),
 )
 
 export const FALLBACK_SAFEGUARD = new CommandSafeguard({ timeoutSeconds: DEFAULT_TIMEOUT_SECONDS })

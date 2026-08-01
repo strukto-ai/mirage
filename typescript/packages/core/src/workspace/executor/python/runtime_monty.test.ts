@@ -99,6 +99,29 @@ describe('MontyRuntime', () => {
     expect(text(result.stderr)).toContain('SyntaxError')
   }, 30_000)
 
+  it('a deadline SIGKILLs the busy worker and reports exit 124', async () => {
+    const rt = make()
+    await expect(
+      rt.run({ code: 'while True: pass', args: [], env: {}, stdin: null, timeoutSeconds: 0.3 }),
+    ).rejects.toThrow(/monty: timed out after 0.3s/)
+  }, 30_000)
+
+  it('an aborted signal SIGKILLs the busy worker and reports exit 1', async () => {
+    const rt = make()
+    const ctrl = new AbortController()
+    setTimeout(() => {
+      ctrl.abort()
+    }, 200)
+    const result = await rt.run({
+      code: 'while True: pass',
+      args: [],
+      env: {},
+      stdin: null,
+      signal: ctrl.signal,
+    })
+    expect(result.exitCode).toBe(1)
+  }, 30_000)
+
   it('runtime errors keep prior stdout', async () => {
     const result = await run(make(), "print('before')\n1/0")
     expect(result.exitCode).toBe(1)

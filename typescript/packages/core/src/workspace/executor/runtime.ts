@@ -235,7 +235,8 @@ export function runtimeBindingsFor(
   }
   for (const entry of entries) {
     if (entry.name === name) {
-      const bindings: Record<string, Runtime> = {}
+      // Null prototype: captures are arbitrary command names.
+      const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
       for (const command of entry.captures) bindings[command] = entry
       return bindings
     }
@@ -254,7 +255,9 @@ export function runtimeBindingsFor(
  * config mistake.
  */
 export function bindCommands(entries: readonly Runtime[]): Record<string, Runtime> {
-  const bindings: Record<string, Runtime> = {}
+  // Null prototype: captures are arbitrary command names, so a capture
+  // like `toString` must bind instead of reading as already-present.
+  const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
   const seen = new Set<string>()
   for (const entry of entries) {
     if (seen.has(entry.name)) {

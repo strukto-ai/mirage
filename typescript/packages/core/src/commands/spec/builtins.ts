@@ -20,7 +20,7 @@ export function specOf(name: string): CommandSpec {
   return spec
 }
 
-export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freeze({
+const SPEC_TABLE: Record<string, CommandSpec> = {
   ls: new CommandSpec({
     options: [
       new Option({ short: '-l' }),
@@ -1159,4 +1159,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
-})
+}
+
+// Null prototype: command names are script-controlled, so a name like
+// `toString` must miss instead of resolving an `Object.prototype`
+// member as a spec.
+export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freeze(
+  Object.setPrototypeOf(SPEC_TABLE, null) as Record<string, CommandSpec>,
+)

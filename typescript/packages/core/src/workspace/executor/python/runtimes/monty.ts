@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../../../commands/builtin/utils/safeguard.ts'
 import { Runtime } from '../../runtime.ts'
 import { EvalError } from '../../runtime_errors.ts'
 import { EVALUATOR, type Evaluator } from '../../runtime_mixin.ts'
@@ -35,6 +36,7 @@ export class MontyUnavailableError extends Error {
 // Structural views of @pydantic/monty so its types never leak into our
 // public .d.ts (the package is an optional peer dependency).
 interface MontySessionLike {
+  readonly workerPid?: number
   feedRun(code: string, options?: Record<string, unknown>): Promise<unknown>
   close(): Promise<void>
 }
@@ -58,6 +60,40 @@ interface MontyDisplayableError extends Error {
 interface MirageEntryLike {
   path: string
   isDir: boolean
+}
+
+// One-shot eval is bounded like quickjs's: nothing above the runtime
+// can stop a hung guest, so the runtime owns its own interrupt.
+const EVAL_INTERRUPT_SECONDS = 10
+
+const INTERRUPTED = Symbol('interrupted')
+
+interface RunInterruption {
+  promise: Promise<typeof INTERRUPTED>
+  timedOut: { value: boolean }
+  dispose: () => void
+}
+
+/**
+ * Hard-stop one monty worker. The binding offers no cancel: feedRun
+ * has no signal and session.close() waits for the in-flight turn
+ * (probed live), so the only way to stop a busy guest is to kill its
+ * worker process — which poisons the session (the pool discards and
+ * replaces the worker) and settles the pending feedRun. The pid is
+ * only readable while the session is idle, so callers capture it
+ * before feeding. Python needs none of this: cancelling run_async
+ * halts the interpreter.
+ */
+function killWorker(pid: number | undefined): void {
+  if (pid === undefined) return
+  const proc = (globalThis as { process?: { kill?: (pid: number, signal?: string) => void } })
+    .process
+  if (typeof proc?.kill !== 'function') return
+  try {
+    proc.kill(pid, 'SIGKILL')
+  } catch {
+    // the worker may already have exited; nothing left to reclaim
+  }
 }
 
 function displayError(err: unknown): string {
@@ -120,10 +156,63 @@ export class MontyRuntime extends Runtime implements Evaluator {
   async run(args: RunArgs): Promise<RunResult> {
     const pool = await this.ensurePool()
     const session = await pool.checkout()
+    // Monty executes on its own worker process, so the event loop stays
+    // live to observe the safeguard deadline and the kill signal; a trip
+    // SIGKILLs the worker (see killWorker). Deadline -> exit 124 via
+    // CommandTimeoutError, kill -> exit 1 like the local runtime.
+    const workerPid = session.workerPid
+    const interruption = this.installInterruption(args.signal, args.timeoutSeconds)
     try {
-      return await this.feedOne(session, args.code, args)
+      const run = this.feedOne(session, args.code, args)
+      const winner = await Promise.race([run, interruption.promise])
+      if (winner !== INTERRUPTED) return winner
+      run.catch(() => undefined)
+      killWorker(workerPid)
+      if (interruption.timedOut.value && args.timeoutSeconds !== undefined) {
+        throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+      }
+      return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
     } finally {
+      interruption.dispose()
       await session.close()
+    }
+  }
+
+  private installInterruption(
+    signal: AbortSignal | undefined,
+    timeoutSeconds: number | undefined,
+  ): RunInterruption {
+    const timedOut = { value: false }
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let removeAbort: (() => void) | null = null
+    const promise = new Promise<typeof INTERRUPTED>((resolve) => {
+      if (timeoutSeconds !== undefined && timeoutSeconds > 0) {
+        timer = setTimeout(() => {
+          timedOut.value = true
+          resolve(INTERRUPTED)
+        }, timeoutSeconds * 1000)
+      }
+      if (signal !== undefined) {
+        if (signal.aborted) {
+          resolve(INTERRUPTED)
+          return
+        }
+        const onAbort = (): void => {
+          resolve(INTERRUPTED)
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+        removeAbort = () => {
+          signal.removeEventListener('abort', onAbort)
+        }
+      }
+    })
+    return {
+      promise,
+      timedOut,
+      dispose: () => {
+        if (timer !== null) clearTimeout(timer)
+        if (removeAbort !== null) removeAbort()
+      },
     }
   }
 
@@ -165,8 +254,25 @@ export class MontyRuntime extends Runtime implements Evaluator {
       os: this.buildOsCallback(module, {}),
     }
     const enc = new TextEncoder()
+    // One-shot evals get the quickjs-style 10s bound (the policy layer
+    // above times out but cannot stop the worker; SIGKILLing it does).
+    // Console sessions stay unbounded, matching python where
+    // cancellation is ambient.
+    const workerPid = session.workerPid
+    const interruption =
+      opts.session === undefined
+        ? this.installInterruption(undefined, EVAL_INTERRUPT_SECONDS)
+        : null
     try {
-      const value = toEvalValue(await session.feedRun(code, options))
+      const fed = session.feedRun(code, options)
+      const winner =
+        interruption !== null ? await Promise.race([fed, interruption.promise]) : await fed
+      if (winner === INTERRUPTED) {
+        fed.catch(() => undefined)
+        killWorker(workerPid)
+        throw new EvalError(`monty eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
+      }
+      const value = toEvalValue(winner)
       return {
         value,
         stdout: enc.encode(out.join('')),
@@ -216,6 +322,7 @@ export class MontyRuntime extends Runtime implements Evaluator {
       }
       throw caught
     } finally {
+      interruption?.dispose()
       if (opts.session === undefined) await session.close()
     }
   }
@@ -301,8 +408,10 @@ export class MontyRuntime extends Runtime implements Evaluator {
     const notHandled = module.NOT_HANDLED
     return (name: string, args: unknown[]): unknown => {
       if (name === 'os.getenv') {
+        // hasOwn, not `in`: the guest picks the key, so a name like
+        // `toString` must miss instead of leaking a host function.
         const key = String(args[0])
-        if (key in env) return env[key]
+        if (Object.hasOwn(env, key)) return env[key]
         return args.length > 1 ? args[1] : null
       }
       if (bridge === null) return notHandled

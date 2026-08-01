@@ -463,7 +463,9 @@ describe('handlePrintf', () => {
     const s = new Session({ sessionId: 'test' })
     expect(handlePrintf(['-v', '__proto__[0]', 'hi'], s)[1].exitCode).toBe(0)
     expect(Object.hasOwn(s.arrays, '__proto__')).toBe(true)
-    expect(Object.getPrototypeOf(s.arrays)).toBe(Object.prototype)
+    // Session records are null-prototype (ownRecord), so there is no
+    // prototype to corrupt in the first place.
+    expect(Object.getPrototypeOf(s.arrays)).toBe(null)
     expect(({} as Record<string, unknown>)[0]).toBeUndefined()
   })
 

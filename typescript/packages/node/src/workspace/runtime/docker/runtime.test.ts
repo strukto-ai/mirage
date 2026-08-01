@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import type { RuntimeOptions } from '@struktoai/mirage-core'
@@ -103,5 +106,29 @@ describe('DockerRuntime', () => {
     const runtime = buildRuntime('docker', { config: { container: 'cid-42' } })
     expect(runtime).toBeInstanceOf(DockerRuntime)
     expect(runtime.captures).toEqual(['*'])
+  })
+})
+
+// The real spawn path: a container command that exits without draining
+// its stdin EPIPEs the pipe. Without the stdin error guard the stream's
+// unhandled 'error' event crashes the whole process (python suppresses
+// the matching BrokenPipeError inside communicate()). A fake `docker`
+// on PATH that ignores stdin reproduces it against the real spawn.
+describe.skipIf(process.platform === 'win32')('DockerRuntime stdin EPIPE', () => {
+  it('a command that ignores a large stdin resolves instead of crashing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fake-docker-'))
+    const fake = join(dir, 'docker')
+    await writeFile(fake, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const savedPath = process.env.PATH
+    process.env.PATH = `${dir}:${savedPath ?? ''}`
+    try {
+      const runtime = new DockerRuntime({ config: { container: 'cid-42' } })
+      const big = new Uint8Array(4 * 1024 * 1024)
+      const result = await runtime.execLine('head -1', big, {}, '/')
+      expect(result.exitCode).toBe(0)
+    } finally {
+      process.env.PATH = savedPath
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -42,6 +42,19 @@ export function setSessionEntry<T>(record: Record<string, T>, name: string, valu
   })
 }
 
+/**
+ * A copy of `record` with a null prototype. Session records (env,
+ * functions, arrays) hold script-controlled names, so they must not
+ * inherit from `Object.prototype`: on a plain object, reading a name
+ * like `toString` hands back an inherited function and assigning
+ * `__proto__` runs the inherited setter instead of storing the value.
+ * With no prototype, every name is an ordinary key. Python's dicts
+ * need no equivalent.
+ */
+export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null) as Record<string, T>, record)
+}
+
 export interface SessionInit {
   sessionId: string
   cwd?: string
@@ -122,14 +135,14 @@ export class Session {
     this.sessionId = init.sessionId
     this.errexitImmune = false
     this.cwd = init.cwd ?? '/'
-    this.env = init.env ?? {}
+    this.env = ownRecord(init.env)
     this.createdAt = init.createdAt ?? Date.now() / 1000
-    this.functions = init.functions ?? {}
+    this.functions = ownRecord(init.functions)
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
     this.shellOptions = init.shellOptions ?? {}
     this.readonlyVars = init.readonlyVars ?? new Set()
-    this.arrays = init.arrays ?? {}
+    this.arrays = ownRecord(init.arrays)
     this.mountModes = init.mountModes ?? null
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null

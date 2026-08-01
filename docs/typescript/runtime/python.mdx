@@ -109,9 +109,13 @@ central point. A run that exceeds `timeout_seconds` answers with exit
 other command; `max_bytes` and `max_lines` cap its output the same
 way. There is no python3-specific limit surface.
 
-One caveat: the guard bounds how long a run may *answer*, not the
-interpreter itself. A run that ignores the deadline keeps its
-interpreter busy in the background until it finishes (monty runs on a
-crash-isolated worker; pyodide shares the event loop, so prefer monty
-for untrusted code). Give untrusted code a finite workload, or run it
-behind a sandboxed deployment.
+The deadline stops the interpreter, not just the answer. Monty's
+worker process is SIGKILLed when its run trips the deadline (or a
+background job is killed), so a runaway loop never keeps burning.
+Pyodide shares the event loop with the workspace, so the runtime arms
+its interrupt buffer from a watchdog thread: the guest gets a
+`KeyboardInterrupt` at the deadline and the run answers 124 even for
+a busy `while True` loop. The watchdog needs `SharedArrayBuffer`
+(always present in Node; in a browser only on cross-origin isolated
+pages) — without it, a busy pyodide loop blocks the event loop until
+it finishes, so prefer monty for untrusted code there.

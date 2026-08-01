@@ -223,7 +223,8 @@ export class MountEntry {
   }
 
   filetypeHandlers(cmdName: string): Record<string, CommandFn> {
-    const fns: Record<string, CommandFn> = {}
+    // Null prototype: filetype names are registration-controlled.
+    const fns: Record<string, CommandFn> = Object.create(null) as Record<string, CommandFn>
     for (const [key, rc] of this.cmds) {
       if (rc.name === cmdName && rc.filetype !== null) {
         if (!(rc.filetype in fns)) fns[rc.filetype] = rc.fn
