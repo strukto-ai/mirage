@@ -35,6 +35,11 @@ export function flagKwargName(flag: string): string {
 
 export const NUMERIC_SHORT = /^-\d+$/
 
+// Value shape accepted by an int-typed option: optional sign plus digits,
+// the portable core of Python int() and argparse (no whitespace, no
+// underscores, so both languages accept exactly the same strings).
+export const INT_VALUE = /^[+-]?\d+$/
+
 // GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
 // (plus ripgrep and jq upstream docs). Everything else exits 1.
 // Commands whose `Try '--help'` hint line is prefixed with the command

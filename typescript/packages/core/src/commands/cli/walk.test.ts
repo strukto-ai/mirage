@@ -256,3 +256,84 @@ describe('walk', () => {
     expect(ok.groupFlags).toEqual({ '--token': 't' })
   })
 })
+
+describe('walk argparse/git alignment', () => {
+  it('resolves an alias to its canonical verb', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      subcommands: [
+        new CLISpec({
+          name: 'checkout',
+          aliases: ['co'],
+          description: 'Switch branches',
+          fn: verb,
+        }),
+      ],
+    })
+    const result = walk('tool', spec, ['co', 'x'])
+    expect(result.leaf).not.toBeNull()
+    expect(result.path).toEqual(['checkout'])
+    expect(result.argv).toEqual(['x'])
+  })
+
+  it('renders aliases beside the canonical name', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      subcommands: [
+        new CLISpec({
+          name: 'checkout',
+          aliases: ['co', 'cout'],
+          description: 'Switch branches',
+          fn: verb,
+        }),
+      ],
+    })
+    const listing = walk('tool', spec, [])
+    expect(text(listing.output)).toContain('  checkout (co, cout)  Switch branches')
+  })
+
+  it('expands a unique group long prefix like git', () => {
+    const result = walk('gws', tree(), ['--verb', '--verb', 'gmail', 'send'])
+    expect(result.leaf).not.toBeNull()
+    expect(result.groupFlags['--verbose']).toBe(2)
+  })
+
+  it('refuses an ambiguous group prefix with git wording', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [
+        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--count' }),
+      ],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const result = walk('tool', spec, ['--co', 'run'])
+    expect(result.exitCode).toBe(129)
+    expect(
+      text(result.output).startsWith('error: ambiguous option: co (could be --context or --count)'),
+    ).toBe(true)
+  })
+
+  it('reaches the injected help through a prefix', () => {
+    const full = walk('gws', tree(), ['--help'])
+    const abbreviated = walk('gws', tree(), ['--hel'])
+    expect(abbreviated.exitCode).toBe(0)
+    expect(abbreviated.output).toEqual(full.output)
+  })
+
+  it('refuses a non-integer int-typed group value with git wording', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ long: '--depth', valueKind: OperandKind.TEXT, type: 'int' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const bad = walk('tool', spec, ['--depth', 'x', 'run'])
+    expect(bad.exitCode).toBe(129)
+    expect(text(bad.output).startsWith("error: option '--depth' expects a numerical value")).toBe(
+      true,
+    )
+    const ok = walk('tool', spec, ['--depth', '-3', 'run'])
+    expect(ok.leaf).not.toBeNull()
+    expect(ok.groupFlags).toEqual({ '--depth': '-3' })
+  })
+})

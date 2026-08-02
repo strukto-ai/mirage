@@ -14,7 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  ambiguousOptionError,
   extraOperandError,
+  invalidIntError,
   invalidArgumentError,
   missingRequiredError,
   missingValueError,
@@ -114,6 +116,28 @@ describe('missingRequiredError', () => {
     const [msg, code] = missingRequiredError('mycmd', '--out')
     expect(new TextDecoder().decode(msg)).toBe(
       "mycmd: option '--out' is required\nTry 'mycmd --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+  })
+})
+
+describe('ambiguousOptionError', () => {
+  it('matches the GNU shape', () => {
+    const [msg, code] = ambiguousOptionError('grep', '--c', ['--context', '--color', '--count'])
+    expect(new TextDecoder().decode(msg)).toBe(
+      "grep: option '--c' is ambiguous; possibilities: '--context' '--color' '--count'\n" +
+        "Try 'grep --help' for more information.\n",
+    )
+    expect(code).toBe(2)
+  })
+})
+
+describe('invalidIntError', () => {
+  it('mirrors argparse wording', () => {
+    const [msg, code] = invalidIntError('mycli', '--port', 'abc')
+    expect(new TextDecoder().decode(msg)).toBe(
+      "mycli: invalid int value: 'abc' for '--port'\n" +
+        "Try 'mycli --help' for more information.\n",
     )
     expect(code).toBe(1)
   })

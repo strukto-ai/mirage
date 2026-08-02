@@ -697,3 +697,84 @@ describe('multiple + default', () => {
     expect(typed.flags['--file']).toEqual(['/data/a', '/data/b'])
   })
 })
+
+describe('long-option abbreviation', () => {
+  it('expands a unique prefix like getopt_long', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--recursive' }), new Option({ long: '--count' })],
+    })
+    const parsed = parseCommand(spec, ['--rec', 'x'], '/')
+    expect(parsed.flags['--recursive']).toBe(true)
+    expect(parsed.invalidOptions).toEqual([])
+    expect(parsed.ambiguousOptions).toEqual([])
+  })
+
+  it('reports ambiguous prefixes with possibilities in declaration order', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--color', valueOptional: true, valueKind: OperandKind.TEXT }),
+        new Option({ long: '--count' }),
+      ],
+    })
+    const parsed = parseCommand(spec, ['--c'], '/')
+    expect(parsed.ambiguousOptions).toEqual([['--c', ['--context', '--color', '--count']]])
+    expect(parsed.invalidOptions).toEqual([])
+  })
+
+  it('lets an exact long win over a longer spelling', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--binary' }),
+        new Option({ long: '--binary-files', valueKind: OperandKind.TEXT }),
+      ],
+    })
+    const parsed = parseCommand(spec, ['--binary'], '/')
+    expect(parsed.flags['--binary']).toBe(true)
+    expect(parsed.ambiguousOptions).toEqual([])
+  })
+
+  it('carries attached and detached values through abbreviation', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--color', valueOptional: true, valueKind: OperandKind.TEXT }),
+        new Option({ long: '--exclude', valueKind: OperandKind.TEXT }),
+      ],
+    })
+    expect(parseCommand(spec, ['--colo=never'], '/').flags['--color']).toBe('never')
+    expect(parseCommand(spec, ['--excl', 'tmp'], '/').flags['--exclude']).toBe('tmp')
+  })
+
+  it('keeps exact-only matching for free-text commands', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--verbose' })],
+      rest: new Operand({ kind: OperandKind.TEXT }),
+    })
+    const parsed = parseCommand(spec, ['--verb', 'hi'], '/')
+    expect(parsed.flags['--verbose']).toBeUndefined()
+    expect(parsed.texts()).toEqual(['--verb', 'hi'])
+  })
+})
+
+describe('int-typed values', () => {
+  it('reports a non-integer value, never throws', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--port', valueKind: OperandKind.TEXT, type: 'int' })],
+    })
+    const parsed = parseCommand(spec, ['--port', 'abc'], '/')
+    expect(parsed.invalidIntOptions).toEqual([['--port', 'abc']])
+    const ok = parseCommand(spec, ['--port', '-42'], '/')
+    expect(ok.invalidIntOptions).toEqual([])
+    expect(ok.flags['--port']).toBe('-42')
+  })
+
+  it('checks every value of a multiple flag', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--id', valueKind: OperandKind.TEXT, multiple: true, type: 'int' }),
+      ],
+    })
+    const parsed = parseCommand(spec, ['--id', '1', '--id', 'x'], '/')
+    expect(parsed.invalidIntOptions).toEqual([['--id', 'x']])
+  })
+})

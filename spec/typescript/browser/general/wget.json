@@ -29,6 +29,7 @@
       "required": false,
       "short": "-O",
       "short_value": true,
+      "type": "str",
       "value_kind": "path",
       "value_optional": false
     },
@@ -43,6 +44,7 @@
       "required": false,
       "short": "-q",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -57,6 +59,7 @@
       "required": false,
       "short": null,
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     }

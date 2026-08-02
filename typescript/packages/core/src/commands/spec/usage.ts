@@ -46,6 +46,43 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
 }
 
+/**
+ * getopt_long refusal for an abbreviated long matching several options.
+ *
+ * Shape pinned against real GNU (`grep --c`): the typed spelling, then
+ * every possibility quoted in declaration order on one line. The
+ * per-tool usage dump GNU appends is deliberately omitted, like
+ * unknownOptionError.
+ */
+export function ambiguousOptionError(
+  cmdName: string,
+  token: string,
+  candidates: readonly string[],
+): [Uint8Array, number] {
+  const listed = candidates.map((c) => `'${c}'`).join(' ')
+  const line = `${cmdName}: option '${token}' is ambiguous; possibilities: ${listed}\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * Refusal for a non-integer value on an int-typed option.
+ *
+ * No GNU tool declares types through getopt (each words its own refusal,
+ * e.g. `head: invalid number of lines`), so this mirrors argparse's
+ * `invalid int value: 'abc'` with the option attributed the way
+ * invalidArgumentError does.
+ */
+export function invalidIntError(
+  cmdName: string,
+  option: string,
+  value: string,
+): [Uint8Array, number] {
+  const line = `${cmdName}: invalid int value: '${value}' for '${option}'\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
 /** GNU-shaped error for a declared value flag with no argument left. */
 export function missingValueError(cmdName: string, token: string): [Uint8Array, number] {
   const line = token.startsWith('--')

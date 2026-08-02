@@ -47,6 +47,13 @@ class CLISpec(CommandSpec):
     Args:
         name (str): the word at this level: argparse's ``prog`` for a
             root, ``add_parser`` name for a subcommand.
+        aliases (tuple[str, ...]): alternate words that resolve to this
+            subcommand (argparse ``add_parser(..., aliases=[...])``).
+            Rendered as ``name (alias, ...)`` in the parent's Commands
+            listing; the walk records the canonical ``name`` in its
+            path, so help and errors attribute to the canonical word
+            (argparse prog semantics). Inert on a root: the installed
+            head word is the only way in.
         fn (Callable | None): leaf handler (argparse
             ``set_defaults(func=...)``), called as
             ``fn(config, paths, *texts, **flags)`` where ``config`` is the
@@ -64,6 +71,7 @@ class CLISpec(CommandSpec):
             ``register_cli``; also the redaction schema for snapshots.
     """
     name: str = ""
+    aliases: tuple[str, ...] = ()
     fn: Callable[..., Any] | None = None
     subcommands: tuple["CLISpec", ...] = ()
     write: bool = False
@@ -87,8 +95,9 @@ class WalkResult:
     Args:
         leaf (CLISpec | None): resolved verb node, None for a rendered
             outcome.
-        path (tuple[str, ...]): words consumed below the head, including
-            the leaf name.
+        path (tuple[str, ...]): canonical subcommand names consumed below
+            the head, including the leaf name (an alias records the name
+            it resolves to, argparse prog semantics).
         group_flags (dict): flags consumed at group levels, keyed by
             canonical dashed spelling like ParsedArgs.flags.
         argv (tuple[str, ...]): remaining tokens for the leaf's spec.

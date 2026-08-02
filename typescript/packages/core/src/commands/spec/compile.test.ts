@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { compileSpec } from './compile.ts'
+import { compileSpec, expandLong } from './compile.ts'
 import { CommandSpec, OperandKind, Option } from './types.ts'
 
 describe('compileSpec — count/choices/required/default tables', () => {
@@ -68,5 +68,49 @@ describe('compileSpec — count/choices/required/default tables', () => {
   it('caches per spec object', () => {
     const spec = new CommandSpec({ options: [new Option({ short: '-x' })] })
     expect(compileSpec(spec)).toBe(compileSpec(spec))
+  })
+})
+
+describe('type int validation', () => {
+  it('requires a value flag', () => {
+    expect(() =>
+      compileSpec(new CommandSpec({ options: [new Option({ long: '--fast', type: 'int' })] })),
+    ).toThrow(/requires a value flag/)
+  })
+
+  it('requires an integer default', () => {
+    expect(() =>
+      compileSpec(
+        new CommandSpec({
+          options: [
+            new Option({
+              long: '--port',
+              valueKind: OperandKind.TEXT,
+              type: 'int',
+              default: 'auto',
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/is not an integer/)
+  })
+})
+
+describe('expandLong', () => {
+  it('handles exact, prefix, ambiguous, and unknown spellings', () => {
+    const cs = compileSpec(
+      new CommandSpec({
+        options: [
+          new Option({ long: '--binary' }),
+          new Option({ long: '--binary-files', valueKind: OperandKind.TEXT }),
+          new Option({ long: '--count' }),
+        ],
+      }),
+    )
+    expect(expandLong(cs, '--binary')).toEqual(['--binary'])
+    expect(expandLong(cs, '--bin')).toEqual(['--binary', '--binary-files'])
+    expect(expandLong(cs, '--co')).toEqual(['--count'])
+    expect(expandLong(cs, '--zz')).toEqual([])
+    expect(expandLong(cs, '--')).toEqual([])
   })
 })

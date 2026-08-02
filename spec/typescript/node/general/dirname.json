@@ -290,6 +290,7 @@
       "required": false,
       "short": "-z",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     }

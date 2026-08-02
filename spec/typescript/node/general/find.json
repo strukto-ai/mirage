@@ -300,6 +300,7 @@
       "required": false,
       "short": "-name",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -314,6 +315,7 @@
       "required": false,
       "short": "-type",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -328,6 +330,7 @@
       "required": false,
       "short": "-maxdepth",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -342,6 +345,7 @@
       "required": false,
       "short": "-size",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -356,6 +360,7 @@
       "required": false,
       "short": "-mtime",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -370,6 +375,7 @@
       "required": false,
       "short": "-iname",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -384,6 +390,7 @@
       "required": false,
       "short": "-path",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -398,6 +405,7 @@
       "required": false,
       "short": "-mindepth",
       "short_value": true,
+      "type": "str",
       "value_kind": "text",
       "value_optional": false
     },
@@ -412,6 +420,7 @@
       "required": false,
       "short": "-print",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -426,6 +435,7 @@
       "required": false,
       "short": "-print0",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -440,6 +450,7 @@
       "required": false,
       "short": "-delete",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -454,6 +465,7 @@
       "required": false,
       "short": "-depth",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -468,6 +480,7 @@
       "required": false,
       "short": "-prune",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -482,6 +495,7 @@
       "required": false,
       "short": "-ls",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -496,6 +510,7 @@
       "required": false,
       "short": "-empty",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -510,6 +525,7 @@
       "required": false,
       "short": "-o",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -524,6 +540,7 @@
       "required": false,
       "short": "-or",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -538,6 +555,7 @@
       "required": false,
       "short": "-a",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -552,6 +570,7 @@
       "required": false,
       "short": "-and",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -566,6 +585,7 @@
       "required": false,
       "short": "-not",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     }

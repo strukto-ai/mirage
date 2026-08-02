@@ -46,6 +46,8 @@ class ParsedCommand(NamedTuple):
     flag_kwargs: dict[str, object]
     warnings: list[str]
     invalid_options: list[str]
+    ambiguous_options: list[tuple[str, tuple[str, ...]]]
     needs_value_options: list[str]
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]]
+    invalid_int_options: list[tuple[str, str]]
     missing_required_options: list[str]

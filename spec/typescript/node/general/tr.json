@@ -290,6 +290,7 @@
       "required": false,
       "short": "-d",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -304,6 +305,7 @@
       "required": false,
       "short": "-s",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -318,6 +320,7 @@
       "required": false,
       "short": "-c",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -332,6 +335,7 @@
       "required": false,
       "short": "-C",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     },
@@ -346,6 +350,7 @@
       "required": false,
       "short": "-t",
       "short_value": true,
+      "type": "str",
       "value_kind": "none",
       "value_optional": false
     }

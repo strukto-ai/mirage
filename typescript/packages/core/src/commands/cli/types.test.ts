@@ -199,3 +199,28 @@ describe('CLISpec', () => {
     expect(Object.isFrozen(new CommandSpec({}))).toBe(true)
   })
 })
+
+describe('CLISpec aliases', () => {
+  it('shares one sibling namespace between names and aliases', () => {
+    expect(
+      () =>
+        new CLISpec({
+          name: 'tool',
+          subcommands: [
+            new CLISpec({ name: 'checkout', aliases: ['co'], fn: verb }),
+            new CLISpec({ name: 'co', fn: verb }),
+          ],
+        }),
+    ).toThrow(/duplicate subcommand 'co'/)
+  })
+
+  it('refuses a multi-word alias', () => {
+    expect(
+      () =>
+        new CLISpec({
+          name: 'tool',
+          subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })],
+        }),
+    ).toThrow(/alias 'c o'/)
+  })
+})

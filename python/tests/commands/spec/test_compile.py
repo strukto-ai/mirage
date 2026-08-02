@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.compile import compile_spec
+import pytest
+
+from mirage.commands.spec.compile import compile_spec, expand_long
 from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
                                         Option)
 
@@ -125,3 +127,31 @@ def test_default_outside_choices_is_a_spec_error():
         assert "not one of its choices" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_type_int_requires_a_value_flag():
+    with pytest.raises(ValueError, match="requires a value flag"):
+        compile_spec(
+            CommandSpec(options=(Option(long="--fast", type="int"), )))
+
+
+def test_type_int_default_must_be_an_integer():
+    with pytest.raises(ValueError, match="is not an integer"):
+        compile_spec(
+            CommandSpec(options=(Option(long="--port",
+                                        value_kind=OperandKind.TEXT,
+                                        type="int",
+                                        default="auto"), )))
+
+
+def test_expand_long_exact_prefix_ambiguous_and_unknown():
+    cs = compile_spec(
+        CommandSpec(options=(
+            Option(long="--binary"),
+            Option(long="--binary-files", value_kind=OperandKind.TEXT),
+            Option(long="--count"))))
+    assert expand_long(cs, "--binary") == ("--binary", )
+    assert expand_long(cs, "--bin") == ("--binary", "--binary-files")
+    assert expand_long(cs, "--co") == ("--count", )
+    assert expand_long(cs, "--zz") == ()
+    assert expand_long(cs, "--") == ()

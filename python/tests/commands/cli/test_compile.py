@@ -108,3 +108,19 @@ def test_sibling_leaves_may_share_option_spellings():
         ),
     )
     assert len(tree.subcommands) == 2
+
+
+def test_alias_shares_the_sibling_namespace():
+    with pytest.raises(ValueError, match="duplicate subcommand 'co'"):
+        CLISpec(name="tool",
+                subcommands=(CLISpec(name="checkout",
+                                     aliases=("co", ),
+                                     fn=_verb), CLISpec(name="co", fn=_verb)))
+
+
+def test_alias_must_be_a_single_word():
+    with pytest.raises(ValueError, match="alias 'c o'"):
+        CLISpec(name="tool",
+                subcommands=(CLISpec(name="checkout",
+                                     aliases=("c o", ),
+                                     fn=_verb), ))

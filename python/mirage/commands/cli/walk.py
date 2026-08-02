@@ -18,8 +18,21 @@ from dataclasses import replace
 from mirage.commands.cli.constants import USAGE_EXIT
 from mirage.commands.cli.types import CLISpec, FlagBag, WalkResult
 from mirage.commands.config import HELP_OPTION
-from mirage.commands.spec.compile import CompiledSpec, compile_spec
+from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
+                                          expand_long)
+from mirage.commands.spec.constants import INT_VALUE
 from mirage.commands.spec.help import render_help
+
+
+def _verb_display(child: CLISpec) -> str:
+    """A subcommand's row label: ``name (alias, ...)`` like argparse.
+
+    Args:
+        child (CLISpec): the subcommand node.
+    """
+    if child.aliases:
+        return f"{child.name} ({', '.join(child.aliases)})"
+    return child.name
 
 
 def node_help(name: str, node: CLISpec) -> str:
@@ -36,7 +49,7 @@ def node_help(name: str, node: CLISpec) -> str:
             renders its own spelling.
         node (CLISpec): the group node.
     """
-    rows = [(child.name, child.description or "")
+    rows = [(_verb_display(child), child.description or "")
             for child in node.subcommands]
     # --help is a registered option everywhere (argparse add_help, click
     # add_help_option, withHelpSupport for leaves), so the listing shows
@@ -156,6 +169,28 @@ def _match_short(
     return None
 
 
+def _expand_group_long(node: CLISpec, cs: CompiledSpec,
+                       spelling: str) -> tuple[str, ...]:
+    """Prefix-expand a long spelling at a group level.
+
+    The declared tables match first; the injected ``--help`` joins the
+    candidate pool when the node does not declare its own, because it is
+    a registered option everywhere else (argparse and getopt_long both
+    expand ``--hel`` to it).
+
+    Args:
+        node (CLISpec): the group node being parsed.
+        cs (CompiledSpec): the node's compiled tables.
+        spelling (str): the typed long spelling, without any ``=value``.
+    """
+    candidates = expand_long(cs, spelling)
+    if ("--help".startswith(spelling) and len(spelling) > 2
+            and "--help" not in candidates
+            and not any(option.long == "--help" for option in node.options)):
+        candidates = candidates + ("--help", )
+    return candidates
+
+
 def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
                  flags: FlagBag) -> WalkResult | None:
     """Apply a node's declarative option rules after its scan.
@@ -176,6 +211,17 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
                 flags[dest] = [default]
             else:
                 flags[dest] = default
+    # Int-typed values before choices, argparse's order; wording is
+    # git's parse-options refusal (`--depth` on a non-integer).
+    for dest in cs.int_dests:
+        value = flags.get(dest)
+        candidates = value if isinstance(
+            value, list) else ([value] if isinstance(value, str) else [])
+        for part in candidates:
+            if not INT_VALUE.match(part):
+                return _usage_error(
+                    name, node,
+                    f"error: option '{dest}' expects a numerical value")
     for dest, allowed in cs.choices_by_dest.items():
         value = flags.get(dest)
         candidates = value if isinstance(
@@ -232,6 +278,19 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
                 continue
             if not options_ended and token.startswith("--"):
                 spelling, eq, attached = token.partition("=")
+                # getopt_long: an exact spelling wins; otherwise a unique
+                # prefix expands (git status --porcel) and an ambiguous
+                # one is refused with every possibility (git wording).
+                if spelling not in cs.dest and spelling != "--help":
+                    candidates = _expand_group_long(node, cs, spelling)
+                    if len(candidates) == 1:
+                        spelling = candidates[0]
+                    elif len(candidates) > 1:
+                        possible = " or ".join(candidates)
+                        return _usage_error(
+                            name, node,
+                            f"error: ambiguous option: {spelling[2:]} "
+                            f"(could be {possible})")
                 # Optional-value longs sit in BOTH long_bool_spellings and
                 # long_optional_spellings, so the optional test runs first
                 # or --color=auto would be refused as taking no value.
@@ -308,12 +367,15 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
             refused = _finish_node(name, node, cs, flags)
             if refused is not None:
                 return refused
-            child = next((c for c in node.subcommands if c.name == token),
-                         None)
+            # An alias resolves to its canonical node; the path records
+            # the canonical name (argparse prog attribution: errors under
+            # `gws co` render as `gws checkout`).
+            child = next((c for c in node.subcommands
+                          if token == c.name or token in c.aliases), None)
             if child is None:
                 return _unknown_verb(head, name, token)
             node = child
-            path = path + (token, )
+            path = path + (child.name, )
             i += 1
             descended = True
             break

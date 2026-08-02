@@ -102,6 +102,17 @@ export interface OptionInit {
    * choices). Presence of a default always satisfies `required`.
    */
   default?: string | null
+  /**
+   * argparse `type=` as data. "int" makes the parser refuse a non-integer
+   * value at parse time (argparse's `invalid int value`; the walk uses
+   * git's `expects a numerical value`), before the command runs. The
+   * accepted shape is an optional sign plus digits, the portable core of
+   * Python int() and argparse. The bag still holds the string: commands
+   * read it through FlagView.asInt, the established mirage convention.
+   * Builtins whose GNU tool words its own numeric refusal (`head: invalid
+   * number of lines`) keep "str" and validate in the command.
+   */
+  type?: 'str' | 'int'
   description?: string
 }
 
@@ -117,6 +128,7 @@ export class Option {
   readonly choices: readonly string[]
   readonly required: boolean
   readonly default: string | null
+  readonly type: 'str' | 'int'
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -131,6 +143,7 @@ export class Option {
     this.choices = init.choices ?? []
     this.required = init.required ?? false
     this.default = init.default ?? null
+    this.type = init.type ?? 'str'
     this.description = init.description ?? null
     Object.freeze(this)
   }
@@ -209,8 +222,10 @@ export interface ParsedArgsInit {
   warnings?: string[]
   wordKinds?: (OperandKind | null)[]
   invalidOptions?: string[]
+  ambiguousOptions?: [string, readonly string[]][]
   needsValueOptions?: string[]
   invalidValueOptions?: [string, string, readonly string[]][]
+  invalidIntOptions?: [string, string][]
   missingRequiredOptions?: string[]
 }
 
@@ -225,12 +240,17 @@ export class ParsedArgs {
   readonly wordKinds: (OperandKind | null)[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
-  // declared value flags that ran out of line ('--max-depth', 'm'),
-  // values outside a declared choices set (canonical spelling, value,
-  // allowed values), and absent required options (canonical spelling).
+  // abbreviated longs matching several options (typed prefix, matched
+  // spellings in declaration order), declared value flags that ran out
+  // of line ('--max-depth', 'm'), values outside a declared choices set
+  // (canonical spelling, value, allowed values), non-integer values on
+  // int-typed options (canonical spelling, value), and absent required
+  // options (canonical spelling).
   readonly invalidOptions: string[]
+  readonly ambiguousOptions: [string, readonly string[]][]
   readonly needsValueOptions: string[]
   readonly invalidValueOptions: [string, string, readonly string[]][]
+  readonly invalidIntOptions: [string, string][]
   readonly missingRequiredOptions: string[]
 
   constructor(init: ParsedArgsInit) {
@@ -243,8 +263,10 @@ export class ParsedArgs {
     this.warnings = init.warnings ?? []
     this.wordKinds = init.wordKinds ?? []
     this.invalidOptions = init.invalidOptions ?? []
+    this.ambiguousOptions = init.ambiguousOptions ?? []
     this.needsValueOptions = init.needsValueOptions ?? []
     this.invalidValueOptions = init.invalidValueOptions ?? []
+    this.invalidIntOptions = init.invalidIntOptions ?? []
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
   }
 

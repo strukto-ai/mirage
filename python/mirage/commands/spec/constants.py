@@ -20,6 +20,11 @@ AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
 # cluster or a path.
 NUMERIC_SHORT = re.compile(r"^-\d+$")
 
+# Value shape accepted by an int-typed option: optional sign plus digits,
+# the portable core of Python int() and argparse (no whitespace, no
+# underscores, so both languages accept exactly the same strings).
+INT_VALUE = re.compile(r"^[+-]?\d+$")
+
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
 # (plus ripgrep and jq upstream docs). Everything else exits 1. Keys are
 # plain strings, not CommandName members: types.py (the enum's home)

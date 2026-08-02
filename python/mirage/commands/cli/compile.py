@@ -38,6 +38,10 @@ def validate_cli(node: "CLISpec") -> None:
     if not node.name or any(ch.isspace() for ch in node.name):
         raise ValueError(
             f"cli name {node.name!r} must be a single non-empty word")
+    for alias in node.aliases:
+        if not alias or any(ch.isspace() for ch in alias):
+            raise ValueError(f"cli {node.name!r}: alias {alias!r} must be "
+                             f"a single non-empty word")
     if node.fn is not None and node.subcommands:
         raise ValueError(
             f"cli {node.name!r}: a node takes fn or subcommands, not both")
@@ -47,12 +51,15 @@ def validate_cli(node: "CLISpec") -> None:
         raise ValueError(
             f"cli {node.name!r}: a group's operand is its subcommand "
             f"word; positional/rest belong on leaves")
+    # Names and aliases share one sibling namespace (argparse refuses a
+    # conflicting subparser alias the same way).
     seen: set[str] = set()
     for child in node.subcommands:
-        if child.name in seen:
-            raise ValueError(f"cli {node.name!r}: duplicate subcommand "
-                             f"{child.name!r}")
-        seen.add(child.name)
+        for word in (child.name, ) + child.aliases:
+            if word in seen:
+                raise ValueError(f"cli {node.name!r}: duplicate subcommand "
+                                 f"{word!r}")
+            seen.add(word)
         if child.config_model is not None:
             raise ValueError(
                 f"cli {node.name!r}: subcommand {child.name!r} declares "

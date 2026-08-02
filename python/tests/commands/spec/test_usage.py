@@ -1,8 +1,7 @@
-from mirage.commands.spec.usage import (extra_operand_error,
-                                        invalid_argument_error,
-                                        missing_required_error,
-                                        missing_value_error,
-                                        unknown_option_error, usage_exit_code)
+from mirage.commands.spec.usage import (  # yapf: disable
+    ambiguous_option_error, extra_operand_error, invalid_argument_error,
+    invalid_int_error, missing_required_error, missing_value_error,
+    unknown_option_error, usage_exit_code)
 
 
 def test_exit_codes_match_gnu():
@@ -78,4 +77,20 @@ def test_missing_required_names_the_canonical_spelling():
     stderr, code = missing_required_error("mycmd", "--out")
     assert stderr == (b"mycmd: option '--out' is required\n"
                       b"Try 'mycmd --help' for more information.\n")
+    assert code == 1
+
+
+def test_ambiguous_option_matches_gnu_shape():
+    out, code = ambiguous_option_error("grep", "--c",
+                                       ("--context", "--color", "--count"))
+    assert out == (b"grep: option '--c' is ambiguous; possibilities: "
+                   b"'--context' '--color' '--count'\n"
+                   b"Try 'grep --help' for more information.\n")
+    assert code == 2
+
+
+def test_invalid_int_mirrors_argparse_wording():
+    out, code = invalid_int_error("mycli", "--port", "abc")
+    assert out == (b"mycli: invalid int value: 'abc' for '--port'\n"
+                   b"Try 'mycli --help' for more information.\n")
     assert code == 1

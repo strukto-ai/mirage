@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { INT_VALUE } from './constants.ts'
 import { type CommandSpec, OperandKind } from './types.ts'
 
 /**
@@ -42,6 +43,12 @@ export class CompiledSpec {
   /** Long spellings whose value only attaches via `=` (GNU optional
    * argument). */
   readonly longOptionalSpellings: ReadonlySet<string>
+  /** Every long spelling in declaration order (the order GNU's ambiguity
+   * refusal lists possibilities), for getopt_long prefix expansion. */
+  readonly longSpellings: readonly string[]
+  /** Canonical spellings of int-typed options; the parser refuses a
+   * non-integer value at parse time (argparse `type=int`). */
+  readonly intDests: ReadonlySet<string>
   /** Value kind per spelling (parse-time lookup). */
   readonly kindOf: ReadonlyMap<string, OperandKind>
   /** Value kind per canonical spelling, for post-parse PATH/TEXT value
@@ -76,6 +83,8 @@ export class CompiledSpec {
     longBoolSpellings: ReadonlySet<string>
     longValueSpellings: ReadonlySet<string>
     longOptionalSpellings: ReadonlySet<string>
+    longSpellings: readonly string[]
+    intDests: ReadonlySet<string>
     kindOf: ReadonlyMap<string, OperandKind>
     kindByDest: ReadonlyMap<string, OperandKind>
     dest: ReadonlyMap<string, string>
@@ -93,6 +102,8 @@ export class CompiledSpec {
     this.longBoolSpellings = fields.longBoolSpellings
     this.longValueSpellings = fields.longValueSpellings
     this.longOptionalSpellings = fields.longOptionalSpellings
+    this.longSpellings = fields.longSpellings
+    this.intDests = fields.intDests
     this.kindOf = fields.kindOf
     this.kindByDest = fields.kindByDest
     this.dest = fields.dest
@@ -124,6 +135,8 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const longBoolSpellings = new Set<string>()
   const longValueSpellings = new Set<string>()
   const longOptionalSpellings = new Set<string>()
+  const longSpellings: string[] = []
+  const intDests = new Set<string>()
   const kindOf = new Map<string, OperandKind>()
   const kindByDest = new Map<string, OperandKind>()
   const dest = new Map<string, string>()
@@ -145,6 +158,15 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     }
     if (opt.choices.length > 0 && opt.default !== null && !opt.choices.includes(opt.default)) {
       throw new Error(`option '${canonical}': default '${opt.default}' is not one of its choices`)
+    }
+    if (opt.type === 'int') {
+      if (opt.valueKind === OperandKind.NONE) {
+        throw new Error(`option '${canonical}': type 'int' requires a value flag`)
+      }
+      if (opt.default !== null && !INT_VALUE.test(opt.default)) {
+        throw new Error(`option '${canonical}': default '${opt.default}' is not an integer`)
+      }
+      intDests.add(canonical)
     }
     if (opt.short !== null) dest.set(opt.short, canonical)
     if (opt.long !== null) dest.set(opt.long, canonical)
@@ -171,6 +193,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
       }
     }
     if (opt.long !== null) {
+      longSpellings.push(opt.long)
       if (opt.valueKind === OperandKind.NONE) {
         longBoolSpellings.add(opt.long)
       } else if (opt.valueOptional) {
@@ -198,6 +221,8 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     longBoolSpellings,
     longValueSpellings,
     longOptionalSpellings,
+    longSpellings,
+    intDests,
     kindOf,
     kindByDest,
     dest,
@@ -211,4 +236,32 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   })
   CACHE.set(spec, compiled)
   return compiled
+}
+
+/**
+ * getopt_long prefix matching for a long spelling.
+ *
+ * An exact declared spelling always wins (GNU: `--binary` never trips
+ * over `--binary-files`); otherwise the candidates are every declared
+ * long the typed spelling prefixes, deduped by dest because glibc treats
+ * several spellings of one option as unambiguous (`grep --colo` resolves
+ * despite `--color`/`--colour`). The result length tells the caller
+ * everything: 0 unknown, 1 match, 2+ ambiguous (candidates in
+ * declaration order, the order GNU lists possibilities).
+ */
+export function expandLong(cs: CompiledSpec, spelling: string): readonly string[] {
+  if (cs.dest.has(spelling)) return [spelling]
+  if (spelling.length <= 2) return []
+  const matches: string[] = []
+  const seen = new Set<string>()
+  for (const declared of cs.longSpellings) {
+    if (declared.startsWith(spelling)) {
+      const dest = cs.destOf(declared)
+      if (!seen.has(dest)) {
+        seen.add(dest)
+        matches.push(declared)
+      }
+    }
+  }
+  return matches
 }

@@ -234,3 +234,72 @@ def test_multichar_short_at_group_level():
     starved = walk("tool", tree, ["-name"])
     assert starved.exit_code == 129
     assert starved.output.startswith(b"error: option '-name' requires a value")
+
+
+def test_alias_resolves_to_the_canonical_verb():
+    tree = CLISpec(
+        name="tool",
+        subcommands=(CLISpec(name="checkout",
+                             aliases=("co", ),
+                             description="Switch branches",
+                             fn=_verb), ),
+    )
+    result = walk("tool", tree, ["co", "x"])
+    assert result.leaf is not None
+    assert result.path == ("checkout", )
+    assert result.argv == ("x", )
+
+
+def test_alias_renders_beside_the_canonical_name():
+    tree = CLISpec(
+        name="tool",
+        subcommands=(CLISpec(name="checkout",
+                             aliases=("co", "cout"),
+                             description="Switch branches",
+                             fn=_verb), ),
+    )
+    listing = walk("tool", tree, [])
+    assert b"  checkout (co, cout)  Switch branches" in listing.output
+
+
+def test_group_long_prefix_expands_like_git():
+    result = walk("gws", _tree(), ["--verb", "--verb", "gmail", "send"])
+    assert result.leaf is not None
+    assert result.group_flags["--verbose"] == 2
+
+
+def test_group_ambiguous_prefix_uses_git_wording():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(long="--context",
+                        value_kind=OperandKind.TEXT), Option(long="--count")),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    result = walk("tool", tree, ["--co", "run"])
+    assert result.exit_code == 129
+    assert result.output.startswith(
+        b"error: ambiguous option: co (could be --context or --count)")
+
+
+def test_help_prefix_reaches_the_injected_help():
+    full = walk("gws", _tree(), ["--help"])
+    abbreviated = walk("gws", _tree(), ["--hel"])
+    assert abbreviated.exit_code == 0
+    assert abbreviated.output == full.output
+
+
+def test_int_typed_group_option_uses_git_wording():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(long="--depth",
+                        value_kind=OperandKind.TEXT,
+                        type="int"), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    bad = walk("tool", tree, ["--depth", "x", "run"])
+    assert bad.exit_code == 129
+    assert bad.output.startswith(
+        b"error: option '--depth' expects a numerical value")
+    ok = walk("tool", tree, ["--depth", "-3", "run"])
+    assert ok.leaf is not None
+    assert ok.group_flags == {"--depth": "-3"}

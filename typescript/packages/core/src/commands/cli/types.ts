@@ -32,6 +32,7 @@ export type CLIVerbFn = (
 
 export interface CLISpecInit extends CommandSpecInit {
   name: string
+  aliases?: readonly string[]
   fn?: CLIVerbFn | null
   subcommands?: readonly CLISpec[]
   write?: boolean
@@ -58,6 +59,7 @@ export interface CLISpecInit extends CommandSpecInit {
  */
 export class CLISpec extends CommandSpec {
   readonly name: string
+  readonly aliases: readonly string[]
   readonly fn: CLIVerbFn | null
   readonly subcommands: readonly CLISpec[]
   readonly write: boolean
@@ -67,6 +69,7 @@ export class CLISpec extends CommandSpec {
   constructor(init: CLISpecInit) {
     super(init)
     this.name = init.name
+    this.aliases = Object.freeze([...(init.aliases ?? [])])
     this.fn = init.fn ?? null
     this.subcommands = Object.freeze([...(init.subcommands ?? [])])
     this.write = init.write ?? false
@@ -74,6 +77,11 @@ export class CLISpec extends CommandSpec {
     this.configModel = init.configModel ?? null
     if (this.name === '' || /\s/.test(this.name)) {
       throw new Error(`cli name '${this.name}' must be a single non-empty word`)
+    }
+    for (const alias of this.aliases) {
+      if (alias === '' || /\s/.test(alias)) {
+        throw new Error(`cli '${this.name}': alias '${alias}' must be a single non-empty word`)
+      }
     }
     if (this.fn !== null && this.subcommands.length > 0) {
       throw new Error(`cli '${this.name}': a node takes fn or subcommands, not both`)
@@ -87,12 +95,16 @@ export class CLISpec extends CommandSpec {
           'positional/rest belong on leaves',
       )
     }
+    // Names and aliases share one sibling namespace (argparse refuses a
+    // conflicting subparser alias the same way).
     const seen = new Set<string>()
     for (const child of this.subcommands) {
-      if (seen.has(child.name)) {
-        throw new Error(`cli '${this.name}': duplicate subcommand '${child.name}'`)
+      for (const word of [child.name, ...child.aliases]) {
+        if (seen.has(word)) {
+          throw new Error(`cli '${this.name}': duplicate subcommand '${word}'`)
+        }
+        seen.add(word)
       }
-      seen.add(child.name)
       if (child.configModel !== null) {
         throw new Error(
           `cli '${this.name}': subcommand '${child.name}' declares configModel; ` +

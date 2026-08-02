@@ -431,3 +431,73 @@ def test_multiple_default_lands_as_one_element_list():
     assert parsed.path_flag_values == ["/data/cfg.txt"]
     typed = parse_command(spec, ["-f", "a", "-f", "b"], "/data")
     assert typed.flags["--file"] == ["/data/a", "/data/b"]
+
+
+def test_unique_long_prefix_expands_like_getopt_long():
+    spec = CommandSpec(options=(Option(long="--recursive"),
+                                Option(long="--count")))
+    parsed = parse_command(spec, ["--rec", "x"], "/")
+    assert parsed.flags["--recursive"] is True
+    assert parsed.invalid_options == []
+    assert parsed.ambiguous_options == []
+
+
+def test_ambiguous_long_prefix_reports_possibilities_in_order():
+    spec = CommandSpec(options=(
+        Option(long="--context", value_kind=OperandKind.TEXT),
+        Option(
+            long="--color", value_optional=True, value_kind=OperandKind.TEXT),
+        Option(long="--count")))
+    parsed = parse_command(spec, ["--c"], "/")
+    assert parsed.ambiguous_options == [("--c", ("--context", "--color",
+                                                 "--count"))]
+    assert parsed.invalid_options == []
+
+
+def test_exact_long_wins_over_a_longer_spelling():
+    spec = CommandSpec(
+        options=(Option(long="--binary"),
+                 Option(long="--binary-files", value_kind=OperandKind.TEXT)))
+    parsed = parse_command(spec, ["--binary"], "/")
+    assert parsed.flags["--binary"] is True
+    assert parsed.ambiguous_options == []
+
+
+def test_abbreviated_long_carries_an_attached_value():
+    spec = CommandSpec(options=(Option(
+        long="--color", value_optional=True, value_kind=OperandKind.TEXT), ))
+    parsed = parse_command(spec, ["--colo=never"], "/")
+    assert parsed.flags["--color"] == "never"
+
+
+def test_abbreviated_value_long_takes_the_next_word():
+    spec = CommandSpec(
+        options=(Option(long="--exclude", value_kind=OperandKind.TEXT), ))
+    parsed = parse_command(spec, ["--excl", "tmp"], "/")
+    assert parsed.flags["--exclude"] == "tmp"
+
+
+def test_free_text_commands_keep_exact_only_long_matching():
+    spec = CommandSpec(options=(Option(long="--verbose"), ),
+                       rest=Operand(kind=OperandKind.TEXT))
+    parsed = parse_command(spec, ["--verb", "hi"], "/")
+    assert "--verbose" not in parsed.flags
+    assert parsed.texts() == ["--verb", "hi"]
+
+
+def test_int_typed_value_is_reported_not_raised():
+    spec = CommandSpec(options=(
+        Option(long="--port", value_kind=OperandKind.TEXT, type="int"), ))
+    parsed = parse_command(spec, ["--port", "abc"], "/")
+    assert parsed.invalid_int_options == [("--port", "abc")]
+    ok = parse_command(spec, ["--port", "-42"], "/")
+    assert ok.invalid_int_options == []
+    assert ok.flags["--port"] == "-42"
+
+
+def test_int_typed_multiple_checks_every_value():
+    spec = CommandSpec(options=(Option(
+        long="--id", value_kind=OperandKind.TEXT, multiple=True, type="int"),
+                                ))
+    parsed = parse_command(spec, ["--id", "1", "--id", "x"], "/")
+    assert parsed.invalid_int_options == [("--id", "x")]

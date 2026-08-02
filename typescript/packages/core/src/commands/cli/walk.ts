@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { HELP_OPTION } from '../config.ts'
-import { compileSpec, type CompiledSpec } from '../spec/compile.ts'
+import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
+import { INT_VALUE } from '../spec/constants.ts'
 import { renderHelp } from '../spec/help.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
@@ -21,6 +22,11 @@ import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 import { USAGE_EXIT } from './constants.ts'
 
 const ENC = new TextEncoder()
+
+/** A subcommand's row label: `name (alias, ...)` like argparse. */
+function verbDisplay(child: CLISpec): string {
+  return child.aliases.length > 0 ? `${child.name} (${child.aliases.join(', ')})` : child.name
+}
 
 /**
  * A group node's help: the ordinary command help plus Commands rows.
@@ -31,7 +37,7 @@ const ENC = new TextEncoder()
  */
 export function nodeHelp(name: string, node: CLISpec): string {
   const rows: [string, string][] = node.subcommands.map((child) => [
-    child.name,
+    verbDisplay(child),
     child.description ?? '',
   ])
   // --help is a registered option everywhere (argparse add_help, click
@@ -136,6 +142,25 @@ function matchShort(
 }
 
 /**
+ * Prefix-expand a long spelling at a group level. The declared tables
+ * match first; the injected `--help` joins the candidate pool when the
+ * node does not declare its own, because it is a registered option
+ * everywhere else (argparse and getopt_long both expand `--hel` to it).
+ */
+function expandGroupLong(node: CLISpec, cs: CompiledSpec, spelling: string): readonly string[] {
+  const candidates = expandLong(cs, spelling)
+  if (
+    '--help'.startsWith(spelling) &&
+    spelling.length > 2 &&
+    !candidates.includes('--help') &&
+    !node.options.some((option) => option.long === '--help')
+  ) {
+    return [...candidates, '--help']
+  }
+  return candidates
+}
+
+/**
  * Apply a node's declarative option rules after its scan: defaults land as
  * if typed, then choices and required are enforced, the same order the
  * flat parser uses. Returns a rendered refusal or null when satisfied.
@@ -149,6 +174,17 @@ function finishNode(
   for (const [dest, value] of cs.defaults) {
     if (!(dest in flags)) {
       flags[dest] = cs.multipleDests.has(dest) ? [value] : value
+    }
+  }
+  // Int-typed values before choices, argparse's order; wording is git's
+  // parse-options refusal (`--depth` on a non-integer).
+  for (const dest of cs.intDests) {
+    const value = flags[dest]
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!INT_VALUE.test(part)) {
+        return usageError(name, node, `error: option '${dest}' expects a numerical value`)
+      }
     }
   }
   for (const [dest, allowed] of cs.choicesByDest) {
@@ -204,8 +240,24 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
       }
       if (!optionsEnded && token.startsWith('--')) {
         const eq = token.indexOf('=')
-        const spelling = eq === -1 ? token : token.slice(0, eq)
+        let spelling = eq === -1 ? token : token.slice(0, eq)
         const attached = eq === -1 ? null : token.slice(eq + 1)
+        // getopt_long: an exact spelling wins; otherwise a unique prefix
+        // expands (git status --porcel) and an ambiguous one is refused
+        // with every possibility (git wording).
+        if (!cs.dest.has(spelling) && spelling !== '--help') {
+          const candidates = expandGroupLong(node, cs, spelling)
+          if (candidates.length === 1) {
+            spelling = candidates[0] ?? spelling
+          } else if (candidates.length > 1) {
+            const possible = candidates.join(' or ')
+            return usageError(
+              name,
+              node,
+              `error: ambiguous option: ${spelling.slice(2)} (could be ${possible})`,
+            )
+          }
+        }
         // Optional-value longs sit in BOTH longBoolSpellings and
         // longOptionalSpellings, so the optional test runs first or
         // --color=auto would be refused as taking no value.
@@ -284,12 +336,15 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
       }
       const refused = finishNode(name, node, cs, flags)
       if (refused !== null) return refused
-      const child = node.subcommands.find((c) => c.name === token)
+      // An alias resolves to its canonical node; the path records the
+      // canonical name (argparse prog attribution: errors under `gws co`
+      // render as `gws checkout`).
+      const child = node.subcommands.find((c) => c.name === token || c.aliases.includes(token))
       if (child === undefined) {
         return unknownVerb(head, name, token)
       }
       node = child
-      path = [...path, token]
+      path = [...path, child.name]
       i += 1
       descended = true
       break

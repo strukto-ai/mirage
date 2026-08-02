@@ -159,6 +159,7 @@ function serializeOption(o: Option): Record<string, unknown> {
     required: o.required,
     short: o.short,
     short_value: o.shortValue,
+    type: o.type,
     value_kind: o.valueKind,
     value_optional: o.valueOptional,
   }

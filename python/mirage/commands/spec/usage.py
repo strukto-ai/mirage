@@ -52,6 +52,47 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     return (line + hint).encode(), usage_exit_code(cmd_name)
 
 
+def ambiguous_option_error(cmd_name: str, token: str,
+                           candidates: tuple[str, ...]) -> tuple[bytes, int]:
+    """getopt_long refusal for an abbreviated long matching several options.
+
+    Shape pinned against real GNU (``grep --c``): the typed spelling,
+    then every possibility quoted in declaration order on one line. The
+    per-tool usage dump GNU appends is deliberately omitted, like
+    unknown_option_error.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        token (str): the typed abbreviated spelling ('--c').
+        candidates (tuple[str, ...]): matching declared spellings in
+            declaration order.
+    """
+    listed = " ".join(f"'{c}'" for c in candidates)
+    line = (f"{cmd_name}: option '{token}' is ambiguous; "
+            f"possibilities: {listed}\n")
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def invalid_int_error(cmd_name: str, option: str,
+                      value: str) -> tuple[bytes, int]:
+    """Refusal for a non-integer value on an int-typed option.
+
+    No GNU tool declares types through getopt (each words its own
+    refusal, e.g. ``head: invalid number of lines``), so this mirrors
+    argparse's ``invalid int value: 'abc'`` with the option attributed
+    the way invalid_argument_error does.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--port').
+        value (str): the rejected value.
+    """
+    line = f"{cmd_name}: invalid int value: '{value}' for '{option}'\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
 def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     """GNU-shaped error for a declared value flag with no argument left.
 

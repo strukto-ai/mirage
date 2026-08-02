@@ -15,7 +15,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from mirage.commands.spec.constants import flag_kwarg_name
 
@@ -93,6 +93,16 @@ class Option:
             if it had been typed (a PATH default resolves and routes, a
             defaulted value must satisfy choices). Presence of a default
             always satisfies ``required``.
+        type (Literal["str", "int"]): argparse ``type=`` as data. "int"
+            makes the parser refuse a non-integer value at parse time
+            (argparse's ``invalid int value``; the walk uses git's
+            ``expects a numerical value``), before the command runs. The
+            accepted shape is an optional sign plus digits, the portable
+            core of Python ``int()`` and argparse. The bag still holds
+            the string: commands read it through ``FlagView.as_int``,
+            the established mirage convention. Builtins whose GNU tool
+            words its own numeric refusal (``head: invalid number of
+            lines``) keep ``"str"`` and validate in the command.
         description (str | None): help text.
     """
     short: str | None = None
@@ -106,6 +116,7 @@ class Option:
     choices: tuple[str, ...] = ()
     required: bool = False
     default: str | None = None
+    type: Literal["str", "int"] = "str"
     description: str | None = None
 
 
@@ -229,13 +240,20 @@ class ParsedArgs:
     word_kinds: list[OperandKind | None] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
-    # declared value flags that ran out of line ('--max-depth', 'm'),
-    # values outside a declared choices set (canonical spelling, value,
-    # allowed values), and absent required options (canonical spelling).
+    # abbreviated longs matching several options (typed prefix, matched
+    # spellings in declaration order), declared value flags that ran out
+    # of line ('--max-depth', 'm'), values outside a declared choices set
+    # (canonical spelling, value, allowed values), non-integer values on
+    # int-typed options (canonical spelling, value), and absent required
+    # options (canonical spelling).
     invalid_options: list[str] = field(default_factory=list)
+    ambiguous_options: list[tuple[str,
+                                  tuple[str,
+                                        ...]]] = field(default_factory=list)
     needs_value_options: list[str] = field(default_factory=list)
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = field(
         default_factory=list)
+    invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
     missing_required_options: list[str] = field(default_factory=list)
 
     def paths(self) -> list[str]:

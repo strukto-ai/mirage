@@ -14,7 +14,9 @@
 
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import {
+  ambiguousOptionError,
   invalidArgumentError,
+  invalidIntError,
   missingRequiredError,
   missingValueError,
   unknownOptionError,
@@ -60,8 +62,10 @@ export function parseFlags(
   Record<string, string | boolean | number | string[]>,
   string[],
   string[],
+  [string, readonly string[]][],
   string[],
   [string, string, readonly string[]][],
+  [string, string][],
   string[],
 ] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
@@ -103,8 +107,10 @@ export function parseFlags(
       flagKwargs,
       parsed.warnings,
       parsed.invalidOptions,
+      parsed.ambiguousOptions,
       parsed.needsValueOptions,
       parsed.invalidValueOptions,
+      parsed.invalidIntOptions,
       parsed.missingRequiredOptions,
     ]
   }
@@ -115,7 +121,7 @@ export function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], [], [], []]
+  return [paths, texts, {}, [], [], [], [], [], [], []]
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is
@@ -124,15 +130,21 @@ export function parseFlags(
 export function optionError(
   cmdName: string,
   invalid: readonly string[],
+  ambiguous: readonly [string, readonly string[]][],
   needsValue: readonly string[],
   invalidValue: readonly [string, string, readonly string[]][],
+  invalidInt: readonly [string, string][],
   missingRequired: readonly string[],
 ): [Uint8Array, number] | null {
   if (cmdName === 'find') return null
   if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
+  const ambiguousFirst = ambiguous[0]
+  if (ambiguousFirst !== undefined) return ambiguousOptionError(cmdName, ...ambiguousFirst)
   if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
   const badValue = invalidValue[0]
   if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
+  const badInt = invalidInt[0]
+  if (badInt !== undefined) return invalidIntError(cmdName, ...badInt)
   if (missingRequired.length > 0) return missingRequiredError(cmdName, missingRequired[0] ?? '')
   return null
 }

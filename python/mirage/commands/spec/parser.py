@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.compile import CompiledSpec, compile_spec
-from mirage.commands.spec.constants import NUMERIC_SHORT, flag_kwarg_name
+from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
+                                          expand_long)
+from mirage.commands.spec.constants import (INT_VALUE, NUMERIC_SHORT,
+                                            flag_kwarg_name)
 from mirage.commands.spec.types import CommandSpec, OperandKind, ParsedArgs
 from mirage.utils.path import resolve_path
 
@@ -142,6 +144,7 @@ def parse_command(
     word_kinds: list[OperandKind | None] = [None] * len(argv)
     warnings: list[str] = []
     invalid_options: list[str] = []
+    ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
     needs_value_options: list[str] = []
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
@@ -165,22 +168,38 @@ def parse_command(
             continue
 
         if tok.startswith("--"):
-            if tok in cs.long_bool_spellings:
-                _set_bool_flag(flags, cs, tok)
+            # getopt_long: an exact spelling always wins; otherwise an
+            # unambiguous prefix expands to its declared spelling
+            # (grep --rec) and an ambiguous one is refused with every
+            # possibility. Free-text commands keep exact-only matching:
+            # their unknown dash tokens are operands, not typos.
+            eq = tok.find("=")
+            typed = tok if eq == -1 else tok[:eq]
+            spelling = typed
+            if typed not in cs.dest and not lenient_dash_operands:
+                expansions = expand_long(cs, typed)
+                if len(expansions) == 1:
+                    spelling = expansions[0]
+                elif len(expansions) > 1:
+                    ambiguous_options.append((typed, expansions))
+                    i += 1
+                    continue
+            etok = spelling if eq == -1 else spelling + tok[eq:]
+            if etok in cs.long_bool_spellings:
+                _set_bool_flag(flags, cs, etok)
                 i += 1
-            elif (tok in cs.long_value_spellings
+            elif (etok in cs.long_value_spellings
                   and i + 1 < len(filtered_argv)):
-                _set_value_flag(flags, cs, tok, filtered_argv[i + 1])
-                word_kinds[orig_indices[i + 1]] = cs.kind_of[tok]
+                _set_value_flag(flags, cs, etok, filtered_argv[i + 1])
+                word_kinds[orig_indices[i + 1]] = cs.kind_of[etok]
                 i += 2
             else:
-                eq = tok.find("=")
-                if eq != -1 and (tok[:eq] in cs.long_value_spellings
-                                 or tok[:eq] in cs.long_optional_spellings):
-                    _set_value_flag(flags, cs, tok[:eq], tok[eq + 1:])
-                elif tok in cs.long_value_spellings:
+                if eq != -1 and (spelling in cs.long_value_spellings
+                                 or spelling in cs.long_optional_spellings):
+                    _set_value_flag(flags, cs, spelling, tok[eq + 1:])
+                elif etok in cs.long_value_spellings:
                     # Declared value flag at end of line with no argument.
-                    needs_value_options.append(tok)
+                    needs_value_options.append(etok)
                 elif lenient_dash_operands:
                     raw_args.append(tok)
                     raw_indices.append(orig_indices[i])
@@ -292,6 +311,18 @@ def parse_command(
             else:
                 flags[dest_name] = default
 
+    # Int-typed values are refused before choices, argparse's order
+    # (type conversion runs before the choices test). The bare boolean
+    # form of an optional-value flag is exempt, like choices.
+    invalid_int_options: list[tuple[str, str]] = []
+    for dest_name in cs.int_dests:
+        value = flags.get(dest_name)
+        candidates = value if isinstance(
+            value, list) else ([value] if isinstance(value, str) else [])
+        for part in candidates:
+            if not INT_VALUE.match(part):
+                invalid_int_options.append((dest_name, part))
+
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = []
     for dest_name, allowed in cs.choices_by_dest.items():
         value = flags.get(dest_name)
@@ -367,8 +398,10 @@ def parse_command(
         warnings=warnings,
         word_kinds=word_kinds,
         invalid_options=invalid_options,
+        ambiguous_options=ambiguous_options,
         needs_value_options=needs_value_options,
         invalid_value_options=invalid_value_options,
+        invalid_int_options=invalid_int_options,
         missing_required_options=missing_required_options,
     )
 

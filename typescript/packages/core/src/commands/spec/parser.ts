@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolvePath } from '../../utils/path.ts'
-import { type CompiledSpec, compileSpec } from './compile.ts'
-import { flagKwargName, NUMERIC_SHORT } from './constants.ts'
+import { type CompiledSpec, compileSpec, expandLong } from './compile.ts'
+import { flagKwargName, INT_VALUE, NUMERIC_SHORT } from './constants.ts'
 import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
 
 // Record a value flag occurrence under its canonical dest. Both spellings
@@ -130,6 +130,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
   const warnings: string[] = []
   const invalidOptions: string[] = []
+  const ambiguousOptions: [string, readonly string[]][] = []
   const needsValueOptions: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
@@ -161,24 +162,41 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
 
     if (tok.startsWith('--')) {
-      if (cs.longBoolSpellings.has(tok)) {
-        setBoolFlag(flags, cs, tok)
+      // getopt_long: an exact spelling always wins; otherwise an
+      // unambiguous prefix expands to its declared spelling (grep --rec)
+      // and an ambiguous one is refused with every possibility.
+      // Free-text commands keep exact-only matching: their unknown dash
+      // tokens are operands, not typos.
+      const eqPos = tok.indexOf('=')
+      const typed = eqPos === -1 ? tok : tok.slice(0, eqPos)
+      let spelling = typed
+      if (!cs.dest.has(typed) && !lenientDashOperands) {
+        const candidates = expandLong(cs, typed)
+        if (candidates.length === 1) {
+          spelling = candidates[0] ?? typed
+        } else if (candidates.length > 1) {
+          ambiguousOptions.push([typed, candidates])
+          i += 1
+          continue
+        }
+      }
+      const etok = eqPos === -1 ? spelling : spelling + tok.slice(eqPos)
+      if (cs.longBoolSpellings.has(etok)) {
+        setBoolFlag(flags, cs, etok)
         i += 1
-      } else if (cs.longValueSpellings.has(tok) && i + 1 < filteredArgv.length) {
-        setValueFlag(flags, cs, tok, filteredArgv[i + 1] ?? '')
-        wordKinds[origIndices[i + 1] ?? -1] = cs.kindOf.get(tok) ?? null
+      } else if (cs.longValueSpellings.has(etok) && i + 1 < filteredArgv.length) {
+        setValueFlag(flags, cs, etok, filteredArgv[i + 1] ?? '')
+        wordKinds[origIndices[i + 1] ?? -1] = cs.kindOf.get(etok) ?? null
         i += 2
       } else {
-        const eq = tok.indexOf('=')
         if (
-          eq !== -1 &&
-          (cs.longValueSpellings.has(tok.slice(0, eq)) ||
-            cs.longOptionalSpellings.has(tok.slice(0, eq)))
+          eqPos !== -1 &&
+          (cs.longValueSpellings.has(spelling) || cs.longOptionalSpellings.has(spelling))
         ) {
-          setValueFlag(flags, cs, tok.slice(0, eq), tok.slice(eq + 1))
-        } else if (cs.longValueSpellings.has(tok)) {
+          setValueFlag(flags, cs, spelling, tok.slice(eqPos + 1))
+        } else if (cs.longValueSpellings.has(etok)) {
           // Declared value flag at end of line with no argument.
-          needsValueOptions.push(tok)
+          needsValueOptions.push(etok)
         } else if (lenientDashOperands) {
           rawArgs.push(tok)
           rawIndices.push(origIndices[i] ?? -1)
@@ -299,6 +317,18 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
   }
 
+  // Int-typed values are refused before choices, argparse's order (type
+  // conversion runs before the choices test). The bare boolean form of
+  // an optional-value flag is exempt, like choices.
+  const invalidIntOptions: [string, string][] = []
+  for (const destName of cs.intDests) {
+    const value = flags[destName]
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!INT_VALUE.test(part)) invalidIntOptions.push([destName, part])
+    }
+  }
+
   const invalidValueOptions: [string, string, readonly string[]][] = []
   for (const [destName, allowed] of cs.choicesByDest) {
     const value = flags[destName]
@@ -380,8 +410,10 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     textFlagValues,
     warnings,
     invalidOptions,
+    ambiguousOptions,
     needsValueOptions,
     invalidValueOptions,
+    invalidIntOptions,
     missingRequiredOptions,
     wordKinds,
   })
