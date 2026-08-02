@@ -21,7 +21,7 @@ import { SLACK_SEARCH } from './slack_search.ts'
 const DEC = new TextDecoder()
 
 async function runSearch(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = (): SlackResponse => ({ ok: true, messages: { matches: [] } }),
 ): Promise<{ out: string; transport: FakeSlackTransport }> {
   const cmd = SLACK_SEARCH[0]

@@ -217,10 +217,14 @@
   "ignore_tokens": [],
   "options": [
     {
+      "choices": [],
+      "count": false,
+      "default": null,
       "description": null,
       "long": "--zero",
+      "multiple": false,
       "numeric_shorthand": false,
-      "repeatable": false,
+      "required": false,
       "short": "-z",
       "short_value": true,
       "value_kind": "none",

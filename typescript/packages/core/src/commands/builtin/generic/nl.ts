@@ -117,7 +117,7 @@ function parseNumbering(raw: string): [string, RegExp | null] {
   return [raw, null]
 }
 
-function parseOptions(flags: Record<string, string | boolean | string[]>): NlConfig {
+function parseOptions(flags: Record<string, string | boolean | number | string[]>): NlConfig {
   const bodyValue = flags.body_numbering
   const footerValue = flags.footer_numbering
   const headerValue = flags.header_numbering

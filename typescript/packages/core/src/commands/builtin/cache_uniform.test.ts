@@ -69,7 +69,7 @@ function readdirOf(_p: PathSpec): Promise<string[]> {
   return Promise.resolve([])
 }
 
-function opts(flags: Record<string, string | boolean | string[]> = {}): CommandOpts {
+function opts(flags: Record<string, string | boolean | number | string[]> = {}): CommandOpts {
   return {
     stdin: null,
     flags,

@@ -86,7 +86,7 @@ function fakeStat(_acc: unknown, p: PathSpec | string): FileStat {
 
 async function runFind(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = GITHUB_CI_FIND[0]
   if (cmd === undefined) throw new Error('find not registered')

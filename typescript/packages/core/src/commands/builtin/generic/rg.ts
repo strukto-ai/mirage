@@ -56,8 +56,8 @@ interface RgFlags {
   hidden: boolean
 }
 
-function parseRgFlags(flags: Record<string, string | boolean | string[]>): RgFlags {
-  const toInt = (v: string | boolean | string[] | undefined): number | null =>
+function parseRgFlags(flags: Record<string, string | boolean | number | string[]>): RgFlags {
+  const toInt = (v: string | boolean | number | string[] | undefined): number | null =>
     typeof v === 'string' ? Number.parseInt(v, 10) : null
   const a = toInt(flags.A)
   const b = toInt(flags.B)

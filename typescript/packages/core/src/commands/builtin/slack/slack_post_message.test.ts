@@ -21,7 +21,7 @@ import { SLACK_POST_MESSAGE } from './slack_post_message.ts'
 const DEC = new TextDecoder()
 
 async function runPost(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = (): SlackResponse => ({ ok: true, ts: '1.0' }),
 ): Promise<{ out: string; transport: FakeSlackTransport }> {
   const cmd = SLACK_POST_MESSAGE[0]

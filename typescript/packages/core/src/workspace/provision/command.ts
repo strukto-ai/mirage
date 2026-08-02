@@ -177,7 +177,7 @@ export async function handleCommandProvision(
 
   const argv = scopedParts.slice(1).map((p) => (p instanceof PathSpec ? p.virtual : p))
   const spec = mount.specFor(cmdName)
-  let flagKwargs: Record<string, string | boolean | string[]> = {}
+  let flagKwargs: Record<string, string | boolean | number | string[]> = {}
   let textArgs: string[]
   if (spec !== null) {
     const parsed = parseCommand(spec, argv, session.cwd)

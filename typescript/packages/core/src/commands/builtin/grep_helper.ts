@@ -40,11 +40,11 @@ export function escapeRegex(s: string): string {
 }
 
 // Resolve the pattern-list argument from -e values (list[str] when
-// repeatable) or the positional. Returns the POSIX newline-joined pattern
+// multiple) or the positional. Returns the POSIX newline-joined pattern
 // list, or null when neither was supplied.
 export function patternArg(
   texts: readonly string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): string | null {
   const e = flags.e
   if (Array.isArray(e) && e.length > 0) return e.join('\n')
@@ -66,7 +66,7 @@ export interface PatternResolution {
 export async function resolvePatternFromFlags(
   name: string,
   texts: readonly string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   paths: readonly PathSpec[],
   mountPrefix: string | null | undefined,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -225,7 +225,9 @@ export function isLiteralPattern(pattern: string, fixedString: boolean): boolean
 // -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
 // file-filtering --glob/--type; the wrapper must defer to the generic scan
 // when any is present.
-export function hasSearchShapingFlags(flags: Record<string, string | boolean | string[]>): boolean {
+export function hasSearchShapingFlags(
+  flags: Record<string, string | boolean | number | string[]>,
+): boolean {
   if (
     flags.v === true ||
     flags.n === true ||
@@ -257,7 +259,7 @@ export function hasSearchShapingFlags(flags: Record<string, string | boolean | s
 // express, so it stays on the generic path. Backends that push a real regex
 // down (mongodb) gate on hasSearchShapingFlags alone instead.
 export function searchPushdownOk(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   pattern: string,
 ): boolean {
   if (pattern.includes('\n')) return false

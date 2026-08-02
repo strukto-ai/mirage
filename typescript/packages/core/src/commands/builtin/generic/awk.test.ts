@@ -32,7 +32,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): CommandOpts {
   return { stdin, flags, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts

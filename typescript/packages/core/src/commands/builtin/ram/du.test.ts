@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runDu(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ lines: string[]; exitCode: number }> {
   const cmd = RAM_DU[0]
   if (cmd === undefined) throw new Error('du not registered')

@@ -50,7 +50,9 @@ function spec(virtual: string): PathSpec {
   })
 }
 
-async function runRg(flags: Record<string, string | boolean | string[]>): Promise<CommandFnResult> {
+async function runRg(
+  flags: Record<string, string | boolean | number | string[]>,
+): Promise<CommandFnResult> {
   const cmd = BOX_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
   const opts: CommandOpts = {

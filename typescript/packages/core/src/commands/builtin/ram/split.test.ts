@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 async function runSplit(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ exitCode: number }> {
   const cmd = RAM_SPLIT[0]

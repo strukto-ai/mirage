@@ -64,3 +64,16 @@ def test_spec_flag_names_are_canonical_and_ambiguous_mapped():
     ))
     names = spec_flag_names(spec)
     assert names == frozenset({"args_l", "max_count", "hidden"})
+
+
+def test_flag_view_count_value_reads_as_int_and_bool():
+    fl = FlagView({"verbose": 3})
+    assert fl.as_int("verbose") == 3
+    assert fl.as_bool("verbose") is True
+    assert FlagView({"verbose": 0}).as_bool("verbose") is False
+
+
+def test_flag_view_bool_never_reads_as_int():
+    fl = FlagView({"append": True})
+    assert fl.as_int("append") is None
+    assert fl.as_bool("append") is True

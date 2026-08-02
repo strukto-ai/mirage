@@ -23,7 +23,7 @@ import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
 // primitives.
 export async function runCp(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)

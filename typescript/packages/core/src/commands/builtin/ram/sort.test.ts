@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runSort(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ lines: string[]; exitCode: number }> {
   const cmd = RAM_SORT[0]

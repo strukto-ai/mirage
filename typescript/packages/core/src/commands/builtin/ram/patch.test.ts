@@ -22,7 +22,7 @@ const DEC = new TextDecoder()
 
 async function runPatch(
   resource: RAMResource,
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   stdin: Uint8Array | null,
 ): Promise<void> {
   const cmd = RAM_PATCH[0]

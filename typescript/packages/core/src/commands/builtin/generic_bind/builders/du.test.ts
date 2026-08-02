@@ -59,7 +59,7 @@ const ACCESSOR = {} as Accessor
 
 async function runDu(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   cwd = '/',
 ): Promise<string[]> {
   const result = await DU_BUILDER.fn(OPS, ACCESSOR, paths, [], {

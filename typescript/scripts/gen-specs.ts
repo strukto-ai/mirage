@@ -149,10 +149,14 @@ function serializeOperand(op: Operand): Record<string, unknown> {
 
 function serializeOption(o: Option): Record<string, unknown> {
   return {
+    choices: o.choices,
+    count: o.count,
+    default: o.default,
     description: o.description,
     long: o.long,
+    multiple: o.multiple,
     numeric_shorthand: o.numericShorthand,
-    repeatable: o.repeatable,
+    required: o.required,
     short: o.short,
     short_value: o.shortValue,
     value_kind: o.valueKind,

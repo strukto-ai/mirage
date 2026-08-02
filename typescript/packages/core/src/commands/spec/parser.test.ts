@@ -256,7 +256,7 @@ describe('parseCommand — providedBy frees the positional slot', () => {
   })
 })
 
-describe('parseCommand — repeatable value flags accumulate newline-joined', () => {
+describe('parseCommand — multiple value flags accumulate newline-joined', () => {
   // POSIX: each -e adds a pattern; a pattern argument is itself a
   // newline-separated pattern list, so repeats join with \n.
   it('accumulates repeated -e for grep', () => {
@@ -271,21 +271,21 @@ describe('parseCommand — repeatable value flags accumulate newline-joined', ()
     expect(p.flags['-e']).toEqual(['foo', 'bar'])
   })
 
-  it('non-repeatable value flags keep the last value', () => {
+  it('non-multiple value flags keep the last value', () => {
     const p = parseCommand(specOf('grep'), ['-m', '1', '-m', '2', 'pat'], '/')
     expect(p.flags['-m']).toBe('2')
   })
 
-  it('cluster into a repeatable flag accumulates', () => {
+  it('cluster into a multiple flag accumulates', () => {
     const p = parseCommand(specOf('grep'), ['-ne', 'foo', '-e', 'bar', '/a.txt'], '/')
     expect(p.flags['-n']).toBe(true)
     expect(p.flags['-e']).toEqual(['foo', 'bar'])
     expect(p.paths()).toEqual(['/a.txt'])
   })
 
-  it('long =value and separate forms of a repeatable flag accumulate', () => {
+  it('long =value and separate forms of a multiple flag accumulate', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--tag', valueKind: OperandKind.TEXT, repeatable: true })],
+      options: [new Option({ long: '--tag', valueKind: OperandKind.TEXT, multiple: true })],
       rest: new Operand({ kind: OperandKind.PATH }),
     })
     const p = parseCommand(spec, ['--tag=a', '--tag', 'b', '/x'], '/')
@@ -592,5 +592,87 @@ describe('attached short values land on the canonical dest', () => {
       '/',
     )
     expect(longLast.flags['--numeric-suffixes']).toBe('3')
+  })
+})
+
+describe('count flags accumulate occurrences', () => {
+  const spec = new CommandSpec({
+    options: [new Option({ short: '-v', long: '--verbose', count: true })],
+    rest: new Operand({ kind: OperandKind.PATH }),
+  })
+
+  it('parses -vvv and -v -v alike', () => {
+    expect(parseCommand(spec, ['-vvv', '/f'], '/').flags['--verbose']).toBe(3)
+    expect(parseCommand(spec, ['-v', '--verbose', '-v', '/f'], '/').flags['--verbose']).toBe(3)
+    expect('--verbose' in parseCommand(spec, ['/f'], '/').flags).toBe(false)
+  })
+})
+
+describe('choices violations are reported, never thrown', () => {
+  it('reports the canonical spelling, value, and allowed set', () => {
+    const parsed = parseCommand(specOf('tee'), ['--output-error=bogus', '/f'], '/')
+    expect(parsed.invalidValueOptions).toEqual([
+      ['--output-error', 'bogus', ['warn', 'warn-nopipe', 'exit', 'exit-nopipe']],
+    ])
+    expect(
+      parseCommand(specOf('tee'), ['--output-error=warn', '/f'], '/').invalidValueOptions,
+    ).toEqual([])
+  })
+
+  it('exempts the bare optional-value form', () => {
+    const parsed = parseCommand(specOf('tee'), ['--output-error', '/f'], '/')
+    expect(parsed.flags['--output-error']).toBe(true)
+    expect(parsed.invalidValueOptions).toEqual([])
+  })
+
+  it('checks every value of a multiple flag', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({
+          short: '-m',
+          valueKind: OperandKind.TEXT,
+          multiple: true,
+          choices: ['x', 'y'],
+        }),
+      ],
+    })
+    const parsed = parseCommand(spec, ['-m', 'x', '-m', 'z'], '/')
+    expect(parsed.invalidValueOptions).toEqual([['-m', 'z', ['x', 'y']]])
+  })
+})
+
+describe('required and default', () => {
+  it('reports an absent required option', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--out', valueKind: OperandKind.TEXT, required: true })],
+    })
+    expect(parseCommand(spec, [], '/').missingRequiredOptions).toEqual(['--out'])
+    expect(parseCommand(spec, ['--out', 'x'], '/').missingRequiredOptions).toEqual([])
+  })
+
+  it('lands the default as if typed, satisfying required', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({
+          long: '--mode',
+          valueKind: OperandKind.TEXT,
+          required: true,
+          default: 'fast',
+        }),
+      ],
+    })
+    const parsed = parseCommand(spec, [], '/')
+    expect(parsed.flags['--mode']).toBe('fast')
+    expect(parsed.missingRequiredOptions).toEqual([])
+    expect(parseCommand(spec, ['--mode', 'slow'], '/').flags['--mode']).toBe('slow')
+  })
+
+  it('resolves and routes a PATH default', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--file', valueKind: OperandKind.PATH, default: 'cfg.txt' })],
+    })
+    const parsed = parseCommand(spec, [], '/data')
+    expect(parsed.flags['--file']).toBe('/data/cfg.txt')
+    expect(parsed.pathFlagValues).toEqual(['/data/cfg.txt'])
   })
 })

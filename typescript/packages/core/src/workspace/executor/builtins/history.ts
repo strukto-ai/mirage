@@ -36,13 +36,13 @@ function usageError(message: string): Result {
 }
 
 interface ParsedArgs {
-  flags: Record<string, string | boolean | string[]>
+  flags: Record<string, string | boolean | number | string[]>
   texts: string[]
   error: string | null
 }
 
 function parseArgs(args: string[]): ParsedArgs {
-  const flags: Record<string, string | boolean | string[]> = {}
+  const flags: Record<string, string | boolean | number | string[]> = {}
   const texts: string[] = []
   let optionsDone = false
   let i = 0

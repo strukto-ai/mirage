@@ -21,7 +21,7 @@ import { crossOpts, flatten, streamOp } from '../utils.ts'
 // wiring: both sides are read through dispatch-relayed primitives.
 export async function runCmp(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)

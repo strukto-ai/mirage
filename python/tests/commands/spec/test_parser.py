@@ -67,7 +67,7 @@ def test_grep_repeated_dash_e_attached_value_accumulates():
     assert parsed.paths() == ["/a.txt"]
 
 
-def test_non_repeatable_value_flag_keeps_last_value():
+def test_non_multiple_value_flag_keeps_last_value():
     parsed = parse_command(SPECS["grep"], ["-m", "1", "-m", "2", "pat"], "/")
     assert parsed.flags["-m"] == "2"
 
@@ -215,7 +215,7 @@ def test_find_multichar_short_flag_still_works():
     assert parsed.flags["-name"] == ["*.txt"]
 
 
-def test_cluster_into_repeatable_flag_accumulates():
+def test_cluster_into_multiple_flag_accumulates():
     parsed = parse_command(SPECS["grep"],
                            ["-ne", "foo", "-e", "bar", "/a.txt"], "/")
     assert parsed.flags["-n"] is True
@@ -223,11 +223,11 @@ def test_cluster_into_repeatable_flag_accumulates():
     assert parsed.paths() == ["/a.txt"]
 
 
-def test_long_equals_and_separate_repeatable_accumulate():
+def test_long_equals_and_separate_multiple_accumulate():
     spec = CommandSpec(
         options=(Option(long="--tag",
                         value_kind=OperandKind.TEXT,
-                        repeatable=True), ),
+                        multiple=True), ),
         rest=Operand(kind=OperandKind.PATH),
     )
     parsed = parse_command(spec, ["--tag=a", "--tag", "b", "/x"], "/")
@@ -351,3 +351,70 @@ def test_attached_short_value_lands_on_canonical_dest():
                               ["-d10", "--numeric-suffixes=3", "/in", "/p"],
                               "/")
     assert long_last.flags["--numeric-suffixes"] == "3"
+
+
+def test_count_flag_accumulates_occurrences():
+    spec = CommandSpec(options=(Option(short="-v",
+                                       long="--verbose",
+                                       count=True), ),
+                       rest=Operand(kind=OperandKind.PATH))
+    packed = parse_command(spec, ["-vvv", "/f"], "/")
+    assert packed.flags["--verbose"] == 3
+    separate = parse_command(spec, ["-v", "--verbose", "-v", "/f"], "/")
+    assert separate.flags["--verbose"] == 3
+    absent = parse_command(spec, ["/f"], "/")
+    assert "--verbose" not in absent.flags
+
+
+def test_choices_violation_is_reported_not_raised():
+    parsed = parse_command(SPECS["tee"], ["--output-error=bogus", "/f"], "/")
+    assert parsed.invalid_value_options == [
+        ("--output-error", "bogus", ("warn", "warn-nopipe", "exit",
+                                     "exit-nopipe")),
+    ]
+    ok = parse_command(SPECS["tee"], ["--output-error=warn", "/f"], "/")
+    assert ok.invalid_value_options == []
+
+
+def test_choices_exempt_bare_optional_value_form():
+    parsed = parse_command(SPECS["tee"], ["--output-error", "/f"], "/")
+    assert parsed.flags["--output-error"] is True
+    assert parsed.invalid_value_options == []
+
+
+def test_choices_check_every_value_of_a_multiple_flag():
+    spec = CommandSpec(options=(Option(short="-m",
+                                       value_kind=OperandKind.TEXT,
+                                       multiple=True,
+                                       choices=("x", "y")), ))
+    parsed = parse_command(spec, ["-m", "x", "-m", "z"], "/")
+    assert parsed.invalid_value_options == [("-m", "z", ("x", "y"))]
+
+
+def test_required_option_reported_when_absent():
+    spec = CommandSpec(options=(
+        Option(long="--out", value_kind=OperandKind.TEXT, required=True), ))
+    missing = parse_command(spec, [], "/")
+    assert missing.missing_required_options == ["--out"]
+    present = parse_command(spec, ["--out", "x"], "/")
+    assert present.missing_required_options == []
+
+
+def test_default_lands_as_if_typed_and_satisfies_required():
+    spec = CommandSpec(options=(Option(long="--mode",
+                                       value_kind=OperandKind.TEXT,
+                                       required=True,
+                                       default="fast"), ))
+    parsed = parse_command(spec, [], "/")
+    assert parsed.flags["--mode"] == "fast"
+    assert parsed.missing_required_options == []
+    typed = parse_command(spec, ["--mode", "slow"], "/")
+    assert typed.flags["--mode"] == "slow"
+
+
+def test_path_default_resolves_and_routes():
+    spec = CommandSpec(options=(Option(
+        long="--file", value_kind=OperandKind.PATH, default="cfg.txt"), ))
+    parsed = parse_command(spec, [], "/data")
+    assert parsed.flags["--file"] == "/data/cfg.txt"
+    assert parsed.path_flag_values == ["/data/cfg.txt"]

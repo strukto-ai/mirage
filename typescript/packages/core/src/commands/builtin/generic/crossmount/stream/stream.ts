@@ -20,7 +20,7 @@ import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function hasActiveFlags(flagKwargs: Record<string, string | boolean | string[]>): boolean {
+function hasActiveFlags(flagKwargs: Record<string, string | boolean | number | string[]>): boolean {
   return Object.values(flagKwargs).some((v) => v !== false)
 }
 
@@ -48,7 +48,7 @@ export async function runStream(
   cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   runSingle: RunSingle,
 ): Promise<CrossResult> {
   let mergedIo = new IOResult()

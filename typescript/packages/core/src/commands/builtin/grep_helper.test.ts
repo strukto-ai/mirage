@@ -240,9 +240,9 @@ describe('hasSearchShapingFlags', () => {
     [{ B: '2' }, true],
     [{ C: '2' }, true],
   ])('hasSearchShapingFlags(%j) === %j', (flags, expected) => {
-    expect(hasSearchShapingFlags(flags as Record<string, string | boolean | string[]>)).toBe(
-      expected,
-    )
+    expect(
+      hasSearchShapingFlags(flags as Record<string, string | boolean | number | string[]>),
+    ).toBe(expected)
   })
 })
 

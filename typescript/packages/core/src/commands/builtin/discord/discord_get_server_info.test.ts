@@ -20,7 +20,7 @@ import { DISCORD_GET_SERVER_INFO } from './discord_get_server_info.ts'
 const DEC = new TextDecoder()
 
 async function runGetInfo(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = () => ({ id: 'G1', name: 'My Server' }),
 ): Promise<{ out: string; transport: FakeDiscordTransport }> {
   const cmd = DISCORD_GET_SERVER_INFO[0]

@@ -26,7 +26,7 @@ async function runSed(
   resource: RAMResource,
   texts: string[],
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<string> {
   const cmd = RAM_SED[0]

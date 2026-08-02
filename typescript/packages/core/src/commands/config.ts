@@ -43,7 +43,7 @@ export type CommandDispatch = (
 
 export interface CommandOpts {
   stdin: ByteSource | null
-  flags: Record<string, string | boolean | string[]>
+  flags: Record<string, string | boolean | number | string[]>
   filetypeFns: Record<string, CommandFn> | null
   mountPrefix?: string
   cwd: string

@@ -34,7 +34,7 @@ function mockFetch(respBody: string, status = 200): void {
 
 async function runWget(
   texts: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{
   out: string
   err: string

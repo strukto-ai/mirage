@@ -53,7 +53,7 @@ interface WcFlags {
   total: 'auto' | 'always' | 'only' | 'never'
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): WcFlags | string {
+function parseFlags(flags: Record<string, string | boolean | number | string[]>): WcFlags | string {
   const rawTotal = typeof flags.total === 'string' ? flags.total : 'auto'
   if (!['auto', 'always', 'only', 'never'].includes(rawTotal)) {
     return `wc: invalid argument '${rawTotal}' for '--total'\n`

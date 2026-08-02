@@ -384,7 +384,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     texts: string[],
-    flags: Record<string, string | boolean | string[]>,
+    flags: Record<string, string | boolean | number | string[]>,
     opts: {
       stdin?: ByteSource | null
       cwd?: string

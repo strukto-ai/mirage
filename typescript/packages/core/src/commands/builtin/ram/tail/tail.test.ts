@@ -27,7 +27,7 @@ const TWENTY_LINES = Array.from({ length: 20 }, (_, i) => `line${String(i + 1)}`
 async function runTail(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')

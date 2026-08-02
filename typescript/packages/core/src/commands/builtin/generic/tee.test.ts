@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../types.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { parseCommand } from '../../spec/parser.ts'
 import { parseTeeFlags, writeOutput } from './tee.ts'
 
 const DEC = new TextDecoder()
@@ -38,15 +40,14 @@ describe('parseTeeFlags', () => {
     expect(parseTeeFlags({ output_error: true })).toEqual({ append: false })
   })
 
-  it('rejects an invalid --output-error mode with the GNU message', () => {
-    const result = parseTeeFlags({ output_error: 'bogus' })
-    expect(typeof result).toBe('string')
-    expect(result).toBe(
-      "tee: invalid argument 'bogus' for '--output-error'\n" +
-        'Valid arguments are:\n' +
-        "  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\n" +
-        "Try 'tee --help' for more information.\n",
-    )
+  it('reports an invalid --output-error mode through the parser channel', () => {
+    // Value validation moved to the spec's choices=: the parser reports a
+    // bad mode and the executor refuses with GNU's ARGMATCH shape before
+    // tee runs, so parseTeeFlags no longer rejects.
+    const parsed = parseCommand(specOf('tee'), ['--output-error=bogus', '/f'], '/')
+    expect(parsed.invalidValueOptions).toEqual([
+      ['--output-error', 'bogus', ['warn', 'warn-nopipe', 'exit', 'exit-nopipe']],
+    ])
   })
 })
 

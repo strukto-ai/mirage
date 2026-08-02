@@ -44,7 +44,7 @@ function mockFetch(respBody: string, status = 200): FetchCall[] {
 
 async function runCurl(
   texts: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{
   out: string
   err: string

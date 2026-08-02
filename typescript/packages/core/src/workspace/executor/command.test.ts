@@ -102,7 +102,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       options: [new Option({ short: '-n', valueKind: OperandKind.TEXT })],
       rest: new Operand({ kind: OperandKind.PATH }),
     })
-    let seenFlags: Record<string, string | boolean | string[]> = {}
+    let seenFlags: Record<string, string | boolean | number | string[]> = {}
     const [cmd] = command({
       name: 'head',
       resource: 'ram',

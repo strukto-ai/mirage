@@ -8,8 +8,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_error_line, fs_strerror
 
-OUTPUT_ERROR_MODES = ("warn", "warn-nopipe", "exit", "exit-nopipe")
-
 
 @dataclass(frozen=True, slots=True)
 class TeeFlags:
@@ -17,14 +15,10 @@ class TeeFlags:
 
 
 def parse_flags(flags: Mapping[str, object]) -> TeeFlags:
+    # --output-error values are validated declaratively: the spec's
+    # choices= makes the parser report any other value and the executor
+    # refuse with GNU's ARGMATCH shape before tee runs.
     fl = FlagView(flags, spec=SPECS["tee"])
-    mode = fl.raw("output_error")
-    if isinstance(mode, str) and mode not in OUTPUT_ERROR_MODES:
-        valid = "\n".join(f"  - '{m}'" for m in OUTPUT_ERROR_MODES)
-        raise ValueError(
-            f"tee: invalid argument '{mode}' for '--output-error'\n"
-            f"Valid arguments are:\n{valid}\n"
-            "Try 'tee --help' for more information.")
     return TeeFlags(append=fl.as_bool("append"))
 
 
@@ -63,10 +57,7 @@ async def tee(
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
-    try:
-        parsed = parse_flags(flags or {})
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+    parsed = parse_flags(flags or {})
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raw = (" ".join(texts)).encode() if texts else b""

@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runFind(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   texts: string[] = [],
 ): Promise<{ lines: string[]; exitCode: number }> {
   const cmd = RAM_FIND[0]

@@ -27,7 +27,7 @@ async function runCmd(
   cmdArr: typeof RAM_EXPAND,
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = cmdArr[0]

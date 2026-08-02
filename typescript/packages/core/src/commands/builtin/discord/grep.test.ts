@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runGrep(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = DISCORD_GREP[0]

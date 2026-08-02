@@ -89,13 +89,16 @@ async function* trStream(
   }
 }
 
-function boolFlag(flags: Record<string, string | boolean | string[]>, ...names: string[]): boolean {
+function boolFlag(
+  flags: Record<string, string | boolean | number | string[]>,
+  ...names: string[]
+): boolean {
   return names.some((n) => flags[n] === true)
 }
 
 function buildOptions(
   texts: readonly string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): TrOptions {
   if (texts.length === 0) throw new Error('tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]')
   const complement = boolFlag(flags, 'c', 'C', 'complement')

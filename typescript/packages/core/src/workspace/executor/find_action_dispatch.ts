@@ -19,7 +19,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 
 export async function applyFindActions(
   stdout: ByteSource | null,
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   registry: MountRegistry,
   cwd: string,
 ): Promise<[ByteSource | null, Uint8Array]> {

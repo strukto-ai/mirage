@@ -93,7 +93,7 @@ export type RunSingle = (
   cmdName: string,
   paths: PathSpec[],
   texts: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   opts?: RunSingleOpts,
 ) => Promise<CrossResult>
 

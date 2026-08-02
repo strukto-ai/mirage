@@ -21,7 +21,7 @@ import { SLACK_ADD_REACTION } from './slack_add_reaction.ts'
 const DEC = new TextDecoder()
 
 async function runReact(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = (): SlackResponse => ({ ok: true }),
 ): Promise<{ out: string; transport: FakeSlackTransport }> {
   const cmd = SLACK_ADD_REACTION[0]

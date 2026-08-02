@@ -48,7 +48,7 @@ async function run(
   name: string,
   paths: PathSpec[],
   texts: string[] = [],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ stdout: string; exitCode: number; writes: string[] }> {
   const cmd = cmdOf(name)
   const result = await cmd.fn(makeAccessor(), paths, texts, {

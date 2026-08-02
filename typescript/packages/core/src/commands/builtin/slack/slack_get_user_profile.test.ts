@@ -21,7 +21,7 @@ import { SLACK_GET_USER_PROFILE } from './slack_get_user_profile.ts'
 const DEC = new TextDecoder()
 
 async function runGetProfile(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder,
 ): Promise<{ out: string; transport: FakeSlackTransport }> {
   const cmd = SLACK_GET_USER_PROFILE[0]

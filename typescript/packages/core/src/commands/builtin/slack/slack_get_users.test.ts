@@ -21,7 +21,7 @@ import { SLACK_GET_USERS } from './slack_get_users.ts'
 const DEC = new TextDecoder()
 
 async function runGetUsers(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder,
 ): Promise<{ out: string; transport: FakeSlackTransport }> {
   const cmd = SLACK_GET_USERS[0]

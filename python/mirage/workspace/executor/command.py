@@ -31,7 +31,9 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
                                   flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
-from mirage.commands.spec.usage import (missing_value_error,
+from mirage.commands.spec.usage import (invalid_argument_error,
+                                        missing_required_error,
+                                        missing_value_error,
                                         unknown_option_error)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
@@ -283,7 +285,7 @@ def _line_runtime(
 
 
 def _scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, Any]:
-    # `repeatable=True` on find value-flags makes parse_to_kwargs emit
+    # `multiple=True` on find value-flags makes parse_to_kwargs emit
     # lists; bespoke backend wrappers read these as scalars. Migrated
     # backends read the expression from `texts` and ignore flag_kwargs.
     return {
@@ -460,6 +462,8 @@ class _ParsedCommand(NamedTuple):
     warnings: list[str]
     invalid_options: list[str]
     needs_value_options: list[str]
+    invalid_value_options: list[tuple[str, str, tuple[str, ...]]]
+    missing_required_options: list[str]
 
 
 def _parse_flags(
@@ -492,7 +496,7 @@ def _parse_flags(
 
     Returns:
         _ParsedCommand: positional paths, positional texts, parsed flag dict
-        (PATH flag values recovered to PathSpec, repeatable PATH flags to
+        (PATH flag values recovered to PathSpec, multiple PATH flags to
         list[PathSpec]), and parser warnings (e.g. ignored unknown options).
     """
     # Build string argv and PathSpec lookup
@@ -511,7 +515,7 @@ def _parse_flags(
         parsed = parse_command(spec, argv, cwd=cwd)
         flag_kwargs = parse_to_kwargs(parsed)
 
-        # Recover PathSpec for PATH flag values; repeatable PATH flags
+        # Recover PathSpec for PATH flag values; multiple PATH flags
         # arrive as a list of resolved paths and become list[PathSpec].
         # A relative PATH flag value cwd-resolved by parse_command (e.g.
         # csplit -f part -> /data/part) is absent from scope_map, so build a
@@ -520,13 +524,13 @@ def _parse_flags(
         repeat_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
-            if opt.value_kind == OperandKind.PATH and opt.repeatable
+            if opt.value_kind == OperandKind.PATH and opt.multiple
             for name in (opt.short, opt.long) if name
         }
         single_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
-            if opt.value_kind == OperandKind.PATH and not opt.repeatable
+            if opt.value_kind == OperandKind.PATH and not opt.multiple
             for name in (opt.short, opt.long) if name
         }
         if not str_flag_paths:
@@ -570,12 +574,14 @@ def _parse_flags(
                 texts.append(value)
         return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings,
                               parsed.invalid_options,
-                              parsed.needs_value_options)
+                              parsed.needs_value_options,
+                              parsed.invalid_value_options,
+                              parsed.missing_required_options)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return _ParsedCommand(paths, texts, {}, [], [], [])
+    return _ParsedCommand(paths, texts, {}, [], [], [], [], [])
 
 
 def _option_error(cmd_name: str,
@@ -595,6 +601,12 @@ def _option_error(cmd_name: str,
         return unknown_option_error(cmd_name, parsed.invalid_options[0])
     if parsed.needs_value_options:
         return missing_value_error(cmd_name, parsed.needs_value_options[0])
+    if parsed.invalid_value_options:
+        option, value, choices = parsed.invalid_value_options[0]
+        return invalid_argument_error(cmd_name, option, value, choices)
+    if parsed.missing_required_options:
+        return missing_required_error(cmd_name,
+                                      parsed.missing_required_options[0])
     return None
 
 

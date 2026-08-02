@@ -58,7 +58,7 @@ function spec(virtual: string): PathSpec {
 
 async function runFind(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string[]> {
   const cmd = LINEAR_COMMANDS.find((c) => c.name === 'find')
   if (cmd === undefined) throw new Error('find not registered')

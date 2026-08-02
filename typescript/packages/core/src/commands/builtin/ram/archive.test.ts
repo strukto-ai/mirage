@@ -35,7 +35,7 @@ async function runCmd(
   reg: readonly RegisteredCommand[],
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): Promise<CmdResult> {
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')

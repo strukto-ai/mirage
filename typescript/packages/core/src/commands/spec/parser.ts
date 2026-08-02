@@ -23,7 +23,7 @@ import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
 // and `multiple` options accumulate in true command-line order
 // (`sort -k1 --key=2` is `[1, 2]`).
 function setValueFlag(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   cs: CompiledSpec,
   spelling: string,
   value: string,
@@ -41,13 +41,21 @@ function setValueFlag(
   }
 }
 
-// Record a boolean flag occurrence under its canonical dest.
+// Record a boolean flag occurrence under its canonical dest. A count flag
+// accumulates occurrences into a number (`-vvv` and `-v -v -v` both land
+// as 3); every other boolean flag is sticky true.
 function setBoolFlag(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   cs: CompiledSpec,
   spelling: string,
 ): void {
-  flags[cs.destOf(spelling)] = true
+  const name = cs.destOf(spelling)
+  if (cs.countDests.has(name)) {
+    const prev = flags[name]
+    flags[name] = typeof prev === 'number' ? prev + 1 : 1
+  } else {
+    flags[name] = true
+  }
 }
 
 interface MixedCluster {
@@ -105,7 +113,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
   }
 
-  const flags: Record<string, string | boolean | string[]> = {}
+  const flags: Record<string, string | boolean | number | string[]> = {}
   const rawArgs: string[] = []
   // rawIndices[k] = argv position of rawArgs[k]
   const rawIndices: number[] = []
@@ -281,6 +289,25 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     i += 1
   }
 
+  // Declared defaults land as if typed, before choices/required checks
+  // and before PATH/TEXT flag-value collection, so a PATH default
+  // resolves and routes and a default always satisfies required.
+  for (const [destName, defaultValue] of cs.defaults) {
+    if (!(destName in flags)) flags[destName] = defaultValue
+  }
+
+  const invalidValueOptions: [string, string, readonly string[]][] = []
+  for (const [destName, allowed] of cs.choicesByDest) {
+    const value = flags[destName]
+    // The bare boolean form of an optional-value flag is exempt.
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!allowed.includes(part)) invalidValueOptions.push([destName, part, allowed])
+    }
+  }
+
+  const missingRequiredOptions = cs.requiredDests.filter((destName) => !(destName in flags))
+
   const positional: OperandKind[] = spec.positional
     .filter((op) => !op.providedBy.some((name) => cs.destOf(name) in flags))
     .map((op) => op.kind)
@@ -351,12 +378,16 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     warnings,
     invalidOptions,
     needsValueOptions,
+    invalidValueOptions,
+    missingRequiredOptions,
     wordKinds,
   })
 }
 
-export function parseToKwargs(parsed: ParsedArgs): Record<string, string | boolean | string[]> {
-  const result: Record<string, string | boolean | string[]> = {}
+export function parseToKwargs(
+  parsed: ParsedArgs,
+): Record<string, string | boolean | number | string[]> {
+  const result: Record<string, string | boolean | number | string[]> = {}
   for (const [key, value] of Object.entries(parsed.flags)) {
     result[flagKwargName(key)] = value
   }

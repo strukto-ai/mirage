@@ -24,7 +24,7 @@ import { ExecutionNode } from '../types.ts'
 export { isCrossMount } from '../../commands/builtin/generic/crossmount/index.ts'
 export type { DispatchFn } from '../../commands/builtin/generic/crossmount/index.ts'
 
-type Flags = Record<string, string | boolean | string[]>
+type Flags = Record<string, string | boolean | number | string[]>
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 // Workspace-level adapter over the generic crossmount router: run the command

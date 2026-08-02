@@ -38,8 +38,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-A", value_kind=OperandKind.TEXT),
             Option(short="-B", value_kind=OperandKind.TEXT),
             Option(short="-C", value_kind=OperandKind.TEXT),
-            Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
-            Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
+            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
             # Accepted no-ops: output is never a tty, so plain output is
             # exactly what GNU produces with --color=auto (#471).
             Option(long="--color",
@@ -77,8 +77,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-o"),
             Option(short="-H"),
             Option(short="-I"),
-            Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
-            Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
+            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
             Option(short="-m", value_kind=OperandKind.TEXT),
             Option(short="-A", value_kind=OperandKind.TEXT),
             Option(short="-B", value_kind=OperandKind.TEXT),
@@ -100,10 +100,10 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-i"),
             # -e takes a script and may repeat; joined with newlines.
-            Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
+            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
             # -f reads the script from a file and may repeat (like grep -f);
             # its value is a PATH so it routes and is read from the mount.
-            Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
+            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
             Option(short="-n"),
             Option(short="-E"),
             Option(short="-r"),
@@ -137,8 +137,8 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         options=(
             Option(short="-F", value_kind=OperandKind.TEXT),
-            Option(short="-v", value_kind=OperandKind.TEXT, repeatable=True),
-            Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
+            Option(short="-v", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
         ),
         positional=(Operand(kind=OperandKind.TEXT, provided_by=("-f", )), ),
         rest=Operand(kind=OperandKind.PATH),
@@ -156,8 +156,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-l"),
             Option(short="-n"),
             Option(short="-v"),
-            Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
-            Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
+            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
             Option(short="-E"),
             Option(short="-F"),
             Option(short="-H"),

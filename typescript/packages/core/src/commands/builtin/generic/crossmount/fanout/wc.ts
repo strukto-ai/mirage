@@ -32,7 +32,7 @@ function parseWcRow(line: string, columns: number): WcRow {
 // the single-mount command uses.
 export function combineWc(
   results: OperandRun[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
 ): Uint8Array {
   const single =
     flagKwargs.lines === true ||

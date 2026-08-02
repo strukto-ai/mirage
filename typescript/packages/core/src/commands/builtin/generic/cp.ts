@@ -49,7 +49,7 @@ const UPDATE_MODES = ['all', 'none', 'none-fail', 'older'] as const
 // PATH-valued flags (-t) reach single-mount commands as PathSpec, so the
 // bag is wider than the string wire type; plain string records assign
 // fine.
-export type Flags = Record<string, string | boolean | string[] | PathSpec>
+export type Flags = Record<string, string | boolean | number | string[] | PathSpec>
 
 export interface CpFlags {
   recursive: boolean

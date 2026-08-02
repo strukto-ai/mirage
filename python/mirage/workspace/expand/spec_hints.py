@@ -49,7 +49,7 @@ def spec_word_kinds(
     """Classify argv words into per-position operand kinds.
 
     Delegates to parse_command so flag syntax (clusters, --flag=value,
-    repeatable flags, provided_by) classifies identically to dispatch.
+    multiple flags, provided_by) classifies identically to dispatch.
     Kinds are positional, not value sets, so the same word can be TEXT
     in one slot and PATH in another (`grep '*.txt' *.txt`). None marks
     flag tokens and ignored words (default classification applies).

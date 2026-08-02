@@ -20,7 +20,7 @@ import { DISCORD_SEND_MESSAGE } from './discord_send_message.ts'
 const DEC = new TextDecoder()
 
 async function runSend(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = () => ({ id: 'M1', content: 'hi' }),
 ): Promise<{ out: string; transport: FakeDiscordTransport }> {
   const cmd = DISCORD_SEND_MESSAGE[0]

@@ -97,3 +97,18 @@ describe('flagKwargName', () => {
     expect(flagKwargName('l')).toBe('args_l')
   })
 })
+
+describe('FlagView — count values', () => {
+  it('reads a count int through asInt and asBool', () => {
+    const fl = new FlagView({ verbose: 3 })
+    expect(fl.asInt('verbose')).toBe(3)
+    expect(fl.asBool('verbose')).toBe(true)
+    expect(new FlagView({ verbose: 0 }).asBool('verbose')).toBe(false)
+  })
+
+  it('never reads a boolean as an int', () => {
+    const fl = new FlagView({ append: true })
+    expect(fl.asInt('append')).toBeUndefined()
+    expect(fl.asBool('append')).toBe(true)
+  })
+})

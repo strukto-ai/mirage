@@ -76,7 +76,7 @@ interface CatDisplay {
   squeezeBlank: boolean
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): CatDisplay {
+function parseFlags(flags: Record<string, string | boolean | number | string[]>): CatDisplay {
   const showAll = flags.show_all === true
   return {
     numberLines: flags.number === true,

@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { extraOperandError, missingValueError, unknownOptionError, usageExitCode } from './usage.ts'
+import {
+  extraOperandError,
+  invalidArgumentError,
+  missingRequiredError,
+  missingValueError,
+  unknownOptionError,
+  usageExitCode,
+} from './usage.ts'
 
 const td = new TextDecoder()
 
@@ -81,5 +88,33 @@ describe('extraOperandError', () => {
     const err = extraOperandError('mktemp', 't2')
     expect(err.message.startsWith('mktemp: too many templates\n')).toBe(true)
     expect(err.exitCode).toBe(1)
+  })
+})
+
+describe('invalidArgumentError', () => {
+  it('matches the GNU ARGMATCH shape and tee exit 1', () => {
+    const [msg, code] = invalidArgumentError('tee', '--output-error', 'bogus', [
+      'warn',
+      'warn-nopipe',
+      'exit',
+      'exit-nopipe',
+    ])
+    expect(new TextDecoder().decode(msg)).toBe(
+      "tee: invalid argument 'bogus' for '--output-error'\n" +
+        'Valid arguments are:\n' +
+        "  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\n" +
+        "Try 'tee --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+  })
+})
+
+describe('missingRequiredError', () => {
+  it('names the canonical spelling', () => {
+    const [msg, code] = missingRequiredError('mycmd', '--out')
+    expect(new TextDecoder().decode(msg)).toBe(
+      "mycmd: option '--out' is required\nTry 'mycmd --help' for more information.\n",
+    )
+    expect(code).toBe(1)
   })
 })

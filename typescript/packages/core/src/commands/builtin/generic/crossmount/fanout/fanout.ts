@@ -62,7 +62,7 @@ export async function runFanout(
   cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   runSingle: RunSingle,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {

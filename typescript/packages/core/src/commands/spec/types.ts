@@ -59,11 +59,17 @@ export interface OptionInit {
   /** Treat "-<digits>" as this flag's value (e.g. head -5). */
   numericShorthand?: boolean
   /**
-   * Repeated occurrences accumulate newline-joined instead of last-wins
-   * (POSIX pattern-list form, e.g. grep -e). Repeatable PATH flags resolve
-   * and route each joined path.
+   * Boolean flag whose occurrences accumulate into a number (click count
+   * semantics): `-vvv` and `-v -v -v` both parse as 3. Only meaningful
+   * with valueKind NONE.
    */
-  repeatable?: boolean
+  count?: boolean
+  /**
+   * Repeated occurrences accumulate into a list instead of last-wins
+   * (argparse append / click multiple, e.g. grep -e). Multiple PATH
+   * flags resolve and route each path.
+   */
+  multiple?: boolean
   /**
    * GNU optional-argument long option (e.g. `--color[=WHEN]`): bare
    * `--color` parses as true, `--color=auto` parses as the string, and a
@@ -77,6 +83,25 @@ export interface OptionInit {
    * so the short clusters (`-bv`) instead of eating the rest as a value.
    */
   shortValue?: boolean
+  /**
+   * Allowed values for a value flag. Any other value is reported (never
+   * thrown) by the parser and surfaces as GNU's ARGMATCH refusal
+   * (`tee: invalid argument 'x' for '--output-error'` plus the valid
+   * list). The bare boolean form of an optional-value flag is exempt.
+   */
+  choices?: readonly string[]
+  /**
+   * The option must appear on the line; a line without it (and without a
+   * default) is a usage error. Click spelling; GNU tools express this
+   * per-command by hand.
+   */
+  required?: boolean
+  /**
+   * Value recorded when the flag is absent, as if it had been typed (a
+   * PATH default resolves and routes, a defaulted value must satisfy
+   * choices). Presence of a default always satisfies `required`.
+   */
+  default?: string | null
   description?: string
 }
 
@@ -85,9 +110,13 @@ export class Option {
   readonly long: string | null
   readonly valueKind: OperandKind
   readonly numericShorthand: boolean
-  readonly repeatable: boolean
+  readonly count: boolean
+  readonly multiple: boolean
   readonly valueOptional: boolean
   readonly shortValue: boolean
+  readonly choices: readonly string[]
+  readonly required: boolean
+  readonly default: string | null
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -95,9 +124,13 @@ export class Option {
     this.long = init.long ?? null
     this.valueKind = init.valueKind ?? OperandKind.NONE
     this.numericShorthand = init.numericShorthand ?? false
-    this.repeatable = init.repeatable ?? false
+    this.count = init.count ?? false
+    this.multiple = init.multiple ?? false
     this.valueOptional = init.valueOptional ?? false
     this.shortValue = init.shortValue ?? true
+    this.choices = init.choices ?? []
+    this.required = init.required ?? false
+    this.default = init.default ?? null
     this.description = init.description ?? null
     Object.freeze(this)
   }
@@ -158,7 +191,7 @@ export class CommandSpec {
 }
 
 export interface ParsedArgsInit {
-  flags: Record<string, string | boolean | string[]>
+  flags: Record<string, string | boolean | number | string[]>
   args: [string, OperandKind][]
   cachePaths?: string[]
   pathFlagValues?: string[]
@@ -168,10 +201,12 @@ export interface ParsedArgsInit {
   wordKinds?: (OperandKind | null)[]
   invalidOptions?: string[]
   needsValueOptions?: string[]
+  invalidValueOptions?: [string, string, readonly string[]][]
+  missingRequiredOptions?: string[]
 }
 
 export class ParsedArgs {
-  readonly flags: Record<string, string | boolean | string[]>
+  readonly flags: Record<string, string | boolean | number | string[]>
   readonly args: [string, OperandKind][]
   readonly cachePaths: string[]
   readonly pathFlagValues: string[]
@@ -181,9 +216,13 @@ export class ParsedArgs {
   readonly wordKinds: (OperandKind | null)[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
-  // and declared value flags that ran out of line ('--max-depth', 'm').
+  // declared value flags that ran out of line ('--max-depth', 'm'),
+  // values outside a declared choices set (canonical spelling, value,
+  // allowed values), and absent required options (canonical spelling).
   readonly invalidOptions: string[]
   readonly needsValueOptions: string[]
+  readonly invalidValueOptions: [string, string, readonly string[]][]
+  readonly missingRequiredOptions: string[]
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -196,6 +235,8 @@ export class ParsedArgs {
     this.wordKinds = init.wordKinds ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.needsValueOptions = init.needsValueOptions ?? []
+    this.invalidValueOptions = init.invalidValueOptions ?? []
+    this.missingRequiredOptions = init.missingRequiredOptions ?? []
   }
 
   paths(): string[] {
@@ -212,8 +253,8 @@ export class ParsedArgs {
 
   flag(
     name: string,
-    fallback: string | boolean | string[] | null = null,
-  ): string | boolean | string[] | null {
+    fallback: string | boolean | number | string[] | null = null,
+  ): string | boolean | number | string[] | null {
     return this.flags[name] ?? fallback
   }
 }
@@ -236,7 +277,7 @@ export function specFlagNames(spec: CommandSpec): ReadonlySet<string> {
   return names
 }
 
-export type FlagValue = string | boolean | string[]
+export type FlagValue = string | boolean | number | string[]
 
 /**
  * Typed read-only view over raw flag kwargs.
@@ -270,11 +311,15 @@ export class FlagView {
   }
 
   asBool(name: string): boolean {
-    return this.flags[this.key(name)] === true
+    const value = this.flags[this.key(name)]
+    if (typeof value === 'boolean') return value
+    // A count flag holds a number; any occurrence reads as set.
+    return typeof value === 'number' && value > 0
   }
 
   asInt(name: string): number | undefined {
     const value = this.flags[this.key(name)]
+    if (typeof value === 'number') return value
     if (typeof value !== 'string') return undefined
     // Python's int() is all-or-nothing: it accepts surrounding whitespace
     // and underscore separators and raises on anything else. parseInt would

@@ -30,7 +30,7 @@ async function* chainStreams(
 }
 
 function stringFlag(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   ...names: string[]
 ): string | null {
   for (const name of names) {
@@ -40,7 +40,9 @@ function stringFlag(
   return null
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): CutOptions | string {
+function parseFlags(
+  flags: Record<string, string | boolean | number | string[]>,
+): CutOptions | string {
   const bytesRange = stringFlag(flags, 'b', 'bytes')
   const charsRange = stringFlag(flags, 'c', 'characters')
   const fieldsRange = stringFlag(flags, 'F', 'f', 'fields')

@@ -1,4 +1,6 @@
 from mirage.commands.spec.usage import (extra_operand_error,
+                                        invalid_argument_error,
+                                        missing_required_error,
                                         missing_value_error,
                                         unknown_option_error, usage_exit_code)
 
@@ -58,3 +60,22 @@ def test_extra_operand_mktemp_says_too_many_templates():
     err = extra_operand_error("mktemp", "t2")
     assert str(err).startswith("mktemp: too many templates\n")
     assert err.exit_code == 1
+
+
+def test_invalid_argument_matches_gnu_argmatch_shape():
+    stderr, code = invalid_argument_error(
+        "tee", "--output-error", "bogus",
+        ("warn", "warn-nopipe", "exit", "exit-nopipe"))
+    assert stderr == (b"tee: invalid argument 'bogus' for '--output-error'\n"
+                      b"Valid arguments are:\n"
+                      b"  - 'warn'\n  - 'warn-nopipe'\n"
+                      b"  - 'exit'\n  - 'exit-nopipe'\n"
+                      b"Try 'tee --help' for more information.\n")
+    assert code == 1
+
+
+def test_missing_required_names_the_canonical_spelling():
+    stderr, code = missing_required_error("mycmd", "--out")
+    assert stderr == (b"mycmd: option '--out' is required\n"
+                      b"Try 'mycmd --help' for more information.\n")
+    assert code == 1

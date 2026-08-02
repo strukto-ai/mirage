@@ -59,7 +59,7 @@ function makeAccessor(): GitHubCIAccessor {
 async function runRg(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = GITHUB_CI_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')

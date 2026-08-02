@@ -21,7 +21,7 @@ import { SLACK_REPLY_TO_THREAD } from './slack_reply_to_thread.ts'
 const DEC = new TextDecoder()
 
 async function runReply(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = (): SlackResponse => ({ ok: true, ts: '2.0' }),
 ): Promise<{ out: string; transport: FakeSlackTransport }> {
   const cmd = SLACK_REPLY_TO_THREAD[0]

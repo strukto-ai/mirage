@@ -65,10 +65,13 @@ class Option:
             dispatch, and reach the command as PathSpec.
         numeric_shorthand (bool): treat "-<digits>" as this flag's value
             (e.g. head -5).
-        repeatable (bool): repeated occurrences accumulate into a list
-            instead of last-wins (argparse append semantics, e.g. grep -e).
-            TEXT values arrive as list[str]; PATH values are each resolved
-            and routed and arrive as list[PathSpec].
+        count (bool): boolean flag whose occurrences accumulate into an
+            int (click count semantics): ``-vvv`` and ``-v -v -v`` both
+            parse as 3. Only meaningful with value_kind NONE.
+        multiple (bool): repeated occurrences accumulate into a list
+            instead of last-wins (argparse append / click multiple, e.g.
+            grep -e). TEXT values arrive as list[str]; PATH values are
+            each resolved and routed and arrive as list[PathSpec].
         value_optional (bool): GNU optional-argument long option (e.g.
             ``--color[=WHEN]``): bare ``--color`` parses as True,
             ``--color=auto`` parses as the string, and a detached next
@@ -78,15 +81,31 @@ class Option:
             whose short is a plain boolean while only the long accepts a
             value (``cp -b`` vs ``--backup[=CONTROL]``), so the short
             clusters (``-bv``) instead of eating the rest as a value.
+        choices (tuple[str, ...]): allowed values for a value flag. Any
+            other value is reported (never raised) by the parser and
+            surfaces as GNU's ARGMATCH refusal (``tee: invalid argument
+            'x' for '--output-error'`` plus the valid list). The bare
+            boolean form of an optional-value flag is exempt.
+        required (bool): the option must appear on the line; a line
+            without it (and without a default) is a usage error. Click
+            spelling; GNU tools express this per-command by hand.
+        default (str | None): value recorded when the flag is absent, as
+            if it had been typed (a PATH default resolves and routes, a
+            defaulted value must satisfy choices). Presence of a default
+            always satisfies ``required``.
         description (str | None): help text.
     """
     short: str | None = None
     long: str | None = None
     value_kind: OperandKind = OperandKind.NONE
     numeric_shorthand: bool = False
-    repeatable: bool = False
+    count: bool = False
+    multiple: bool = False
     value_optional: bool = False
     short_value: bool = True
+    choices: tuple[str, ...] = ()
+    required: bool = False
+    default: str | None = None
     description: str | None = None
 
 
@@ -148,10 +167,18 @@ class FlagView:
         return name
 
     def as_bool(self, name: str) -> bool:
-        return self._flags.get(self._key(name)) is True
+        value = self._flags.get(self._key(name))
+        if isinstance(value, bool):
+            return value
+        # A count flag holds an int; any occurrence reads as set.
+        return isinstance(value, int) and value > 0
 
     def as_int(self, name: str) -> int | None:
         value = self._flags.get(self._key(name))
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
         return int(value) if isinstance(value, str) else None
 
     def as_str(self, name: str) -> str | None:
@@ -192,7 +219,7 @@ def spec_flag_names(spec: CommandSpec) -> frozenset[str]:
 
 @dataclass
 class ParsedArgs:
-    flags: dict[str, str | bool | list[str]]
+    flags: dict[str, str | bool | int | list[str]]
     args: list[tuple[str, OperandKind]]
     cache_paths: list[str] = field(default_factory=list)
     path_flag_values: list[str] = field(default_factory=list)
@@ -202,9 +229,14 @@ class ParsedArgs:
     word_kinds: list[OperandKind | None] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
-    # and declared value flags that ran out of line ('--max-depth', 'm').
+    # declared value flags that ran out of line ('--max-depth', 'm'),
+    # values outside a declared choices set (canonical spelling, value,
+    # allowed values), and absent required options (canonical spelling).
     invalid_options: list[str] = field(default_factory=list)
     needs_value_options: list[str] = field(default_factory=list)
+    invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = field(
+        default_factory=list)
+    missing_required_options: list[str] = field(default_factory=list)
 
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == OperandKind.PATH]

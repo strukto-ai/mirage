@@ -32,7 +32,10 @@ const G: KeyMods = {
   reverse: false,
 }
 
-function lines(text: string, flags: Record<string, string | boolean | string[]> = {}): string[] {
+function lines(
+  text: string,
+  flags: Record<string, string | boolean | number | string[]> = {},
+): string[] {
   return sortLines(text.split('\n'), buildConfig(flags))
 }
 

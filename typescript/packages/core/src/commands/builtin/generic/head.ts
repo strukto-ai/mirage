@@ -33,7 +33,7 @@ interface HeadFlags {
 }
 
 function flagString(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   short: string,
   long: string,
 ): string | null {
@@ -41,7 +41,9 @@ function flagString(
   return typeof value === 'string' ? value : null
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): HeadFlags | string {
+function parseFlags(
+  flags: Record<string, string | boolean | number | string[]>,
+): HeadFlags | string {
   const nRaw = flagString(flags, 'n', 'lines')
   const cRaw = flagString(flags, 'c', 'bytes')
   const numErr = numberFlagError('head', nRaw, cRaw)

@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runWc(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_WC[0]
   if (cmd === undefined) throw new Error('wc not registered')

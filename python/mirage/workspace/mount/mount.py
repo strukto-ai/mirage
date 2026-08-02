@@ -481,7 +481,7 @@ class MountEntry:
 
         # Stamp this mount's backend key onto path-shaped flag values so
         # backend reads can address them: a single PathSpec (e.g. awk -f,
-        # single grep -f) or a list of PathSpec (repeatable grep -f).
+        # single grep -f) or a list of PathSpec (multiple grep -f).
         # Everything else (bools, strings, list[str] like repeated -e) is
         # not a path and passes through unchanged.
         kw: dict[str, Any] = {}

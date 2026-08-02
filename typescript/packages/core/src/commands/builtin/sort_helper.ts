@@ -157,7 +157,9 @@ export function parseKeydef(spec: string, globalMods: KeyMods, globalSkip: boole
   }
 }
 
-export function buildConfig(flags: Record<string, string | boolean | string[]>): SortConfig {
+export function buildConfig(
+  flags: Record<string, string | boolean | number | string[]>,
+): SortConfig {
   const globalMods: KeyMods = {
     numeric: flags.n === true,
     generalNumeric: flags.g === true,

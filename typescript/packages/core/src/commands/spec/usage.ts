@@ -56,6 +56,39 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
 }
 
 /**
+ * GNU ARGMATCH refusal for a value outside a declared choices set.
+ *
+ * Shape pinned against real GNU (`tee --output-error=bogus`): the
+ * offending value, the option's canonical long spelling, then every valid
+ * argument in declaration order, one per line.
+ */
+export function invalidArgumentError(
+  cmdName: string,
+  option: string,
+  value: string,
+  choices: readonly string[],
+): [Uint8Array, number] {
+  const valid = choices.map((c) => `  - '${c}'`).join('\n')
+  const line =
+    `${cmdName}: invalid argument '${value}' for '${option}'\n` + `Valid arguments are:\n${valid}\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * Refusal for a declared required option absent from the line.
+ *
+ * No GNU tool declares required options through getopt, so there is no
+ * GNU shape to pin; this follows the unrecognized-option pattern (click
+ * reports the same condition as "Missing option").
+ */
+export function missingRequiredError(cmdName: string, option: string): [Uint8Array, number] {
+  const line = `${cmdName}: option '${option}' is required\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
  * GNU-shaped usage error for an operand past a command's arity.
  *
  * Shapes pinned against real GNU: `<cmd>: extra operand '<arg>'` with the

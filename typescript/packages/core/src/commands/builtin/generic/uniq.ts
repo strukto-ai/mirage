@@ -35,7 +35,7 @@ interface UniqFlags {
   zeroTerminated: boolean
 }
 
-function parseCount(value: string | boolean | string[] | undefined): number | null {
+function parseCount(value: string | boolean | number | string[] | undefined): number | null {
   if (value === undefined || value === false) return null
   if (typeof value !== 'string') throw new Error(`uniq: invalid count: '${String(value)}'`)
   const normalized = value.trim()
@@ -46,15 +46,15 @@ function parseCount(value: string | boolean | string[] | undefined): number | nu
 }
 
 function stringAlias(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   short: string,
   long: string,
-): string | boolean | string[] | undefined {
+): string | boolean | number | string[] | undefined {
   return flags[short] ?? flags[long]
 }
 
 function optionalMethod(
-  value: string | boolean | string[] | undefined,
+  value: string | boolean | number | string[] | undefined,
   defaultValue: string,
   allowed: string[],
   option: string,
@@ -67,7 +67,7 @@ function optionalMethod(
   return normalized
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): UniqFlags {
+function parseFlags(flags: Record<string, string | boolean | number | string[]>): UniqFlags {
   const count = flags.count === true
   const duplicatesOnly = flags.repeated === true
   const uniqueOnly = flags.unique === true

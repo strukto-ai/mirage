@@ -22,7 +22,7 @@ import { crossOpts, flatten, streamOp } from '../utils.ts'
 // primitives on its owning mount, matching the single-mount builder.
 export async function runComm(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const result = await commGeneric(flatten(scopes), crossOpts(flagKwargs), streamOp(dispatch))

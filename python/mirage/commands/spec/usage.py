@@ -67,6 +67,43 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     return (line + hint).encode(), usage_exit_code(cmd_name)
 
 
+def invalid_argument_error(cmd_name: str, option: str, value: str,
+                           choices: tuple[str, ...]) -> tuple[bytes, int]:
+    """GNU ARGMATCH refusal for a value outside a declared choices set.
+
+    Shape pinned against real GNU (``tee --output-error=bogus``): the
+    offending value, the option's canonical long spelling, then every
+    valid argument in declaration order, one per line.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--output-error').
+        value (str): the rejected value.
+        choices (tuple[str, ...]): allowed values in declaration order.
+    """
+    valid = "\n".join(f"  - '{c}'" for c in choices)
+    line = (f"{cmd_name}: invalid argument '{value}' for '{option}'\n"
+            f"Valid arguments are:\n{valid}\n")
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:
+    """Refusal for a declared required option absent from the line.
+
+    No GNU tool declares required options through getopt, so there is no
+    GNU shape to pin; this follows the unrecognized-option pattern
+    (click reports the same condition as "Missing option").
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--output').
+    """
+    line = f"{cmd_name}: option '{option}' is required\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
 def extra_operand_error(cmd_name: str, operand: str) -> UsageError:
     """GNU-shaped usage error for an operand past a command's arity.
 

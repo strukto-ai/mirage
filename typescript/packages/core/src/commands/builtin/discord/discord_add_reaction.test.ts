@@ -20,7 +20,7 @@ import { DISCORD_ADD_REACTION } from './discord_add_reaction.ts'
 const DEC = new TextDecoder()
 
 async function runReact(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = () => null,
 ): Promise<{ out: string; transport: FakeDiscordTransport }> {
   const cmd = DISCORD_ADD_REACTION[0]

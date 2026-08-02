@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -167,7 +167,7 @@ export async function xxdGeneric(
   } else {
     source = resolveSource(opts.stdin)
   }
-  const toInt = (v: string | boolean | string[] | undefined): number =>
+  const toInt = (v: FlagValue | undefined): number =>
     typeof v === 'string' ? Number.parseInt(v, 10) : 0
   const skip = toInt(fl.raw('s'))
   const limitFlag = toInt(fl.raw('args_l'))

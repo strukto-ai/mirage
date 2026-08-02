@@ -22,23 +22,15 @@ import { FlagView, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
-const OUTPUT_ERROR_MODES = ['warn', 'warn-nopipe', 'exit', 'exit-nopipe']
-
 export interface TeeOptions {
   append: boolean
 }
 
-export function parseTeeFlags(flags: Record<string, FlagValue>): TeeOptions | string {
+export function parseTeeFlags(flags: Record<string, FlagValue>): TeeOptions {
+  // --output-error values are validated declaratively: the spec's
+  // choices= makes the parser report any other value and the executor
+  // refuse with GNU's ARGMATCH shape before tee runs.
   const fl = new FlagView(flags, specOf('tee'))
-  const mode = fl.raw('output_error')
-  if (typeof mode === 'string' && !OUTPUT_ERROR_MODES.includes(mode)) {
-    const valid = OUTPUT_ERROR_MODES.map((m) => `  - '${m}'`).join('\n')
-    return (
-      `tee: invalid argument '${mode}' for '--output-error'\n` +
-      `Valid arguments are:\n${valid}\n` +
-      "Try 'tee --help' for more information.\n"
-    )
-  }
   return { append: fl.asBool('append') }
 }
 
@@ -53,9 +45,6 @@ export async function teeGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
   const parsed = parseTeeFlags(opts.flags)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
-  }
   const first = paths[0]
   if (first === undefined) return [null, new IOResult()]
   const stdinData = await readStdinAsync(opts.stdin)

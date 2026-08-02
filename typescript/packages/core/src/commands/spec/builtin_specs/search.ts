@@ -18,8 +18,8 @@ export const SPECS: Record<string, CommandSpec> = {
   awk: new CommandSpec({
     options: [
       new Option({ short: '-F', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-v', valueKind: OperandKind.TEXT, repeatable: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      new Option({ short: '-v', valueKind: OperandKind.TEXT, multiple: true }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),
@@ -45,8 +45,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-A', valueKind: OperandKind.TEXT }),
       new Option({ short: '-B', valueKind: OperandKind.TEXT }),
       new Option({ short: '-C', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
       // Accepted no-ops: output is never a tty, so plain output is
       // exactly what GNU produces with --color=auto (#471).
       new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
@@ -77,8 +77,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-o' }),
       new Option({ short: '-H' }),
       new Option({ short: '-I' }),
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
       new Option({ short: '-m', valueKind: OperandKind.TEXT }),
       new Option({ short: '-A', valueKind: OperandKind.TEXT }),
       new Option({ short: '-B', valueKind: OperandKind.TEXT }),
@@ -105,10 +105,10 @@ export const SPECS: Record<string, CommandSpec> = {
     options: [
       new Option({ short: '-i' }),
       // -e takes a script and may repeat; multiple -e are joined with newlines.
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
+      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
       // -f reads the script from a file and may repeat (like grep -f); its value
       // is a PATH so it routes and is read from the mount.
-      new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
       new Option({ short: '-n' }),
       new Option({ short: '-E' }),
       new Option({ short: '-r' }),
@@ -132,8 +132,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-l' }),
       new Option({ short: '-n' }),
       new Option({ short: '-v' }),
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
       new Option({ short: '-E' }),
       new Option({ short: '-F' }),
       new Option({ short: '-H' }),

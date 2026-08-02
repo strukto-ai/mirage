@@ -22,7 +22,7 @@ import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
 // mount.
 export async function runMv(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)

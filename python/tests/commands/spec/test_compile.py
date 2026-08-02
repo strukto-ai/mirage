@@ -20,7 +20,7 @@ from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
 def test_dest_prefers_long_and_keeps_short_only_identity():
     spec = CommandSpec(options=(
         Option(short="-a", long="--append"),
-        Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
+        Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
         Option(
             long="--color", value_kind=OperandKind.TEXT, value_optional=True),
     ))
@@ -33,8 +33,8 @@ def test_dest_prefers_long_and_keeps_short_only_identity():
 
 def test_multiple_dests_are_canonical():
     spec = CommandSpec(options=(Option(
-        short="-k", long="--key", value_kind=OperandKind.TEXT,
-        repeatable=True), ))
+        short="-k", long="--key", value_kind=OperandKind.TEXT, multiple=True),
+                                ))
     cs = compile_spec(spec)
     assert cs.multiple_dests == frozenset({"--key"})
 
@@ -75,3 +75,53 @@ def test_kind_tables_split_spelling_and_dest():
 def test_compile_is_cached_per_spec():
     spec = CommandSpec(options=(Option(short="-x"), ))
     assert compile_spec(spec) is compile_spec(spec)
+
+
+def test_count_choices_required_default_tables():
+    spec = CommandSpec(options=(
+        Option(short="-v", long="--verbose", count=True),
+        Option(long="--mode",
+               value_kind=OperandKind.TEXT,
+               choices=("a", "b"),
+               default="a"),
+        Option(long="--out", value_kind=OperandKind.TEXT, required=True),
+    ))
+    cs = compile_spec(spec)
+    assert cs.count_dests == frozenset({"--verbose"})
+    assert cs.choices_by_dest == {"--mode": ("a", "b")}
+    assert cs.required_dests == ("--out", )
+    assert cs.defaults == {"--mode": "a"}
+
+
+def test_count_on_a_value_flag_is_a_spec_error():
+    spec = CommandSpec(options=(
+        Option(long="--level", value_kind=OperandKind.TEXT, count=True), ))
+    try:
+        compile_spec(spec)
+    except ValueError as exc:
+        assert "count requires a boolean flag" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_choices_on_a_boolean_flag_is_a_spec_error():
+    spec = CommandSpec(options=(Option(long="--quiet", choices=("a", "b")), ))
+    try:
+        compile_spec(spec)
+    except ValueError as exc:
+        assert "require a value flag" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_default_outside_choices_is_a_spec_error():
+    spec = CommandSpec(options=(Option(long="--mode",
+                                       value_kind=OperandKind.TEXT,
+                                       choices=("a", "b"),
+                                       default="c"), ))
+    try:
+        compile_spec(spec)
+    except ValueError as exc:
+        assert "not one of its choices" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")

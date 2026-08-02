@@ -31,7 +31,7 @@ export async function runOperands(
   cmdName: string,
   scopes: PathSpec[],
   texts: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   stdinBytes: Uint8Array | null = null,
 ): Promise<OperandRun[]> {
   const results: OperandRun[] = []
@@ -106,7 +106,9 @@ export function flatten(scopes: PathSpec[]): PathSpec[] {
 // Minimal CommandOpts for delegating a read/compare to a generic: only flags,
 // mountPrefix and stdin are read by those generics. The cross command always
 // has path operands, so stdin is never consulted.
-export function crossOpts(flagKwargs: Record<string, string | boolean | string[]>): CommandOpts {
+export function crossOpts(
+  flagKwargs: Record<string, string | boolean | number | string[]>,
+): CommandOpts {
   return {
     stdin: null,
     flags: flagKwargs,

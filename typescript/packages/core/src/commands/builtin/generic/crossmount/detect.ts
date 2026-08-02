@@ -22,7 +22,7 @@ import { Cmd, Strategy } from './types.ts'
 // independent), so it fans out instead of streaming.
 export function strategyFor(
   cmdName: Cmd,
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
 ): Strategy {
   if (RELAY_COMMANDS.has(cmdName)) return Strategy.RELAY
   if (cmdName === Cmd.SED && flagKwargs.i === true) return Strategy.FANOUT

@@ -40,7 +40,7 @@ const SPEC = new CommandSpec({
 })
 
 function parseIntFlag(
-  raw: string | boolean | string[] | undefined,
+  raw: string | boolean | number | string[] | undefined,
   name: string,
   fallback: number,
   lo: number,

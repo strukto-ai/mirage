@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 
 async function runFind(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<string> {
   const cmd = DISCORD_COMMANDS.find((c) => c.name === 'find')

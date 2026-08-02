@@ -21,7 +21,7 @@ const RAM_MKTEMP = RAM_COMMANDS.filter((c) => c.name === 'mktemp' && c.filetype 
 const DEC = new TextDecoder()
 
 async function runMktemp(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   texts: string[] = [],
 ): Promise<{ out: string; resource: RAMResource }> {
   const resource = new RAMResource()

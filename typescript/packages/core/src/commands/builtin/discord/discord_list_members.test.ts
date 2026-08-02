@@ -20,7 +20,7 @@ import { DISCORD_LIST_MEMBERS } from './discord_list_members.ts'
 const DEC = new TextDecoder()
 
 async function runList(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   responder: Responder = () => [{ user: { id: 'U1', username: 'alice' } }],
 ): Promise<{ out: string; transport: FakeDiscordTransport }> {
   const cmd = DISCORD_LIST_MEMBERS[0]

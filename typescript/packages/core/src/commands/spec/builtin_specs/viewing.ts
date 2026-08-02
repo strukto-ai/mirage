@@ -107,7 +107,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-A', long: '--address-radix', valueKind: OperandKind.TEXT }),
       new Option({ short: '-j', long: '--skip-bytes', valueKind: OperandKind.TEXT }),
       new Option({ short: '-N', long: '--read-bytes', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-t', long: '--format', valueKind: OperandKind.TEXT, repeatable: true }),
+      new Option({ short: '-t', long: '--format', valueKind: OperandKind.TEXT, multiple: true }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),

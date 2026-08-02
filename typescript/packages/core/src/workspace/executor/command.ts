@@ -14,7 +14,12 @@
 
 import { SPECS } from '../../commands/spec/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
-import { missingValueError, unknownOptionError } from '../../commands/spec/usage.ts'
+import {
+  invalidArgumentError,
+  missingRequiredError,
+  missingValueError,
+  unknownOptionError,
+} from '../../commands/spec/usage.ts'
 import { concatBytes } from '../../core/jq/format.ts'
 import { OperandKind } from '../../commands/spec/types.ts'
 import type { CommandSpec } from '../../commands/spec/types.ts'
@@ -64,7 +69,7 @@ import { formatFsError } from '../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
-type Flags = Record<string, string | boolean | string[]>
+type Flags = Record<string, string | boolean | number | string[]>
 
 interface RunOnMountCtx {
   registry: MountRegistry
@@ -195,7 +200,7 @@ interface RunOnMountOpts {
   mount?: MountEntry | null
 }
 
-// `repeatable: true` on find value-flags makes parseToKwargs emit arrays;
+// `multiple: true` on find value-flags makes parseToKwargs emit arrays;
 // bespoke backend wrappers read these as scalars. Migrated backends read the
 // expression from `texts` and ignore flagKwargs.
 function scalarFindFlags(flagKwargs: Flags): Flags {
@@ -539,7 +544,7 @@ export async function handleCommand(
     const csParsed = parseFlags(parts.slice(1), SPECS[cmdName] ?? null, cmdName, session.cwd)
     const csFlags = csParsed[2]
     const csTexts = findExprTokens ?? csParsed[1]
-    const csRefusal = optionError(cmdName, csParsed[4], csParsed[5])
+    const csRefusal = optionError(cmdName, csParsed[4], csParsed[5], csParsed[6], csParsed[7])
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
       return [
@@ -654,9 +659,23 @@ export async function handleCommand(
     throw err
   }
 
-  const [paths, textsRaw, flagKwargs, parseWarnings, invalidOptions, needsValueOptions] =
-    parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
-  const refusal = optionError(cmdName, invalidOptions, needsValueOptions)
+  const [
+    paths,
+    textsRaw,
+    flagKwargs,
+    parseWarnings,
+    invalidOptions,
+    needsValueOptions,
+    invalidValueOptions,
+    missingRequiredOptions,
+  ] = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
+  const refusal = optionError(
+    cmdName,
+    invalidOptions,
+    needsValueOptions,
+    invalidValueOptions,
+    missingRequiredOptions,
+  )
   if (refusal !== null) {
     const [msg, code] = refusal
     return [
@@ -667,7 +686,7 @@ export async function handleCommand(
   }
   const texts = findExprTokens ?? textsRaw
   if (findExprTokens !== null) {
-    // `repeatable: true` on find value-flags makes parseToKwargs emit arrays;
+    // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
     // bespoke backend wrappers read these as scalars. Migrated backends read
     // the expression from `texts` and ignore flagKwargs.
     for (const [key, value] of Object.entries(flagKwargs)) {
@@ -751,9 +770,11 @@ function parseFlags(
 ): [
   PathSpec[],
   string[],
-  Record<string, string | boolean | string[]>,
+  Record<string, string | boolean | number | string[]>,
   string[],
   string[],
+  string[],
+  [string, string, readonly string[]][],
   string[],
 ] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
@@ -808,6 +829,8 @@ function parseFlags(
       parsed.warnings,
       parsed.invalidOptions,
       parsed.needsValueOptions,
+      parsed.invalidValueOptions,
+      parsed.missingRequiredOptions,
     ]
   }
 
@@ -817,7 +840,7 @@ function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], []]
+  return [paths, texts, {}, [], [], [], [], []]
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is
@@ -827,10 +850,15 @@ function optionError(
   cmdName: string,
   invalid: readonly string[],
   needsValue: readonly string[],
+  invalidValue: readonly [string, string, readonly string[]][],
+  missingRequired: readonly string[],
 ): [Uint8Array, number] | null {
   if (cmdName === 'find') return null
   if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
   if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
+  const badValue = invalidValue[0]
+  if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
+  if (missingRequired.length > 0) return missingRequiredError(cmdName, missingRequired[0] ?? '')
   return null
 }
 
@@ -932,7 +960,7 @@ async function injectLinks(
   stdout: ByteSource | null,
   namespace: Namespace,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   cwd: string,
 ): Promise<ByteSource | null> {
   if (flagKwargs.d === true || flagKwargs.R === true) return stdout
@@ -966,7 +994,7 @@ async function injectChildMounts(
   stdout: ByteSource | null,
   registry: MountRegistry,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   cwd: string,
 ): Promise<ByteSource | null> {
   if (flagKwargs.d === true || flagKwargs.R === true) return stdout

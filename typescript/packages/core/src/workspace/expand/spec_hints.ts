@@ -36,7 +36,7 @@ export function specForCommand(
 // Classify argv words into per-position operand kinds.
 //
 // Delegates to parseCommand so flag syntax (clusters, --flag=value,
-// repeatable flags, providedBy) classifies identically to dispatch. Kinds
+// multiple flags, providedBy) classifies identically to dispatch. Kinds
 // are positional, not value sets, so the same word can be TEXT in one slot
 // and PATH in another (`grep '*.txt' *.txt`). Null marks flag tokens and
 // ignored words (default classification applies).

@@ -25,7 +25,7 @@ const FILES: Record<string, string> = {
   '/right.txt': 'b\nc\n',
 }
 
-function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
+function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
   return { stdin: null, flags, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts
 }
 

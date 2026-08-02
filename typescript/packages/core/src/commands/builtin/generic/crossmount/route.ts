@@ -33,7 +33,7 @@ export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
   runSingle: RunSingle,
   stdin: ByteSource | null = null,

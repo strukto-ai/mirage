@@ -40,7 +40,7 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
+function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
   return {
     stdin: null,
     flags,
@@ -66,7 +66,7 @@ const readdir = (p: PathSpec): Promise<string[]> => {
   return Promise.resolve([])
 }
 
-async function run(flags: Record<string, string | boolean | string[]>): Promise<string[]> {
+async function run(flags: Record<string, string | boolean | number | string[]>): Promise<string[]> {
   const result = await lsGeneric([spec('/')], opts(flags), readdir, stat)
   if (result === null) return []
   const [out] = result
@@ -131,7 +131,7 @@ const treeReaddir = (p: PathSpec): Promise<string[]> => {
 
 async function runTree(
   paths: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await lsGeneric(paths.map(spec), opts(flags), treeReaddir, treeStat)
   if (result === null) return { stdout: '', stderr: '', exitCode: 0 }
@@ -233,7 +233,7 @@ const tiedReaddir = (p: PathSpec): Promise<string[]> =>
 
 async function runTied(
   paths: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string> {
   const result = await lsGeneric(paths.map(spec), opts(flags), tiedReaddir, tiedStat)
   if (result === null) return ''
@@ -292,7 +292,7 @@ const codeStat = (p: PathSpec): Promise<FileStat> => {
 
 async function status(
   paths: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<[number, string]> {
   const result = await lsGeneric(paths.map(spec), opts(flags), codeReaddir, codeStat)
   if (result === null) return [-1, '']

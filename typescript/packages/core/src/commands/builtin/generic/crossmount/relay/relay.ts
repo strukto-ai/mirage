@@ -29,7 +29,7 @@ import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
 export async function runRelay(
   cmdName: Cmd,
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   if (cmdName === Cmd.CP) return runCp(scopes, flagKwargs, dispatch)

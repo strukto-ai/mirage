@@ -19,7 +19,7 @@ from mirage.utils.path import resolve_path
 
 
 def _set_value_flag(
-    flags: dict[str, str | bool | list[str]],
+    flags: dict[str, str | bool | int | list[str]],
     cs: CompiledSpec,
     spelling: str,
     value: str,
@@ -49,18 +49,27 @@ def _set_value_flag(
 
 
 def _set_bool_flag(
-    flags: dict[str, str | bool | list[str]],
+    flags: dict[str, str | bool | int | list[str]],
     cs: CompiledSpec,
     spelling: str,
 ) -> None:
     """Record a boolean flag occurrence under its canonical dest.
+
+    A count flag accumulates occurrences into an int (``-vvv`` and
+    ``-v -v -v`` both land as 3); every other boolean flag is sticky
+    True.
 
     Args:
         flags (dict): parsed flag bag, updated in place.
         cs (CompiledSpec): compiled spec tables.
         spelling (str): dashed spelling as typed.
     """
-    flags[cs.dest_of(spelling)] = True
+    name = cs.dest_of(spelling)
+    if name in cs.count_dests:
+        prev = flags.get(name)
+        flags[name] = prev + 1 if isinstance(prev, int) else 1
+    else:
+        flags[name] = True
 
 
 def _match_mixed_cluster(
@@ -116,7 +125,7 @@ def parse_command(
             orig_indices.append(i)
             i += 1
 
-    flags: dict[str, str | bool | list[str]] = {}
+    flags: dict[str, str | bool | int | list[str]] = {}
     raw_args: list[str] = []
     # raw_indices[k] = argv position of raw_args[k]
     raw_indices: list[int] = []
@@ -272,6 +281,27 @@ def parse_command(
         raw_indices.append(orig_indices[i])
         i += 1
 
+    # Declared defaults land as if typed, before choices/required checks
+    # and before PATH/TEXT flag-value collection, so a PATH default
+    # resolves and routes and a default always satisfies required.
+    for dest_name, default in cs.defaults.items():
+        if dest_name not in flags:
+            flags[dest_name] = default
+
+    invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = []
+    for dest_name, allowed in cs.choices_by_dest.items():
+        value = flags.get(dest_name)
+        # The bare boolean form of an optional-value flag is exempt.
+        candidates = value if isinstance(
+            value, list) else ([value] if isinstance(value, str) else [])
+        for part in candidates:
+            if part not in allowed:
+                invalid_value_options.append((dest_name, part, allowed))
+
+    missing_required_options = [
+        dest_name for dest_name in cs.required_dests if dest_name not in flags
+    ]
+
     positional: tuple[OperandKind, ...] = tuple(
         op.kind for op in spec.positional
         if not any(cs.dest_of(name) in flags for name in op.provided_by))
@@ -334,6 +364,8 @@ def parse_command(
         word_kinds=word_kinds,
         invalid_options=invalid_options,
         needs_value_options=needs_value_options,
+        invalid_value_options=invalid_value_options,
+        missing_required_options=missing_required_options,
     )
 
 

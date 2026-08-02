@@ -35,7 +35,7 @@ function opts(overrides: Partial<CommandOpts> = {}): CommandOpts {
 
 async function runCurl(
   url: string,
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: Uint8Array; io: IOResult }> {
   const resource = new RAMResource()
   const cmd = GENERAL_CURL[0]
@@ -50,7 +50,7 @@ async function runCurl(
 
 async function runWget(
   url: string,
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: Uint8Array; io: IOResult }> {
   const resource = new RAMResource()
   const cmd = GENERAL_WGET[0]

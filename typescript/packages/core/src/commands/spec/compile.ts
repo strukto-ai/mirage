@@ -51,6 +51,18 @@ export class CompiledSpec {
   readonly dest: ReadonlyMap<string, string>
   /** Canonical spellings that accumulate repeated values into a list. */
   readonly multipleDests: ReadonlySet<string>
+  /** Canonical spellings of boolean flags whose occurrences accumulate
+   * into a number (click count, `-vvv`). */
+  readonly countDests: ReadonlySet<string>
+  /** Allowed values per canonical spelling, in declaration order (the
+   * order GNU's ARGMATCH refusal lists them). */
+  readonly choicesByDest: ReadonlyMap<string, readonly string[]>
+  /** Canonical spellings that must appear, in declaration order; a
+   * default satisfies the requirement. */
+  readonly requiredDests: readonly string[]
+  /** Value recorded per canonical spelling when the flag is absent from
+   * the line. */
+  readonly defaults: ReadonlyMap<string, string>
   /** Canonical spelling fed by the `-<digits>` shorthand, when one
    * option declares it. */
   readonly numericDest: string | null
@@ -68,6 +80,10 @@ export class CompiledSpec {
     kindByDest: ReadonlyMap<string, OperandKind>
     dest: ReadonlyMap<string, string>
     multipleDests: ReadonlySet<string>
+    countDests: ReadonlySet<string>
+    choicesByDest: ReadonlyMap<string, readonly string[]>
+    requiredDests: readonly string[]
+    defaults: ReadonlyMap<string, string>
     numericDest: string | null
     restKind: OperandKind | null
   }) {
@@ -81,6 +97,10 @@ export class CompiledSpec {
     this.kindByDest = fields.kindByDest
     this.dest = fields.dest
     this.multipleDests = fields.multipleDests
+    this.countDests = fields.countDests
+    this.choicesByDest = fields.choicesByDest
+    this.requiredDests = fields.requiredDests
+    this.defaults = fields.defaults
     this.numericDest = fields.numericDest
     this.restKind = fields.restKind
   }
@@ -108,15 +128,32 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const kindByDest = new Map<string, OperandKind>()
   const dest = new Map<string, string>()
   const multipleDests = new Set<string>()
+  const countDests = new Set<string>()
+  const choicesByDest = new Map<string, readonly string[]>()
+  const requiredDests: string[] = []
+  const defaults = new Map<string, string>()
   let numericDest: string | null = null
 
   for (const opt of spec.options) {
     const canonical = opt.long ?? opt.short
     if (canonical === null) continue
+    if (opt.count && opt.valueKind !== OperandKind.NONE) {
+      throw new Error(`option '${canonical}': count requires a boolean flag (valueKind NONE)`)
+    }
+    if (opt.valueKind === OperandKind.NONE && (opt.choices.length > 0 || opt.default !== null)) {
+      throw new Error(`option '${canonical}': choices and default require a value flag`)
+    }
+    if (opt.choices.length > 0 && opt.default !== null && !opt.choices.includes(opt.default)) {
+      throw new Error(`option '${canonical}': default '${opt.default}' is not one of its choices`)
+    }
     if (opt.short !== null) dest.set(opt.short, canonical)
     if (opt.long !== null) dest.set(opt.long, canonical)
     if (opt.valueKind !== OperandKind.NONE) kindByDest.set(canonical, opt.valueKind)
-    if (opt.repeatable) multipleDests.add(canonical)
+    if (opt.multiple) multipleDests.add(canonical)
+    if (opt.count) countDests.add(canonical)
+    if (opt.choices.length > 0) choicesByDest.set(canonical, opt.choices)
+    if (opt.required) requiredDests.push(canonical)
+    if (opt.default !== null) defaults.set(canonical, opt.default)
 
     if (opt.short !== null) {
       if (opt.valueKind === OperandKind.NONE) {
@@ -165,6 +202,10 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     kindByDest,
     dest,
     multipleDests,
+    countDests,
+    choicesByDest,
+    requiredDests,
+    defaults,
     numericDest,
     restKind: spec.rest !== null ? spec.rest.kind : null,
   })

@@ -30,26 +30,34 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 interface SortFlags {
-  normalized: Record<string, string | boolean | string[]>
+  normalized: Record<string, string | boolean | number | string[]>
   check: boolean
   checkQuiet: boolean
   output: string | null
   zeroTerminated: boolean
 }
 
-function flagStr(flags: Record<string, string | boolean | string[]>, name: string): string | null {
+function flagStr(
+  flags: Record<string, string | boolean | number | string[]>,
+  name: string,
+): string | null {
   const value = flags[name]
   return typeof value === 'string' ? value : null
 }
 
-function flagList(flags: Record<string, string | boolean | string[]>, name: string): string[] {
+function flagList(
+  flags: Record<string, string | boolean | number | string[]>,
+  name: string,
+): string[] {
   const value = flags[name]
   if (typeof value === 'string') return [value]
   if (Array.isArray(value)) return [...value]
   return []
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): SortFlags | string {
+function parseFlags(
+  flags: Record<string, string | boolean | number | string[]>,
+): SortFlags | string {
   const rawCheck = flags.check
   if (
     rawCheck !== undefined &&

@@ -181,7 +181,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-t",
                    long="--format",
                    value_kind=OperandKind.TEXT,
-                   repeatable=True),
+                   multiple=True),
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),

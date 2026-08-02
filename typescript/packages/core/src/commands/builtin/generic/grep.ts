@@ -59,8 +59,8 @@ interface FlagSet {
   beforeContext: number
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): FlagSet {
-  const toInt = (v: string | boolean | string[] | undefined): number | null =>
+function parseFlags(flags: Record<string, string | boolean | number | string[]>): FlagSet {
+  const toInt = (v: string | boolean | number | string[] | undefined): number | null =>
     typeof v === 'string' ? Number.parseInt(v, 10) : null
   const aCtx = toInt(flags.A)
   const bCtx = toInt(flags.B)

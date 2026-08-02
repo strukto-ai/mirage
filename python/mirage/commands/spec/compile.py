@@ -50,6 +50,17 @@ class CompiledSpec:
         dest (dict[str, str]): spelling -> canonical spelling.
         multiple_dests (frozenset[str]): canonical spellings that
             accumulate repeated values into a list.
+        count_dests (frozenset[str]): canonical spellings of boolean
+            flags whose occurrences accumulate into an int (click count,
+            ``-vvv``).
+        choices_by_dest (dict[str, tuple[str, ...]]): allowed values per
+            canonical spelling, in declaration order (the order GNU's
+            ARGMATCH refusal lists them).
+        required_dests (tuple[str, ...]): canonical spellings that must
+            appear, in declaration order; a default satisfies the
+            requirement.
+        defaults (dict[str, str]): value recorded per canonical spelling
+            when the flag is absent from the line.
         numeric_dest (str | None): canonical spelling fed by the
             ``-<digits>`` shorthand, when one option declares it.
         rest_kind (OperandKind | None): kind of the rest operand.
@@ -65,6 +76,10 @@ class CompiledSpec:
     kind_by_dest: dict[str, OperandKind] = field(default_factory=dict)
     dest: dict[str, str] = field(default_factory=dict)
     multiple_dests: frozenset[str] = frozenset()
+    count_dests: frozenset[str] = frozenset()
+    choices_by_dest: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    required_dests: tuple[str, ...] = ()
+    defaults: dict[str, str] = field(default_factory=dict)
     numeric_dest: str | None = None
     rest_kind: OperandKind | None = None
 
@@ -94,20 +109,43 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     kind_by_dest: dict[str, OperandKind] = {}
     dest: dict[str, str] = {}
     multiple_dests: set[str] = set()
+    count_dests: set[str] = set()
+    choices_by_dest: dict[str, tuple[str, ...]] = {}
+    required_dests: list[str] = []
+    defaults: dict[str, str] = {}
     numeric_dest: str | None = None
 
     for opt in spec.options:
         canonical = opt.long if opt.long else opt.short
         if canonical is None:
             continue
+        if opt.count and opt.value_kind != OperandKind.NONE:
+            raise ValueError(f"option {canonical!r}: count requires a "
+                             "boolean flag (value_kind NONE)")
+        if opt.value_kind == OperandKind.NONE and (opt.choices
+                                                   or opt.default is not None):
+            raise ValueError(f"option {canonical!r}: choices and default "
+                             "require a value flag")
+        if (opt.choices and opt.default is not None
+                and opt.default not in opt.choices):
+            raise ValueError(f"option {canonical!r}: default "
+                             f"{opt.default!r} is not one of its choices")
         if opt.short:
             dest[opt.short] = canonical
         if opt.long:
             dest[opt.long] = canonical
         if opt.value_kind != OperandKind.NONE:
             kind_by_dest[canonical] = opt.value_kind
-        if opt.repeatable:
+        if opt.multiple:
             multiple_dests.add(canonical)
+        if opt.count:
+            count_dests.add(canonical)
+        if opt.choices:
+            choices_by_dest[canonical] = opt.choices
+        if opt.required:
+            required_dests.append(canonical)
+        if opt.default is not None:
+            defaults[canonical] = opt.default
 
         if opt.short:
             if opt.value_kind == OperandKind.NONE:
@@ -153,6 +191,10 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         kind_by_dest=kind_by_dest,
         dest=dest,
         multiple_dests=frozenset(multiple_dests),
+        count_dests=frozenset(count_dests),
+        choices_by_dest=choices_by_dest,
+        required_dests=tuple(required_dests),
+        defaults=defaults,
         numeric_dest=numeric_dest,
         rest_kind=spec.rest.kind if spec.rest is not None else None,
     )

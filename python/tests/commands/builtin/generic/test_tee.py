@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.tee import TeeFlags, parse_flags, tee
+from mirage.commands.spec import SPECS, parse_command
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 
@@ -22,40 +23,21 @@ def test_parse_flags_i_and_p_are_noops():
 
 
 def test_parse_flags_valid_output_error_modes():
+    # Value validation moved to the spec's choices=: the parser reports a
+    # bad mode and the executor refuses before tee runs, so parse_flags
+    # only reads append.
     for mode in ("warn", "warn-nopipe", "exit", "exit-nopipe"):
         assert parse_flags({"output_error": mode}) == TeeFlags(append=False)
     assert parse_flags({"output_error": True}) == TeeFlags(append=False)
 
 
-def test_parse_flags_bad_output_error_mode_message():
-    with pytest.raises(ValueError) as exc:
-        parse_flags({"output_error": "bogus"})
-    assert str(exc.value) == (
-        "tee: invalid argument 'bogus' for '--output-error'\n"
-        "Valid arguments are:\n"
-        "  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\n"
-        "Try 'tee --help' for more information.")
-
-
-@pytest.mark.asyncio
-async def test_bad_output_error_mode_exits_one():
-
-    async def _write(_p, _d):
-        raise AssertionError("write should not run on a bad flag")
-
-    async def _read(_p):
-        if False:
-            yield b""
-
-    source, io = await tee([_spec("/out.txt")], (),
-                           read_stream=_read,
-                           write_bytes=_write,
-                           stdin=b"hi",
-                           flags={"output_error": "bogus"})
-    assert source is None
-    assert io.exit_code == 1
-    assert b"the delimiter" not in await materialize(io.stderr)
-    assert b"--output-error" in await materialize(io.stderr)
+def test_bad_output_error_mode_is_reported_by_the_parser():
+    parsed = parse_command(SPECS["tee"], ["--output-error=bogus", "/f.txt"],
+                           cwd="/")
+    assert parsed.invalid_value_options == [
+        ("--output-error", "bogus", ("warn", "warn-nopipe", "exit",
+                                     "exit-nopipe")),
+    ]
 
 
 @pytest.mark.asyncio
