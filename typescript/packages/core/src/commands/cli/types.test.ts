@@ -62,13 +62,13 @@ describe('CLISpec', () => {
     const gws = tree()
     expect(gws).toBeInstanceOf(CommandSpec)
     expect(gws.subcommands.map((child) => child.name)).toEqual(['gmail', 'docs'])
-    const gmail = gws.subcommands[0]!
-    const send = gmail.subcommands[0]!
-    expect(send.write).toBe(true)
-    expect(send.fn).toBe(verb)
-    expect(send.options[0]!.long).toBe('--to')
+    const gmail = gws.subcommands[0]
+    const send = gmail?.subcommands[0]
+    expect(send?.write).toBe(true)
+    expect(send?.fn).toBe(verb)
+    expect(send?.options[0]?.long).toBe('--to')
     expect(gws.configModel).toBe(configModel)
-    expect(gmail.configModel).toBeNull()
+    expect(gmail?.configModel).toBeNull()
   })
 
   it('allows a single-verb leaf root', () => {
@@ -84,7 +84,7 @@ describe('CLISpec', () => {
       options: [new Option({ short: '-C', valueKind: OperandKind.PATH })],
       subcommands: [new CLISpec({ name: 'status', fn: verb })],
     })
-    expect(git.options[0]!.short).toBe('-C')
+    expect(git.options[0]?.short).toBe('-C')
   })
 
   it('rejects an empty or multi-word name', () => {

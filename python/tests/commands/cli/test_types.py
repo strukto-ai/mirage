@@ -40,12 +40,11 @@ def _tree() -> CLISpec:
                         CLISpec(name="send",
                                 fn=_verb,
                                 write=True,
-                                options=(Option(
-                                    short="-t",
-                                    long="--to",
-                                    value_kind=OperandKind.TEXT,
-                                    multiple=True,
-                                    required=True), ),
+                                options=(Option(short="-t",
+                                                long="--to",
+                                                value_kind=OperandKind.TEXT,
+                                                multiple=True,
+                                                required=True), ),
                                 rest=Operand(kind=OperandKind.TEXT)),
                         CLISpec(name="list", fn=_verb),
                     )),
@@ -118,8 +117,9 @@ def test_group_declares_no_positional_or_rest():
 def test_duplicate_subcommand_names_raise():
     with pytest.raises(ValueError, match="duplicate subcommand 'send'"):
         CLISpec(name="gws",
-                subcommands=(CLISpec(name="send", fn=_verb),
-                             CLISpec(name="send", fn=_verb)))
+                subcommands=(CLISpec(name="send",
+                                     fn=_verb), CLISpec(name="send",
+                                                        fn=_verb)))
 
 
 def test_config_model_is_root_only():
