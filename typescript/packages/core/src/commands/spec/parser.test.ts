@@ -676,3 +676,24 @@ describe('required and default', () => {
     expect(parsed.pathFlagValues).toEqual(['/data/cfg.txt'])
   })
 })
+
+describe('multiple + default', () => {
+  it('lands the default as a one-element list and resolves PATH values', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({
+          short: '-f',
+          long: '--file',
+          valueKind: OperandKind.PATH,
+          multiple: true,
+          default: 'cfg.txt',
+        }),
+      ],
+    })
+    const parsed = parseCommand(spec, [], '/data')
+    expect(parsed.flags['--file']).toEqual(['/data/cfg.txt'])
+    expect(parsed.pathFlagValues).toEqual(['/data/cfg.txt'])
+    const typed = parseCommand(spec, ['-f', 'a', '-f', 'b'], '/data')
+    expect(typed.flags['--file']).toEqual(['/data/a', '/data/b'])
+  })
+})

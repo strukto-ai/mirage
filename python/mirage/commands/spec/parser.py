@@ -283,10 +283,14 @@ def parse_command(
 
     # Declared defaults land as if typed, before choices/required checks
     # and before PATH/TEXT flag-value collection, so a PATH default
-    # resolves and routes and a default always satisfies required.
+    # resolves and routes and a default always satisfies required. A
+    # multiple dest holds lists, so its default is a one-element list.
     for dest_name, default in cs.defaults.items():
         if dest_name not in flags:
-            flags[dest_name] = default
+            if dest_name in cs.multiple_dests:
+                flags[dest_name] = [default]
+            else:
+                flags[dest_name] = default
 
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = []
     for dest_name, allowed in cs.choices_by_dest.items():

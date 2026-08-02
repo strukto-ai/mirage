@@ -418,3 +418,16 @@ def test_path_default_resolves_and_routes():
     parsed = parse_command(spec, [], "/data")
     assert parsed.flags["--file"] == "/data/cfg.txt"
     assert parsed.path_flag_values == ["/data/cfg.txt"]
+
+
+def test_multiple_default_lands_as_one_element_list():
+    spec = CommandSpec(options=(Option(short="-f",
+                                       long="--file",
+                                       value_kind=OperandKind.PATH,
+                                       multiple=True,
+                                       default="cfg.txt"), ))
+    parsed = parse_command(spec, [], "/data")
+    assert parsed.flags["--file"] == ["/data/cfg.txt"]
+    assert parsed.path_flag_values == ["/data/cfg.txt"]
+    typed = parse_command(spec, ["-f", "a", "-f", "b"], "/data")
+    assert typed.flags["--file"] == ["/data/a", "/data/b"]

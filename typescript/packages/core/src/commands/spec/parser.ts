@@ -291,9 +291,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   // Declared defaults land as if typed, before choices/required checks
   // and before PATH/TEXT flag-value collection, so a PATH default
-  // resolves and routes and a default always satisfies required.
+  // resolves and routes and a default always satisfies required. A
+  // multiple dest holds lists, so its default is a one-element list.
   for (const [destName, defaultValue] of cs.defaults) {
-    if (!(destName in flags)) flags[destName] = defaultValue
+    if (!(destName in flags)) {
+      flags[destName] = cs.multipleDests.has(destName) ? [defaultValue] : defaultValue
+    }
   }
 
   const invalidValueOptions: [string, string, readonly string[]][] = []
