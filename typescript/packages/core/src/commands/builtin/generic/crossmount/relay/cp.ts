@@ -25,6 +25,9 @@ export async function runCp(
   scopes: PathSpec[],
   flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
+  // Maps an operand to its storage identity so two prefixes over one
+  // store compare equal.
+  storageKey?: (path: PathSpec) => string,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
@@ -36,5 +39,12 @@ export async function runCp(
   const mkdir = async (p: PathSpec): Promise<void> => {
     await dispatch('mkdir', p)
   }
-  return cpGeneric(flat, stat, { readBytes, write, mkdir, readdir }, parseCpFlags(flagKwargs))
+  return cpGeneric(
+    flat,
+    stat,
+    { readBytes, write, mkdir, readdir },
+    parseCpFlags(flagKwargs),
+    undefined,
+    storageKey,
+  )
 }

@@ -40,6 +40,7 @@ export async function handleCrossMount(
   runSingle: RunSingle,
   stdin: ByteSource | null,
   cmdStr: string,
+  storageKey?: (path: PathSpec) => string,
 ): Promise<Result> {
   const [stdout, io] = await routeCrossMount(
     cmdName,
@@ -49,6 +50,7 @@ export async function handleCrossMount(
     dispatch,
     runSingle,
     stdin,
+    storageKey,
   )
   const stderrBytes = await materialize(io.stderr)
   const exec = new ExecutionNode({ command: cmdStr, stderr: stderrBytes, exitCode: io.exitCode })

@@ -110,6 +110,11 @@ export interface Resource {
   // only where a truthful number exists (a real filesystem, or a provider
   // quota); never fabricate a total.
   statfs?(): Promise<CapacityResult>
+  // Identity of the storage behind this resource, so cp/mv can tell two
+  // prefixes over one store from two genuinely separate ones. Absent ->
+  // every mount is treated as its own storage, which only preserves the
+  // pre-existing behavior; see BaseResource.storageId.
+  storageId?(): string
   deltaHook?(): DeltaHook
 }
 
@@ -128,6 +133,10 @@ export function sizesAlwaysKnown(resource: Resource): boolean {
 export abstract class BaseResource {
   readonly indexTtl: number = 600
   protected _index?: IndexCacheStore
+  // JS has no object-identity primitive, so the default storageId hands
+  // each instance a serial number the first time it is asked.
+  static #storageCounter = 0
+  #storageSeq?: number
 
   get index(): IndexCacheStore {
     let store = this._index
@@ -153,6 +162,22 @@ export abstract class BaseResource {
     }
     const ttl = config === undefined ? this.indexTtl : (config.ttl ?? 600)
     return new RAMIndexCacheStore({ ttl })
+  }
+
+  // Identity of the storage this resource reads and writes. Two mounts
+  // whose resources return the same value address the same bytes, so a
+  // move between them must refuse rather than copy the object onto itself
+  // and then unlink the source. The default treats every instance as its
+  // own storage, which is the safe direction to be wrong in: a false
+  // "different" only keeps the pre-existing behavior, while a false "same"
+  // would refuse a legitimate move. Backends whose config pins the storage
+  // (a disk root, a bucket and key prefix) override this so two separately
+  // constructed instances pointing at one target still compare equal.
+  storageId(): string {
+    this.#storageSeq ??= ++BaseResource.#storageCounter
+    // The serial is what makes this unique; the class name only makes the
+    // value readable when it shows up while debugging.
+    return `${this.constructor.name}:${this.#storageSeq}`
   }
 
   // Default df capacity: UNKNOWN (rendered `-`). Backends that can report

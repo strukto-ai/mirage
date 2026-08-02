@@ -24,6 +24,10 @@ export async function runMv(
   scopes: PathSpec[],
   flagKwargs: Record<string, string | boolean | number | string[]>,
   dispatch: DispatchFn,
+  // Maps an operand to its storage identity. Without it a move between
+  // two prefixes over one store would copy the object onto itself and
+  // then unlink the source, destroying it.
+  storageKey?: (path: PathSpec) => string,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
@@ -46,5 +50,7 @@ export async function runMv(
     stat,
     { readBytes, write, mkdir, readdir, unlink, rmdir },
     parseMvFlags(flagKwargs),
+    undefined,
+    storageKey,
   )
 }

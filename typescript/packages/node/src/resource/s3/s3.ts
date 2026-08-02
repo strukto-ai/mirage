@@ -115,6 +115,14 @@ export class S3Resource extends BaseResource implements Resource {
     })
   }
 
+  // Endpoint, bucket and key prefix pin the object namespace. The endpoint
+  // matters because the same bucket name on two providers (AWS vs MinIO vs
+  // R2) is two different stores.
+  override storageId(): string {
+    const cfg = this.config
+    return `${this.kind}:${cfg.endpoint ?? 'aws'}:${cfg.bucket}:${cfg.keyPrefix ?? ''}`
+  }
+
   open(): Promise<void> {
     return Promise.resolve()
   }

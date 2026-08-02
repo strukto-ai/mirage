@@ -117,6 +117,12 @@ export class RedisResource extends BaseResource implements Resource {
     this.accessor = new RedisAccessor(this.store)
   }
 
+  // The server URL (host, port and db) plus the key prefix pin the keyspace
+  // two mounts would share.
+  override storageId(): string {
+    return `${this.kind}:${this.url}:${this.keyPrefix}`
+  }
+
   async open(): Promise<void> {
     await this.store.client()
   }

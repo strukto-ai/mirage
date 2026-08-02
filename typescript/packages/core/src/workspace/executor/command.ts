@@ -37,6 +37,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
+import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import { VfsRuntime, type Runtime } from './runtime.ts'
 import type { PolicyDecision } from './policy/index.ts'
@@ -582,6 +583,7 @@ export async function handleCommand(
       runSingle,
       stdin,
       cmdStr,
+      makeStorageKey(registry),
     )
     if (csParsed[3].length > 0) {
       const csWarn = new TextEncoder().encode(csParsed[3].map((w) => `${cmdName}: ${w}\n`).join(''))

@@ -120,6 +120,12 @@ export class DiskResource extends BaseResource implements Resource {
     this.accessor = new DiskAccessor(this.root)
   }
 
+  // The resolved root is the storage: two DiskResources built on the same
+  // directory are one store, however they were spelled.
+  override storageId(): string {
+    return `${this.kind}:${this.root}`
+  }
+
   async open(): Promise<void> {
     await mkdir(this.root, { recursive: true })
   }
