@@ -14,6 +14,7 @@
 
 import type { OpRecord } from '../../observe/record.ts'
 import type { FileStat } from '../../types.ts'
+import { DriftPolicy } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 
 /**
@@ -52,6 +53,105 @@ export interface FingerprintEntry {
 interface RegistryLike {
   mountFor(path: string): MountEntry | null
   allMounts(): readonly MountEntry[]
+}
+
+/**
+ * Fingerprint checks a load queued, drained on the first async op.
+ *
+ * `Workspace.load` records one entry per read whose snapshot manifest
+ * carried a fingerprint but no stable revision (a pinned read needs no
+ * check: the pin guarantees the bytes). The first `dispatch` or
+ * `execute` drains them, so downstream code can rely on consistent
+ * state. Mirrors the Python `DriftQueue` in `snapshot/drift.py`.
+ */
+export class DriftQueue {
+  private entries: { path: string; fingerprint: string }[] = []
+  private isPending = false
+
+  get pending(): boolean {
+    return this.isPending
+  }
+
+  /** Paths still queued for a check (audit surface). */
+  get paths(): string[] {
+    return this.entries.map((e) => e.path)
+  }
+
+  /** Drop any queued state (a re-install starts fresh). */
+  clear(): void {
+    this.entries = []
+    this.isPending = false
+  }
+
+  queue(path: string, fingerprint: string): void {
+    this.entries.push({ path, fingerprint })
+    this.isPending = true
+  }
+
+  /**
+   * Stat every queued path in parallel; throw on the first drift.
+   * Subsequent calls are no-ops. Stats run concurrently so first-op
+   * latency does not scale linearly with the number of recorded reads.
+   */
+  async drain(registry: RegistryLike, statFn: (path: string) => Promise<unknown>): Promise<void> {
+    this.isPending = false
+    if (this.entries.length === 0) return
+    const pending = this.entries
+    this.entries = []
+    const results = await Promise.allSettled(
+      pending.map((p) => checkDrift(registry, statFn, p.path, p.fingerprint)),
+    )
+    for (const r of results) {
+      if (r.status === 'rejected') throw r.reason as Error
+    }
+  }
+}
+
+/**
+ * Walk a loaded snapshot's fingerprint manifest. For entries with a
+ * revision, install the pin on the owning mount so replay reads pin to
+ * that revision. For fingerprint-only entries, queue the path on the
+ * drift queue. OFF skips the checks and evicts the snapshot cache for
+ * fingerprinted paths so reads serve current state.
+ *
+ * Idempotent: clears queued state before installing. Called from
+ * `Workspace.fromState`.
+ */
+export function installDriftState(
+  registry: RegistryLike,
+  cache: { remove(key: string): Promise<void> },
+  drift: DriftQueue,
+  state: { fingerprints?: FingerprintEntry[]; live_only_mounts?: string[] },
+  policy: DriftPolicy,
+): void {
+  drift.clear()
+  const entries = state.fingerprints ?? []
+  if (entries.length === 0) return
+  if (policy === DriftPolicy.OFF) {
+    for (const e of entries) {
+      void cache.remove(e.path)
+    }
+    return
+  }
+  for (const e of entries) {
+    const mount = registry.mountFor(e.path)
+    if (mount === null) continue
+    if (e.revision !== undefined && e.revision !== null) {
+      mount.revisions.set(e.path, e.revision)
+      continue
+    }
+    if (e.fingerprint !== undefined && e.fingerprint !== null) {
+      drift.queue(e.path, e.fingerprint)
+    }
+  }
+  const liveOnly = state.live_only_mounts ?? []
+  if (liveOnly.length > 0) {
+    console.warn(
+      `Workspace.load: ${String(liveOnly.length)} mount(s) opt out of snapshot replay; ` +
+        `reads against them will serve current state with no drift detection: ` +
+        liveOnly.join(', '),
+    )
+  }
 }
 
 /**

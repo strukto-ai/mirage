@@ -313,6 +313,29 @@ def requires_resource_override(mount_state: dict[str, Any]) -> bool:
     return has_redacted_secret(config, config_cls)
 
 
+def reusable_resources(mounts: list[Any], state: dict[str,
+                                                      Any]) -> dict[str, Any]:
+    """Live resources a copy should share with its origin.
+
+    Remote backends (S3, Redis, GDrive) stay shared: their state
+    redacts the secrets a reconstruction would need. Local content
+    resources (RAM, Disk) are rebuilt fresh so the copy's writes do
+    not clobber the original's data. The auto mounts are excluded
+    because the new workspace mounts its own.
+
+    Args:
+        mounts (list[Any]): the origin's mount entries.
+        state (dict[str, Any]): the origin's state dict.
+    """
+    auto = {"/dev/", norm_mount_prefix(HISTORY_PREFIX)}
+    live = {m.prefix: m.resource for m in mounts if m.prefix not in auto}
+    return {
+        m[MountKey.PREFIX]: live[m[MountKey.PREFIX]]
+        for m in state[StateKey.MOUNTS]
+        if requires_resource_override(m) and m[MountKey.PREFIX] in live
+    }
+
+
 def _resource_class_for(mount_state: dict[str, Any]):
     ptype = mount_state[MountKey.RESOURCE_STATE].get(ResourceStateKey.TYPE, "")
     if ptype in REGISTRY:

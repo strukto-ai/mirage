@@ -27,7 +27,7 @@ from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult
-from mirage.workspace.workspace import parse
+from mirage.shell.parse import parse
 
 
 class AlphaRuntime(Runtime):

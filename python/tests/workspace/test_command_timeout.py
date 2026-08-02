@@ -286,7 +286,7 @@ async def test_truncation_keeps_lazy_exit_zero_on_match():
 async def test_provision_dry_run_honors_timeout(monkeypatch, restore_defaults):
     sg.DEFAULT_COMMAND_SAFEGUARDS["cat"] = CommandSafeguard(
         timeout_seconds=0.1)
-    monkeypatch.setattr("mirage.workspace.workspace.provision_node",
+    monkeypatch.setattr("mirage.workspace.workspace.execute.provision_node",
                         _slow_provision)
     ws = _ws()
     r = await ws.execute("cat /data/f.txt", provision=True)

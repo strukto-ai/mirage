@@ -64,10 +64,10 @@ def test_multiple_fuse_mounts_are_independent(monkeypatch):
     ws.add_fuse_mount("/a/", "/tmp/mp-a")
     ws.add_fuse_mount("/b/", "/tmp/mp-b")
     assert ws.fuse_mountpoints == {"/a/": "/tmp/mp-a", "/b/": "/tmp/mp-b"}
-    assert set(ws._fuse_managers) == {"/a/", "/b/"}
+    assert set(ws._kernel_mounts._managers) == {"/a/", "/b/"}
     ws.remove_fuse_mount("/a/")
     assert ws.fuse_mountpoints == {"/b/": "/tmp/mp-b"}
-    assert set(ws._fuse_managers) == {"/b/"}
+    assert set(ws._kernel_mounts._managers) == {"/b/"}
 
 
 def test_collision_rejected_before_mount(monkeypatch):

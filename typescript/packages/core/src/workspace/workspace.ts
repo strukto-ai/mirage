@@ -12,42 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileCache } from '../cache/file/mixin.ts'
-import type { IndexConfig } from '../cache/index/config.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
+import type { FileCache } from '../cache/file/mixin.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import type { ByteSource } from '../io/types.ts'
-import { IOResult, materialize } from '../io/types.ts'
-import { runWithRecording } from '../observe/context.ts'
+import { IOResult } from '../io/types.ts'
 import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
-import type { ObserverStore } from '../observe/store.ts'
-import type { NamespaceStore } from './mount/namespace/store.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
-import { assertMountAllowed, runWithSession } from '../context/session_context.ts'
+import { assertMountAllowed } from '../context/session_context.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
-import {
-  guardOutput,
-  CommandTimeoutError,
-  runWithTimeout,
-} from '../commands/builtin/utils/safeguard.ts'
+import { runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from './executor/policy/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
-import { findSyntaxError, findUnterminatedBacktick, type ShellParser } from '../shell/parse.ts'
-import { UsageError } from '../commands/errors.ts'
-import { ContentDriftError } from './snapshot/drift.ts'
+import type { ShellParser } from '../shell/parse.ts'
+import { DriftQueue, installDriftState } from './snapshot/drift.ts'
 import { snapshot as writeSnapshot } from './snapshot/api.ts'
-import { checkDrift } from './snapshot/drift.ts'
 import { readFileBytes } from './snapshot/fs.ts'
 import { applyStateDict, buildMountArgs, toStateDict } from './snapshot/state.ts'
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
 import type { FileEvent, FileStat } from '../types.ts'
 import {
-  type CommandSafeguard,
   ConsistencyPolicy,
   DriftPolicy,
   FileType,
@@ -55,193 +43,44 @@ import {
   parseMountMode,
   PathSpec,
 } from '../types.ts'
+import type { PolicyFn } from './executor/policy/index.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
-import type { DispatchFn } from './executor/cross_mount.ts'
 import type { ProvisionResult } from '../provision/types.ts'
 import { WorkspaceFS } from './fs.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
 import { MontyUnavailableError } from './executor/python/runtimes/monty.ts'
-import {
-  commandFacts,
-  decideLine,
-  PolicyDeny,
-  PolicyError,
-  type PolicyDecision,
-  type PolicyContext,
-  type PolicyFn,
-} from './executor/policy/index.ts'
-import {
-  bindCommands,
-  catchAll,
-  DEFAULT_ENTRIES,
-  runtimeBindingsFor,
-  scriptStringError,
-  VfsRuntime,
-  wholeLineRuntime,
-  type Runtime,
-  type RuntimeEntry,
-} from './executor/runtime.ts'
+import { scriptStringError, type Runtime, type RuntimeEntry } from './executor/runtime.ts'
 import { isEvaluator } from './executor/runtime_mixin.ts'
 import type { EvalResult, RunResult } from './executor/runtime_types.ts'
-import { buildRuntime } from './executor/runtime_table.ts'
 import { PyodideUnavailableError } from './executor/python/types.ts'
-import { makeAbortError } from './abort.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { provisionNode } from './node/provision_node.ts'
-import { runCommandTree } from './node/run_tree.ts'
-import type { ExecuteNodeDeps } from './node/execute_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
-import type { SessionStore } from './session/store.ts'
-import { RAMWorkspaceStateStore } from './store/ram.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from './store/base.ts'
 import type { Session } from './session/session.ts'
-import type { ExecutionNode } from './types.ts'
-import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
 import { stripSlash } from '../utils/slash.ts'
 import type { WatchRuntime } from '../watch/base.ts'
-import { Watcher } from '../watch/watcher.ts'
+import { resolveControlStores } from './workspace/build.ts'
+import { executeLine, type ExecuteEnv } from './workspace/execute.ts'
+import { closeWorkspace } from './workspace/lifecycle.ts'
+import { WorkspaceMeta } from './workspace/meta.ts'
+import { normalizeResources, unmountPrefix } from './workspace/mounts.ts'
+import { PolicyRouter } from './workspace/policy.ts'
+import { Runtimes } from './workspace/runtimes.ts'
+import type { ExecuteResult } from './workspace/types.ts'
+import { type ExecuteOptions, type MountSpec, type WorkspaceOptions } from './workspace/types.ts'
+import { commandName, infrastructurePrefixes } from './workspace/utils.ts'
+import { WatchManager } from './workspace/watch.ts'
 
-/**
- * One mount entry: a bare resource takes the workspace default mode, a
- * `[resource, mode]` pair pins the mount's own mode, and an optional
- * third element attaches per-command safeguards (mirrors the Python
- * `(resource, mode, safeguards)` tuple form).
- */
-export type MountSpec =
-  | Resource
-  | readonly [Resource, MountMode]
-  | readonly [Resource, MountMode, Record<string, CommandSafeguard>]
-
-export interface WorkspaceOptions {
-  mode?: MountMode
-  consistency?: ConsistencyPolicy
-  commandSafeguards?: Record<string, Record<string, CommandSafeguard>>
-  /**
-   * Behaviour for the post-load drift check on fingerprinted reads. Only
-   * consulted by {@link Workspace.load} / {@link Workspace.fromState};
-   * fresh workspaces never have fingerprints to check.
-   *
-   * - `STRICT` (load default): raise {@link ContentDriftError} on the
-   *   first mismatch when the workspace's first `dispatch`/`execute`
-   *   runs.
-   * - `OFF`: skip drift checks entirely and evict the snapshot cache
-   *   for fingerprinted paths.
-   */
-  driftPolicy?: DriftPolicy
-  ops?: OpsRegistry
-  shellParser?: ShellParser
-  shellParserFactory?: () => Promise<ShellParser>
-  agentId?: string
-  sessionId?: string
-  cacheLimit?: string | number
-  cache?: FileCache & Resource
-  index?: IndexConfig
-  observe?: ObserverStore
-  namespaceStore?: NamespaceStore
-  sessionStore?: SessionStore
-  workspaceId?: string
-  store?: WorkspaceStateStore
-  python?: {
-    autoLoadFromImports?: boolean
-    bootstrapCode?: string
-    denyPackages?: readonly string[]
-  }
-  /**
-   * The workspace's ordered runtime world: instances and name
-   * shorthands including 'vfs'; the first capturer binds each
-   * command. Unset = the default world (pyodide, quickjs, vfs).
-   */
-  runtimes?: RuntimeEntry[]
-  /**
-   * Global policy script for the policy ladder: a function taking the
-   * PolicyContext (or a config-borne ScriptSource) naming the runtime
-   * for a line, or null to fall to the entries' own scripts. Ladder:
-   * the runtime argument > policy > scripts by list order > admission
-   * failure (exit 126).
-   */
-  policy?: PolicyFn
-}
-
-export class ExecuteResult {
-  readonly stdout: Uint8Array
-  readonly stderr: Uint8Array
-  readonly exitCode: number
-
-  constructor(stdout: Uint8Array, stderr: Uint8Array, exitCode: number) {
-    this.stdout = stdout
-    this.stderr = stderr
-    this.exitCode = exitCode
-  }
-
-  get stdoutText(): string {
-    return new TextDecoder().decode(this.stdout)
-  }
-
-  get stderrText(): string {
-    return new TextDecoder().decode(this.stderr)
-  }
-}
-
-export interface ExecuteOptions {
-  stdin?: ByteSource | null
-  provision?: boolean
-  sessionId?: string
-  agentId?: string
-  /**
-   * Abort the in-progress execution. Observed cooperatively at recursion
-   * boundaries between LIST/PIPELINE/loop iterations and inside `sleep`.
-   * Long-running synchronous primitives (e.g. a single large file read)
-   * may still complete before the signal lands. On abort, throws
-   * `DOMException('execute aborted', 'AbortError')`.
-   */
-  signal?: AbortSignal
-  /**
-   * When false, run without logging a history entry or opening a
-   * recording context; ops emitted by the command flow into the
-   * caller's recorder. Used by the executor's internal evaluations
-   * ($(), eval, source, xargs) and available to SDK callers that need
-   * an unrecorded run. Mirrors GNU: history is appended where the typed
-   * line is read, never inside the evaluator.
-   */
-  record?: boolean
-  /**
-   * Per-call working directory. Providing this runs the command in an
-   * isolated session, like a bash subshell `(cd <cwd> && cmd)`. Mutations
-   * (cd, export) inside the call do NOT persist back to the workspace's
-   * session. To change the persistent cwd, assign `ws.cwd` directly or run
-   * `ws.execute('cd <path>')` without this option.
-   */
-  cwd?: string
-  /**
-   * Per-call environment variable overrides, layered on top of the
-   * session's env. Providing this runs the command in an isolated session,
-   * like `env FOO=bar cmd`. Mutations (export) inside the call do NOT
-   * persist back to the workspace's session. To change the persistent env,
-   * assign `ws.env` directly or run `ws.execute('export FOO=bar')` without
-   * this option.
-   */
-  env?: Record<string, string>
-  /**
-   * Explicit runtime for this line, naming a workspace runtime entry.
-   * Stages the named runtime captures rebind to it for this line only
-   * (nested evals inherit it); everything else keeps its normal
-   * binding, so the argument overrides policy, never capability.
-   * Throws for a name that is not a workspace entry.
-   */
-  runtime?: string
-  /**
-   * @internal The typed line's routing decision, forwarded to nested
-   * evals so inner lines never re-route.
-   */
-  routingDecision?: PolicyDecision
-}
+export { ExecuteResult } from './workspace/types.ts'
+export type { ExecuteOptions, MountSpec, WorkspaceOptions } from './workspace/types.ts'
 
 export class Workspace {
   readonly registry: MountRegistry
@@ -250,8 +89,7 @@ export class Workspace {
   private readonly stateStoreInternal: WorkspaceStateStore
   private readonly ownsStateStore: boolean
   private readonly sharedResources = new Set<Resource>()
-  private metaWritten = false
-  private readonly sessionIdExplicit: boolean
+  private readonly meta: WorkspaceMeta
   private readonly opsRegistry: OpsRegistry
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
@@ -268,110 +106,72 @@ export class Workspace {
   readonly fs: WorkspaceFS
   private closed = false
   private readonly closers: (() => Promise<void>)[] = []
-  private watchRuntime: WatchRuntime | null = null
-  private readonly runtimeEntries: Runtime[]
-  private runtimeBindings: Record<string, Runtime>
+  private readonly watchManager: WatchManager
+  private readonly runtimes: Runtimes
+  private readonly policyRouter: PolicyRouter
   private readonly policy: PolicyFn | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
   // Drift check state populated by Workspace.load. Empty during normal
-  // runs. Drained on first dispatch/execute after load (see
-  // {@link runPendingDriftCheck}).
-  protected driftPolicy: DriftPolicy = DriftPolicy.OFF
-  protected driftCheckPending = false
-  protected pendingDrift: { mount: MountEntry; path: string; fingerprint: string }[] = []
+  // runs; drained on the first dispatch/execute after load.
+  protected readonly drift = new DriftQueue()
 
   // FUSE lives entirely in the node Workspace (FUSE needs the OS; the browser
   // can't mount), so the core Workspace carries no FUSE state.
 
   constructor(resources: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
-    const bareResources: Record<string, Resource> = {}
-    const mountModes: Record<string, MountMode> = {}
-    const mountSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
-    for (const [prefix, spec] of Object.entries(resources)) {
-      if (Array.isArray(spec)) {
-        const [resource, mode, safeguards] = spec as readonly [
-          Resource,
-          MountMode,
-          Record<string, CommandSafeguard>?,
-        ]
-        bareResources[prefix] = resource
-        mountModes[prefix] = mode
-        if (safeguards !== undefined) mountSafeguards[prefix] = safeguards
-      } else {
-        bareResources[prefix] = spec as Resource
-      }
-    }
-    this.registry = new MountRegistry(bareResources, options.mode ?? MountMode.READ, mountModes)
+    const normalized = normalizeResources(resources)
+    this.registry = new MountRegistry(
+      normalized.bare,
+      options.mode ?? MountMode.READ,
+      normalized.modes,
+    )
     const consistency = options.consistency ?? ConsistencyPolicy.LAZY
     this.registry.setConsistency(consistency)
     if (options.index !== undefined) {
-      for (const resource of Object.values(bareResources)) {
+      for (const resource of Object.values(normalized.bare)) {
         resource.setIndex?.(options.index)
       }
     }
-    // One provider scopes every control-plane store by workspace id; the
-    // per-plane options (observe / namespaceStore / sessionStore) remain
-    // as direct overrides that win over the provider. A caller-passed
-    // provider may be shared with sibling workspaces, so only a
-    // workspace that built its own provider closes it.
     this.wsId = options.workspaceId ?? newWorkspaceId()
-    // A minted default session id is provisional: attaching to a
-    // workspace whose discovery record already names one adopts the
-    // stored pointer instead (see ensureMeta).
-    this.sessionIdExplicit = options.sessionId !== undefined
-    this.ownsStateStore = options.store === undefined
-    this.stateStoreInternal = options.store ?? new RAMWorkspaceStateStore()
-    const observeStore = options.observe ?? this.stateStoreInternal.observer(this.wsId)
-    const namespaceStore = options.namespaceStore ?? this.stateStoreInternal.namespace(this.wsId)
-    const sessionStore = options.sessionStore ?? this.stateStoreInternal.sessions(this.wsId)
-    this.sessionManager = new SessionManager(options.sessionId ?? newSessionId(), sessionStore)
+    const stores = resolveControlStores(this.wsId, options)
+    this.ownsStateStore = stores.owned
+    this.stateStoreInternal = stores.stateStore
+    this.sessionManager = new SessionManager(options.sessionId ?? newSessionId(), stores.sessions)
+    this.meta = new WorkspaceMeta(
+      this.wsId,
+      this.stateStoreInternal,
+      this.sessionManager,
+      options.sessionId !== undefined,
+    )
     this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? null
-    // The ordered runtime world; the first capturer binds each
-    // command. The TypeScript engines construct lazily (missing wasm
-    // surfaces at run time), so defaults and explicit entries build
-    // the same way. options.python keeps configuring the default
-    // pyodide build.
-    const userPython = options.python ?? {}
-    this.runtimeEntries = []
-    if (options.runtimes === undefined) {
-      for (const name of DEFAULT_ENTRIES) {
-        this.runtimeEntries.push(
-          buildRuntime(name, name === 'pyodide' ? { config: { ...userPython } } : {}),
-        )
-      }
-    } else {
-      for (const entry of options.runtimes) {
-        this.runtimeEntries.push(typeof entry === 'string' ? buildRuntime(entry) : entry)
-      }
-    }
-    // The vfs runtime is required: every world names an executor for
-    // unclaimed commands, so an omitted entry appends the default
-    // unconditional one.
-    if (!this.runtimeEntries.some((entry) => entry.name === 'vfs')) {
-      this.runtimeEntries.push(new VfsRuntime())
-    }
-    this.registry.vfsRuntime =
-      this.runtimeEntries.find((entry) => entry instanceof VfsRuntime) ?? null
-    if (this.registry.vfsRuntime instanceof VfsRuntime) {
-      this.registry.vfsRuntime.bindLineExecutor((line, lineStdin, env, cwd) =>
+    this.watchManager = new WatchManager(this.registry)
+    this.runtimes = new Runtimes({
+      registry: this.registry,
+      entries: options.runtimes,
+      pythonConfig: options.python ?? {},
+      bridge: () => this.buildWorkspaceBridge(),
+      visibleMounts: () => this.sandboxVisibleMounts(),
+      lineExecutor: (line, lineStdin, env, cwd) =>
         this.executeLineForVfs(line, lineStdin, env, cwd),
-      )
-    }
-    for (const entry of this.runtimeEntries) {
-      if (typeof entry.script === 'string')
-        throw scriptStringError(`runtime '${entry.name}' script`)
-      entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
-      this.closers.push(() => entry.close())
-    }
-    this.runtimeBindings = bindCommands(this.runtimeEntries)
+      registerCloser: (fn) => {
+        this.closers.push(fn)
+      },
+    })
     if (typeof options.policy === 'string') throw scriptStringError('policy')
     this.policy = options.policy ?? null
-    this.observer = new Observer(observeStore)
+    this.policyRouter = new PolicyRouter(
+      this.runtimes,
+      this.policy,
+      this.sessionManager,
+      this.agentId,
+      () => this.sandboxVisibleMounts(),
+    )
+    this.observer = new Observer(stores.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
     this.registry.attachFileCache(this.cache)
@@ -380,7 +180,7 @@ export class Workspace {
     this.namespace = new Namespace(
       this.registry,
       (p) => this.resolve(p),
-      namespaceStore,
+      stores.namespace,
       options.agentId ?? null,
     )
     this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
@@ -415,7 +215,7 @@ export class Workspace {
       }
     }
     for (const [prefix, safeguards] of Object.entries({
-      ...mountSafeguards,
+      ...normalized.safeguards,
       ...(options.commandSafeguards ?? {}),
     })) {
       const mount = this.registry.mountForPrefix(prefix)
@@ -454,56 +254,9 @@ export class Workspace {
     return prefixes
   }
 
-  /**
-   * Append a runtime entry to the workspace's ordered world.
-   *
-   * The entry lands last, so it never steals a command an earlier
-   * entry already captures (first capturer still wins). A name builds
-   * like a config entry and fails loud; a duplicate name is rejected
-   * before any state changes.
-   */
+  /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
   addRuntime(runtime: RuntimeEntry): Runtime {
-    const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
-    if (typeof entry.script === 'string') throw scriptStringError(`runtime '${entry.name}' script`)
-    const candidate = [...this.runtimeEntries, entry]
-    const bindings = bindCommands(candidate)
-    entry.attach(this.buildWorkspaceBridge(), () => this.sandboxVisibleMounts())
-    this.closers.push(() => entry.close())
-    this.runtimeEntries.push(entry)
-    this.runtimeBindings = bindings
-    return entry
-  }
-
-  /**
-   * The policy ladder for one typed line: runtime, policy, scripts.
-   * Returns null when nothing decides (no runtime argument, no policy
-   * configured)
-   * so dispatch falls to the static bindings; a nested eval inherits
-   * the typed line's decision and never re-routes.
-   */
-  /**
-   * The runtime taking this whole line, null for the executor.
-   *
-   * A runtime with runsLines takes the raw line when the line's
-   * resolved bindings place one of its commands (or "*") on it;
-   * everything else walks the executor's tree as today. The common
-   * world has no such runtime, so this is a cheap scan.
-   */
-  private wholeLineRuntimeFor(
-    rootNode: TSNodeLike,
-    decision: PolicyDecision | null,
-  ): Runtime | null {
-    const candidates = this.runtimeEntries.some(
-      (entry) => entry.runsLines && !(entry instanceof VfsRuntime),
-    )
-    if (!candidates) return null
-    const bindings: Record<string, Runtime | null> =
-      decision !== null ? decision.bindings : this.runtimeBindings
-    const facts = commandFacts(rootNode)
-    return wholeLineRuntime(
-      bindings,
-      facts.map((fact) => fact.command),
-    )
+    return this.runtimes.add(runtime)
   }
 
   /**
@@ -525,49 +278,6 @@ export class Workspace {
       stderr: result.stderr.length > 0 ? result.stderr : null,
       exitCode: result.exitCode,
     }
-  }
-
-  private async resolvePolicyDecision(
-    root: TSNodeLike,
-    command: string,
-    options: ExecuteOptions,
-  ): Promise<PolicyDecision | null> {
-    if (options.routingDecision !== undefined) return options.routingDecision
-    if (options.runtime !== undefined) {
-      let overlay: Record<string, Runtime>
-      try {
-        overlay = runtimeBindingsFor(this.runtimeEntries, options.runtime)
-      } catch (caught) {
-        throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
-          cause: caught,
-        })
-      }
-      return {
-        bindings: Object.assign(
-          Object.create(null) as Record<string, Runtime>,
-          this.runtimeBindings,
-          overlay,
-        ),
-        fallback: catchAll(this.runtimeEntries),
-      }
-    }
-    const hasScripts = this.runtimeEntries.some((entry) => entry.script !== undefined)
-    if (this.policy === null && !hasScripts) return null
-    const facts = commandFacts(root)
-    const sessionId = options.sessionId ?? this.sessionManager.defaultId
-    const session = this.sessionManager.get(sessionId)
-    const ctx: PolicyContext = {
-      line: command,
-      commands: facts,
-      command: facts[0]?.command ?? '',
-      builtin: facts[0]?.builtin ?? false,
-      cwd: options.cwd ?? session.cwd,
-      env: { ...session.env, ...(options.env ?? {}) },
-      sessionId,
-      agentId: options.agentId ?? this.agentId ?? '',
-      mounts: this.sandboxVisibleMounts(),
-    }
-    return decideLine(this.runtimeEntries, this.policy, ctx, this.runtimeBindings)
   }
 
   /**
@@ -704,27 +414,11 @@ export class Workspace {
           modes.set('/' + stripSlash(p), parseMountMode(mode))
         }
       }
-      for (const p of this.infrastructureMountPrefixes()) {
+      for (const p of infrastructurePrefixes(this.syntheticRootAnchor)) {
         if (!modes.has(p)) modes.set(p, MountMode.EXEC)
       }
     }
     return this.sessionManager.create(sessionId, { mountModes: modes })
-  }
-
-  /**
-   * Mount prefixes a session is always allowed to touch.
-   *
-   * The synthetic scratch root (where text-processing commands like `wc`
-   * without a path argument resolve), the device mount, and the history
-   * view are infrastructure: they hold no user credentials, and
-   * rejecting them would break common shell idioms or the history
-   * builtin. A user-defined root mount is NOT infrastructure; sessions
-   * must be granted `/` explicitly to touch it.
-   */
-  private infrastructureMountPrefixes(): Set<string> {
-    const prefixes = new Set<string>(['/dev', HISTORY_PREFIX])
-    if (this.syntheticRootAnchor) prefixes.add('/')
-    return prefixes
   }
 
   getSession(sessionId: string): Session {
@@ -749,7 +443,7 @@ export class Workspace {
    * stored pointer before hydration keys off it.
    */
   async ensureSessionsLoaded(): Promise<void> {
-    await this.ensureMeta()
+    await this.meta.ensure()
     await this.sessionManager.ensureLoaded()
   }
 
@@ -770,54 +464,12 @@ export class Workspace {
    * point the discovery record at it.
    */
   async adoptDefaultSession(sessionId: string): Promise<void> {
-    this.sessionManager.adoptDefault(sessionId)
-    await this.stateStoreInternal.replaceMeta(this.wsId, {
-      workspace_id: this.wsId,
-      default_session_id: sessionId,
-    })
-    this.metaWritten = true
+    await this.meta.adoptDefault(sessionId)
   }
 
   /** This workspace's metadata record (discovery surface). */
   async workspaceMeta(): Promise<WorkspaceFields> {
-    await this.ensureMeta()
-    const meta = await this.stateStoreInternal.loadMeta(this.wsId)
-    return meta ?? {}
-  }
-
-  /**
-   * Write the discovery record once per process. An existing record
-   * wins (another process or an earlier run already registered it); a
-   * fresh workspace registers itself so siblings pointed at the same
-   * store can find its sessions and default session.
-   */
-  private async ensureMeta(): Promise<void> {
-    if (this.metaWritten) return
-    let existing = await this.stateStoreInternal.loadMeta(this.wsId)
-    if (existing === null) {
-      const created = await this.stateStoreInternal.casSetMeta(
-        this.wsId,
-        {
-          workspace_id: this.wsId,
-          default_session_id: this.sessionManager.defaultId,
-          created_at: Date.now() / 1000,
-          generation: 1,
-        },
-        0,
-      )
-      if (!created) {
-        // Lost the create race: a sibling registered first and its
-        // record wins, like any other existing record.
-        existing = await this.stateStoreInternal.loadMeta(this.wsId)
-      }
-    }
-    if (existing !== null) {
-      const stored = existing.default_session_id
-      if (!this.sessionIdExplicit && typeof stored === 'string') {
-        this.sessionManager.adoptDefault(stored)
-      }
-    }
-    this.metaWritten = true
+    return this.meta.load()
   }
 
   /** Write every session's durable fields through to the session store. */
@@ -835,34 +487,21 @@ export class Workspace {
 
   attachWatchRuntime(runtime: WatchRuntime): void {
     if (this.closed) throw new Error('Workspace is closed')
-    if (this.watchRuntime !== null) {
-      throw new Error(
-        'watch runtime already attached: detachWatchRuntime first, or attach before the first watch()/notify()',
-      )
-    }
-    this.watchRuntime = runtime
+    this.watchManager.attach(runtime)
   }
 
   async detachWatchRuntime(): Promise<void> {
-    if (this.watchRuntime === null) return
-    await this.watchRuntime.close()
-    this.watchRuntime = null
-  }
-
-  private watchDelegate(): WatchRuntime {
-    if (this.closed) throw new Error('Workspace is closed')
-    this.watchRuntime ??= new Watcher(this.registry)
-    return this.watchRuntime
+    await this.watchManager.detach()
   }
 
   watch(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
-    const raw = typeof path === 'string' || path instanceof PathSpec ? [path] : [...path]
-    const specs = raw.map((item) => (item instanceof PathSpec ? item : PathSpec.fromStrPath(item)))
-    return this.watchDelegate().watch(specs)
+    if (this.closed) throw new Error('Workspace is closed')
+    return this.watchManager.watch(path)
   }
 
   async notify(change: FileEvent): Promise<void> {
-    await this.watchDelegate().notify(change)
+    if (this.closed) throw new Error('Workspace is closed')
+    await this.watchManager.notify(change)
   }
 
   /**
@@ -888,29 +527,15 @@ export class Workspace {
    */
   async unmount(prefix: string): Promise<void> {
     if (this.closed) throw new Error('Workspace is closed')
-    const stripped = stripSlash(prefix)
-    const norm = stripped ? `/${stripped}/` : '/'
-    if (norm === '/') {
-      throw new Error(`cannot unmount root: ${prefix}`)
-    }
-    if (norm === '/dev/') {
-      throw new Error(`cannot unmount reserved prefix: /dev/`)
-    }
-    if (norm === HISTORY_PREFIX + '/') {
-      throw new Error(`cannot unmount history view: ${HISTORY_PREFIX}`)
-    }
-    const removed = this.registry.unmount(prefix)
-    const resource = removed.resource
-    const stillMounted = this.registry.allMounts().some((m) => m.resource === resource)
-    if (!stillMounted) {
-      this.opsRegistry.unregisterResource(resource.kind)
-      const idx = this.openOrder.indexOf(resource)
-      if (idx !== -1) this.openOrder.splice(idx, 1)
-      if (this.opened.has(resource)) {
-        this.opened.delete(resource)
-        await resource.close()
-      }
-    }
+    await unmountPrefix(
+      {
+        registry: this.registry,
+        opsRegistry: this.opsRegistry,
+        opened: this.opened,
+        openOrder: this.openOrder,
+      },
+      prefix,
+    )
   }
 
   /**
@@ -960,76 +585,15 @@ export class Workspace {
   }
 
   /**
-   * Drain the post-load drift check.
-   *
-   * Called once on the first async entry point (`dispatch` or `execute`)
-   * after {@link Workspace.load} with a non-OFF drift policy. Stats every
-   * queued `(mount, path, expected_fingerprint)` triple against the live
-   * source in parallel and throws {@link ContentDriftError} on the first
-   * mismatch. Subsequent calls are no-ops.
-   *
-   * Pinned paths (those whose manifest entry carried a stable revision)
-   * are never enqueued — the pin guarantees bytes match by construction.
-   */
-  protected async runPendingDriftCheck(): Promise<void> {
-    this.driftCheckPending = false
-    if (this.pendingDrift.length === 0) return
-    const pending = this.pendingDrift
-    this.pendingDrift = []
-    const statFn = async (p: string): Promise<unknown> => this.dispatch('stat', p)
-    const results = await Promise.allSettled(
-      pending.map((p) => checkDrift(this.registry, statFn, p.path, p.fingerprint)),
-    )
-    for (const r of results) {
-      if (r.status === 'rejected') throw r.reason
-    }
-  }
-
-  /**
-   * Walk a loaded snapshot's fingerprint manifest. For entries with a
-   * revision, install the pin on the owning mount so replay reads pin to
-   * that revision. For fingerprint-only entries, queue a `(mount, path,
-   * fingerprint)` tuple for the drift check.
-   *
-   * Idempotent: clearing existing state before installing. Called from
-   * {@link Workspace.load} / {@link Workspace.fromState}.
+   * Install a loaded snapshot's fingerprint manifest: revision pins on
+   * the owning mounts, fingerprint-only entries queued on the drift
+   * queue (drained on the first dispatch/execute).
    */
   protected installDriftState(
     state: WorkspaceStateDict,
     policy: DriftPolicy = DriftPolicy.STRICT,
   ): void {
-    this.driftPolicy = policy
-    this.pendingDrift = []
-    this.driftCheckPending = false
-    const entries = state.fingerprints ?? []
-    if (entries.length === 0) return
-    if (policy === DriftPolicy.OFF) {
-      // Evict snapshot cache for fingerprinted paths so reads serve live.
-      for (const e of entries) {
-        void this.cache.remove(e.path)
-      }
-      return
-    }
-    for (const e of entries) {
-      const mount = this.registry.mountFor(e.path)
-      if (mount === null) continue
-      if (e.revision !== undefined && e.revision !== null) {
-        mount.revisions.set(e.path, e.revision)
-        continue
-      }
-      if (e.fingerprint !== undefined && e.fingerprint !== null) {
-        this.pendingDrift.push({ mount, path: e.path, fingerprint: e.fingerprint })
-      }
-    }
-    this.driftCheckPending = this.pendingDrift.length > 0
-    const liveOnly = state.live_only_mounts ?? []
-    if (liveOnly.length > 0) {
-      console.warn(
-        `Workspace.load: ${String(liveOnly.length)} mount(s) opt out of snapshot replay; ` +
-          `reads against them will serve current state with no drift detection: ` +
-          liveOnly.join(', '),
-      )
-    }
+    installDriftState(this.registry, this.cache, this.drift, state, policy)
   }
 
   /**
@@ -1060,8 +624,8 @@ export class Workspace {
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     await this.namespace.ensureLoaded()
-    if (this.driftCheckPending) {
-      await this.runPendingDriftCheck()
+    if (this.drift.pending) {
+      await this.drift.drain(this.registry, (p) => this.dispatch('stat', p))
     }
     // The Dispatcher owns the rest — symlink follow, resolution (its
     // resolveFn is Workspace.resolve, so lazy open and mount grants
@@ -1086,24 +650,17 @@ export class Workspace {
     const [resource] = result
     const mount = this.registry.mountFor(path)
     if (mount !== null) assertMountAllowed(mount.prefix)
-    if (!this.opened.has(resource)) {
-      await resource.open()
-      this.opened.add(resource)
-      this.openOrder.push(resource)
-    }
+    await this.ensureOpen(resource)
     return result
   }
 
-  /**
-   * Drop file-cache + stale parent index after a write to `path`.
-   *
-   * Single source of truth for post-write invalidation. Called from the
-   * dispatch closure so a write through any code path (including direct
-   * Ops) sees the same invalidation rules: file cache is dropped only
-   * for remote-backed mounts, and the parent directory index is dirtied
-   * for any mount that maintains an index. No-op for paths that resolve
-   * to no known mount.
-   */
+  private async ensureOpen(resource: Resource): Promise<void> {
+    if (this.opened.has(resource)) return
+    await resource.open()
+    this.opened.add(resource)
+    this.openOrder.push(resource)
+  }
+
   /**
    * Drop the file cache and every mount index wholesale. A whole-line
    * runtime may have written anywhere in its view of the workspace,
@@ -1132,7 +689,7 @@ export class Workspace {
     // Substitutions expand to empty, so affected words degrade the
     // plan to honest UNKNOWN instead of resolving via execution.
     const executeFn: ExecuteFn = () => Promise.resolve(new IOResult())
-    const provName = command.trim().split(/\s+/)[0] ?? ''
+    const provName = commandName(command)
     const provResolved = provName !== '' ? resolveSafeguard(provName) : null
     const provTimeout = provResolved !== null ? provResolved.timeoutSeconds : null
     return runWithTimeout(
@@ -1144,6 +701,36 @@ export class Workspace {
       provTimeout,
       provName !== '' ? provName : '?',
     )
+  }
+
+  /** Everything the module-level executor needs, assembled from this workspace. */
+  private executeEnv(): ExecuteEnv {
+    return {
+      parser: () => this.getShellParser(),
+      meta: this.meta,
+      drift: this.drift,
+      statFn: (p) => this.dispatch('stat', p),
+      namespace: this.namespace,
+      sessions: this.sessionManager,
+      registry: this.registry,
+      dispatcher: this.dispatcher,
+      observer: this.observer,
+      records: this.records,
+      jobTable: this.jobTable,
+      agentId: this.agentId,
+      workspaceId: this.wsId,
+      runtimes: this.runtimes,
+      policyRouter: this.policyRouter,
+      registerCloser: (fn) => {
+        this.closers.push(fn)
+      },
+      ensureOpen: (resource) => this.ensureOpen(resource),
+      unmount: (prefix) => this.unmount(prefix),
+      invalidateAllAfterRemote: () => this.invalidateAllAfterRemote(),
+      provision: (cmd) => this.provision(cmd),
+      execute: (cmd, opts) =>
+        this.execute(cmd, opts as ExecuteOptions & { provision?: false | undefined }),
+    }
   }
 
   async execute(
@@ -1159,288 +746,7 @@ export class Workspace {
     command: string,
     options: ExecuteOptions = {},
   ): Promise<ExecuteResult | ProvisionResult> {
-    if (options.signal?.aborted === true) {
-      throw makeAbortError()
-    }
-    await this.namespace.ensureLoaded()
-    await this.ensureMeta()
-    await this.sessionManager.ensureLoaded()
-    if (this.driftCheckPending) {
-      await this.runPendingDriftCheck()
-    }
-    const stdin = options.stdin ?? null
-    const parser = await this.getShellParser()
-    const root = parser.parse(command)
-    // tree-sitter accepts an unclosed backtick as a complete command, so
-    // the region is scanned separately.
-    const offending = findSyntaxError(root) ?? findUnterminatedBacktick(command)
-    if (offending !== null) {
-      // The gate runs before the provision branch, mirroring Python:
-      // a provision run of unparseable input reports the syntax error
-      // instead of walking the ERROR tree.
-      const snippet = offending.trim()
-      const errMsg =
-        snippet.length > 0
-          ? `mirage: syntax error near '${snippet}'\n`
-          : 'mirage: syntax error in command\n'
-      const err = new TextEncoder().encode(errMsg)
-      return new ExecuteResult(new Uint8Array(), err, 2)
-    }
-    if (options.provision === true) return this.provision(command)
-    const rootNode = root as unknown as TSNodeLike
-    let routingDecision: PolicyDecision | null
-    try {
-      routingDecision = await this.resolvePolicyDecision(rootNode, command, options)
-    } catch (caught) {
-      if (caught instanceof PolicyDeny) {
-        // A deny is a policy outcome, not a mistake: it folds into the
-        // line's result the way a timeout does, never a throw. The
-        // typed line still records and the session still flushes,
-        // mirroring Python's finally path. The denied party is the
-        // command, so the message carries its name like every
-        // per-command error.
-        const cmdName = command.trim().split(/\s+/)[0] ?? command
-        const msg = new TextEncoder().encode(`${cmdName}: policy denied: ${caught.reason}\n`)
-        const deniedSessionId = options.sessionId ?? this.sessionManager.defaultId
-        const deniedSession = this.sessionManager.get(deniedSessionId)
-        deniedSession.lastExitCode = 126
-        if (options.record !== false) {
-          await this.observer.logExecution(
-            command,
-            new IOResult({ exitCode: 126, stderr: msg }),
-            [],
-            options.agentId ?? this.agentId ?? '',
-            deniedSessionId,
-            options.cwd ?? deniedSession.cwd,
-          )
-        }
-        await this.sessionManager.flush()
-        return new ExecuteResult(new Uint8Array(), msg, 126)
-      }
-      throw caught
-    }
-
-    const dispatch: DispatchFn = this.dispatcher.dispatch
-
-    const executeFn: ExecuteFn = async (cmd, opts) => {
-      // The executor's internal evals ($(), eval, source, xargs) are
-      // never a typed line: they must not record a history entry or open
-      // their own recording context, so their ops flow into this line's
-      // recorder (GNU: history is appended by the line reader).
-      const innerOpts: ExecuteOptions & { provision?: false } = { record: false }
-      if (options.signal !== undefined) innerOpts.signal = options.signal
-      // Nested lines never re-route: the evaluator's inner lines keep
-      // the typed line's decision (runtime argument, policy, or scripts).
-      if (routingDecision !== null) innerOpts.routingDecision = routingDecision
-      // `command NAME` re-runs the inner line and must forward the pipe
-      // stdin so `... | command cat` filters the upstream output; the same
-      // path carries `echo hi | bash -c 'cat'` into the inner line.
-      if (opts.stdin !== undefined && opts.stdin !== null) innerOpts.stdin = opts.stdin
-      const res = await this.execute(cmd, innerOpts)
-      return new IOResult({
-        exitCode: res.exitCode,
-        stdout: res.stdout,
-        stderr: res.stderr,
-      })
-    }
-
-    const ensureOpen = async (resource: Resource): Promise<void> => {
-      if (this.opened.has(resource)) return
-      await resource.open()
-      this.opened.add(resource)
-      this.openOrder.push(resource)
-    }
-
-    const callAgentId = options.agentId ?? this.agentId ?? ''
-    const deps = {
-      dispatch,
-      registry: this.registry,
-      namespace: this.namespace,
-      jobTable: this.jobTable,
-      executeFn,
-      agentId: callAgentId,
-      workspaceId: this.wsId,
-      registerCloser: (fn: () => Promise<void>) => {
-        this.closers.push(fn)
-      },
-      ensureOpen,
-      unmount: (prefix: string) => this.unmount(prefix),
-      runtimeBindings: this.runtimeBindings,
-      ...(routingDecision !== null ? { routingDecision } : {}),
-      ...(options.signal !== undefined ? { signal: options.signal } : {}),
-    }
-    const targetSessionId = options.sessionId ?? this.sessionManager.defaultId
-    const targetSession = this.sessionManager.get(targetSessionId)
-    try {
-      return await this.executeParsed(command, options, rootNode, deps, targetSession, stdin)
-    } finally {
-      // Durable session fields (cwd, env, grants) flush at the end of
-      // every execute, success or failure, mirroring Python's finally.
-      await this.sessionManager.flush()
-    }
-  }
-
-  private async executeParsed(
-    command: string,
-    options: ExecuteOptions,
-    rootNode: TSNodeLike,
-    deps: ExecuteNodeDeps,
-    targetSession: Session,
-    stdin: ByteSource | null,
-  ): Promise<ExecuteResult> {
-    const callAgentId = options.agentId ?? this.agentId ?? ''
-    const useOverride = options.cwd !== undefined || options.env !== undefined
-    const effectiveSession = useOverride
-      ? targetSession.fork({
-          ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-          ...(options.env !== undefined ? { env: { ...targetSession.env, ...options.env } } : {}),
-        })
-      : targetSession
-    // The line-reader decision (GNU: history is appended where the typed
-    // line is read, never inside the evaluator). Internal evaluations run
-    // with record:false: no new recording scope, so their ops land in the
-    // caller's recorder, and no command entry is logged for them.
-    const isLine = options.record !== false
-    if (isLine) {
-      // Each typed line reads stdin fresh; a buffer left behind by a
-      // previous line's read/select would otherwise serve EOF forever.
-      effectiveSession.stdinBuffer = null
-    }
-    const lineRuntime = this.wholeLineRuntimeFor(rootNode, deps.routingDecision ?? null)
-    if (lineRuntime?.runLine !== undefined) {
-      const data = stdin !== null ? await materialize(stdin) : null
-      // A whole line is a command like any other: the same resolution
-      // and boundary rule as the tree, so timeoutSeconds answers 124
-      // and maxBytes/maxLines cap the output.
-      const name = command.trim().split(/\s+/)[0] ?? ''
-      const guard = resolveSafeguard(name, this.registry.allMounts())
-      let result: RunResult
-      try {
-        result = await runWithTimeout(
-          lineRuntime.runLine(command, data, { ...effectiveSession.env }, effectiveSession.cwd),
-          guard?.timeoutSeconds ?? null,
-          name,
-        )
-      } catch (err) {
-        if (err instanceof CommandTimeoutError) {
-          result = {
-            stdout: new Uint8Array(),
-            stderr: new TextEncoder().encode(`${err.message}\n`),
-            exitCode: 124,
-          }
-        } else {
-          result = {
-            stdout: new Uint8Array(),
-            stderr: new TextEncoder().encode(err instanceof Error ? err.message : String(err)),
-            exitCode: 1,
-          }
-        }
-      } finally {
-        // The line may have written anywhere in the runtime's view of
-        // the workspace; local read caches are stale.
-        await this.invalidateAllAfterRemote()
-      }
-      const [capped, cappedErr, cappedCode] = await guardOutput(
-        result.stdout,
-        result.stderr,
-        result.exitCode,
-        guard,
-      )
-      result = {
-        stdout: capped !== null ? await materialize(capped) : new Uint8Array(),
-        stderr: cappedErr !== null ? await materialize(cappedErr) : null,
-        exitCode: cappedCode,
-      }
-      targetSession.lastExitCode = result.exitCode
-      if (isLine) {
-        const lineIo = new IOResult({
-          exitCode: result.exitCode,
-          stdout: result.stdout,
-          ...(result.stderr !== null ? { stderr: result.stderr } : {}),
-        })
-        await this.observer.logExecution(
-          command,
-          lineIo,
-          [],
-          callAgentId,
-          targetSession.sessionId,
-          effectiveSession.cwd,
-        )
-      }
-      return new ExecuteResult(result.stdout, result.stderr ?? new Uint8Array(), result.exitCode)
-    }
-    const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
-      runWithSession(effectiveSession, () =>
-        runCommandTree(deps, rootNode, effectiveSession, stdin),
-      )
-    let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
-    try {
-      execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
-    } catch (err) {
-      if (err instanceof CommandTimeoutError) {
-        const msg = new TextEncoder().encode(`${err.message}\n`)
-        targetSession.lastExitCode = 124
-        return new ExecuteResult(new Uint8Array(), msg, 124)
-      }
-      if (err instanceof UsageError) {
-        const msg = new TextEncoder().encode(`${err.message}\n`)
-        targetSession.lastExitCode = err.exitCode
-        return new ExecuteResult(new Uint8Array(), msg, err.exitCode)
-      }
-      // Abort (cancellation) and content drift are control-flow signals that
-      // must propagate, mirroring the Python workspace. Any other execution
-      // failure (an unsupported shell construct) is surfaced as a failed
-      // command rather than crashing the caller.
-      if (err instanceof ContentDriftError) throw err
-      if (err instanceof DOMException && err.name === 'AbortError') throw err
-      const msg = new TextEncoder().encode(`${err instanceof Error ? err.message : String(err)}\n`)
-      targetSession.lastExitCode = 1
-      return new ExecuteResult(new Uint8Array(), msg, 1)
-    }
-    const [[materialized, io], opRecords] = execResult
-    targetSession.lastExitCode = io.exitCode
-    let stdoutBytes: Uint8Array
-    try {
-      await this.dispatcher.applyIo(io, opRecords)
-      stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
-    } catch (err) {
-      // Lazy reads can fail while draining (e.g. head/tail that open the
-      // stream mid-pipeline, or a backend size guard thrown on the first
-      // pull); surface that as a failed command, not a crash. The command
-      // name is the first token of the pipeline's failing stage; for a bare
-      // command it is simply the command.
-      const strerror = gnuStrerror((err as { code?: string }).code)
-      const cmdName = command.trim().split(/\s+/)[0] ?? command
-      io.exitCode = 1
-      io.stderr = new TextEncoder().encode(
-        strerror !== null
-          ? `${cmdName}: ${errorVirtualPath(err)}: ${strerror}\n`
-          : `${err instanceof Error ? err.message : String(err)}\n`,
-      )
-      targetSession.lastExitCode = 1
-      stdoutBytes = new Uint8Array()
-    }
-    const stderrBytes = await materialize(io.stderr)
-
-    // One rule on every path: an op that happened is always accounted, in
-    // byte accounting (which feeds snapshot fingerprints/drift) and as
-    // observer op events. The command event's exit_code says whether the
-    // line that emitted them succeeded. Internal evals (record:false) have
-    // an empty opRecords here: their ops were accounted by the line above.
-    this.records.push(...opRecords)
-    if (isLine) {
-      io.stdout = stdoutBytes
-      await this.observer.logExecution(
-        command,
-        io,
-        opRecords,
-        callAgentId,
-        targetSession.sessionId,
-        effectiveSession.cwd,
-      )
-    }
-
-    return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode)
+    return executeLine(this.executeEnv(), command, options)
   }
 
   /**
@@ -1452,7 +758,7 @@ export class Workspace {
   async executePythonRepl(code: string, options: { sessionId?: string } = {}): Promise<EvalResult> {
     if (this.closed) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
-    const bound = this.runtimeBindings.python3
+    const bound = this.runtimes.bindings.python3
     if (bound === undefined || !isEvaluator(bound)) {
       throw new Error('no evaluator runtime bound for the repl')
     }
@@ -1551,42 +857,17 @@ export class Workspace {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    if (this.watchRuntime !== null) {
-      await this.watchRuntime.close()
-      this.watchRuntime = null
-    }
-    const drainTasks = [...(this.cache.drainTasks?.values() ?? [])]
-    for (const task of drainTasks) {
-      await task
-    }
-    // Per-plane stores from the provider close through it below; a
-    // caller-passed provider (or direct store override) may be shared
-    // with sibling workspaces, so only its owner closes it.
-    if (this.ownsStateStore) {
-      await this.stateStoreInternal.close()
-    }
-    await this.cache.clear()
-    for (const fn of this.closers.splice(0)) {
-      try {
-        await fn()
-      } catch {
-        // keep tearing down; swallow subsystem-cleanup failures
-      }
-    }
-    for (const job of this.jobTable.runningJobs()) {
-      this.jobTable.kill(job.id)
-    }
-    const toClose = new Set<Resource>(this.openOrder)
-    for (const mount of this.registry.allMounts()) {
-      toClose.add(mount.resource)
-    }
-    for (const r of toClose) {
-      // Resources reused from another live workspace (copy() / load
-      // resource overrides) stay open here; their origin closes them.
-      if (this.sharedResources.has(r)) continue
-      await r.close()
-    }
-    this.opened.clear()
-    this.openOrder.length = 0
+    await closeWorkspace({
+      watch: this.watchManager,
+      cache: this.cache,
+      ownsStateStore: this.ownsStateStore,
+      stateStore: this.stateStoreInternal,
+      closers: this.closers,
+      jobTable: this.jobTable,
+      registry: this.registry,
+      opened: this.opened,
+      openOrder: this.openOrder,
+      sharedResources: this.sharedResources,
+    })
   }
 }
