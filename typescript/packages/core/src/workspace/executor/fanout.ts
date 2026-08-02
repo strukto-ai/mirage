@@ -67,7 +67,7 @@ function adjustDepthFlags(
   const mountDepth = pathSegments(mountPrefix).length
   const delta = mountDepth - parentDepth
   const out: Record<string, string | boolean | number | string[]> = { ...flagKwargs }
-  const first = (v: string | boolean | number | string[]): string | boolean =>
+  const first = (v: string | boolean | number | string[]): string | boolean | number =>
     Array.isArray(v) ? (v[0] ?? '') : v
   if ('maxdepth' in out) {
     const orig = Number(first(out.maxdepth))
