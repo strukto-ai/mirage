@@ -127,6 +127,12 @@
         "has_provision": false,
         "has_write": false
       },
+      "opfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
+      },
       "postgres": {
         "filetypes": [],
         "has_aggregate": false,
@@ -196,6 +202,7 @@
       "mongodb",
       "notion",
       "onedrive",
+      "opfs",
       "postgres",
       "qdrant",
       "ram",

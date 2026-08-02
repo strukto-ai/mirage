@@ -19,6 +19,12 @@
         "has_provision": false,
         "has_write": true
       },
+      "opfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
       "ram": {
         "filetypes": [],
         "has_aggregate": false,
@@ -46,6 +52,7 @@
       "box",
       "gdrive",
       "onedrive",
+      "opfs",
       "ram",
       "s3",
       "sharepoint"
