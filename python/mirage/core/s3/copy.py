@@ -15,7 +15,9 @@
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.s3._client import _client_kwargs, _key, async_session
+from mirage.core.s3.exists import exists
 from mirage.types import PathSpec
+from mirage.utils.errors import enoent
 
 
 async def copy(accessor: S3Accessor, src_spec: PathSpec,
@@ -23,6 +25,14 @@ async def copy(accessor: S3Accessor, src_spec: PathSpec,
     src = src_spec.mount_path
     dst = dst_spec.mount_path
     config = accessor.config
+    if _key(src, config) == _key(dst, config):
+        # Copying an object onto its own key is a no-op we must not send:
+        # AWS and MinIO reject it, but a store that accepts it would pair
+        # with rename's delete below and destroy the only copy. A missing
+        # source still has to fail (#150).
+        if not await exists(accessor, src_spec):
+            raise enoent(src_spec)
+        return
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         await client.copy_object(

@@ -212,10 +212,15 @@ class MultiBucketS3Client:
         self._objects(Bucket)[Key] = Body
 
     async def delete_object(self, Bucket: str, Key: str) -> None:
+        self.calls["delete_object"] += 1
         self._objects(Bucket).pop(Key, None)
 
     async def copy_object(self, Bucket: str, CopySource: dict,
                           Key: str) -> None:
+        # Deliberately lenient: a self-copy is accepted, the way a
+        # non-AWS S3-compatible store might. That is what makes the
+        # same-key guard observable in tests (#150).
+        self.calls["copy_object"] += 1
         src_bucket = CopySource.get("Bucket", Bucket)
         src_key = CopySource["Key"]
         src_objects = self._objects(src_bucket)

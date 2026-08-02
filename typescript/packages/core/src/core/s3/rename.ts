@@ -15,13 +15,23 @@
 import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
+import { enoent } from '../../utils/errors.ts'
 import { loadS3Module, rawPathOf, s3Key, withClient } from './_client.ts'
+import { exists } from './exists.ts'
 
 export async function rename(accessor: S3Accessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const { CopyObjectCommand, DeleteObjectCommand } = await loadS3Module(accessor.config)
   const srcKey = s3Key(rawPathOf(src), accessor.config)
   const dstKey = s3Key(rawPathOf(dst), accessor.config)
   const { bucket } = accessor.config
+  if (srcKey === dstKey) {
+    // POSIX rename(2): the same existing file succeeds and performs no
+    // other action. Reaching the copy+delete pair below would instead
+    // delete the object on any store that accepts the self-copy, and
+    // error on the ones that reject it (#150).
+    if (!(await exists(accessor, src))) throw enoent(src)
+    return
+  }
   await withClient(accessor.config, async (client) => {
     await client.send(
       new CopyObjectCommand({
