@@ -223,6 +223,7 @@ export interface ParsedArgsInit {
   wordKinds?: (OperandKind | null)[]
   invalidOptions?: string[]
   ambiguousOptions?: [string, readonly string[]][]
+  optionErrorKinds?: string[]
   needsValueOptions?: string[]
   invalidValueOptions?: [string, string, readonly string[]][]
   invalidIntOptions?: [string, string][]
@@ -248,6 +249,12 @@ export class ParsedArgs {
   // options (canonical spelling).
   readonly invalidOptions: string[]
   readonly ambiguousOptions: [string, readonly string[]][]
+  // "invalid" / "ambiguous" tags in scan encounter order, so the refusal
+  // names the FIRST offending token like GNU (grep --c --bogus reports
+  // --c; reversed reports --bogus). needsValue is absent by construction:
+  // it only fires on the line's final token, so it can never precede
+  // another scan error.
+  readonly optionErrorKinds: string[]
   readonly needsValueOptions: string[]
   readonly invalidValueOptions: [string, string, readonly string[]][]
   readonly invalidIntOptions: [string, string][]
@@ -264,6 +271,7 @@ export class ParsedArgs {
     this.wordKinds = init.wordKinds ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.ambiguousOptions = init.ambiguousOptions ?? []
+    this.optionErrorKinds = init.optionErrorKinds ?? []
     this.needsValueOptions = init.needsValueOptions ?? []
     this.invalidValueOptions = init.invalidValueOptions ?? []
     this.invalidIntOptions = init.invalidIntOptions ?? []

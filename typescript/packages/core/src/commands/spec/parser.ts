@@ -131,6 +131,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   const warnings: string[] = []
   const invalidOptions: string[] = []
   const ambiguousOptions: [string, readonly string[]][] = []
+  const optionErrorKinds: string[] = []
   const needsValueOptions: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
@@ -176,6 +177,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
           spelling = candidates[0] ?? typed
         } else if (candidates.length > 1) {
           ambiguousOptions.push([typed, candidates])
+          optionErrorKinds.push('ambiguous')
           i += 1
           continue
         }
@@ -202,6 +204,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
           rawIndices.push(origIndices[i] ?? -1)
         } else {
           invalidOptions.push(tok)
+          optionErrorKinds.push('invalid')
         }
         i += 1
       }
@@ -297,6 +300,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
           }
         }
         invalidOptions.push(bad)
+        optionErrorKinds.push('invalid')
       }
       i += 1
       continue
@@ -411,6 +415,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     warnings,
     invalidOptions,
     ambiguousOptions,
+    optionErrorKinds,
     needsValueOptions,
     invalidValueOptions,
     invalidIntOptions,

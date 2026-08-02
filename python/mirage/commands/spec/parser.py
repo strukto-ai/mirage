@@ -145,6 +145,7 @@ def parse_command(
     warnings: list[str] = []
     invalid_options: list[str] = []
     ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
+    option_error_kinds: list[str] = []
     needs_value_options: list[str] = []
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
@@ -182,6 +183,7 @@ def parse_command(
                     spelling = expansions[0]
                 elif len(expansions) > 1:
                     ambiguous_options.append((typed, expansions))
+                    option_error_kinds.append("ambiguous")
                     i += 1
                     continue
             etok = spelling if eq == -1 else spelling + tok[eq:]
@@ -205,6 +207,7 @@ def parse_command(
                     raw_indices.append(orig_indices[i])
                 else:
                     invalid_options.append(tok)
+                    option_error_kinds.append("invalid")
                 i += 1
             continue
 
@@ -293,6 +296,7 @@ def parse_command(
                         bad = ch
                         break
                 invalid_options.append(bad)
+                option_error_kinds.append("invalid")
             i += 1
             continue
 
@@ -399,6 +403,7 @@ def parse_command(
         word_kinds=word_kinds,
         invalid_options=invalid_options,
         ambiguous_options=ambiguous_options,
+        option_error_kinds=option_error_kinds,
         needs_value_options=needs_value_options,
         invalid_value_options=invalid_value_options,
         invalid_int_options=invalid_int_options,

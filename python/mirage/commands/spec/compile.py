@@ -57,6 +57,10 @@ class CompiledSpec:
         long_spellings (tuple[str, ...]): every long spelling in
             declaration order (the order GNU's ambiguity refusal lists
             possibilities), for getopt_long prefix expansion.
+        long_signatures (dict[str, str]): behavior signature per long
+            spelling. Prefix candidates whose signatures all match are
+            one option in glibc's eyes (same action struct), so the
+            prefix resolves instead of refusing as ambiguous.
         int_dests (frozenset[str]): canonical spellings of int-typed
             options; the parser refuses a non-integer value at parse
             time (argparse ``type=int``).
@@ -80,6 +84,7 @@ class CompiledSpec:
     long_value_spellings: frozenset[str] = frozenset()
     long_optional_spellings: frozenset[str] = frozenset()
     long_spellings: tuple[str, ...] = ()
+    long_signatures: dict[str, str] = field(default_factory=dict)
     int_dests: frozenset[str] = frozenset()
     kind_of: dict[str, OperandKind] = field(default_factory=dict)
     kind_by_dest: dict[str, OperandKind] = field(default_factory=dict)
@@ -106,12 +111,14 @@ def expand_long(cs: CompiledSpec, spelling: str) -> tuple[str, ...]:
 
     An exact declared spelling always wins (GNU: ``--binary`` never
     trips over ``--binary-files``); otherwise the candidates are every
-    declared long the typed spelling prefixes, deduped by dest because
-    glibc treats several spellings of one option as unambiguous
-    (``grep --colo`` resolves despite ``--color``/``--colour``). The
-    result length tells the caller everything: 0 unknown, 1 match, 2+
-    ambiguous (candidates in declaration order, the order GNU lists
-    possibilities).
+    declared long the typed spelling prefixes. Candidates whose behavior
+    signatures all match count as one option, the way glibc treats
+    several table entries with one action struct (``grep --colo``
+    resolves despite ``--color``/``--colour`` being separate entries),
+    and the prefix resolves to the first. The result length tells the
+    caller everything: 0 unknown, 1 match, 2+ ambiguous (every matching
+    spelling in declaration order, the order GNU lists possibilities,
+    synonyms included like GNU's own listing).
 
     Args:
         cs (CompiledSpec): compiled tables to match against.
@@ -121,15 +128,14 @@ def expand_long(cs: CompiledSpec, spelling: str) -> tuple[str, ...]:
         return (spelling, )
     if len(spelling) <= 2:
         return ()
-    matches: list[str] = []
-    seen: set[str] = set()
-    for declared in cs.long_spellings:
-        if declared.startswith(spelling):
-            dest = cs.dest_of(declared)
-            if dest not in seen:
-                seen.add(dest)
-                matches.append(declared)
-    return tuple(matches)
+    matches = tuple(declared for declared in cs.long_spellings
+                    if declared.startswith(spelling))
+    if not matches:
+        return ()
+    signatures = {cs.long_signatures[declared] for declared in matches}
+    if len(signatures) == 1:
+        return (matches[0], )
+    return matches
 
 
 @lru_cache(maxsize=512)
@@ -146,6 +152,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     long_value_spellings: set[str] = set()
     long_optional_spellings: set[str] = set()
     long_spellings: list[str] = []
+    long_signatures: dict[str, str] = {}
     int_dests: set[str] = set()
     kind_of: dict[str, OperandKind] = {}
     kind_by_dest: dict[str, OperandKind] = {}
@@ -214,6 +221,12 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
                     numeric_dest = canonical
         if opt.long:
             long_spellings.append(opt.long)
+            # Everything parsing-relevant except the spellings and the
+            # help text: two options that agree here are one action.
+            long_signatures[opt.long] = "|".join(
+                (opt.value_kind.value, str(opt.value_optional),
+                 str(opt.multiple), str(opt.count), ",".join(opt.choices),
+                 str(opt.required), str(opt.default), opt.type))
             if opt.value_kind == OperandKind.NONE:
                 long_bool_spellings.add(opt.long)
             elif opt.value_optional:
@@ -239,6 +252,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         long_value_spellings=frozenset(long_value_spellings),
         long_optional_spellings=frozenset(long_optional_spellings),
         long_spellings=tuple(long_spellings),
+        long_signatures=long_signatures,
         int_dests=frozenset(int_dests),
         kind_of=kind_of,
         kind_by_dest=kind_by_dest,

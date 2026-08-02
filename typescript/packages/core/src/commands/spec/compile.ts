@@ -46,6 +46,10 @@ export class CompiledSpec {
   /** Every long spelling in declaration order (the order GNU's ambiguity
    * refusal lists possibilities), for getopt_long prefix expansion. */
   readonly longSpellings: readonly string[]
+  /** Behavior signature per long spelling. Prefix candidates whose
+   * signatures all match are one option in glibc's eyes (same action
+   * struct), so the prefix resolves instead of refusing as ambiguous. */
+  readonly longSignatures: ReadonlyMap<string, string>
   /** Canonical spellings of int-typed options; the parser refuses a
    * non-integer value at parse time (argparse `type=int`). */
   readonly intDests: ReadonlySet<string>
@@ -84,6 +88,7 @@ export class CompiledSpec {
     longValueSpellings: ReadonlySet<string>
     longOptionalSpellings: ReadonlySet<string>
     longSpellings: readonly string[]
+    longSignatures: ReadonlyMap<string, string>
     intDests: ReadonlySet<string>
     kindOf: ReadonlyMap<string, OperandKind>
     kindByDest: ReadonlyMap<string, OperandKind>
@@ -103,6 +108,7 @@ export class CompiledSpec {
     this.longValueSpellings = fields.longValueSpellings
     this.longOptionalSpellings = fields.longOptionalSpellings
     this.longSpellings = fields.longSpellings
+    this.longSignatures = fields.longSignatures
     this.intDests = fields.intDests
     this.kindOf = fields.kindOf
     this.kindByDest = fields.kindByDest
@@ -136,6 +142,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const longValueSpellings = new Set<string>()
   const longOptionalSpellings = new Set<string>()
   const longSpellings: string[] = []
+  const longSignatures = new Map<string, string>()
   const intDests = new Set<string>()
   const kindOf = new Map<string, OperandKind>()
   const kindByDest = new Map<string, OperandKind>()
@@ -194,6 +201,21 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     }
     if (opt.long !== null) {
       longSpellings.push(opt.long)
+      // Everything parsing-relevant except the spellings and the help
+      // text: two options that agree here are one action.
+      longSignatures.set(
+        opt.long,
+        [
+          opt.valueKind,
+          String(opt.valueOptional),
+          String(opt.multiple),
+          String(opt.count),
+          opt.choices.join(','),
+          String(opt.required),
+          String(opt.default),
+          opt.type,
+        ].join('|'),
+      )
       if (opt.valueKind === OperandKind.NONE) {
         longBoolSpellings.add(opt.long)
       } else if (opt.valueOptional) {
@@ -222,6 +244,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     longValueSpellings,
     longOptionalSpellings,
     longSpellings,
+    longSignatures,
     intDests,
     kindOf,
     kindByDest,
@@ -243,25 +266,22 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
  *
  * An exact declared spelling always wins (GNU: `--binary` never trips
  * over `--binary-files`); otherwise the candidates are every declared
- * long the typed spelling prefixes, deduped by dest because glibc treats
- * several spellings of one option as unambiguous (`grep --colo` resolves
- * despite `--color`/`--colour`). The result length tells the caller
- * everything: 0 unknown, 1 match, 2+ ambiguous (candidates in
- * declaration order, the order GNU lists possibilities).
+ * long the typed spelling prefixes. Candidates whose behavior signatures
+ * all match count as one option, the way glibc treats several table
+ * entries with one action struct (`grep --colo` resolves despite
+ * `--color`/`--colour` being separate entries), and the prefix resolves
+ * to the first. The result length tells the caller everything: 0
+ * unknown, 1 match, 2+ ambiguous (every matching spelling in
+ * declaration order, the order GNU lists possibilities, synonyms
+ * included like GNU's own listing).
  */
 export function expandLong(cs: CompiledSpec, spelling: string): readonly string[] {
   if (cs.dest.has(spelling)) return [spelling]
   if (spelling.length <= 2) return []
-  const matches: string[] = []
-  const seen = new Set<string>()
-  for (const declared of cs.longSpellings) {
-    if (declared.startsWith(spelling)) {
-      const dest = cs.destOf(declared)
-      if (!seen.has(dest)) {
-        seen.add(dest)
-        matches.push(declared)
-      }
-    }
-  }
+  const matches = cs.longSpellings.filter((declared) => declared.startsWith(spelling))
+  const first = matches[0]
+  if (first === undefined) return []
+  const signatures = new Set(matches.map((declared) => cs.longSignatures.get(declared)))
+  if (signatures.size === 1) return [first]
   return matches
 }

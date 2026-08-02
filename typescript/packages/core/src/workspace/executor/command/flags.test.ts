@@ -16,7 +16,8 @@ import { describe, expect, it } from 'vitest'
 
 import { SPECS } from '../../../commands/spec/index.ts'
 import { PathSpec } from '../../../types.ts'
-import { parseFlags } from './flags.ts'
+import { CommandSpec, OperandKind, Option } from '../../../commands/spec/types.ts'
+import { optionError, parseFlags } from './flags.ts'
 
 function path(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, resourcePath: '', resolved: true })
@@ -44,5 +45,47 @@ describe('parseFlags', () => {
     const [paths] = parseFlags(['b.txt'], SPECS.cat ?? null, 'cat', '/data')
     expect(paths.length).toBe(1)
     expect(paths[0]?.resourcePath).toBe('')
+  })
+})
+
+describe('optionError scan order', () => {
+  it('reports the first scan error like GNU', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--count' }),
+      ],
+    })
+    const dec = new TextDecoder()
+    const ambiguousFirst = parseFlags(['--c', '--bogus', 'x'], spec, 'grep', '/')
+    const refusal = optionError(
+      'grep',
+      ...([
+        ambiguousFirst[4],
+        ambiguousFirst[5],
+        ambiguousFirst[6],
+        ambiguousFirst[7],
+        ambiguousFirst[8],
+        ambiguousFirst[9],
+        ambiguousFirst[10],
+      ] as const),
+    )
+    expect(refusal).not.toBeNull()
+    expect(dec.decode(refusal?.[0]).startsWith("grep: option '--c' is ambiguous")).toBe(true)
+    const invalidFirst = parseFlags(['--bogus', '--c', 'x'], spec, 'grep', '/')
+    const flipped = optionError(
+      'grep',
+      ...([
+        invalidFirst[4],
+        invalidFirst[5],
+        invalidFirst[6],
+        invalidFirst[7],
+        invalidFirst[8],
+        invalidFirst[9],
+        invalidFirst[10],
+      ] as const),
+    )
+    expect(flipped).not.toBeNull()
+    expect(dec.decode(flipped?.[0]).startsWith("grep: unrecognized option '--bogus'")).toBe(true)
   })
 })

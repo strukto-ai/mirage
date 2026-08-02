@@ -778,3 +778,46 @@ describe('int-typed values', () => {
     expect(parsed.invalidIntOptions).toEqual([['--id', 'x']])
   })
 })
+
+describe('synonym long spellings', () => {
+  it('resolves a shared prefix like glibc', () => {
+    const grep = specOf('grep')
+    const parsed = parseCommand(grep, ['--colo', 'pat', '/a.txt'], '/')
+    expect(parsed.ambiguousOptions).toEqual([])
+    expect(parsed.flags['--color']).toBe(true)
+    const attached = parseCommand(grep, ['--colo=never', 'pat', '/a.txt'], '/')
+    expect(attached.flags['--color']).toBe('never')
+  })
+
+  it('lists synonyms in an ambiguity like GNU', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--color', valueOptional: true, valueKind: OperandKind.TEXT }),
+        new Option({ long: '--colour', valueOptional: true, valueKind: OperandKind.TEXT }),
+        new Option({ long: '--count' }),
+      ],
+    })
+    const parsed = parseCommand(spec, ['--c'], '/')
+    expect(parsed.ambiguousOptions).toEqual([
+      ['--c', ['--context', '--color', '--colour', '--count']],
+    ])
+  })
+
+  it('keeps scan order in optionErrorKinds', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--count' }),
+      ],
+    })
+    expect(parseCommand(spec, ['--c', '--bogus'], '/').optionErrorKinds).toEqual([
+      'ambiguous',
+      'invalid',
+    ])
+    expect(parseCommand(spec, ['--bogus', '--c'], '/').optionErrorKinds).toEqual([
+      'invalid',
+      'ambiguous',
+    ])
+  })
+})

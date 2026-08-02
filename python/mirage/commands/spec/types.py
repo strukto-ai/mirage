@@ -250,6 +250,12 @@ class ParsedArgs:
     ambiguous_options: list[tuple[str,
                                   tuple[str,
                                         ...]]] = field(default_factory=list)
+    # "invalid" / "ambiguous" tags in scan encounter order, so the refusal
+    # names the FIRST offending token like GNU (grep --c --bogus reports
+    # --c; reversed reports --bogus). needs_value is absent by
+    # construction: it only fires on the line's final token, so it can
+    # never precede another scan error.
+    option_error_kinds: list[str] = field(default_factory=list)
     needs_value_options: list[str] = field(default_factory=list)
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = field(
         default_factory=list)

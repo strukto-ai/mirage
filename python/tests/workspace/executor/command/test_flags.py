@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec import SPECS
-from mirage.workspace.executor.command.flags import (parse_flags,
+from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.workspace.executor.command.flags import (option_error, parse_flags,
                                                      synthesize_path_spec)
 
 
@@ -43,3 +44,17 @@ def test_classified_path_wins_over_synthesis():
     path = synthesize_path_spec("/data/a.txt")
     parsed = parse_flags([path], SPECS["cat"], "cat", "/")
     assert parsed.paths[0] is path
+
+
+def test_option_error_reports_the_first_scan_error_like_gnu():
+    spec = CommandSpec(
+        options=(Option(long="--context", value_kind=OperandKind.TEXT),
+                 Option(long="--count")))
+    ambiguous_first = parse_flags(["--c", "--bogus", "x"], spec, "grep", "/")
+    refusal = option_error("grep", ambiguous_first)
+    assert refusal is not None
+    assert refusal[0].startswith(b"grep: option '--c' is ambiguous")
+    invalid_first = parse_flags(["--bogus", "--c", "x"], spec, "grep", "/")
+    refusal = option_error("grep", invalid_first)
+    assert refusal is not None
+    assert refusal[0].startswith(b"grep: unrecognized option '--bogus'")

@@ -501,3 +501,35 @@ def test_int_typed_multiple_checks_every_value():
                                 ))
     parsed = parse_command(spec, ["--id", "1", "--id", "x"], "/")
     assert parsed.invalid_int_options == [("--id", "x")]
+
+
+def test_synonym_spellings_resolve_a_shared_prefix_like_glibc():
+    parsed = parse_command(SPECS["grep"], ["--colo", "pat", "/a.txt"], "/")
+    assert parsed.ambiguous_options == []
+    assert parsed.flags["--color"] is True
+    attached = parse_command(SPECS["grep"], ["--colo=never", "pat", "/a.txt"],
+                             "/")
+    assert attached.flags["--color"] == "never"
+
+
+def test_ambiguity_lists_synonyms_like_gnu():
+    spec = CommandSpec(options=(
+        Option(long="--context", value_kind=OperandKind.TEXT),
+        Option(
+            long="--color", value_optional=True, value_kind=OperandKind.TEXT),
+        Option(
+            long="--colour", value_optional=True, value_kind=OperandKind.TEXT),
+        Option(long="--count")))
+    parsed = parse_command(spec, ["--c"], "/")
+    assert parsed.ambiguous_options == [("--c", ("--context", "--color",
+                                                 "--colour", "--count"))]
+
+
+def test_option_error_kinds_keep_scan_order():
+    spec = CommandSpec(
+        options=(Option(long="--context", value_kind=OperandKind.TEXT),
+                 Option(long="--count")))
+    parsed = parse_command(spec, ["--c", "--bogus"], "/")
+    assert parsed.option_error_kinds == ["ambiguous", "invalid"]
+    flipped = parse_command(spec, ["--bogus", "--c"], "/")
+    assert flipped.option_error_kinds == ["invalid", "ambiguous"]

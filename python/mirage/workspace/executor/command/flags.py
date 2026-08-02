@@ -131,18 +131,16 @@ def parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return ParsedCommand(paths, texts, flag_kwargs, parsed.warnings,
-                             parsed.invalid_options,
-                             parsed.ambiguous_options,
-                             parsed.needs_value_options,
-                             parsed.invalid_value_options,
-                             parsed.invalid_int_options,
-                             parsed.missing_required_options)
+        return ParsedCommand(
+            paths, texts, flag_kwargs, parsed.warnings, parsed.invalid_options,
+            parsed.ambiguous_options, parsed.option_error_kinds,
+            parsed.needs_value_options, parsed.invalid_value_options,
+            parsed.invalid_int_options, parsed.missing_required_options)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return ParsedCommand(paths, texts, {}, [], [], [], [], [], [], [])
+    return ParsedCommand(paths, texts, {}, [], [], [], [], [], [], [], [])
 
 
 def option_error(cmd_name: str,
@@ -158,6 +156,13 @@ def option_error(cmd_name: str,
     """
     if cmd_name == "find":
         return None
+    # Scan-order between unknown and ambiguous options: GNU stops at the
+    # first offending token, so `grep --c --bogus` reports the ambiguity
+    # and the reversed line reports --bogus.
+    if (parsed.option_error_kinds
+            and parsed.option_error_kinds[0] == "ambiguous"):
+        token, candidates = parsed.ambiguous_options[0]
+        return ambiguous_option_error(cmd_name, token, candidates)
     if parsed.invalid_options:
         return unknown_option_error(cmd_name, parsed.invalid_options[0])
     if parsed.ambiguous_options:

@@ -218,6 +218,7 @@ export async function handleCommand(
       csParsed[7],
       csParsed[8],
       csParsed[9],
+      csParsed[10],
     )
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
@@ -341,6 +342,7 @@ export async function handleCommand(
     parseWarnings,
     invalidOptions,
     ambiguousOptions,
+    optionErrorKinds,
     needsValueOptions,
     invalidValueOptions,
     invalidIntOptions,
@@ -350,6 +352,7 @@ export async function handleCommand(
     cmdName,
     invalidOptions,
     ambiguousOptions,
+    optionErrorKinds,
     needsValueOptions,
     invalidValueOptions,
     invalidIntOptions,
