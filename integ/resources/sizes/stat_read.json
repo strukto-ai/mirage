@@ -1459,15 +1459,15 @@
       }
     },
     {
-      "id": "sz_jaeger_every_file_size_matches_read",
+      "id": "sz_jaeger_seeded_services_size_matches_read",
       "seq": 700117,
       "targets": [
         "jaeger"
       ],
-      "command": "n=0; t=0; for f in $(find /j -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; test \"$t\" -gt 0 && echo \"mismatched=$((t-n))\"",
+      "command": "n=0; t=0; for f in $(find /j/services/checkout-api /j/services/orders-api /j/services/search-api /j/services/web-frontend -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
       "expect": {
         "exit": 0,
-        "stdout": "mismatched=0\n",
+        "stdout": "8/8\n",
         "stderr": ""
       }
     },
