@@ -37,7 +37,8 @@ def _usage_error(name: str, node: CLISpec, message: str) -> WalkResult:
         message (str): first line of the refusal.
     """
     text = f"{message}\n\n{render_group_help(name, node)}"
-    return WalkResult(output=text.encode(), stream="stderr",
+    return WalkResult(output=text.encode(),
+                      stream="stderr",
                       exit_code=USAGE_EXIT)
 
 
@@ -113,8 +114,8 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
                 flags[dest] = default
     for dest, allowed in cs.choices_by_dest.items():
         value = flags.get(dest)
-        candidates = value if isinstance(value, list) else (
-            [value] if isinstance(value, str) else [])
+        candidates = value if isinstance(
+            value, list) else ([value] if isinstance(value, str) else [])
         for part in candidates:
             if part not in allowed:
                 return _usage_error(
@@ -151,7 +152,9 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
     i = 0
     while True:
         if node.fn is not None:
-            return WalkResult(leaf=node, path=path, group_flags=flags,
+            return WalkResult(leaf=node,
+                              path=path,
+                              group_flags=flags,
                               argv=tuple(argv[i:]))
         name = " ".join((head, ) + path)
         cs = compile_spec(node)
@@ -223,8 +226,8 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
             refused = _finish_node(name, node, cs, flags)
             if refused is not None:
                 return refused
-            child = next(
-                (c for c in node.subcommands if c.name == token), None)
+            child = next((c for c in node.subcommands if c.name == token),
+                         None)
             if child is None:
                 return _unknown_verb(head, name, token)
             node = child
@@ -238,4 +241,5 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
         if refused is not None:
             return refused
         return WalkResult(output=render_group_help(name, node).encode(),
-                          stream="stdout", exit_code=1)
+                          stream="stdout",
+                          exit_code=1)

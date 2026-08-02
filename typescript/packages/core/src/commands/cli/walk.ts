@@ -14,7 +14,7 @@
 
 import { compileSpec, type CompiledSpec } from '../spec/compile.ts'
 import { renderGroupHelp } from './help.ts'
-import { CLISpec, WalkResult, type WalkFlagBag } from './types.ts'
+import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 const ENC = new TextEncoder()
 
@@ -130,7 +130,8 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
     let descended = false
     let optionsEnded = false
     while (i < argv.length) {
-      const token = argv[i] as string
+      const token = argv[i]
+      if (token === undefined) break
       if (!optionsEnded && token === '--help') {
         return new WalkResult({ output: ENC.encode(renderGroupHelp(name, node)) })
       }
@@ -155,11 +156,12 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
             recordBool(flags, cs, spelling)
           }
         } else if (cs.longValueSpellings.has(spelling)) {
+          const next = argv[i + 1]
           if (attached !== null) {
             recordValue(flags, cs, spelling, attached)
-          } else if (i + 1 < argv.length) {
+          } else if (next !== undefined) {
             i += 1
-            recordValue(flags, cs, spelling, argv[i] as string)
+            recordValue(flags, cs, spelling, next)
           } else {
             return usageError(name, node, `error: option '${spelling}' requires a value`)
           }
@@ -173,17 +175,18 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
         let error: string | null = null
         let j = 1
         while (j < token.length) {
-          const spelling = `-${token[j] as string}`
+          const spelling = `-${token.charAt(j)}`
           if (cs.boolSpellings.has(spelling)) {
             recordBool(flags, cs, spelling)
             j += 1
           } else if (cs.dest.has(spelling)) {
             const rest = token.slice(j + 1)
+            const next = argv[i + 1]
             if (rest !== '') {
               recordValue(flags, cs, spelling, rest)
-            } else if (i + 1 < argv.length) {
+            } else if (next !== undefined) {
               i += 1
-              recordValue(flags, cs, spelling, argv[i] as string)
+              recordValue(flags, cs, spelling, next)
             } else {
               error = `error: option '${spelling}' requires a value`
             }

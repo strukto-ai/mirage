@@ -36,24 +36,23 @@ def test_group_help_full_shape():
                                                       fn=_verb), )),
         ),
     )
-    assert render_group_help("gws", node) == (
-        "usage: gws [<options>] <command> [<args>]\n"
-        "\n"
-        "Google Workspace\n"
-        "\n"
-        "Commands:\n"
-        "  docs\n"
-        "  gmail  Gmail messages\n"
-        "\n"
-        "Flags:\n"
-        "  -C, --cwd <text>  run as if started there\n")
+    assert render_group_help(
+        "gws", node) == ("usage: gws [<options>] <command> [<args>]\n"
+                         "\n"
+                         "Google Workspace\n"
+                         "\n"
+                         "Commands:\n"
+                         "  docs\n"
+                         "  gmail  Gmail messages\n"
+                         "\n"
+                         "Flags:\n"
+                         "  -C, --cwd <text>  run as if started there\n")
 
 
 def test_group_help_minimal_shape():
-    node = CLISpec(name="tool",
-                   subcommands=(CLISpec(name="run", fn=_verb), ))
-    assert render_group_help("tool", node) == (
-        "usage: tool <command> [<args>]\n"
-        "\n"
-        "Commands:\n"
-        "  run\n")
+    node = CLISpec(name="tool", subcommands=(CLISpec(name="run", fn=_verb), ))
+    assert render_group_help("tool",
+                             node) == ("usage: tool <command> [<args>]\n"
+                                       "\n"
+                                       "Commands:\n"
+                                       "  run\n")

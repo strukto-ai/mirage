@@ -74,7 +74,15 @@ describe('walk', () => {
   })
 
   it('collects group options per level', () => {
-    const result = walk('gws', tree(), ['-C', '/tmp', '-vv', 'gmail', '--account=work', 'send', 'x'])
+    const result = walk('gws', tree(), [
+      '-C',
+      '/tmp',
+      '-vv',
+      'gmail',
+      '--account=work',
+      'send',
+      'x',
+    ])
     expect(result.leaf).not.toBeNull()
     expect(result.groupFlags).toEqual({ '--cwd': '/tmp', '--verbose': 2, '--account': 'work' })
     expect(result.argv).toEqual(['x'])

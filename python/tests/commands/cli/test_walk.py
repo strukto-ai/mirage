@@ -59,9 +59,9 @@ def test_resolves_a_leaf_and_keeps_its_argv():
 
 
 def test_group_options_collect_per_level():
-    result = walk("gws", _tree(), [
-        "-C", "/tmp", "-vv", "gmail", "--account=work", "send", "x"
-    ])
+    result = walk(
+        "gws", _tree(),
+        ["-C", "/tmp", "-vv", "gmail", "--account=work", "send", "x"])
     assert result.leaf is not None
     assert result.group_flags == {
         "--cwd": "/tmp",
@@ -132,8 +132,7 @@ def test_unknown_group_option_exits_129_with_usage():
 def test_starved_group_value_exits_129():
     result = walk("gws", _tree(), ["--cwd"])
     assert result.exit_code == 129
-    assert result.output.startswith(
-        b"error: option '--cwd' requires a value")
+    assert result.output.startswith(b"error: option '--cwd' requires a value")
 
 
 def test_bool_long_with_value_refused():
