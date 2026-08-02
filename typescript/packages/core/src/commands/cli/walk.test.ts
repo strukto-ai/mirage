@@ -99,7 +99,11 @@ describe('walk', () => {
     expect(result.leaf).toBeNull()
     expect(result.stream).toBe('stdout')
     expect(result.exitCode).toBe(1)
-    expect(text(result.output).startsWith('usage: gws [<options>] <command> [<args>]')).toBe(true)
+    expect(
+      text(result.output).startsWith(
+        'gws: Google Workspace\n\nUsage: gws [flags] <command> [<args>]',
+      ),
+    ).toBe(true)
     expect(text(result.output)).toContain('Commands:')
   })
 
@@ -114,9 +118,11 @@ describe('walk', () => {
   it('names the path in nested group help', () => {
     const result = walk('gws', tree(), ['gmail', '--help'])
     expect(result.exitCode).toBe(0)
-    expect(text(result.output).startsWith('usage: gws gmail [<options>] <command> [<args>]')).toBe(
-      true,
-    )
+    expect(
+      text(result.output).startsWith(
+        'gws gmail: Gmail messages\n\nUsage: gws gmail [flags] <command> [<args>]',
+      ),
+    ).toBe(true)
   })
 
   it('matches git wording for an unknown verb', () => {
@@ -144,7 +150,9 @@ describe('walk', () => {
     const result = walk('gws', tree(), ['--zzz', 'gmail'])
     expect(result.stream).toBe('stderr')
     expect(result.exitCode).toBe(129)
-    expect(text(result.output).startsWith('unknown option: --zzz\n\nusage: gws ')).toBe(true)
+    expect(text(result.output).startsWith('unknown option: --zzz\n\ngws: Google Workspace')).toBe(
+      true,
+    )
   })
 
   it('exits 129 for a starved group value', () => {
@@ -187,6 +195,12 @@ describe('walk', () => {
     const helped = walk('gws', tree(), ['--', '--help'])
     expect(helped.leaf).toBeNull()
     expect(text(helped.output)).toContain('is not a gws command')
+  })
+
+  it('lists the injected help flag in group help', () => {
+    const result = walk('gws', tree(), ['--help'])
+    expect(text(result.output)).toContain('\n  --help')
+    expect(text(result.output)).toContain('Show this help and exit')
   })
 
   it('passes argv through for a leaf root', () => {

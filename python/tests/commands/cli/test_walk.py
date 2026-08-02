@@ -83,7 +83,7 @@ def test_bare_root_prints_usage_to_stdout_exit_1():
     assert result.stream == "stdout"
     assert result.exit_code == 1
     assert result.output.startswith(
-        b"usage: gws [<options>] <command> [<args>]")
+        b"gws: Google Workspace\n\nUsage: gws [flags] <command> [<args>]")
     assert b"Commands:" in result.output
 
 
@@ -99,7 +99,8 @@ def test_nested_group_help_names_the_path():
     result = walk("gws", _tree(), ["gmail", "--help"])
     assert result.exit_code == 0
     assert result.output.startswith(
-        b"usage: gws gmail [<options>] <command> [<args>]")
+        b"gws gmail: Gmail messages\n\n"
+        b"Usage: gws gmail [flags] <command> [<args>]")
 
 
 def test_unknown_verb_matches_git_wording():
@@ -126,7 +127,8 @@ def test_unknown_group_option_exits_129_with_usage():
     result = walk("gws", _tree(), ["--zzz", "gmail"])
     assert result.stream == "stderr"
     assert result.exit_code == 129
-    assert result.output.startswith(b"unknown option: --zzz\n\nusage: gws ")
+    assert result.output.startswith(
+        b"unknown option: --zzz\n\ngws: Google Workspace")
 
 
 def test_starved_group_value_exits_129():
@@ -193,3 +195,9 @@ def test_required_group_option_missing_exits_129():
     ok = walk("tool", tree, ["--token", "t", "run"])
     assert ok.leaf is not None
     assert ok.group_flags == {"--token": "t"}
+
+
+def test_group_help_lists_the_injected_help_flag():
+    result = walk("gws", _tree(), ["--help"])
+    assert b"\n  --help" in result.output
+    assert b"Show this help and exit" in result.output

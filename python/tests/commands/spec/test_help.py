@@ -56,3 +56,37 @@ def test_epilog_trails_the_flag_table_after_a_blank_line():
 def test_epilog_is_omitted_when_absent():
     out = render_help("foo", CommandSpec())
     assert out == "foo\n\nUsage: foo\n"
+
+
+def test_render_help_with_subcommands_lists_commands():
+    spec = CommandSpec(
+        description="Google Workspace",
+        options=(Option(short="-C",
+                        long="--cwd",
+                        value_kind=OperandKind.TEXT,
+                        description="run as if started there"), ),
+    )
+    rows = [("gmail", "Gmail messages\nlong tail ignored"), ("docs", "")]
+    assert render_help(
+        "gws", spec,
+        subcommands=rows) == ("gws: Google Workspace\n"
+                              "\n"
+                              "Usage: gws [flags] <command> [<args>]\n"
+                              "\n"
+                              "Commands:\n"
+                              "  docs\n"
+                              "  gmail  Gmail messages\n"
+                              "\n"
+                              "Flags:\n"
+                              "  -C, --cwd <text>  run as if started there\n")
+
+
+def test_render_help_with_subcommands_minimal():
+    assert render_help("tool", CommandSpec(), subcommands=[
+        ("run", "")
+    ]) == ("tool\n"
+           "\n"
+           "Usage: tool <command> [<args>]\n"
+           "\n"
+           "Commands:\n"
+           "  run\n")

@@ -12,11 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { HELP_OPTION } from '../config.ts'
 import { compileSpec, type CompiledSpec } from '../spec/compile.ts'
-import { renderGroupHelp } from './help.ts'
+import { renderHelp } from '../spec/help.ts'
+import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
 const ENC = new TextEncoder()
+
+/**
+ * A group node's help: the ordinary command help plus Commands rows.
+ * One renderer serves leaves and groups; the same text serves `--help`
+ * (stdout, exit 0) and the bare-group refusal (stdout, exit 1, matching
+ * git). `name` is the full display path as typed ('gws gmail'), so a
+ * renamed install renders its own spelling.
+ */
+export function nodeHelp(name: string, node: CLISpec): string {
+  const rows: [string, string][] = node.subcommands.map((child) => [
+    child.name,
+    child.description ?? '',
+  ])
+  // --help is a registered option everywhere (argparse add_help, click
+  // add_help_option, withHelpSupport for leaves), so the listing shows it
+  // unless the node declares its own.
+  const listed = node.options.some((option) => option.long === '--help')
+    ? node
+    : // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+      new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
+  return renderHelp(name, listed, rows)
+}
 
 // git prints usage errors at tree levels with exit 129; leaf spec errors
 // keep the GNU exit-2 machinery they already ride.
@@ -29,7 +53,7 @@ const USAGE_EXIT = 129
  */
 function usageError(name: string, node: CLISpec, message: string): WalkResult {
   return new WalkResult({
-    output: ENC.encode(`${message}\n\n${renderGroupHelp(name, node)}`),
+    output: ENC.encode(`${message}\n\n${nodeHelp(name, node)}`),
     stream: 'stderr',
     exitCode: USAGE_EXIT,
   })
@@ -132,9 +156,6 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
     while (i < argv.length) {
       const token = argv[i]
       if (token === undefined) break
-      if (!optionsEnded && token === '--help') {
-        return new WalkResult({ output: ENC.encode(renderGroupHelp(name, node)) })
-      }
       if (!optionsEnded && token === '--') {
         optionsEnded = true
         i += 1
@@ -165,6 +186,11 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
           } else {
             return usageError(name, node, `error: option '${spelling}' requires a value`)
           }
+        } else if (spelling === '--help') {
+          if (attached !== null) {
+            return usageError(name, node, `error: option '${spelling}' takes no value`)
+          }
+          return new WalkResult({ output: ENC.encode(nodeHelp(name, node)) })
         } else {
           return usageError(name, node, `unknown option: ${spelling}`)
         }
@@ -218,7 +244,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
     const refused = finishNode(name, node, cs, flags)
     if (refused !== null) return refused
     return new WalkResult({
-      output: ENC.encode(renderGroupHelp(name, node)),
+      output: ENC.encode(nodeHelp(name, node)),
       stream: 'stdout',
       exitCode: 1,
     })

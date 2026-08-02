@@ -12,7 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
+
 from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+
+# (name, one-line help) rows a CLI group passes for its children.
+SubcommandRows = Sequence[tuple[str, str]]
 
 _VALUE_LABEL = {
     OperandKind.NONE: "",
@@ -39,7 +44,19 @@ def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
     return [(_flag_display(o), o.description or "") for o in spec.options]
 
 
-def render_help(name: str, spec: CommandSpec) -> str:
+def render_help(name: str, spec: CommandSpec,
+                subcommands: SubcommandRows = ()) -> str:
+    """Render one command's help; a CLI group is the same shape plus a
+    Commands section.
+
+    Args:
+        name (str): command name as invoked (a CLI group passes its full
+            display path, e.g. "gws gmail").
+        spec (CommandSpec): the node's grammar.
+        subcommands (SubcommandRows): (name, one-line help)
+            rows for a CLI group node; when given, the usage line reads
+            ``<command> [<args>]`` instead of the operand slots.
+    """
     lines: list[str] = []
     if spec.description:
         lines.append(f"{name}: {spec.description}")
@@ -50,6 +67,8 @@ def render_help(name: str, spec: CommandSpec) -> str:
     usage_bits = [name]
     if spec.options:
         usage_bits.append("[flags]")
+    if subcommands:
+        usage_bits.append("<command> [<args>]")
     for op in spec.positional:
         usage_bits.append("<path>" if op.kind ==
                           OperandKind.PATH else "<text>")
@@ -58,6 +77,17 @@ def render_help(name: str, spec: CommandSpec) -> str:
         usage_bits.append("[<path>...]" if kind ==
                           OperandKind.PATH else "[<text>...]")
     lines.append("Usage: " + " ".join(usage_bits))
+
+    if subcommands:
+        lines.append("")
+        lines.append("Commands:")
+        width = max(len(sub) for sub, _ in subcommands)
+        for sub, desc in sorted(subcommands):
+            first = desc.split("\n")[0]
+            if first:
+                lines.append(f"  {sub.ljust(width)}  {first}")
+            else:
+                lines.append(f"  {sub}")
 
     if spec.options:
         lines.append("")

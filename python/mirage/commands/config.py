@@ -24,7 +24,7 @@ from mirage.io.types import IOResult
 from mirage.types import CommandSafeguard
 from mirage.version import __version__
 
-_HELP_OPTION = Option(
+HELP_OPTION = Option(
     long="--help",
     value_kind=OperandKind.NONE,
     description="Show this help and exit",
@@ -78,7 +78,7 @@ def _with_help_support(
     """
     extras: list[Option] = []
     if not any(o.long == "--help" for o in spec.options):
-        extras.append(_HELP_OPTION)
+        extras.append(HELP_OPTION)
     if not any(o.long == "--version" for o in spec.options):
         extras.append(_VERSION_OPTION)
     new_spec = (spec if not extras else replace(

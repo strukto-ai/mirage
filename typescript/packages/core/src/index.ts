@@ -622,8 +622,7 @@ export {
   WalkResult,
   type WalkResultInit,
 } from './commands/cli/types.ts'
-export { renderGroupHelp } from './commands/cli/help.ts'
-export { walk } from './commands/cli/walk.ts'
+export { nodeHelp, walk } from './commands/cli/walk.ts'
 export {
   COMPOUND_EXTENSIONS,
   getExtension,

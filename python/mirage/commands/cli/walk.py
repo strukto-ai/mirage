@@ -13,16 +13,44 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
+from dataclasses import replace
 
-from mirage.commands.cli.help import render_group_help
 from mirage.commands.cli.types import CLISpec, WalkResult
+from mirage.commands.config import HELP_OPTION
 from mirage.commands.spec.compile import CompiledSpec, compile_spec
+from mirage.commands.spec.help import render_help
 
 FlagBag = dict[str, str | bool | int | list[str]]
 
 # git prints usage errors at tree levels with exit 129; leaf spec errors
 # keep the GNU exit-2 machinery they already ride.
 USAGE_EXIT = 129
+
+
+def node_help(name: str, node: CLISpec) -> str:
+    """A group node's help: the ordinary command help plus Commands rows.
+
+    One renderer serves leaves and groups (a group is a spec whose
+    operand is the subcommand word); the same text serves ``--help``
+    (stdout, exit 0) and the bare-group refusal (stdout, exit 1,
+    matching git).
+
+    Args:
+        name (str): full display path as typed, e.g. "gws gmail"; the
+            head word is the installed name, so a renamed install
+            renders its own spelling.
+        node (CLISpec): the group node.
+    """
+    rows = [(child.name, child.description or "")
+            for child in node.subcommands]
+    # --help is a registered option everywhere (argparse add_help, click
+    # add_help_option, withHelpSupport for leaves), so the listing shows
+    # it unless the node declares its own.
+    if any(option.long == "--help" for option in node.options):
+        listed = node
+    else:
+        listed = replace(node, options=node.options + (HELP_OPTION, ))
+    return render_help(name, listed, subcommands=rows)
 
 
 def _usage_error(name: str, node: CLISpec, message: str) -> WalkResult:
@@ -36,7 +64,7 @@ def _usage_error(name: str, node: CLISpec, message: str) -> WalkResult:
         node (CLISpec): the group node being parsed.
         message (str): first line of the refusal.
     """
-    text = f"{message}\n\n{render_group_help(name, node)}"
+    text = f"{message}\n\n{node_help(name, node)}"
     return WalkResult(output=text.encode(),
                       stream="stderr",
                       exit_code=USAGE_EXIT)
@@ -162,9 +190,6 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
         options_ended = False
         while i < len(argv):
             token = argv[i]
-            if not options_ended and token == "--help":
-                return WalkResult(
-                    output=render_group_help(name, node).encode())
             if not options_ended and token == "--":
                 options_ended = True
                 i += 1
@@ -192,6 +217,12 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
                         return _usage_error(
                             name, node,
                             f"error: option '{spelling}' requires a value")
+                elif spelling == "--help":
+                    if eq:
+                        return _usage_error(
+                            name, node,
+                            f"error: option '{spelling}' takes no value")
+                    return WalkResult(output=node_help(name, node).encode())
                 else:
                     return _usage_error(name, node,
                                         f"unknown option: {spelling}")
@@ -240,6 +271,6 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
         refused = _finish_node(name, node, cs, flags)
         if refused is not None:
             return refused
-        return WalkResult(output=render_group_help(name, node).encode(),
+        return WalkResult(output=node_help(name, node).encode(),
                           stream="stdout",
                           exit_code=1)

@@ -16,9 +16,11 @@ import re
 from pathlib import Path
 
 # The spec layer builds the flag mapping, so it reads and writes it directly.
-# Everything downstream goes through FlagView or a typed parameter.
+# Everything downstream goes through FlagView or a typed parameter. The CLI
+# walk is spec-layer too: it builds the group-flag bag the way parser.py
+# builds the command's.
 COMMANDS = Path(__file__).resolve().parents[2] / "mirage" / "commands"
-EXEMPT = {"spec/parser.py", "spec/shell.py", "spec/types.py"}
+EXEMPT = {"spec/parser.py", "spec/shell.py", "spec/types.py", "cli/walk.py"}
 # Assignment is fine: crossmount fanout builds a bag to hand to the
 # sub-commands it dispatches. Only reads have to go through the view.
 RAW_READ = re.compile(r"\bflags\.get\(|\bflags\[[^\]]*\](?!\s*=[^=])")

@@ -62,3 +62,41 @@ describe('renderHelp', () => {
     expect(performance.now() - started).toBeLessThan(1000)
   })
 })
+
+describe('renderHelp with subcommands', () => {
+  it('lists commands after the usage line', () => {
+    const spec = new CommandSpec({
+      description: 'Google Workspace',
+      options: [
+        new Option({
+          short: '-C',
+          long: '--cwd',
+          valueKind: OperandKind.TEXT,
+          description: 'run as if started there',
+        }),
+      ],
+    })
+    const rows: [string, string][] = [
+      ['gmail', 'Gmail messages\nlong tail ignored'],
+      ['docs', ''],
+    ]
+    expect(renderHelp('gws', spec, rows)).toBe(
+      'gws: Google Workspace\n' +
+        '\n' +
+        'Usage: gws [flags] <command> [<args>]\n' +
+        '\n' +
+        'Commands:\n' +
+        '  docs\n' +
+        '  gmail  Gmail messages\n' +
+        '\n' +
+        'Flags:\n' +
+        '  -C, --cwd <text>  run as if started there\n',
+    )
+  })
+
+  it('renders the minimal group shape', () => {
+    expect(renderHelp('tool', new CommandSpec({}), [['run', '']])).toBe(
+      'tool\n' + '\n' + 'Usage: tool <command> [<args>]\n' + '\n' + 'Commands:\n' + '  run\n',
+    )
+  })
+})

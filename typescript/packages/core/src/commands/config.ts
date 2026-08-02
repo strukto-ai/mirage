@@ -139,7 +139,7 @@ export interface CommandOptions<A extends Accessor = Accessor> {
   safeguard?: CommandSafeguard | null
 }
 
-const HELP_OPTION = new Option({
+export const HELP_OPTION = new Option({
   long: '--help',
   valueKind: OperandKind.NONE,
   description: 'Show this help and exit',
