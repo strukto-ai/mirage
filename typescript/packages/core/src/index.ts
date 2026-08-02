@@ -614,6 +614,7 @@ export {
   RegisteredCommand,
   type RegisteredCommandInit,
 } from './commands/config.ts'
+export { CLISpec, type CLISpecInit, type CLIVerbFn } from './commands/cli/types.ts'
 export {
   COMPOUND_EXTENSIONS,
   getExtension,

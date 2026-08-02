@@ -162,13 +162,20 @@ export class Operand {
   }
 }
 
+/**
+ * Init accepts every CommandSpec instance field at its instance type
+ * (ignoreTokens as any iterable, description/epilog as null) so a spec
+ * instance can be spread into a new one: `new CommandSpec({...spec, ...})`
+ * is the TS mirror of Python's dataclasses.replace and carries fields
+ * added later without hand-listing them.
+ */
 export interface CommandSpecInit {
   options?: readonly Option[]
   positional?: readonly Operand[]
   rest?: Operand | null
-  ignoreTokens?: readonly string[]
-  description?: string
-  epilog?: string
+  ignoreTokens?: Iterable<string>
+  description?: string | null
+  epilog?: string | null
 }
 
 export class CommandSpec {
@@ -186,7 +193,9 @@ export class CommandSpec {
     this.ignoreTokens = new Set(init.ignoreTokens ?? [])
     this.description = init.description ?? null
     this.epilog = init.epilog ?? null
-    Object.freeze(this)
+    // A subclass (CLISpec) still has its own fields to assign, so only
+    // freeze here when constructed directly; subclasses freeze themselves.
+    if (new.target === CommandSpec) Object.freeze(this)
   }
 }
 

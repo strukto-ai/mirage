@@ -191,18 +191,15 @@ function withHelpSupport(
   const extras: Option[] = []
   if (!hasHelp) extras.push(HELP_OPTION)
   if (!hasVersion) extras.push(VERSION_OPTION)
-  const init: ConstructorParameters<typeof CommandSpec>[0] = {
-    options: extras.length === 0 ? spec.options : [...spec.options, ...extras],
-    positional: spec.positional,
-    rest: spec.rest,
-    ignoreTokens: [...spec.ignoreTokens],
-  }
-  if (spec.description !== null) init.description = spec.description
-  // Python rebuilds via dataclasses.replace, which keeps every other field;
-  // this init is hand-listed, so a new CommandSpec field must be added here
-  // too or --help silently loses it.
-  if (spec.epilog !== null) init.epilog = spec.epilog
-  const newSpec = extras.length === 0 ? spec : new CommandSpec(init)
+  // Instance spread mirrors Python's dataclasses.replace: every CommandSpec
+  // field rides along, including ones added after this code was written.
+  // The prototype loss the lint warns about is the point: init wants a
+  // plain field bag, and the constructor rebuilds the class.
+  const newSpec =
+    extras.length === 0
+      ? spec
+      : // eslint-disable-next-line @typescript-eslint/no-misused-spread
+        new CommandSpec({ ...spec, options: [...spec.options, ...extras] })
   const helpText = renderHelp(name, newSpec)
   const versionText = versionLine(name)
   const wrappedFn: CommandFn = async (accessor, paths, texts, opts) => {
