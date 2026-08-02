@@ -27,7 +27,7 @@ import { arrayIndex } from '../../expand/variable.ts'
 import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
-import { ReturnSignal } from '../command.ts'
+import { ReturnSignal } from '../control.ts'
 import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
 

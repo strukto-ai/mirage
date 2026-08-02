@@ -69,7 +69,6 @@ export interface ExecuteEnv {
   policyRouter: PolicyRouter
   registerCloser(fn: () => Promise<void>): void
   ensureOpen(resource: Resource): Promise<void>
-  unmount(prefix: string): Promise<void>
   invalidateAllAfterRemote(): Promise<void>
   provision(command: string): Promise<ProvisionResult>
   execute(cmd: string, options: ExecuteOptions): Promise<ExecuteResult>
@@ -198,7 +197,6 @@ export async function executeLine(
       env.registerCloser(fn)
     },
     ensureOpen: (resource: Resource) => env.ensureOpen(resource),
-    unmount: (prefix: string) => env.unmount(prefix),
     runtimeBindings: env.runtimes.bindings,
     ...(routingDecision !== null ? { routingDecision } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),

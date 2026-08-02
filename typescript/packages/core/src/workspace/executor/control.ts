@@ -529,3 +529,14 @@ export async function handleSelect(
   }
   return collectLoopResult(allStdout, mergedIo, 'select')
 }
+
+export class ReturnSignal extends Error {
+  readonly exitCode: number
+  readonly stderr: Uint8Array
+  constructor(exitCode: number, stderr: Uint8Array = new Uint8Array()) {
+    super('return')
+    this.name = 'ReturnSignal'
+    this.exitCode = exitCode
+    this.stderr = stderr
+  }
+}

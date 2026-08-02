@@ -238,7 +238,6 @@ export interface ExecuteNodeDeps {
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
   ensureOpen?: (resource: Resource) => Promise<void>
-  unmount?: (prefix: string) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: PolicyDecision
   signal?: AbortSignal
@@ -287,7 +286,6 @@ export async function executeNode(
       callStack,
       jobTable,
       deps.ensureOpen,
-      deps.unmount,
       deps.runtimeBindings,
       deps.routingDecision,
       deps.signal,

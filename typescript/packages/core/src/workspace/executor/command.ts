@@ -13,391 +13,66 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SPECS } from '../../commands/spec/index.ts'
-import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
-import {
-  invalidArgumentError,
-  missingRequiredError,
-  missingValueError,
-  unknownOptionError,
-} from '../../commands/spec/usage.ts'
 import { concatBytes } from '../../core/jq/format.ts'
-import { OperandKind } from '../../commands/spec/types.ts'
-import type { CommandSpec } from '../../commands/spec/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
-import type { ShellArray } from '../../shell/array.ts'
-import { finishStatement } from './statement.ts'
-import { CallStack } from '../../shell/call_stack.ts'
+import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
-import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
-import { FileStat, PathSpec, wordText } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
-import { VfsRuntime, type Runtime } from './runtime.ts'
+import { type Runtime } from './runtime.ts'
 import type { PolicyDecision } from './policy/index.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { asyncChain } from '../../io/stream.ts'
-import { LS_FAILURE } from '../../commands/builtin/generic/ls.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
 import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
-import { classifyBarePath } from '../expand/classify/index.ts'
 import { resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
-import { applyFindActions } from './find_action_dispatch.ts'
 import { fanOutTraversal, shouldFanOut } from './fanout.ts'
 import {
   FindParseError,
   findExprTail,
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
-import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
+import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from './policy/safeguard.ts'
-import type { ExecuteNodeFn } from './jobs.ts'
+import type { ExecuteNodeFn, JobHandlerResult } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
-import { UsageError } from '../../commands/errors.ts'
 import { versionRequest } from '../../commands/config.ts'
-import { formatFsError } from '../../utils/errors.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
-type Result = [ByteSource | null, IOResult, ExecutionNode]
-type Flags = Record<string, string | boolean | number | string[]>
+import { optionError, parseFlags } from './command/flags.ts'
+import { executeShellFunction } from './command/functions.ts'
+import { checkMountRootGuard } from './command/guard.ts'
+import {
+  CWD_DEFAULT_RAW,
+  defaultCwdOperand,
+  mergeScopes,
+  pathFlagScopes,
+} from './command/routing.ts'
+import { runOnMount, type RunOnMountCtx } from './command/run.ts'
+import type { Result } from './command/types.ts'
 
-interface RunOnMountCtx {
-  registry: MountRegistry
-  session: Session
-  dispatch: DispatchFn
-  namespace?: Namespace
-  ensureOpen?: (resource: Resource) => Promise<void>
-  runtimeBindings?: Record<string, Runtime>
-  routingDecision?: PolicyDecision
-}
+export { ReturnSignal } from './control.ts'
 
-// Commands a bare invocation points at the working directory, mapped to
-// the typed spelling their synthetic operand carries. GNU find/tree/du/
-// ls behave exactly as if `.` had been typed (./-prefixed output); GNU
-// grep -r and bare rg print bare relative names (empty raw). Two gates:
-// grep only defaults under -r/-R (and ignores stdin, GNU's rule); rg
-// yields to an attached stdin, even an empty one (its readable-stdin
-// rule). All pinned on debian:stable-slim / ripgrep 14.
-const CWD_DEFAULT_RAW: Record<string, string> = {
-  grep: '',
-  rg: '',
-  find: '.',
-  tree: '.',
-  du: '.',
-  ls: '.',
-}
-
-// The synthetic cwd operand for a CWD_DEFAULT_RAW command typed bare.
-// Injected before routing, so mount resolution, fan-out across
-// descendant mounts, and respellRaw treat it exactly like a typed
-// operand; backends never see the difference.
-function defaultCwdOperand(
-  parts: readonly (string | PathSpec)[],
-  cmdName: string,
-  registry: MountRegistry,
-  cwd: string,
-  stdin: ByteSource | null,
-): PathSpec | null {
-  const spec = SPECS[cmdName]
-  if (spec === undefined) return null
-  const argv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
-  const parsed = parseCommand(spec, argv, cwd)
-  if (parsed.paths().length > 0) return null
-  if (cmdName === 'grep') {
-    const kwargs = parseToKwargs(parsed)
-    if (kwargs.r !== true && kwargs.R !== true) return null
-  } else if (cmdName === 'rg' && stdin !== null) {
-    return null
-  }
-  const operand = classifyBarePath('.', registry, cwd)
-  if (typeof operand === 'string') return null
-  return new PathSpec({
-    virtual: operand.virtual,
-    directory: operand.directory,
-    resourcePath: operand.resourcePath,
-    pattern: operand.pattern,
-    resolved: operand.resolved,
-    rawPath: CWD_DEFAULT_RAW[cmdName] ?? '',
-  })
-}
-
-function pathFlagScopes(cmdName: string, argv: string[], cwd: string): PathSpec[] {
-  const spec = SPECS[cmdName]
-  if (spec === undefined) return []
-  return parseCommand(spec, argv, cwd).pathFlagValues.map(
-    (value) =>
-      new PathSpec({
-        virtual: value,
-        directory: value,
-        resourcePath: '',
-        rawPath: value,
-      }),
-  )
-}
-
-/** Combine positional and path-flag scopes, keeping operand order. */
-function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): PathSpec[] {
-  const merged = [...positional]
-  const seen = new Set(merged.map((p) => p.virtual))
-  for (const scope of flagScopes) {
-    if (!seen.has(scope.virtual)) {
-      seen.add(scope.virtual)
-      merged.push(scope)
-    }
-  }
-  return merged
-}
-
-/** The 126 result for a command no runtime accepted. */
-function admissionDenial(cmdName: string): IOResult {
-  const msg = `${cmdName}: no runtime accepted this line\n`
-  return new IOResult({ exitCode: 126, stderr: new TextEncoder().encode(msg) })
-}
-
-/**
- * Resolve a command against the line's routing decision. With no
- * decision, the static bindings apply. With one, the command's runtime
- * is looked up in the decision: its binding, or the decision's
- * fallback when no entry captures it. A resolved VfsRuntime means the
- * executor serves the command itself (the vfs runtime has no
- * interpreter door); null means no runtime accepted it: exit 126,
- * "no runtime accepted this line", like a shell refusing to exec.
- */
-function lineRuntimeFor(
-  cmdName: string,
-  runtimeBindings: Record<string, Runtime> | undefined,
-  vfs: Runtime | null,
-  routingDecision: PolicyDecision | undefined,
-): [Runtime | undefined, IOResult | null] {
-  if (routingDecision === undefined) {
-    const restricted = vfs instanceof VfsRuntime && vfs.restricted
-    const runtime = runtimeBindings?.[cmdName]
-    if (runtime !== undefined && runtime === vfs) return [undefined, null]
-    if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
-    return [runtime, null]
-  }
-  const runtime = Object.hasOwn(routingDecision.bindings, cmdName)
-    ? routingDecision.bindings[cmdName]
-    : routingDecision.fallback
-  if (runtime === null || runtime === undefined) return [undefined, admissionDenial(cmdName)]
-  if (runtime instanceof VfsRuntime) return [undefined, null]
-  return [runtime, null]
-}
-
-interface RunOnMountOpts {
-  stdin?: ByteSource | null
-  resolveHint?: PathSpec | null
-  mount?: MountEntry | null
-}
-
-// `multiple: true` on find value-flags makes parseToKwargs emit arrays;
-// bespoke backend wrappers read these as scalars. Migrated backends read the
-// expression from `texts` and ignore flagKwargs.
-function scalarFindFlags(flagKwargs: Flags): Flags {
-  const out: Flags = { ...flagKwargs }
-  for (const [key, value] of Object.entries(out)) {
-    if (Array.isArray(value)) {
-      const last = value.at(-1)
-      if (last !== undefined) out[key] = last
-    }
-  }
-  return out
-}
-
-// Merge namespace attr overlays into one stat row (ls/stat rendering). A path
-// never chown'd defaults its owner to the workspace user (the launch agent,
-// what whoami reports) so ls -l and stat -c agree; an unclaimed workspace
-// leaves uid/gid null and the formatters fall back to the neutral "user".
-function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileStat): FileStat {
-  const merged = mergeOverlayStat(namespace.metaFor(virtual), stat)
-  const user = namespace.user
-  if (user === null || (merged.uid !== null && merged.gid !== null)) return merged
-  return new FileStat({
-    name: merged.name,
-    size: merged.size,
-    modified: merged.modified,
-    fingerprint: merged.fingerprint,
-    revision: merged.revision,
-    type: merged.type,
-    mode: merged.mode,
-    uid: merged.uid ?? user,
-    gid: merged.gid ?? user,
-    atime: merged.atime,
-    extra: merged.extra,
-  })
-}
-
-// Run one already-parsed command on the mount that owns its paths. The shared
-// single-mount execution tail: mount resolution, session-mode checks, executeCmd,
-// filesystem-error formatting, ls/find post-processing, and read/write key
-// prefixing. handleCommand uses it for the normal path, and passes it (bound)
-// to the cross-mount runners so each operand executes natively on its owning
-// mount. `resolveHint` resolves the mount when `paths` is empty (a stream
-// command running in stdin mode); a pre-resolved `mount` skips resolution and
-// session-mode checks, which the caller already performed.
-async function runOnMount(
-  ctx: RunOnMountCtx,
-  cmdName: string,
-  paths: PathSpec[],
-  texts: string[],
-  flagKwargs: Flags,
-  opts: RunOnMountOpts = {},
-): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings, routingDecision } =
-    ctx
-  const hint = opts.resolveHint ?? null
-  let mount = opts.mount ?? null
-  if (mount === null) {
-    const resolvePaths = paths.length > 0 ? paths : hint !== null ? [hint] : []
-    try {
-      mount = await registry.resolveMount(cmdName, resolvePaths, session.cwd)
-    } catch (err) {
-      if (err instanceof MountCommandUnsupported) {
-        const errBytes = new TextEncoder().encode(`${err.message}\n`)
-        return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
-      }
-      throw err
-    }
-    if (mount === null) {
-      const errBytes = new TextEncoder().encode(`${cmdName}: command not found`)
-      return [null, new IOResult({ exitCode: 127, stderr: errBytes })]
-    }
-    try {
-      assertMountAllowed(mount.prefix)
-      for (const ps of paths) {
-        const target = registry.mountFor(ps.virtual)
-        if (target !== null) assertMountAllowed(target.prefix)
-      }
-    } catch (err) {
-      if (err instanceof MountNotAllowedError) {
-        const errBytes = new TextEncoder().encode(`${cmdName}: ${err.message}\n`)
-        return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
-      }
-      throw err
-    }
-  }
-
-  let flags = flagKwargs
-  if (cmdName === 'find') flags = scalarFindFlags(flags)
-
-  if (ensureOpen !== undefined) {
-    await ensureOpen(mount.resource)
-  }
-
-  // resolveMount may redirect a warm remote read to the cache mount, which
-  // does not carry the origin mount's per-command safeguards. Resolve the
-  // safeguard from the real (pre-redirect) mount so the cap survives the hit.
-  // A spec can bucket a path-shaped operand as TEXT (python3's script), so
-  // when the spec-split paths are empty fall back to the classified scope
-  // hint before cwd, mirroring the Python executor.
-  const realMount = registry.mountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
-  const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
-
-  // ls/stat render stat rows from the backend's own stat, which never sees
-  // namespace attr overlays (chmod/chown/touch on overlay backends) or the
-  // default owner; inject the merge so ls -l and stat -c agree.
-  // cp/mv -u freshness checks compare the same merged mtimes, and
-  // find -mtime filters on them (touch results, observed writes).
-  const statOverlay =
-    (cmdName === 'ls' ||
-      cmdName === 'stat' ||
-      cmdName === 'cp' ||
-      cmdName === 'mv' ||
-      cmdName === 'find') &&
-    namespace !== undefined
-      ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
-      : null
-
-  const [lineRuntime, denial] = lineRuntimeFor(
-    cmdName,
-    runtimeBindings,
-    registry.vfsRuntime,
-    routingDecision,
-  )
-  if (denial !== null) return [null, denial]
-
-  try {
-    const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
-      stdin: opts.stdin ?? null,
-      cwd: session.cwd,
-      dispatch,
-      sessionId: session.sessionId,
-      env: session.env,
-      execAllowed: registry.isExecAllowed(),
-      ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
-      ...(statOverlay !== null ? { statOverlay } : {}),
-      ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
-      safeguardOverride,
-    })
-    let stdout = initialStdout
-    // A minor problem (exit 1: an entry below the operand could not be
-    // stat'd) still lists the directory, so the mount and link rows belong in
-    // that output; only a failed operand (exit 2) has nothing to augment.
-    if (cmdName === 'ls' && io.exitCode !== LS_FAILURE) {
-      stdout = await injectChildMounts(stdout, registry, paths, flags, session.cwd)
-      if (namespace?.hasLinks() === true) {
-        stdout = await injectLinks(stdout, namespace, paths, flags, session.cwd)
-      }
-    }
-    if (cmdName === 'find') {
-      const [newStdout, actionErr] = await applyFindActions(stdout, flags, registry, session.cwd)
-      stdout = newStdout
-      if (actionErr.length > 0) {
-        const existing = await materialize(io.stderr)
-        const merged = new Uint8Array(existing.length + actionErr.length)
-        merged.set(existing, 0)
-        merged.set(actionErr, existing.length)
-        io.stderr = merged
-        if (io.exitCode === 0) io.exitCode = 1
-      }
-    }
-    const prefix = rstripSlash(mount.prefix)
-    if (prefix !== '') {
-      io.reads = prefixKeys(io.reads, prefix)
-      io.writes = prefixKeys(io.writes, prefix)
-      io.cache = io.cache.map((p) => prefix + p)
-    }
-    return [stdout, io]
-  } catch (err) {
-    // Command-owned usage errors (extra operands, missing patterns) become
-    // this command's IOResult so the rest of the line keeps running, like a
-    // real shell (#452).
-    if (err instanceof UsageError) {
-      return [
-        null,
-        new IOResult({
-          exitCode: err.exitCode,
-          stderr: new TextEncoder().encode(`${err.message}\n`),
-        }),
-      ]
-    }
-    // A safeguard timeout is not a filesystem failure: let it reach the
-    // workspace-level handler that answers with exit 124.
-    if (err instanceof CommandTimeoutError) throw err
-    return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]
-  }
-}
-
-export class ReturnSignal extends Error {
-  readonly exitCode: number
-  readonly stderr: Uint8Array
-  constructor(exitCode: number, stderr: Uint8Array = new Uint8Array()) {
-    super('return')
-    this.name = 'ReturnSignal'
-    this.exitCode = exitCode
-    this.stderr = stderr
-  }
+// One handler per JOB_BUILTINS member; route already narrowed the name.
+const JOB_HANDLERS: Record<
+  string,
+  (jobTable: JobTable, textParts: string[]) => JobHandlerResult | Promise<JobHandlerResult>
+> = {
+  wait: handleWait,
+  fg: handleFg,
+  kill: handleKill,
+  jobs: handleJobs,
+  ps: handlePs,
 }
 
 export async function handleCommand(
@@ -410,7 +85,6 @@ export async function handleCommand(
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
   ensureOpen?: (resource: Resource) => Promise<void>,
-  unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: PolicyDecision,
@@ -428,11 +102,8 @@ export async function handleCommand(
 
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
-    if (cmdName === 'wait') return handleWait(jobTable, textParts)
-    if (cmdName === 'fg') return handleFg(jobTable, textParts)
-    if (cmdName === 'kill') return handleKill(jobTable, textParts)
-    if (cmdName === 'jobs') return handleJobs(jobTable, textParts)
-    if (cmdName === 'ps') return handlePs(jobTable, textParts)
+    const handler = JOB_HANDLERS[cmdName]
+    if (handler !== undefined) return handler(jobTable, textParts)
   }
 
   const funcBody = session.functions[cmdName]
@@ -526,12 +197,6 @@ export async function handleCommand(
       }
       throw err
     }
-  }
-
-  if (unmount !== undefined && pathScopes.length === 1) {
-    const intercept = await tryUnmountIntercept(cmdName, parts, pathScopes[0], registry, unmount)
-    if (intercept !== null)
-      return [null, intercept, new ExecutionNode({ command: cmdStr, exitCode: intercept.exitCode })]
   }
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
@@ -757,409 +422,4 @@ export async function handleCommand(
     paths,
   })
   return [stdout, io, exec]
-}
-
-// Single-mount dispatch and cross-mount dispatch both parse through here,
-// so flags, texts, and parser warnings cannot drift between the two paths
-// (a cross-mount `grep --bogus` used to lose its warning). The spec comes
-// from the owning mount on the single-mount path and the shared SPECS
-// registry on the cross-mount path.
-function parseFlags(
-  parts: readonly (string | PathSpec)[],
-  spec: CommandSpec | null,
-  cmdName: string,
-  cwd: string,
-): [
-  PathSpec[],
-  string[],
-  Record<string, string | boolean | number | string[]>,
-  string[],
-  string[],
-  string[],
-  [string, string, readonly string[]][],
-  string[],
-] {
-  const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
-  const scopeMap = new Map<string, PathSpec>()
-  for (const item of parts) {
-    if (item instanceof PathSpec) {
-      scopeMap.set(item.virtual, item)
-      const stripped = rstripSlash(item.virtual)
-      if (stripped !== '' && stripped !== item.virtual) scopeMap.set(stripped, item)
-    }
-  }
-
-  if (spec !== null) {
-    const parsed = parseCommand(spec, argv, cwd)
-    const flagKwargs = parseToKwargs(parsed)
-
-    for (const [key, value] of Object.entries(flagKwargs)) {
-      if (typeof value === 'string') {
-        const match = scopeMap.get(value)
-        if (match !== undefined) {
-          flagKwargs[key] = match.virtual
-        }
-      }
-    }
-
-    const paths: PathSpec[] = []
-    const texts: string[] = []
-    for (const [value, kind] of parsed.args) {
-      if (kind === OperandKind.PATH) {
-        const existing = scopeMap.get(value)
-        if (existing !== undefined) {
-          paths.push(existing)
-        } else {
-          const slash = value.lastIndexOf('/')
-          paths.push(
-            new PathSpec({
-              resourcePath: stripSlash(value),
-              virtual: value,
-              directory: slash >= 0 ? value.slice(0, slash + 1) : '/',
-              resolved: true,
-            }),
-          )
-        }
-      } else {
-        texts.push(value)
-      }
-    }
-    return [
-      paths,
-      texts,
-      flagKwargs,
-      parsed.warnings,
-      parsed.invalidOptions,
-      parsed.needsValueOptions,
-      parsed.invalidValueOptions,
-      parsed.missingRequiredOptions,
-    ]
-  }
-
-  const paths: PathSpec[] = []
-  const texts: string[] = []
-  for (const item of parts) {
-    if (item instanceof PathSpec) paths.push(item)
-    else texts.push(item)
-  }
-  return [paths, texts, {}, [], [], [], [], []]
-}
-
-// GNU-shaped refusal for option errors the parser reported. find is
-// exempt: its expression tokens are validated by parseFindExpression,
-// which raises the GNU predicate error itself.
-function optionError(
-  cmdName: string,
-  invalid: readonly string[],
-  needsValue: readonly string[],
-  invalidValue: readonly [string, string, readonly string[]][],
-  missingRequired: readonly string[],
-): [Uint8Array, number] | null {
-  if (cmdName === 'find') return null
-  if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
-  if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
-  const badValue = invalidValue[0]
-  if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
-  if (missingRequired.length > 0) return missingRequiredError(cmdName, missingRequired[0] ?? '')
-  return null
-}
-
-function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<string, ByteSource> {
-  const out: Record<string, ByteSource> = {}
-  for (const [k, v] of Object.entries(obj)) {
-    out[prefix + k] = v
-  }
-  return out
-}
-
-interface GuardResult {
-  message: string
-  exitCode: number
-}
-
-function checkMountRootGuard(
-  cmdName: string,
-  paths: readonly PathSpec[],
-  registry: MountRegistry,
-  argv: readonly string[],
-): GuardResult | null {
-  if (paths.length === 0) return null
-  const isRoot = (p: PathSpec): boolean => registry.isMountRoot(p.virtual)
-
-  if (cmdName === 'rm' || cmdName === 'rmdir') {
-    for (const p of paths) {
-      if (isRoot(p)) {
-        return {
-          message:
-            cmdName === 'rmdir'
-              ? `rmdir: failed to remove '${p.virtual}': Device or resource busy\n`
-              : `rm: cannot remove '${p.virtual}': Device or resource busy\n`,
-          exitCode: 1,
-        }
-      }
-    }
-    return null
-  }
-
-  if (cmdName === 'mv') {
-    if (paths[0] !== undefined && isRoot(paths[0])) {
-      const dst = paths[1] !== undefined ? paths[1].virtual : '?'
-      return {
-        message: `mv: cannot move '${paths[0].virtual}' to '${dst}': Device or resource busy\n`,
-        exitCode: 1,
-      }
-    }
-    return null
-  }
-
-  if (cmdName === 'mkdir') {
-    for (const tok of argv) {
-      if (tok === '-p' || tok === '--parents') return null
-      if (tok.startsWith('-') && !tok.startsWith('--') && tok.includes('p')) return null
-    }
-    for (const p of paths) {
-      if (isRoot(p)) {
-        return {
-          message: `mkdir: cannot create directory '${p.virtual}': File exists\n`,
-          exitCode: 1,
-        }
-      }
-    }
-    return null
-  }
-
-  if (cmdName === 'touch') {
-    for (const p of paths) {
-      if (isRoot(p)) {
-        return {
-          message: `touch: cannot touch '${p.virtual}': Is a directory\n`,
-          exitCode: 1,
-        }
-      }
-    }
-    return null
-  }
-
-  if (cmdName === 'ln') {
-    const last = paths[paths.length - 1]
-    if (last !== undefined && isRoot(last)) {
-      return {
-        message: `ln: failed to create link '${last.virtual}': File exists\n`,
-        exitCode: 1,
-      }
-    }
-    return null
-  }
-
-  return null
-}
-
-// Append symlink entries living under the listed directory. Links are
-// namespace state, invisible to backend readdir, so `ls` surfaces them the
-// same way child mounts are surfaced. Long form renders GNU-style
-// `name -> target`.
-async function injectLinks(
-  stdout: ByteSource | null,
-  namespace: Namespace,
-  paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
-  cwd: string,
-): Promise<ByteSource | null> {
-  if (flagKwargs.d === true || flagKwargs.R === true) return stdout
-  if (paths.length > 1) return stdout
-  const listed = paths.length === 1 && paths[0] !== undefined ? paths[0].virtual : cwd
-  const links = namespace.linksUnder(listed)
-  if (links.size === 0) return stdout
-
-  const existing = stdout === null ? '' : new TextDecoder().decode(await materialize(stdout))
-  const long = flagKwargs.args_l === true
-  const classify = flagKwargs.F === true
-  const present = new Set<string>()
-  for (const line of existing.split('\n')) {
-    if (line === '') continue
-    const name = long ? (line.split('\t').pop() ?? '') : line.replace(/[/*@|=]$/, '')
-    if (name !== '') present.add(name)
-  }
-  const extras: string[] = []
-  for (const n of [...links.keys()].sort()) {
-    if (present.has(n)) continue
-    if (long) extras.push(`l\t-\t-\t${n} -> ${links.get(n) ?? ''}`)
-    else extras.push(classify ? `${n}@` : n)
-  }
-  if (extras.length === 0) return stdout
-  const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
-  const combined = existing + sep + extras.join('\n') + '\n'
-  return new TextEncoder().encode(combined)
-}
-
-async function injectChildMounts(
-  stdout: ByteSource | null,
-  registry: MountRegistry,
-  paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
-  cwd: string,
-): Promise<ByteSource | null> {
-  if (flagKwargs.d === true || flagKwargs.R === true) return stdout
-  if (paths.length > 1) return stdout
-  const listed = paths.length === 1 && paths[0] !== undefined ? paths[0].virtual : cwd
-  const includeHidden = flagKwargs.a === true || flagKwargs.A === true
-  const childNames = registry.childMountNames(listed, includeHidden)
-  if (childNames.length === 0) return stdout
-
-  const existing = stdout === null ? '' : new TextDecoder().decode(await materialize(stdout))
-  const long = flagKwargs.args_l === true
-  const classify = flagKwargs.F === true
-  const present = new Set<string>()
-  for (const line of existing.split('\n')) {
-    if (line === '') continue
-    const name = long ? (line.split('\t').pop() ?? '') : line.replace(/[/*@|=]$/, '')
-    if (name !== '') present.add(name)
-  }
-  const extras: string[] = []
-  for (const n of childNames) {
-    if (present.has(n)) continue
-    if (long) extras.push(`d\t-\t-\t${n}`)
-    else extras.push(classify ? `${n}/` : n)
-  }
-  if (extras.length === 0) return stdout
-  const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
-  const combined = existing + sep + extras.join('\n')
-  return new TextEncoder().encode(combined)
-}
-
-async function executeShellFunction(
-  executeNode: ExecuteNodeFn,
-  cmdName: string,
-  body: unknown[],
-  restParts: readonly (string | PathSpec)[],
-  session: Session,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-): Promise<Result> {
-  const cs = callStack ?? new CallStack()
-  // Positional args carry the word as typed ($1 stays sub/a.txt).
-  const textArgs = restParts.map(wordText)
-  cs.push(textArgs, cmdName)
-  const savedLocals = new Map<string, string | null>()
-  const savedArrays = new Map<string, ShellArray | null>()
-  session.localVars = savedLocals
-  session.localArrays = savedArrays
-  const allStdout: (ByteSource | null)[] = []
-  let mergedIo = new IOResult()
-  let lastExec = new ExecutionNode({ command: cmdName, exitCode: 0 })
-
-  try {
-    for (const cmd of body) {
-      try {
-        const cmdNode = cmd as Parameters<ExecuteNodeFn>[0]
-        const [rawStdout, io, execNode] = await executeNode(cmdNode, session, stdin, cs)
-        // $? tracks each statement inside the body, so a bare `return`
-        // (and mid-function $?) sees the last command.
-        const stdout = await finishStatement(rawStdout, io, session)
-        if (stdout !== null) allStdout.push(stdout)
-        mergedIo = await mergedIo.merge(io)
-        lastExec = execNode
-        if (
-          io.exitCode !== 0 &&
-          session.shellOptions.errexit === true &&
-          !ERREXIT_EXEMPT_TYPES.has(cmdNode.type) &&
-          !session.errexitImmune
-        ) {
-          mergedIo.exitCode = io.exitCode
-          break
-        }
-      } catch (err) {
-        if (err instanceof ReturnSignal) {
-          if (err.stderr.length > 0) {
-            mergedIo = await mergedIo.merge(new IOResult({ stderr: err.stderr }))
-          }
-          mergedIo.exitCode = err.exitCode
-          break
-        }
-        throw err
-      }
-    }
-  } finally {
-    cs.pop()
-    for (const [key, oldVal] of savedLocals) {
-      if (oldVal === null) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.env[key]
-      } else {
-        session.env[key] = oldVal
-      }
-    }
-    for (const [key, oldArr] of savedArrays) {
-      if (oldArr === null) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.arrays[key]
-      } else {
-        session.arrays[key] = oldArr
-      }
-    }
-    session.localVars = null
-    session.localArrays = null
-  }
-
-  const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
-  lastExec.exitCode = mergedIo.exitCode
-  return [combined, mergedIo, lastExec]
-}
-
-/**
- * If the command is a destructive op (rm -r/-R or rmdir) targeting a path
- * that exactly matches a mount prefix, treat it as an unmount instead of a
- * recursive delete. Mount roots are structural metadata; users typing
- * `rm -r /data` reach for the natural Unix-ish gesture to "remove this
- * directory" — for a mount, that's the unmount op.
- *
- * Returns null when the intercept does not apply.
- */
-async function tryUnmountIntercept(
-  cmdName: string,
-  parts: readonly (string | PathSpec)[],
-  pathScope: PathSpec | undefined,
-  registry: MountRegistry,
-  unmount: (prefix: string) => Promise<void>,
-): Promise<IOResult | null> {
-  if (pathScope === undefined) return null
-
-  let recursive = false
-  if (cmdName === 'rmdir') {
-    recursive = true
-  } else if (cmdName === 'rm') {
-    for (const p of parts.slice(1)) {
-      if (typeof p !== 'string') continue
-      if (
-        p === '-r' ||
-        p === '-R' ||
-        p === '-rf' ||
-        p === '-Rf' ||
-        p === '-rfR' ||
-        p === '-fr' ||
-        p === '-fR'
-      ) {
-        recursive = true
-        break
-      }
-    }
-  }
-  if (!recursive) return null
-
-  const original = pathScope.virtual
-  const stripped = stripSlash(original)
-  const norm = stripped ? `/${stripped}/` : '/'
-  const matched = registry.mountForPrefix(norm)
-  if (matched === null) return null
-
-  try {
-    await unmount(norm)
-    return new IOResult({ exitCode: 0 })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return new IOResult({
-      exitCode: 1,
-      stderr: new TextEncoder().encode(`${cmdName}: ${msg}\n`),
-    })
-  }
 }

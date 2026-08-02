@@ -30,7 +30,7 @@ export type ExecuteNodeFn = (
   callStack: CallStack | null,
 ) => Promise<[ByteSource | null, IOResult, ExecutionNode]>
 
-type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
+export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
 
 export async function handleBackground(
   executeNode: ExecuteNodeFn,

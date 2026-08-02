@@ -725,7 +725,6 @@ export class Workspace {
         this.closers.push(fn)
       },
       ensureOpen: (resource) => this.ensureOpen(resource),
-      unmount: (prefix) => this.unmount(prefix),
       invalidateAllAfterRemote: () => this.invalidateAllAfterRemote(),
       provision: (cmd) => this.provision(cmd),
       execute: (cmd, opts) =>

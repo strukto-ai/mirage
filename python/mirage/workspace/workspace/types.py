@@ -12,29 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TypeAlias
+from typing import TypeAlias
 
-from mirage.io import IOResult
 from mirage.resource.base import BaseResource
 from mirage.runtime.policy.safeguard import CommandSafeguard
-from mirage.types import MountBackend, MountMode, PathSpec
+from mirage.types import MountBackend, MountMode
 from mirage.workspace.mount.spec import Mount
 
 ResourceMount: TypeAlias = (BaseResource | Mount
                             | tuple[BaseResource, MountMode]
                             | tuple[BaseResource, MountMode,
                                     dict[str, CommandSafeguard]])
-
-
-class DispatchFn(Protocol):
-    """The workspace op dispatch: run ``op`` against the mount owning
-    ``path`` and return its result with the accounting IOResult."""
-
-    def __call__(self, op: str, path: PathSpec,
-                 **kwargs: Any) -> Awaitable[tuple[Any, IOResult]]:
-        ...
 
 
 @dataclass(frozen=True, slots=True)

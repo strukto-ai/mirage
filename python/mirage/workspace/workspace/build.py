@@ -23,9 +23,9 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session import SessionStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
+from mirage.workspace.types import DispatchFn
 from mirage.workspace.workspace.policy import PolicyRouter
 from mirage.workspace.workspace.runtimes import Runtimes
-from mirage.workspace.workspace.types import DispatchFn
 
 LineExecutor = Callable[[str, bytes | None, dict[str, str], str],
                         Awaitable[RunResult]]

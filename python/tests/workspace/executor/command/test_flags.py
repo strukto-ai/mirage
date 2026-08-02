@@ -1,0 +1,45 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from mirage.commands.spec import SPECS
+from mirage.workspace.executor.command.flags import (parse_flags,
+                                                     synthesize_path_spec)
+
+
+def test_synthesized_spec_leaves_the_backend_key_to_the_mount():
+    spec = synthesize_path_spec("/data/sub/x.txt")
+    assert spec.virtual == "/data/sub/x.txt"
+    assert spec.directory == "/data/sub/"
+    # The mount stamps resource_path at execute time; a parse-time
+    # value is dead (proven by the sentinel run in both languages).
+    assert spec.resource_path == ""
+    assert spec.resolved is True
+
+
+def test_synthesized_spec_for_a_bare_name_roots_the_directory():
+    assert synthesize_path_spec("x.txt").directory == "/"
+
+
+def test_no_spec_separates_parts_by_type():
+    path = synthesize_path_spec("/data/a.txt")
+    parsed = parse_flags([path, "hello"], None, "unknown", "/")
+    assert parsed.paths == [path]
+    assert parsed.texts == ["hello"]
+    assert parsed.flag_kwargs == {}
+
+
+def test_classified_path_wins_over_synthesis():
+    path = synthesize_path_spec("/data/a.txt")
+    parsed = parse_flags([path], SPECS["cat"], "cat", "/")
+    assert parsed.paths[0] is path
