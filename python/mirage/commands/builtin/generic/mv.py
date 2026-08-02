@@ -375,10 +375,15 @@ async def mv(
             errors.append(f"mv: cannot move '{src.virtual}' to "
                           f"'{target.virtual}': Invalid cross-device link")
             continue
-        # A backup renames the target aside first, so -b -T installs over a
-        # nonempty directory (GNU 9.7) instead of hitting this refusal.
-        if src_is_dir and target_is_dir and flags.no_target_dir \
-                and readdir is not None \
+        if not await overwrite_gate(policy, stat, src, target, errors):
+            continue
+        # GNU refuses to replace a non-empty directory whether the target
+        # was named outright (-T) or mapped under an existing destination
+        # directory, so this cannot be gated on no_target_dir. It runs
+        # after the clobber gate because -n and --update=none skip such a
+        # target silently at exit 0, and a backup renames the target aside
+        # first, so -b installs over it instead (all GNU 9.7).
+        if src_is_dir and target_is_dir and readdir is not None \
                 and not backup_displaces(flags.backup):
             try:
                 children = await readdir(target)
@@ -392,8 +397,6 @@ async def mv(
                 errors.append(f"mv: cannot overwrite '{target.virtual}': "
                               "Directory not empty")
                 continue
-        if not await overwrite_gate(policy, stat, src, target, errors):
-            continue
         backup, ok = await make_backup(policy, strategy, stat, readdir, target,
                                        writes, errors)
         if not ok:

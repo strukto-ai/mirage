@@ -375,15 +375,14 @@ export async function mvGeneric(
       )
       continue
     }
-    // A backup renames the target aside first, so -b -T installs over a
-    // nonempty directory (GNU 9.7) instead of hitting this refusal.
-    if (
-      srcIsDir &&
-      targetIsDir &&
-      flags.noTargetDir &&
-      versionReaddir !== undefined &&
-      !backupDisplaces(flags.backup)
-    ) {
+    if (!(await overwriteGate(policy, stat, src, target, errors))) continue
+    // GNU refuses to replace a non-empty directory whether the target was
+    // named outright (-T) or mapped under an existing destination
+    // directory, so this cannot be gated on noTargetDir. It runs after the
+    // clobber gate because -n and --update=none skip such a target
+    // silently at exit 0, and a backup renames the target aside first, so
+    // -b installs over it instead (all GNU 9.7).
+    if (srcIsDir && targetIsDir && versionReaddir !== undefined && !backupDisplaces(flags.backup)) {
       let children: string[]
       try {
         children = await versionReaddir(target)
@@ -399,7 +398,6 @@ export async function mvGeneric(
         continue
       }
     }
-    if (!(await overwriteGate(policy, stat, src, target, errors))) continue
     const made = await makeBackup(
       policy,
       strategy,
