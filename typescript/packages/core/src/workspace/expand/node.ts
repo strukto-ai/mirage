@@ -35,6 +35,78 @@ export function unescapeUnquoted(text: string): string {
   return parts[0] ?? text
 }
 
+// Whitespace tree-sitter folds into an expansion's opening token.
+// Inside a double-quoted string, a run of whitespace between two
+// expansions is not emitted as string content: it lands inside the
+// following node's extent, so `"$a $(b)"` yields a command substitution
+// whose text is `" $(b)"`. Every expansion branch has to re-emit it or
+// the two values run together. Unquoted words do not fold, so the
+// prefix is empty there and this stays a no-op.
+export function foldedWhitespace(node: TSNodeLike): string {
+  const raw = node.text
+  return raw.slice(0, raw.length - raw.trimStart().length)
+}
+
+// Split a backtick region into segments, each flagged as a command or as
+// literal text. tree-sitter-bash lexes the gap between two backtick
+// substitutions as a single token when that gap is empty or
+// whitespace-only, so `a` `b` arrives as ONE command_substitution node
+// holding both commands and the text between them. Re-lexing the node's
+// own text on unescaped backticks recovers the real segments; a single
+// pair simply yields one command segment.
+//
+// Inside a command, POSIX keeps the backslash literal except before `$`,
+// a backtick and `\`, where it escapes. Consuming those pairs whole is
+// what makes the parity right: `\\` is one escaped backslash, so a
+// backtick straight after it still closes the region rather than reading
+// as an escaped backtick.
+function splitBacktickSegments(raw: string): [string, boolean][] {
+  const segments: [string, boolean][] = []
+  const ESCAPABLE = new Set(['$', '`', '\\'])
+  let buf = ''
+  let inCommand = false
+  let i = 0
+  while (i < raw.length) {
+    const next = raw[i + 1]
+    if (raw[i] === '\\' && inCommand && next !== undefined && ESCAPABLE.has(next)) {
+      buf += next
+      i += 2
+      continue
+    }
+    if (raw[i] === '`') {
+      segments.push([buf, inCommand])
+      buf = ''
+      inCommand = !inCommand
+      i += 1
+      continue
+    }
+    buf += raw.charAt(i)
+    i += 1
+  }
+  segments.push([buf, inCommand])
+  return segments.filter(([text, cmd]) => text !== '' || cmd)
+}
+
+async function expandBacktickRegion(
+  raw: string,
+  session: Session,
+  executeFn: ExecuteFn,
+): Promise<string> {
+  let out = ''
+  for (const [text, isCommand] of splitBacktickSegments(raw)) {
+    if (!isCommand) {
+      out += text
+      continue
+    }
+    const io = await executeFn(text, { sessionId: session.sessionId })
+    out += (await io.stdoutStr()).replace(/\n+$/, '')
+    io.syncExitCode()
+    session.cmdsubSeq += 1
+    session.cmdsubStatus = io.exitCode
+  }
+  return out
+}
+
 // Unquoted-heredoc escapes: \$, \`, \\, \<newline> only.
 // Unlike double quotes, \" stays literal in heredoc bodies.
 export function unescapeHeredoc(text: string): string {
@@ -148,32 +220,32 @@ export async function expandNode(
   }
 
   if (ntype === NT.SIMPLE_EXPANSION) {
-    const raw = tsNode.text
+    const prefix = foldedWhitespace(tsNode)
+    const raw = tsNode.text.slice(prefix.length)
     const special = tsNode.namedChildren.find((c) => c.type === NT.SPECIAL_VARIABLE_NAME)
     if (special !== undefined) {
-      // lastIndexOf would split `$$` into prefix "$" + variable "".
-      return lookupVar(special.text, session, callStack)
+      return prefix + lookupVar(special.text, session, callStack)
     }
-    const dollar = raw.lastIndexOf('$')
-    const prefix = raw.slice(0, dollar)
-    const variable = raw.slice(dollar + 1)
-    return prefix + lookupVar(variable, session, callStack)
+    // Slice past the leading "$" rather than searching for it, so `$$`
+    // keeps its name instead of splitting into prefix + "".
+    return prefix + lookupVar(raw.slice(1), session, callStack)
   }
 
   if (ntype === NT.EXPANSION) {
-    // In-string whitespace attaches to the node's leading `${` token
-    // ("${a} ${b}" parses the space into the second expansion);
-    // preserve it, mirroring the simple-expansion prefix handling.
-    const raw = tsNode.text
-    const brace = raw.indexOf('${')
-    const prefix = brace > 0 ? raw.slice(0, brace) : ''
+    const prefix = foldedWhitespace(tsNode)
     const expandChild = (c: TSNodeLike): Promise<string> =>
       expandNode(c, session, executeFn, callStack)
     return prefix + (await expandBraces(tsNode, session, callStack, expandChild))
   }
 
   if (ntype === NT.COMMAND_SUBSTITUTION) {
-    const rawSub = tsNode.text
+    const prefix = foldedWhitespace(tsNode)
+    const rawSub = tsNode.text.slice(prefix.length)
+    if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
+      // Backtick regions are re-lexed here rather than trusted from the
+      // grammar, which merges adjacent pairs (see splitBacktickSegments).
+      return prefix + (await expandBacktickRegion(rawSub, session, executeFn))
+    }
     if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
       // Inside heredoc bodies tree-sitter parses `$((expr))` as a
       // command substitution wrapping a subshell; evaluate it as
@@ -187,10 +259,10 @@ export async function expandNode(
         try {
           const { value, updates } = evaluateArith(expr, session.env)
           Object.assign(session.env, updates)
-          return value.toString()
+          return prefix + value.toString()
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
-          return rawSub
+          return prefix + rawSub
         }
       }
     }
@@ -202,7 +274,7 @@ export async function expandNode(
         c.type === NT.REDIRECTED_STATEMENT ||
         c.type === NT.SUBSHELL,
     )
-    if (innerCmds.length === 0) return ''
+    if (innerCmds.length === 0) return prefix
     const inner = innerCmds[0]?.text ?? ''
     const io = await executeFn(inner, { sessionId: session.sessionId })
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
@@ -212,10 +284,11 @@ export async function expandNode(
     io.syncExitCode()
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
-    return text
+    return prefix + text
   }
 
   if (ntype === NT.ARITHMETIC_EXPANSION) {
+    const prefix = foldedWhitespace(tsNode)
     const expr = await expandArith(tsNode, session, executeFn, callStack)
     let value: bigint
     let updates: Record<string, string>
@@ -226,7 +299,7 @@ export async function expandNode(
       throw err
     }
     Object.assign(session.env, updates)
-    return value.toString()
+    return prefix + value.toString()
   }
 
   if (ntype === NT.CONCATENATION) {

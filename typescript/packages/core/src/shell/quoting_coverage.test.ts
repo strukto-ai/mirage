@@ -256,4 +256,75 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
       })
     }
   })
+  describe('whitespace between expansions inside double quotes', () => {
+    // tree-sitter folds the separating whitespace into the *second*
+    // node's extent, so each expansion branch has to re-emit it.
+    const cases: [string, string][] = [
+      ['echo "$(echo a) $(echo b)"', 'a b\n'],
+      ['echo "$(echo a) $(echo b) $(echo c)"', 'a b c\n'],
+      ['x=a; echo "$x $(echo b)"', 'a b\n'],
+      ['x=a; echo "${x} $(echo b)"', 'a b\n'],
+      ['y=b; echo "$(echo a) ${y}"', 'a b\n'],
+      ['echo "$((1+1)) $(echo b)"', '2 b\n'],
+      ['echo "$(echo a) $((1+1))"', 'a 2\n'],
+      ['echo "$((1+1)) $((2+2))"', '2 4\n'],
+      ['x=a; echo "$x $((1+1))"', 'a 2\n'],
+      ['x=a; true; echo "$x $?"', 'a 0\n'],
+      ['x=a; set -- p q; echo "$x $#"', 'a 2\n'],
+      // a run of whitespace is preserved verbatim, not collapsed
+      ['echo "$(echo a)  $(echo b)"', 'a  b\n'],
+      ['printf "%s\\n" "$(echo a)\t$(echo b)"', 'a\tb\n'],
+      // unquoted words never fold, so word splitting is unchanged
+      ['echo $(echo a) $(echo b)', 'a b\n'],
+      ['echo $((1+1)) $((2+2))', '2 4\n'],
+      // "${a[@]}" word-splits, and the folded gap joins its first word
+      ['x=a; arr=(1 2); echo "$x ${arr[@]}"', 'a 1 2\n'],
+      ['arr=(1 2); echo "$(echo p) ${arr[@]}"', 'p 1 2\n'],
+      ['arr=(1 2); echo "${arr[@]} ${arr[@]}"', '1 2 1 2\n'],
+      ['x=a; arr=(); echo "[$x ${arr[@]}]"', '[a ]\n'],
+    ]
+    for (const [line, expected] of cases) {
+      it(`${line} \u2192 ${JSON.stringify(expected)}`, async () => {
+        const ws = await makeQuotingWs()
+        const r = await run(ws, line)
+        expect(r.out).toBe(expected)
+        await ws.close()
+      })
+    }
+  })
+  describe('adjacent backtick substitutions', () => {
+    // tree-sitter merges pairs separated by nothing or whitespace into
+    // one node, so the region is re-lexed during expansion.
+    const cases: [string, string][] = [
+      ['echo `echo a` `echo b`', 'a b\n'],
+      ['echo "`echo a` `echo b`"', 'a b\n'],
+      ['echo `echo a``echo b`', 'ab\n'],
+      ['echo "`echo a``echo b`"', 'ab\n'],
+      ['echo `echo a` `echo b` `echo c`', 'a b c\n'],
+      ['echo "`echo \'q q\'` `echo b`"', 'q q b\n'],
+      // backslash parity: `\\` is one escaped backslash, so the
+      // backtick after it still closes the region
+      ["echo `echo 'a\\\\'`", 'a\\\n'],
+      ["echo `echo 'a\\\\'` `echo b`", 'a\\ b\n'],
+      ["echo `echo 'a\\\\b'`", 'a\\b\n'],
+      ["echo `echo 'a\\`b'`", 'a`b\n'],
+      ['echo `echo \\`echo n\\``', 'n\n'],
+      // shapes the grammar already handled, kept so the re-lex is
+      // proven not to regress them
+      ['echo `echo a`', 'a\n'],
+      ['echo "`echo a`"', 'a\n'],
+      ['echo "x`echo a`y`echo b`z"', 'xaybz\n'],
+      ['echo "`echo a` lit `echo b`"', 'a lit b\n'],
+      ['echo `echo a` mid `echo b`', 'a mid b\n'],
+      ['x=`echo a`; y=`echo b`; echo "$x $y"', 'a b\n'],
+    ]
+    for (const [line, expected] of cases) {
+      it(`${line} \u2192 ${JSON.stringify(expected)}`, async () => {
+        const ws = await makeQuotingWs()
+        const r = await run(ws, line)
+        expect(r.out).toBe(expected)
+        await ws.close()
+      })
+    }
+  })
 })

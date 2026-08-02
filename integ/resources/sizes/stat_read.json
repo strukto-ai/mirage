@@ -1366,6 +1366,58 @@
         "stdout": "6 match\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_linear_every_file_size_matches_read",
+      "seq": 700109,
+      "targets": [
+        "linear"
+      ],
+      "command": "n=0; t=0; for f in $(find /issues -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "17/17\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_every_json_size_matches_read",
+      "seq": 700111,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "n=0; t=0; for f in /ci/workflows/*.json /ci/runs/*/run.json /ci/runs/*/jobs/*.json; do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3/3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_sized_kinds_size_matches_read",
+      "seq": 700112,
+      "targets": [
+        "trello"
+      ],
+      "command": "n=0; t=0; for f in $(find /board -type f -name '*.json'); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "19/19\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_comments_jsonl_is_size_unknown_until_read",
+      "seq": 700113,
+      "targets": [
+        "trello"
+      ],
+      "command": "f=/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/comments.jsonl; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cold=0\nread=186\nwarm=186\n",
+        "stderr": ""
+      }
     }
   ]
 }

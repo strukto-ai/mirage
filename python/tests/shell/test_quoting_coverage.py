@@ -253,3 +253,76 @@ def test_echo_quoting_matrix(input_text, expected):
     ws = _ws_with_paths()
     io = _exec(ws, f'echo "{input_text}"')
     assert _stdout(io) == expected
+
+
+# ── whitespace between expansions inside double quotes ─────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # tree-sitter folds the separating whitespace into the *second*
+        # node's extent, so each expansion branch has to re-emit it.
+        ('echo "$(echo a) $(echo b)"', b"a b\n"),
+        ('echo "$(echo a) $(echo b) $(echo c)"', b"a b c\n"),
+        ('x=a; echo "$x $(echo b)"', b"a b\n"),
+        ('x=a; echo "${x} $(echo b)"', b"a b\n"),
+        ('y=b; echo "$(echo a) ${y}"', b"a b\n"),
+        ('echo "$((1+1)) $(echo b)"', b"2 b\n"),
+        ('echo "$(echo a) $((1+1))"', b"a 2\n"),
+        ('echo "$((1+1)) $((2+2))"', b"2 4\n"),
+        ('x=a; echo "$x $((1+1))"', b"a 2\n"),
+        ('x=a; true; echo "$x $?"', b"a 0\n"),
+        ('x=a; set -- p q; echo "$x $#"', b"a 2\n"),
+        # a run of whitespace is preserved verbatim, not collapsed
+        ('echo "$(echo a)  $(echo b)"', b"a  b\n"),
+        ('printf "%s\\n" "$(echo a)\t$(echo b)"', b"a\tb\n"),
+        # unquoted words never fold, so word splitting is unchanged
+        ("echo $(echo a) $(echo b)", b"a b\n"),
+        ("echo $((1+1)) $((2+2))", b"2 4\n"),
+        # "${a[@]}" word-splits, and the folded gap joins its first word
+        ('x=a; arr=(1 2); echo "$x ${arr[@]}"', b"a 1 2\n"),
+        ('arr=(1 2); echo "$(echo p) ${arr[@]}"', b"p 1 2\n"),
+        ('arr=(1 2); echo "${arr[@]} ${arr[@]}"', b"1 2 1 2\n"),
+        ('x=a; arr=(); echo "[$x ${arr[@]}]"', b"[a ]\n"),
+    ])
+def test_whitespace_between_expansions_survives(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── adjacent backtick substitutions ────────────────────────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # tree-sitter merges pairs separated by nothing or whitespace
+        # into one node, so the region is re-lexed during expansion.
+        ("echo `echo a` `echo b`", b"a b\n"),
+        ('echo "`echo a` `echo b`"', b"a b\n"),
+        ("echo `echo a``echo b`", b"ab\n"),
+        ('echo "`echo a``echo b`"', b"ab\n"),
+        ("echo `echo a` `echo b` `echo c`", b"a b c\n"),
+        ('echo "`echo \'q q\'` `echo b`"', b"q q b\n"),
+        # backslash parity: `\\` is one escaped backslash, so the
+        # backtick after it still closes the region
+        (r"echo `echo 'a\\'`", b"a\\\n"),
+        (r"echo `echo 'a\\'` `echo b`", b"a\\ b\n"),
+        (r"echo `echo 'a\\b'`", b"a\\b\n"),
+        (r"echo `echo 'a\`b'`", b"a`b\n"),
+        (r"echo `echo \`echo n\``", b"n\n"),
+        # shapes the grammar already handled, kept so the re-lex is
+        # proven not to regress them
+        ("echo `echo a`", b"a\n"),
+        ('echo "`echo a`"', b"a\n"),
+        ('echo "x`echo a`y`echo b`z"', b"xaybz\n"),
+        ('echo "`echo a` lit `echo b`"', b"a lit b\n"),
+        ("echo `echo a` mid `echo b`", b"a mid b\n"),
+        ("x=`echo a`; y=`echo b`; echo \"$x $y\"", b"a b\n"),
+    ])
+def test_adjacent_backtick_substitutions(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
