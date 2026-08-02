@@ -54,14 +54,22 @@ export function foldedWhitespace(node: TSNodeLike): string {
 // holding both commands and the text between them. Re-lexing the node's
 // own text on unescaped backticks recovers the real segments; a single
 // pair simply yields one command segment.
+//
+// Inside a command, POSIX keeps the backslash literal except before `$`,
+// a backtick and `\`, where it escapes. Consuming those pairs whole is
+// what makes the parity right: `\\` is one escaped backslash, so a
+// backtick straight after it still closes the region rather than reading
+// as an escaped backtick.
 function splitBacktickSegments(raw: string): [string, boolean][] {
   const segments: [string, boolean][] = []
+  const ESCAPABLE = new Set(['$', '`', '\\'])
   let buf = ''
   let inCommand = false
   let i = 0
   while (i < raw.length) {
-    if (raw[i] === '\\' && raw[i + 1] === '`') {
-      buf += '`'
+    const next = raw[i + 1]
+    if (raw[i] === '\\' && inCommand && next !== undefined && ESCAPABLE.has(next)) {
+      buf += next
       i += 2
       continue
     }

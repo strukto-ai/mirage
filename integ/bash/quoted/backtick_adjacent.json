@@ -203,6 +203,74 @@
         "stdout": "a lit b\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "backtick_escaped_backslash_closes_region",
+      "seq": 930126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo `echo 'a\\\\'` `echo b`",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\\ b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "backtick_escaped_backtick_stays_literal",
+      "seq": 930127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo `echo 'a\\`b'`",
+      "expect": {
+        "exit": 0,
+        "stdout": "a`b\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -59,6 +59,12 @@ def _split_backtick_segments(raw: str) -> list[tuple[str, bool]]:
     node's own text on unescaped backticks recovers the real segments;
     a single pair simply yields one command segment.
 
+    Inside a command, POSIX keeps the backslash literal except before
+    ``$``, `` ` `` and ``\\``, where it escapes. Consuming those pairs
+    whole is what makes the parity right: ``\\\\`` is one escaped
+    backslash, so a backtick straight after it still closes the region
+    rather than reading as an escaped backtick.
+
     Args:
         raw (str): the node's text, opening and closing with a backtick.
     """
@@ -67,8 +73,9 @@ def _split_backtick_segments(raw: str) -> list[tuple[str, bool]]:
     in_command = False
     i = 0
     while i < len(raw):
-        if raw[i] == "\\" and i + 1 < len(raw) and raw[i + 1] == "`":
-            buf.append("`")
+        if (raw[i] == "\\" and in_command and i + 1 < len(raw)
+                and raw[i + 1] in ("$", "`", "\\")):
+            buf.append(raw[i + 1])
             i += 2
             continue
         if raw[i] == "`":

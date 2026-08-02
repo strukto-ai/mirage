@@ -306,6 +306,13 @@ def test_whitespace_between_expansions_survives(line, expected):
         ('echo "`echo a``echo b`"', b"ab\n"),
         ("echo `echo a` `echo b` `echo c`", b"a b c\n"),
         ('echo "`echo \'q q\'` `echo b`"', b"q q b\n"),
+        # backslash parity: `\\` is one escaped backslash, so the
+        # backtick after it still closes the region
+        (r"echo `echo 'a\\'`", b"a\\\n"),
+        (r"echo `echo 'a\\'` `echo b`", b"a\\ b\n"),
+        (r"echo `echo 'a\\b'`", b"a\\b\n"),
+        (r"echo `echo 'a\`b'`", b"a`b\n"),
+        (r"echo `echo \`echo n\``", b"n\n"),
         # shapes the grammar already handled, kept so the re-lex is
         # proven not to regress them
         ("echo `echo a`", b"a\n"),

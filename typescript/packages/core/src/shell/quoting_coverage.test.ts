@@ -302,6 +302,13 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
       ['echo "`echo a``echo b`"', 'ab\n'],
       ['echo `echo a` `echo b` `echo c`', 'a b c\n'],
       ['echo "`echo \'q q\'` `echo b`"', 'q q b\n'],
+      // backslash parity: `\\` is one escaped backslash, so the
+      // backtick after it still closes the region
+      ["echo `echo 'a\\\\'`", 'a\\\n'],
+      ["echo `echo 'a\\\\'` `echo b`", 'a\\ b\n'],
+      ["echo `echo 'a\\\\b'`", 'a\\b\n'],
+      ["echo `echo 'a\\`b'`", 'a`b\n'],
+      ['echo `echo \\`echo n\\``', 'n\n'],
       // shapes the grammar already handled, kept so the re-lex is
       // proven not to regress them
       ['echo `echo a`', 'a\n'],
