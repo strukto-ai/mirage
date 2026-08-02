@@ -40,8 +40,7 @@ def validate_cli(node: "CLISpec") -> None:
         raise ValueError(
             f"cli {node.name!r}: a node takes fn or subcommands, not both")
     if node.fn is None and not node.subcommands:
-        raise ValueError(
-            f"cli {node.name!r}: a node needs fn or subcommands")
+        raise ValueError(f"cli {node.name!r}: a node needs fn or subcommands")
     if node.subcommands and (node.positional or node.rest is not None):
         raise ValueError(
             f"cli {node.name!r}: a group's operand is its subcommand "
