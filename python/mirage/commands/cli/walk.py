@@ -15,16 +15,11 @@
 from collections.abc import Sequence
 from dataclasses import replace
 
-from mirage.commands.cli.types import CLISpec, WalkResult
+from mirage.commands.cli.constants import USAGE_EXIT
+from mirage.commands.cli.types import CLISpec, FlagBag, WalkResult
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.spec.compile import CompiledSpec, compile_spec
 from mirage.commands.spec.help import render_help
-
-FlagBag = dict[str, str | bool | int | list[str]]
-
-# git prints usage errors at tree levels with exit 129; leaf spec errors
-# keep the GNU exit-2 machinery they already ride.
-USAGE_EXIT = 129
 
 
 def node_help(name: str, node: CLISpec) -> str:
@@ -120,6 +115,47 @@ def _record_value(flags: FlagBag, cs: CompiledSpec, spelling: str,
         flags[dest] = value
 
 
+def _match_short(
+        name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag, token: str,
+        next_token: str | None) -> tuple[int, WalkResult | None] | None:
+    """Match a whole short token against declared spellings.
+
+    Mirrors the flat parser's precedence before cluster splitting:
+    attached values on attach-capable spellings, then value spellings
+    (exact token wants the next word; longer token carries an attached
+    value), then an exact boolean spelling. Multi-char shorts like
+    find's ``-name`` only match here. Returns None to fall through to
+    the single-char cluster loop, else (tokens consumed, refusal).
+
+    Args:
+        name (str): display path walked so far.
+        node (CLISpec): the group node being parsed.
+        cs (CompiledSpec): the node's compiled tables.
+        flags (FlagBag): accumulated group flags.
+        token (str): the short token as typed.
+        next_token (str | None): the following word, when any.
+    """
+    for vf in cs.attach_spellings:
+        if token.startswith(vf) and len(token) > len(vf):
+            _record_value(flags, cs, vf, token[len(vf):])
+            return (1, None)
+    for vf in cs.value_spellings:
+        if token == vf:
+            if next_token is None:
+                return (0,
+                        _usage_error(name, node,
+                                     f"error: option '{vf}' requires a value"))
+            _record_value(flags, cs, vf, next_token)
+            return (2, None)
+        if token.startswith(vf) and len(token) > len(vf):
+            _record_value(flags, cs, vf, token[len(vf):])
+            return (1, None)
+    if token in cs.bool_spellings:
+        _record_bool(flags, cs, token)
+        return (1, None)
+    return None
+
+
 def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
                  flags: FlagBag) -> WalkResult | None:
     """Apply a node's declarative option rules after its scan.
@@ -196,17 +232,20 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
                 continue
             if not options_ended and token.startswith("--"):
                 spelling, eq, attached = token.partition("=")
-                if spelling in cs.long_bool_spellings:
+                # Optional-value longs sit in BOTH long_bool_spellings and
+                # long_optional_spellings, so the optional test runs first
+                # or --color=auto would be refused as taking no value.
+                if spelling in cs.long_optional_spellings:
+                    if eq:
+                        _record_value(flags, cs, spelling, attached)
+                    else:
+                        _record_bool(flags, cs, spelling)
+                elif spelling in cs.long_bool_spellings:
                     if eq:
                         return _usage_error(
                             name, node,
                             f"error: option '{spelling}' takes no value")
                     _record_bool(flags, cs, spelling)
-                elif spelling in cs.long_optional_spellings:
-                    if eq:
-                        _record_value(flags, cs, spelling, attached)
-                    else:
-                        _record_bool(flags, cs, spelling)
                 elif spelling in cs.long_value_spellings:
                     if eq:
                         _record_value(flags, cs, spelling, attached)
@@ -229,6 +268,18 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
                 i += 1
                 continue
             if not options_ended and token.startswith("-") and token != "-":
+                # Declared multi-char shorts (find-style -name) match the
+                # whole token before any cluster splitting, longest first,
+                # the same precedence the flat parser uses.
+                whole = _match_short(
+                    name, node, cs, flags, token,
+                    argv[i + 1] if i + 1 < len(argv) else None)
+                if whole is not None:
+                    consumed, refused = whole
+                    if refused is not None:
+                        return refused
+                    i += consumed
+                    continue
                 j = 1
                 error = None
                 while j < len(token):

@@ -211,6 +211,37 @@ describe('walk', () => {
     expect(result.argv).toEqual(['--help', '-x', 'arg'])
   })
 
+  it('handles an optional-value long at group level', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const attached = walk('tool', spec, ['--color=auto', 'run'])
+    expect(attached.leaf).not.toBeNull()
+    expect(attached.groupFlags).toEqual({ '--color': 'auto' })
+    const bare = walk('tool', spec, ['--color', 'run'])
+    expect(bare.leaf).not.toBeNull()
+    expect(bare.groupFlags).toEqual({ '--color': true })
+  })
+
+  it('handles a multi-char short at group level', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ short: '-name', valueKind: OperandKind.TEXT })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const detached = walk('tool', spec, ['-name', 'foo', 'run'])
+    expect(detached.leaf).not.toBeNull()
+    expect(detached.groupFlags).toEqual({ '-name': 'foo' })
+    const attached = walk('tool', spec, ['-namefoo', 'run'])
+    expect(attached.leaf).not.toBeNull()
+    expect(attached.groupFlags).toEqual({ '-name': 'foo' })
+    const starved = walk('tool', spec, ['-name'])
+    expect(starved.exitCode).toBe(129)
+    expect(text(starved.output).startsWith("error: option '-name' requires a value")).toBe(true)
+  })
+
   it('exits 129 for a missing required group option', () => {
     const spec = new CLISpec({
       name: 'tool',

@@ -21,6 +21,10 @@ from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
 from mirage.types import CommandSafeguard
 
+# The group-level flag bag the walk accumulates, keyed by canonical
+# dashed spelling like ParsedArgs.flags.
+FlagBag = dict[str, str | bool | int | list[str]]
+
 
 @dataclass(frozen=True)
 class CLISpec(CommandSpec):
@@ -94,8 +98,7 @@ class WalkResult:
     """
     leaf: "CLISpec | None" = None
     path: tuple[str, ...] = ()
-    group_flags: dict[str, str | bool | int
-                      | list[str]] = field(default_factory=dict)
+    group_flags: FlagBag = field(default_factory=dict)
     argv: tuple[str, ...] = ()
     output: bytes = b""
     stream: Literal["stdout", "stderr"] = "stdout"

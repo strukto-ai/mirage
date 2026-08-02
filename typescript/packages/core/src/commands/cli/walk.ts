@@ -18,6 +18,8 @@ import { renderHelp } from '../spec/help.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
+import { USAGE_EXIT } from './constants.ts'
+
 const ENC = new TextEncoder()
 
 /**
@@ -41,10 +43,6 @@ export function nodeHelp(name: string, node: CLISpec): string {
       new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
   return renderHelp(name, listed, rows)
 }
-
-// git prints usage errors at tree levels with exit 129; leaf spec errors
-// keep the GNU exit-2 machinery they already ride.
-const USAGE_EXIT = 129
 
 /**
  * Group-level option refusal: message plus the node's usage block. Mirrors
@@ -92,6 +90,49 @@ function recordValue(flags: WalkFlagBag, cs: CompiledSpec, spelling: string, val
   } else {
     flags[dest] = value
   }
+}
+
+/**
+ * Match a whole short token against declared spellings. Mirrors the flat
+ * parser's precedence before cluster splitting: attached values on
+ * attach-capable spellings, then value spellings (exact token wants the
+ * next word; longer token carries an attached value), then an exact
+ * boolean spelling. Multi-char shorts like find's `-name` only match
+ * here. Returns null to fall through to the single-char cluster loop,
+ * else [tokens consumed, refusal].
+ */
+function matchShort(
+  name: string,
+  node: CLISpec,
+  cs: CompiledSpec,
+  flags: WalkFlagBag,
+  token: string,
+  nextToken: string | undefined,
+): [number, WalkResult | null] | null {
+  for (const vf of cs.attachSpellings) {
+    if (token.startsWith(vf) && token.length > vf.length) {
+      recordValue(flags, cs, vf, token.slice(vf.length))
+      return [1, null]
+    }
+  }
+  for (const vf of cs.valueSpellings) {
+    if (token === vf) {
+      if (nextToken === undefined) {
+        return [0, usageError(name, node, `error: option '${vf}' requires a value`)]
+      }
+      recordValue(flags, cs, vf, nextToken)
+      return [2, null]
+    }
+    if (token.startsWith(vf) && token.length > vf.length) {
+      recordValue(flags, cs, vf, token.slice(vf.length))
+      return [1, null]
+    }
+  }
+  if (cs.boolSpellings.has(token)) {
+    recordBool(flags, cs, token)
+    return [1, null]
+  }
+  return null
 }
 
 /**
@@ -165,17 +206,20 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
         const eq = token.indexOf('=')
         const spelling = eq === -1 ? token : token.slice(0, eq)
         const attached = eq === -1 ? null : token.slice(eq + 1)
-        if (cs.longBoolSpellings.has(spelling)) {
-          if (attached !== null) {
-            return usageError(name, node, `error: option '${spelling}' takes no value`)
-          }
-          recordBool(flags, cs, spelling)
-        } else if (cs.longOptionalSpellings.has(spelling)) {
+        // Optional-value longs sit in BOTH longBoolSpellings and
+        // longOptionalSpellings, so the optional test runs first or
+        // --color=auto would be refused as taking no value.
+        if (cs.longOptionalSpellings.has(spelling)) {
           if (attached !== null) {
             recordValue(flags, cs, spelling, attached)
           } else {
             recordBool(flags, cs, spelling)
           }
+        } else if (cs.longBoolSpellings.has(spelling)) {
+          if (attached !== null) {
+            return usageError(name, node, `error: option '${spelling}' takes no value`)
+          }
+          recordBool(flags, cs, spelling)
         } else if (cs.longValueSpellings.has(spelling)) {
           const next = argv[i + 1]
           if (attached !== null) {
@@ -198,6 +242,16 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
         continue
       }
       if (!optionsEnded && token.startsWith('-') && token !== '-') {
+        // Declared multi-char shorts (find-style -name) match the whole
+        // token before any cluster splitting, longest first, the same
+        // precedence the flat parser uses.
+        const whole = matchShort(name, node, cs, flags, token, argv[i + 1])
+        if (whole !== null) {
+          const [consumed, refused] = whole
+          if (refused !== null) return refused
+          i += consumed
+          continue
+        }
         let error: string | null = null
         let j = 1
         while (j < token.length) {

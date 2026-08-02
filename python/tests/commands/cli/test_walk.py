@@ -201,3 +201,36 @@ def test_group_help_lists_the_injected_help_flag():
     result = walk("gws", _tree(), ["--help"])
     assert b"\n  --help" in result.output
     assert b"Show this help and exit" in result.output
+
+
+def test_optional_value_long_at_group_level():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(long="--color",
+                        value_kind=OperandKind.TEXT,
+                        value_optional=True), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    attached = walk("tool", tree, ["--color=auto", "run"])
+    assert attached.leaf is not None
+    assert attached.group_flags == {"--color": "auto"}
+    bare = walk("tool", tree, ["--color", "run"])
+    assert bare.leaf is not None
+    assert bare.group_flags == {"--color": True}
+
+
+def test_multichar_short_at_group_level():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(short="-name", value_kind=OperandKind.TEXT), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    detached = walk("tool", tree, ["-name", "foo", "run"])
+    assert detached.leaf is not None
+    assert detached.group_flags == {"-name": "foo"}
+    attached = walk("tool", tree, ["-namefoo", "run"])
+    assert attached.leaf is not None
+    assert attached.group_flags == {"-name": "foo"}
+    starved = walk("tool", tree, ["-name"])
+    assert starved.exit_code == 129
+    assert starved.output.startswith(b"error: option '-name' requires a value")
