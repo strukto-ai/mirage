@@ -14,6 +14,7 @@
 
 import type { PathSpec } from '../../types.ts'
 import { stripMount } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 
 /**
@@ -39,10 +40,10 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
       // Outside every mount there is no storage to name, so fall back to
       // the path itself; such an operand fails on its own when the
       // command tries to read it.
-      return path.virtual.replace(/\/+$/, '')
+      return rstripSlash(path.virtual)
     }
-    const rel = stripMount(path.virtual, entry.prefix.replace(/\/+$/, ''))
-    const trimmed = rel.replace(/\/+$/, '')
+    const rel = stripMount(path.virtual, rstripSlash(entry.prefix))
+    const trimmed = rstripSlash(rel)
     // A resource that declares no identity is treated as its own storage,
     // keyed by the mount prefix. That only reproduces the pre-existing
     // behavior, which is the safe direction: it can miss an alias, never
