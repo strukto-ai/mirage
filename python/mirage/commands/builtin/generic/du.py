@@ -192,21 +192,17 @@ async def du_operands(
     return present, missing
 
 
-async def du_has_content(compute_size: ComputeSize,
-                         compute_entries: ComputeEntries | None,
+async def du_has_content(compute_entries: ComputeEntries,
                          path: PathSpec) -> bool:
     """Whether an operand holds anything, for the unstattable case.
 
     Args:
-        compute_size (ComputeSize): recursive byte size of one operand.
-        compute_entries (ComputeEntries | None): per-file breakdown.
+        compute_entries (ComputeEntries): per-file breakdown.
         path (PathSpec): the operand to probe.
     """
     try:
-        if compute_entries is not None:
-            entries, _ = await compute_entries(path)
-            return bool(entries)
-        return await compute_size(path) > 0
+        entries, _ = await compute_entries(path)
+        return bool(entries)
     except Exception as exc:
         # This runs only after stat already failed, to tell an implicit
         # directory from an absent path. Backends raise their own error
@@ -332,12 +328,12 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
 async def _du_one(
     path: PathSpec,
     compute_size: ComputeSize,
-    compute_entries: ComputeEntries | None,
+    compute_entries: ComputeEntries,
     flags: DuFlags,
 ) -> tuple[list[str], int]:
     label = path.raw_path
 
-    if flags.s or compute_entries is None:
+    if flags.s:
         total = await compute_size(path)
         return [_line(total, flags.h, label)], total
 
@@ -368,7 +364,7 @@ async def run_du(
     resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     compute_size: ComputeSize,
-    compute_entries: ComputeEntries | None = None,
+    compute_entries: ComputeEntries,
     *,
     s: bool = False,
     a: bool = False,
@@ -391,7 +387,7 @@ async def run_du(
         resolve_glob (Callable): expands globs against the backend.
         stat (Callable): raises when an operand cannot be read.
         compute_size (ComputeSize): recursive byte size of one operand.
-        compute_entries (ComputeEntries | None): per-file breakdown.
+        compute_entries (ComputeEntries): per-file breakdown.
         s (bool): -s.
         a (bool): -a.
         h (bool): -h.
@@ -409,8 +405,8 @@ async def run_du(
                         c=c,
                         max_depth=max_depth if max_depth is not None else d)
     present, missing = await du_operands(
-        paths, cwd, resolve_glob, stat,
-        partial(du_has_content, compute_size, compute_entries))
+        paths, cwd, resolve_glob, stat, partial(du_has_content,
+                                                compute_entries))
     return await du(present,
                     compute_size=compute_size,
                     compute_entries=compute_entries,
@@ -423,7 +419,7 @@ async def du(
     paths: list[PathSpec],
     *,
     compute_size: ComputeSize,
-    compute_entries: ComputeEntries | None = None,
+    compute_entries: ComputeEntries,
     flags: DuFlags,
     missing: Sequence[str] = (),
     truncated: Callable[[], bool] | None = None,
@@ -433,7 +429,7 @@ async def du(
     Args:
         paths (list[PathSpec]): the readable operands, glob-resolved.
         compute_size (ComputeSize): recursive byte size of one operand.
-        compute_entries (ComputeEntries | None): per-file breakdown of one
+        compute_entries (ComputeEntries): per-file breakdown of one
             operand as mount-relative (path, size) pairs plus the total.
             ``None`` on backends that can only produce a size, which makes
             both ``-a`` and the per-directory lines degrade to one total.

@@ -25,6 +25,45 @@
         "stdout": "5\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tr_find_size_filters",
+      "seq": 550100,
+      "targets": [
+        "trello"
+      ],
+      "command": "find /board -type f -size +300c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/board/workspaces/Strukto__org_strukto/boards/Ops__brd_ops/lists/Backlog__lst_backlog/cards/Upgrade_Redis_to_7.4__crd_upgrade/card.json\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/Done__lst_done/cards/Dark_mode_toggle__crd_darkmode/card.json\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/card.json\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/Add_full-text_search__crd_search/comments.jsonl\n/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/cards/CSV_export_for_reports__crd_export/card.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_find_size_unsatisfiable",
+      "seq": 550101,
+      "targets": [
+        "trello"
+      ],
+      "command": "find /board -size +1000000c",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_find_mtime_unsatisfiable",
+      "seq": 550102,
+      "targets": [
+        "trello"
+      ],
+      "command": "find /board -mtime +36500",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

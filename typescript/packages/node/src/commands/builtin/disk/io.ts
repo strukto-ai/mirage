@@ -55,6 +55,5 @@ export const DISK_IO: CommandIO<DiskAccessor> = {
   append: diskAppend,
   setAttrs: diskSetAttrs,
   find: diskFind,
-  duSize: diskDu,
-  duEntries: diskDuAll,
+  du: { size: diskDu, entries: diskDuAll },
 }

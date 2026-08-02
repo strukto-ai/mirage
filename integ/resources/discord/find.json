@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "dc_find_size_filters",
+      "seq": 690100,
+      "targets": [
+        "discord"
+      ],
+      "command": "find /discord -size +1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_find_size_unsatisfiable",
+      "seq": 690101,
+      "targets": [
+        "discord"
+      ],
+      "command": "find /discord -size +1000000c",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_find_mtime_unsatisfiable",
+      "seq": 690102,
+      "targets": [
+        "discord"
+      ],
+      "command": "find /discord -mtime +36500",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

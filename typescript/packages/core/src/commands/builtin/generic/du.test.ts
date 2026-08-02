@@ -197,10 +197,14 @@ describe('duGeneric', () => {
     expect(DEC.decode(out.stdout)).toBe('2\t/a.txt\n3\t/b.txt\n')
   })
 
-  it('still reports a total when the backend has no entries op', async () => {
-    const [size] = backend({ '/dir/a.txt': 2 })
-    const out = await duGeneric([spec('/dir', 'dir')], flags({ a: true }), size, undefined)
-    expect(DEC.decode(out.stdout)).toBe('2\t/dir\n')
+  // A backend offering only the cheaper `size` used to degrade du to one
+  // operand line with no directory rows and an inert `-a`. `CommandIO.du`
+  // now pairs both halves, so that shape is unreachable (#645): with a
+  // native du wired, `-a` always reaches the per-file breakdown.
+  it('lists files under -a whenever a native du is wired', async () => {
+    const [size, entries] = backend({ '/dir/a.txt': 2 })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ a: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('2\t/dir/a.txt\n2\t/dir\n')
   })
 
   it('reports a missing operand and exits 1', async () => {

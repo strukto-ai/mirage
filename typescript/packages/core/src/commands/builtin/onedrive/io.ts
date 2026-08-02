@@ -21,6 +21,5 @@ export const ONEDRIVE_IO: CommandIO<OneDriveAccessor> = {
   create: drive.create,
   truncate: drive.truncate,
   find: drive.find,
-  duSize: drive.du,
-  duEntries: drive.duEntries,
+  du: { size: drive.du, entries: drive.duEntries },
 }

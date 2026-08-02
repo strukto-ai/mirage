@@ -143,17 +143,10 @@ function cwdSpec(cwd: string, mountPrefix?: string): PathSpec {
 /**
  * Whether an operand holds anything, for the unstattable case.
  */
-async function duHasContent(
-  computeSize: ComputeSize,
-  computeEntries: ComputeEntries | undefined,
-  path: PathSpec,
-): Promise<boolean> {
+async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Promise<boolean> {
   try {
-    if (computeEntries !== undefined) {
-      const [entries] = await computeEntries(path)
-      return entries.length > 0
-    }
-    return (await computeSize(path)) > 0
+    const [entries] = await computeEntries(path)
+    return entries.length > 0
   } catch {
     // This runs only after stat already failed, to tell an implicit
     // directory from an absent path. Backends raise their own error types
@@ -308,13 +301,13 @@ export function rollup(
 async function duOne(
   path: PathSpec,
   computeSize: ComputeSize,
-  computeEntries: ComputeEntries | undefined,
+  computeEntries: ComputeEntries,
   fmt: (size: number) => string,
   flags: DuFlags,
 ): Promise<[string[], number]> {
   const label = path.rawPath
 
-  if (flags.s || computeEntries === undefined) {
+  if (flags.s) {
     const total = await computeSize(path)
     return [[`${fmt(total)}\t${label}`], total]
   }
@@ -359,7 +352,7 @@ export async function runDu(
   resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
   stat: (p: PathSpec) => Promise<unknown>,
   computeSize: ComputeSize,
-  computeEntries?: ComputeEntries,
+  computeEntries: ComputeEntries,
   truncated?: () => boolean,
 ): Promise<DuOutput> {
   const flags = parseDuFlags(opts)
@@ -368,7 +361,7 @@ export async function runDu(
     opts.cwd,
     resolveGlob,
     stat,
-    (p) => duHasContent(computeSize, computeEntries, p),
+    (p) => duHasContent(computeEntries, p),
     opts.mountPrefix,
   )
   return duGeneric(present, flags, computeSize, computeEntries, missing, truncated)
@@ -388,7 +381,7 @@ export async function duGeneric(
   paths: PathSpec[],
   flags: DuFlags,
   computeSize: ComputeSize,
-  computeEntries?: ComputeEntries,
+  computeEntries: ComputeEntries,
   missing: string[] = [],
   truncated?: () => boolean,
 ): Promise<DuOutput> {

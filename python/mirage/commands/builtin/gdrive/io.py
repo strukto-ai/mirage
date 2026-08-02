@@ -14,7 +14,7 @@
 
 from functools import partial
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.gdrive.copy import copy as _copy
 from mirage.core.gdrive.create import create as _create
@@ -59,8 +59,7 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_size=_du_size,
-    du_entries=_du_entries,
+    du=DuOps(size=_du_size, entries=_du_entries),
 )
 
 resolve_glob = IO.resolve_glob

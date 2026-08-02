@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "ln_find_size_filters",
+      "seq": 560100,
+      "targets": [
+        "linear"
+      ],
+      "command": "find /issues -size +800c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_find_size_unsatisfiable",
+      "seq": 560101,
+      "targets": [
+        "linear"
+      ],
+      "command": "find /issues -size +1000000c",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_find_mtime_unsatisfiable",
+      "seq": 560102,
+      "targets": [
+        "linear"
+      ],
+      "command": "find /issues -mtime +36500",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

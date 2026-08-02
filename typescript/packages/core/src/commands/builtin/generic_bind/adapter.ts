@@ -103,6 +103,16 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
     resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches)
 }
 
+// A backend's native du, both halves at once. The generic derives its
+// per-directory rows from `entries`, so a backend offering only the
+// cheaper `size` would silently print operand totals with no directory
+// rows and an inert `-a`. Pairing them makes native du all-or-nothing,
+// so that degraded shape cannot be reached by omission (#645).
+export interface DuOps<A extends Accessor = Accessor> {
+  size: DuSizeOp<A>
+  entries: DuEntriesOp<A>
+}
+
 export interface CommandIO<A extends Accessor = Accessor> {
   readdir: ReaddirOp<A>
   readBytes: ReadBytesOp<A>
@@ -124,8 +134,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   truncate?: (accessor: A, path: PathSpec, length: number) => Promise<void>
   find?: FindOp<A>
   isDirName?: IsDirNameOp<A>
-  duSize?: DuSizeOp<A>
-  duEntries?: DuEntriesOp<A>
+  du?: DuOps<A>
   maxDuEntries?: number
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   append?: (...args: any[]) => unknown

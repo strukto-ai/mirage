@@ -115,18 +115,16 @@ export const DU_BUILDER: Builder = {
   name: 'du',
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
-    const { duSize, duEntries } = ops
+    const native = ops.du
     const budget = new WalkBudget(ops.maxDuEntries ?? DEFAULT_MAX_DU_ENTRIES)
     const computeSize: ComputeSize =
-      duSize === undefined
+      native === undefined
         ? (p) => duWalk(ops, accessor, idx, p, budget, null)
-        : (p) => duSize(accessor, p, idx)
-    const computeEntries: ComputeEntries | undefined =
-      duSize === undefined
+        : (p) => native.size(accessor, p, idx)
+    const computeEntries: ComputeEntries =
+      native === undefined
         ? (p) => walkEntries(ops, accessor, idx, budget, p)
-        : duEntries === undefined
-          ? undefined
-          : (p) => duEntries(accessor, p, idx)
+        : (p) => native.entries(accessor, p, idx)
 
     const out = await runDu(
       paths,

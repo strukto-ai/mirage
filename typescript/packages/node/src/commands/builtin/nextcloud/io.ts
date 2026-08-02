@@ -40,6 +40,5 @@ export const NEXTCLOUD_IO: CommandIO<NextcloudAccessor> = {
   create,
   truncate,
   find,
-  duSize: nextcloudDuSize,
-  duEntries: nextcloudDuEntries,
+  du: { size: nextcloudDuSize, entries: nextcloudDuEntries },
 }

@@ -55,6 +55,5 @@ export const RAM_IO: CommandIO<RAMAccessor> = {
   append: ramAppend,
   setAttrs: ramSetAttrs,
   find: ramFind,
-  duSize: ramDu,
-  duEntries: ramDuAll,
+  du: { size: ramDu, entries: ramDuAll },
 }

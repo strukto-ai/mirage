@@ -50,6 +50,5 @@ export const GDRIVE_IO: CommandIO<GDriveAccessor> = {
   create: gdriveCreate,
   truncate: gdriveTruncate,
   find: gdriveFind,
-  duSize: gdriveDu,
-  duEntries: gdriveDuAll,
+  du: { size: gdriveDu, entries: gdriveDuAll },
 }

@@ -51,6 +51,5 @@ export const GRIDFS_IO: CommandIO<GridFSAccessor> = {
   create: gridfsCreate,
   truncate: gridfsTruncate,
   find: gridfsFind,
-  duSize: gridfsDu,
-  duEntries: gridfsDuAll,
+  du: { size: gridfsDu, entries: gridfsDuAll },
 }

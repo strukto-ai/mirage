@@ -4,6 +4,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.builtin.generic.du import (DuFlags, _depth, du,
                                                 parse_depth, parse_flags,
                                                 rollup, run_du, to_virtual)
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.errors import UsageError
 from mirage.resource.disk import DiskResource
 from mirage.types import PathSpec
@@ -235,14 +236,24 @@ async def test_multiple_operands_render_in_order():
     assert out.stdout == b"2\t/a.txt\n3\t/b.txt\n"
 
 
-@pytest.mark.asyncio
-async def test_backend_without_entries_still_reports_a_total():
-    compute_size, _ = _make_backend({"/dir/a.txt": 2})
-    out = await du([_spec("/dir", "dir")],
-                   compute_size=compute_size,
-                   compute_entries=None,
-                   flags=DuFlags(a=True))
-    assert out.stdout == b"2\t/dir\n"
+def test_native_du_is_all_or_nothing():
+    """Half a native du is unconstructable, so it cannot be wired.
+
+    A backend offering only the cheaper ``size`` used to degrade du to
+    one operand line with no directory rows and an inert ``-a``. Pairing
+    the two halves in ``DuOps`` makes that shape unreachable (#645).
+    """
+    with pytest.raises(TypeError):
+        DuOps(size=lambda *_a, **_k: None)
+    with pytest.raises(TypeError):
+        DuOps(entries=lambda *_a, **_k: None)
+
+
+def test_command_io_omitting_du_keeps_the_walk_fallback():
+    """No native du means the generic walk, never the degraded path."""
+    assert CommandIO.__dataclass_fields__["du"].default is None
+    assert "du_size" not in CommandIO.__dataclass_fields__
+    assert "du_entries" not in CommandIO.__dataclass_fields__
 
 
 @pytest.mark.asyncio

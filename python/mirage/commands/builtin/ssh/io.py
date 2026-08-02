@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.create import create as _create
@@ -51,8 +51,7 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_size=_du_size,
-    du_entries=_du_entries,
+    du=DuOps(size=_du_size, entries=_du_entries),
     truncate=_truncate,
     set_attrs=_set_attrs,
 )

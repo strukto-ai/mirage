@@ -211,6 +211,7 @@ export {
   type Builder,
   type BuilderFn,
   type CommandIO,
+  type DuOps,
   type MakeGenericCommandsOptions,
   defaultProvision,
   makeCopyProvision,

@@ -89,6 +89,26 @@ class Operation(StrEnum):
     TRUNCATE = "truncate"
 
 
+@dataclass(frozen=True, slots=True)
+class DuOps:
+    """A backend's native ``du`` implementation, both halves at once.
+
+    ``size`` and ``entries`` are not independent: the generic derives its
+    per-directory rows from ``entries``, so a backend offering only the
+    cheaper ``size`` would silently print operand totals with no
+    directory rows and an inert ``-a``. Pairing them in one value makes
+    native du all-or-nothing, so that degraded shape cannot be reached
+    by omission.
+
+    Args:
+        size (OperationFn): recursive byte total for one path.
+        entries (OperationFn): per-file breakdown, leaf files only.
+    """
+
+    size: OperationFn
+    entries: OperationFn
+
+
 @dataclass(frozen=True)
 class Builder:
     name: str
@@ -122,8 +142,7 @@ class CommandIO:
     truncate: OperationFn | None = None
     find: OperationFn | None = None
     is_dir_name: OperationFn | None = None
-    du_size: OperationFn | None = None
-    du_entries: OperationFn | None = None
+    du: DuOps | None = None
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     append: OperationFn | None = None
     set_attrs: OperationFn | None = None

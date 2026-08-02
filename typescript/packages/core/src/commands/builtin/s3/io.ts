@@ -51,6 +51,5 @@ export const S3_IO: CommandIO<S3Accessor> = {
   create: s3Create,
   truncate: s3Truncate,
   find: s3Find,
-  duSize: s3Du,
-  duEntries: s3DuAll,
+  du: { size: s3Du, entries: s3DuAll },
 }

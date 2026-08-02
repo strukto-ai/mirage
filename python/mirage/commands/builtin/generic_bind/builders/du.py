@@ -154,17 +154,15 @@ async def du(
     if not ops.is_mounted(accessor):
         raise ValueError("du: no resource")
     budget = WalkBudget(ops.max_du_entries)
-    size_op = ops.du_size
-    entries_op = ops.du_entries
+    native = ops.du
     compute_size: ComputeSize
-    compute_entries: ComputeEntries | None
-    if size_op is None:
+    compute_entries: ComputeEntries
+    if native is None:
         compute_size = partial(_walk_size, ops, accessor, index, budget)
         compute_entries = partial(_walk_entries, ops, accessor, index, budget)
     else:
-        compute_size = partial(_op_size, size_op, accessor, index)
-        compute_entries = (partial(_op_entries, entries_op, accessor, index)
-                           if entries_op is not None else None)
+        compute_size = partial(_op_size, native.size, accessor, index)
+        compute_entries = partial(_op_entries, native.entries, accessor, index)
 
     out = await run_du(
         paths,

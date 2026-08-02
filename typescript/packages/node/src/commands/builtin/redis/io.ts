@@ -55,6 +55,5 @@ export const REDIS_IO: CommandIO<RedisAccessor> = {
   append: redisAppend,
   setAttrs: redisSetAttrs,
   find: redisFind,
-  duSize: redisDu,
-  duEntries: redisDuEntries,
+  du: { size: redisDu, entries: redisDuEntries },
 }

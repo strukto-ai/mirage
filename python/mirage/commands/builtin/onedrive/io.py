@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.onedrive.copy import copy as _copy
 from mirage.core.onedrive.create import create as _create
 from mirage.core.onedrive.du import entries as _du_entries
@@ -50,8 +50,7 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_size=_du_size,
-    du_entries=_du_entries,
+    du=DuOps(size=_du_size, entries=_du_entries),
 )
 
 resolve_glob = IO.resolve_glob

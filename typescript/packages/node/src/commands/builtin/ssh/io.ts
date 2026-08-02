@@ -54,7 +54,6 @@ export const SSH_IO: CommandIO<SSHAccessor> = {
   truncate: sshTruncate,
   append: sshAppend,
   find: sshFind,
-  duSize: sshDu,
-  duEntries: sshDuAll,
+  du: { size: sshDu, entries: sshDuAll },
   setAttrs: sshSetAttrs,
 }
