@@ -102,8 +102,11 @@ class RedisResource(BaseResource):
 
     def storage_id(self) -> str:
         # The server URL (host, port and db) plus the key prefix pin the
-        # keyspace two mounts would share.
-        return f"{self.name}:{self.url}:{self.key_prefix}"
+        # keyspace two mounts would share. The prefix is joined path-like
+        # so nested prefixes collapse onto one key.
+        prefix = self.key_prefix.strip("/")
+        base = f"{self.name}:{self.url}"
+        return f"{base}/{prefix}" if prefix else base
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

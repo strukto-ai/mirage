@@ -49,6 +49,7 @@ import {
   type Resource,
   unlink as unlinkCore,
   write as writeCore,
+  stripSlash,
 } from '@struktoai/mirage-core'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -117,10 +118,14 @@ export class S3Resource extends BaseResource implements Resource {
 
   // Endpoint, bucket and key prefix pin the object namespace. The endpoint
   // matters because the same bucket name on two providers (AWS vs MinIO vs
-  // R2) is two different stores.
+  // R2) is two different stores. The prefix joins path-like so two mounts
+  // whose prefixes nest still resolve to one key once the mount-relative
+  // path is appended.
   override storageId(): string {
     const cfg = this.config
-    return `${this.kind}:${cfg.endpoint ?? 'aws'}:${cfg.bucket}:${cfg.keyPrefix ?? ''}`
+    const prefix = stripSlash(cfg.keyPrefix ?? '')
+    const base = `${this.kind}:${cfg.endpoint ?? 'aws'}:${cfg.bucket}`
+    return prefix === '' ? base : `${base}/${prefix}`
   }
 
   open(): Promise<void> {

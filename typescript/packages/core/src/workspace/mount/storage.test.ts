@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { BaseResource, type Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from './registry.ts'
-import { makeStorageKey } from './storage.ts'
+import { makeStorageKey, resourceStorageId } from './storage.ts'
 
 class StoreResource extends BaseResource implements Resource {
   readonly kind = 'ram'
@@ -103,10 +103,41 @@ describe('makeStorageKey', () => {
     expect(key(spec('/m2/dirty')).startsWith(`${key(spec('/m1/dir'))}/`)).toBe(false)
   })
 
-  it('falls back to the mount prefix when a resource declares no identity', () => {
-    // Two bare resources must stay distinct: without an identity the safe
-    // answer is "its own storage", never a false same-file refusal.
+  it('keeps distinct bare resources distinct', () => {
     const key = keyFor({ '/b1': new BareResource(), '/b2': new BareResource() })
     expect(key(spec('/b1/x.txt'))).not.toBe(key(spec('/b2/x.txt')))
+  })
+
+  it('gives one storageId-less object one identity across two prefixes', () => {
+    // Browser resources implement Resource directly and have no
+    // storageId. Keying on the mount prefix handed the same object two
+    // identities, so a self-move still relayed a write then an unlink.
+    const shared = new BareResource()
+    const key = keyFor({ '/b1': shared, '/b2': shared })
+    expect(key(spec('/b1/x.txt'))).toBe(key(spec('/b2/x.txt')))
+  })
+
+  it('resolves nested backings onto one key', () => {
+    // /a rooted at /srv/data and /b at /srv/data/sub make /a/sub/x and
+    // /b/x one file; separate key components kept them apart.
+    const key = keyFor({
+      '/a': new RootedResource('/srv/data'),
+      '/b': new RootedResource('/srv/data/sub'),
+    })
+    expect(key(spec('/a/sub/x.txt'))).toBe(key(spec('/b/x.txt')))
+  })
+
+  it('does not fuse roots that merely share a name prefix', () => {
+    const key = keyFor({
+      '/a': new RootedResource('/srv/data'),
+      '/b': new RootedResource('/srv/dataX'),
+    })
+    expect(key(spec('/a/y.txt'))).not.toBe(key(spec('/b/y.txt')))
+  })
+
+  it('resourceStorageId is stable per object', () => {
+    const bare = new BareResource()
+    expect(resourceStorageId(bare)).toBe(resourceStorageId(bare))
+    expect(resourceStorageId(bare)).not.toBe(resourceStorageId(new BareResource()))
   })
 })
