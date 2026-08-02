@@ -167,8 +167,17 @@ function runId(): string {
 
 async function openRam(target: Target): Promise<Open> {
   const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
+  const built: Record<string, RAMResource> = {}
   for (const m of target.mounts) {
-    const resource = new RAMResource()
+    // alias_of gives two prefixes one store: the shape that made
+    // cross-mount mv copy an object onto itself and then unlink the
+    // source. Every other path here allocates fresh storage.
+    const existing = m.alias_of !== undefined ? built[m.alias_of] : undefined
+    if (m.alias_of !== undefined && existing === undefined) {
+      throw new Error(`alias_of names no built mount: ${m.alias_of}`)
+    }
+    const resource = existing ?? new RAMResource()
+    built[m.path] = resource
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, {

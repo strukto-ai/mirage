@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "alias_seed",
+      "seq": 614000,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "printf precious | tee /data/x.txt > /dev/null && mkdir -p /data/tree && printf a | tee /data/tree/a.txt > /dev/null && echo seeded",
+      "expect": {
+        "exit": 0,
+        "stdout": "seeded\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_both_prefixes_see_one_store",
+      "seq": 614001,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "cat /alias/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "precious",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_mv_across_prefixes_refuses",
+      "seq": 614002,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "mv /data/x.txt /alias/x.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: '/data/x.txt' and '/alias/x.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "alias_mv_refusal_kept_the_bytes",
+      "seq": 614003,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "cat /data/x.txt && cat /alias/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "preciousprecious",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_cp_across_prefixes_refuses",
+      "seq": 614004,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "cp /data/x.txt /alias/x.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: '/data/x.txt' and '/alias/x.txt' are the same file\n"
+      }
+    },
+    {
+      "id": "alias_distinct_paths_still_move",
+      "seq": 614005,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "mv /data/x.txt /alias/moved.txt && cat /data/moved.txt && ls /alias",
+      "expect": {
+        "exit": 0,
+        "stdout": "preciousmoved.txt\ntree\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "alias_dir_move_onto_itself_refuses",
+      "seq": 614006,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "mv /data/tree /alias/tree",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/tree' to a subdirectory of itself, '/alias/tree/tree'\n"
+      }
+    },
+    {
+      "id": "alias_cleanup",
+      "seq": 614009,
+      "targets": [
+        "ram-alias"
+      ],
+      "command": "rm -rf /data/moved.txt /data/tree && echo cleaned",
+      "expect": {
+        "exit": 0,
+        "stdout": "cleaned\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

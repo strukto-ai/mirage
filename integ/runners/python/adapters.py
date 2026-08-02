@@ -2035,9 +2035,20 @@ def build_mounts(
 ) -> tuple[dict[str, object], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
+    built: dict[str, object] = {}
     for mount in target["mounts"]:
-        builder = BUILDERS[mount["resource"]]
-        resource, cleanup = builder(mount, run_id, service)
+        alias_of = mount.get("alias_of")
+        if alias_of is not None:
+            # Two prefixes over one store: the shape that made cross-mount
+            # mv copy an object onto itself and then unlink the source.
+            # Reusing the built resource is the only way to express it,
+            # since every builder otherwise allocates fresh storage.
+            resource = built[alias_of]
+            cleanup = _noop
+        else:
+            builder = BUILDERS[mount["resource"]]
+            resource, cleanup = builder(mount, run_id, service)
+        built[mount["path"]] = resource
         if mount.get("mode") == "read":
             mounts[mount["path"]] = (resource, MountMode.READ)
         else:

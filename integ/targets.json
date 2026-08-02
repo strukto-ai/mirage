@@ -75,6 +75,26 @@
       }
     },
     {
+      "id": "ram-alias",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/alias",
+          "resource": "ram",
+          "backend": "memory",
+          "alias_of": "/data"
+        }
+      ]
+    },
+    {
       "id": "ram-history",
       "hosts": [
         "python",

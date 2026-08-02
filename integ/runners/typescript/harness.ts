@@ -28,6 +28,10 @@ export interface Mount {
   backend: string
   mode?: string
   fixture?: string
+  // Mount this prefix over an already-built mount's storage instead of
+  // allocating fresh storage, so cp/mv can be exercised against two
+  // prefixes that address the same bytes.
+  alias_of?: string
   // Fixture seeded by the adapter (over the backend API) instead of the
   // harness tee path -- used by read-only backends like box.
   seed?: string

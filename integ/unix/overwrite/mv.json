@@ -31,6 +31,70 @@
         "stdout": "newdst.txt\ns\nt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ow_mv_onto_existing_nonempty_dir",
+      "seq": 203006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/ow/s/t /data/ow",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot overwrite '/data/ow/t': Directory not empty\n"
+      }
+    },
+    {
+      "id": "ow_mv_n_skips_existing_nonempty_dir",
+      "seq": 203007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv -n /data/ow/s/t /data/ow && ls /data/ow/t && ls /data/ow/s/t",
+      "expect": {
+        "exit": 0,
+        "stdout": "f.old\nf.txt\nf.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }
