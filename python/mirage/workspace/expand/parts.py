@@ -28,7 +28,8 @@ from mirage.workspace.expand.brace import (expand_template, make_inert,
 from mirage.workspace.expand.classify import classify_word
 from mirage.workspace.expand.constants import (BRACE_LITERAL_TYPES,
                                                BRACE_WORD_TYPES, SPLIT_TYPES)
-from mirage.workspace.expand.node import _unescape_unquoted, expand_node
+from mirage.workspace.expand.node import (_folded_whitespace,
+                                          _unescape_unquoted, expand_node)
 from mirage.workspace.expand.variable import expand_array_at, is_multiword_at
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -71,6 +72,10 @@ async def _expand_string_with_array(
         if is_multiword_at(child):
             words = await expand_array_at(child, session, call_stack,
                                           expand_child)
+            # The separating whitespace is folded into this node, and
+            # survives even when the array is empty: bash renders
+            # "$x ${empty[@]}" as the single word "a ".
+            fragments[-1] = fragments[-1] + _folded_whitespace(child)
             if not words:
                 continue
             if len(words) == 1:

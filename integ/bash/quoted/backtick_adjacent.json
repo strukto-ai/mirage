@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "backtick_adjacent_unquoted",
+      "seq": 930120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo `echo a` `echo b`",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "backtick_adjacent_quoted",
+      "seq": 930121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo \"`echo a` `echo b`\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "backtick_adjacent_no_gap",
+      "seq": 930122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo `echo a``echo b`",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "backtick_adjacent_three",
+      "seq": 930123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo `echo a` `echo b` `echo c`",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "backtick_single_pair_unchanged",
+      "seq": 930124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo \"`echo a`\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "backtick_literal_between",
+      "seq": 930125,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo \"`echo a` lit `echo b`\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a lit b\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

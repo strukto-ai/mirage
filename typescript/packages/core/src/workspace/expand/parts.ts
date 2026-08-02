@@ -22,7 +22,7 @@ import { homeDir } from '../session/shell_dirs.ts'
 import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES, SPLIT_TYPES } from './constants.ts'
-import { expandNode, unescapeUnquoted, type ExecuteFn } from './node.ts'
+import { expandNode, foldedWhitespace, unescapeUnquoted, type ExecuteFn } from './node.ts'
 import { expandArrayAt, isMultiwordAt, type TSNodeLike } from './variable.ts'
 
 // Brace-expand a concatenation or brace_expression into words. Literal
@@ -88,6 +88,11 @@ async function expandStringWithArray(
     if (child.type === NT.DQUOTE) continue
     if (isMultiwordAt(child)) {
       const words = await expandArrayAt(child, session, callStack, expandChild)
+      // The separating whitespace is folded into this node, and survives
+      // even when the array is empty: bash renders "$x ${empty[@]}" as
+      // the single word "a ".
+      const gap = fragments.length - 1
+      fragments[gap] = (fragments[gap] ?? '') + foldedWhitespace(child)
       if (words.length === 0) continue
       const last = fragments.length - 1
       if (words.length === 1) {
