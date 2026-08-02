@@ -25,11 +25,11 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec, PrimitiveMove
 
 
-async def run_mv(scopes: list[PathSpec],
-                 flag_kwargs: dict[str, object],
-                 dispatch: Callable[..., Any],
-                 storage_key: Callable[[PathSpec], str] | None = None
-                 ) -> CrossResult:
+async def run_mv(
+        scopes: list[PathSpec],
+        flag_kwargs: dict[str, object],
+        dispatch: Callable[..., Any],
+        storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
     Pure wiring: copy through the transfer primitives, then unlink the

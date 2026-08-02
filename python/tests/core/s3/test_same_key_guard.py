@@ -43,8 +43,8 @@ def _config(key_prefix: str | None = None) -> S3Config:
 def _spec(key: str) -> PathSpec:
     return PathSpec(resource_path=key,
                     virtual=f"/{key}",
-                    directory="/" + key.rsplit("/", 1)[0] if "/" in key else
-                    "/")
+                    directory="/" +
+                    key.rsplit("/", 1)[0] if "/" in key else "/")
 
 
 def _run(fn, store: dict, config: S3Config):
@@ -98,8 +98,8 @@ def test_copy_onto_the_same_key_is_a_no_op():
 def test_rename_onto_the_same_key_still_fails_when_absent():
     """A missing source must not be silently reported as moved."""
     with pytest.raises(FileNotFoundError):
-        _run(lambda acc: rename(acc, _spec("nope.txt"), _spec("nope.txt")),
-             {}, _config())
+        _run(lambda acc: rename(acc, _spec("nope.txt"), _spec("nope.txt")), {},
+             _config())
 
 
 def test_copy_onto_the_same_key_still_fails_when_absent():

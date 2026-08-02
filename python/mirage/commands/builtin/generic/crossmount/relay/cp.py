@@ -24,11 +24,11 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec, PrimitiveCopy
 
 
-async def run_cp(scopes: list[PathSpec],
-                 flag_kwargs: dict[str, object],
-                 dispatch: Callable[..., Any],
-                 storage_key: Callable[[PathSpec], str] | None = None
-                 ) -> CrossResult:
+async def run_cp(
+        scopes: list[PathSpec],
+        flag_kwargs: dict[str, object],
+        dispatch: Callable[..., Any],
+        storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.
 
     Pure wiring: the generic runs in its primitive mode (no native copy),

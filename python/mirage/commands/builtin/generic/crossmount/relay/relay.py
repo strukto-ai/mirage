@@ -25,12 +25,12 @@ from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.types import PathSpec
 
 
-async def run_relay(cmd_name: str,
-                    scopes: list[PathSpec],
-                    flag_kwargs: dict[str, object],
-                    dispatch: Callable[..., Any],
-                    storage_key: Callable[[PathSpec], str] | None = None
-                    ) -> CrossResult:
+async def run_relay(
+        cmd_name: str,
+        scopes: list[PathSpec],
+        flag_kwargs: dict[str, object],
+        dispatch: Callable[..., Any],
+        storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Run a command whose data must colocate across mounts.
 
     Pure wiring: every operand is read or written through ``dispatch``

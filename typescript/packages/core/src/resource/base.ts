@@ -177,7 +177,7 @@ export abstract class BaseResource {
     this.#storageSeq ??= ++BaseResource.#storageCounter
     // The serial is what makes this unique; the class name only makes the
     // value readable when it shows up while debugging.
-    return `${this.constructor.name}:${this.#storageSeq}`
+    return `${this.constructor.name}:${String(this.#storageSeq)}`
   }
 
   // Default df capacity: UNKNOWN (rendered `-`). Backends that can report
