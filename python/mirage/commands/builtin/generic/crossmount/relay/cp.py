@@ -24,8 +24,11 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec, PrimitiveCopy
 
 
-async def run_cp(scopes: list[PathSpec], flag_kwargs: dict[str, object],
-                 dispatch: Callable[..., Any]) -> CrossResult:
+async def run_cp(scopes: list[PathSpec],
+                 flag_kwargs: dict[str, object],
+                 dispatch: Callable[..., Any],
+                 storage_key: Callable[[PathSpec], str] | None = None
+                 ) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.
 
     Pure wiring: the generic runs in its primitive mode (no native copy),
@@ -36,6 +39,8 @@ async def run_cp(scopes: list[PathSpec], flag_kwargs: dict[str, object],
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared cp spec.
         dispatch (Callable): Workspace operation dispatcher.
+        storage_key (Callable | None): Maps an operand to its storage
+            identity so two prefixes over one store compare equal.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cp"])
     primitives = transfer_primitives(dispatch)
@@ -46,4 +51,5 @@ async def run_cp(scopes: list[PathSpec], flag_kwargs: dict[str, object],
                                 write=primitives["write"],
                                 mkdir=primitives["mkdir"],
                                 readdir=primitives["readdir"]),
-                            flags=parse_cp_flags(fl))
+                            flags=parse_cp_flags(fl),
+                            backend_key=storage_key)

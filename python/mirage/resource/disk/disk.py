@@ -86,6 +86,11 @@ class DiskResource(BaseResource):
         for ro in DISK_OPS:
             self.register_op(ro)
 
+    def storage_id(self) -> str:
+        # The resolved root is the storage: two DiskResources built on the
+        # same directory are one store, however they were spelled.
+        return f"{self.name}:{self.root}"
+
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:
             paths = [

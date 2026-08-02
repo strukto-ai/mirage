@@ -35,6 +35,7 @@ async def handle_cross_mount(
     dispatch: Callable[..., Any],
     run_single: RunSingle,
     stdin: ByteSource | None = None,
+    storage_key: Callable[[PathSpec], str] | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -57,11 +58,14 @@ async def handle_cross_mount(
             (STREAM and FANOUT).
         stdin (ByteSource | None): Original stdin (tee re-feeds it per
             operand).
+        storage_key (Callable | None): Maps an operand to its storage
+            identity (RELAY's transfer commands).
     """
     try:
         strategy = strategy_for(cmd_name, flag_kwargs)
         if strategy is Strategy.RELAY:
-            return await run_relay(cmd_name, scopes, flag_kwargs, dispatch)
+            return await run_relay(cmd_name, scopes, flag_kwargs, dispatch,
+                                   storage_key)
         if strategy is Strategy.STREAM:
             return await run_stream(cmd_name, scopes, text_args, flag_kwargs,
                                     run_single)

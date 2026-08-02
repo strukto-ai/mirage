@@ -63,6 +63,7 @@ from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
+from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
@@ -809,13 +810,15 @@ async def handle_command(
                                        dispatch,
                                        namespace,
                                        routing_decision=routing_decision)
-        stdout, io = await handle_cross_mount(cmd_name,
-                                              cross_scopes,
-                                              cross_texts,
-                                              cross_parsed.flag_kwargs,
-                                              dispatch,
-                                              run_single,
-                                              stdin=stdin)
+        stdout, io = await handle_cross_mount(
+            cmd_name,
+            cross_scopes,
+            cross_texts,
+            cross_parsed.flag_kwargs,
+            dispatch,
+            run_single,
+            stdin=stdin,
+            storage_key=make_storage_key(registry))
         if cross_parsed.warnings:
             warn = "".join(f"{cmd_name}: {w}\n"
                            for w in cross_parsed.warnings).encode()

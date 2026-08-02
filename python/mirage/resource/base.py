@@ -103,6 +103,21 @@ class BaseResource:
                            prefix: str = "") -> list[PathSpec]:
         raise NotImplementedError
 
+    def storage_id(self) -> str:
+        """Identity of the storage this resource reads and writes.
+
+        Two mounts whose resources return the same value address the same
+        bytes, so a move between them must refuse rather than copy the
+        object over itself and then unlink the source. The default treats
+        every instance as its own storage, which is the safe direction to
+        be wrong in: a false "different" only keeps the pre-existing
+        behavior, while a false "same" would refuse a legitimate move.
+        Backends whose config pins the storage (a disk root, a bucket and
+        key prefix) override this so two separately constructed instances
+        pointing at one target still compare equal.
+        """
+        return f"{self.name}:{id(self):x}"
+
     async def statfs(self) -> CapacityResult:
         """Capacity of this backend for df. Default: UNKNOWN (rendered as
         ``-``). Backends that can report truthfully — a real filesystem, or

@@ -25,8 +25,11 @@ from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec, PrimitiveMove
 
 
-async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
-                 dispatch: Callable[..., Any]) -> CrossResult:
+async def run_mv(scopes: list[PathSpec],
+                 flag_kwargs: dict[str, object],
+                 dispatch: Callable[..., Any],
+                 storage_key: Callable[[PathSpec], str] | None = None
+                 ) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
     Pure wiring: copy through the transfer primitives, then unlink the
@@ -36,6 +39,10 @@ async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared mv spec.
         dispatch (Callable): Workspace operation dispatcher.
+        storage_key (Callable | None): Maps an operand to its storage
+            identity. Without it a move between two prefixes over one
+            store would copy the object onto itself and then unlink the
+            source, destroying it.
     """
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
@@ -49,4 +56,5 @@ async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
                                 readdir=primitives["readdir"],
                                 unlink=p(relay, dispatch, "unlink"),
                                 rmdir=p(relay, dispatch, "rmdir")),
-                            flags=parse_mv_flags(fl))
+                            flags=parse_mv_flags(fl),
+                            backend_key=storage_key)

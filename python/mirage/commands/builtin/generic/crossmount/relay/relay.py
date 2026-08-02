@@ -25,9 +25,12 @@ from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.types import PathSpec
 
 
-async def run_relay(cmd_name: str, scopes: list[PathSpec],
+async def run_relay(cmd_name: str,
+                    scopes: list[PathSpec],
                     flag_kwargs: dict[str, object],
-                    dispatch: Callable[..., Any]) -> CrossResult:
+                    dispatch: Callable[..., Any],
+                    storage_key: Callable[[PathSpec], str] | None = None
+                    ) -> CrossResult:
     """Run a command whose data must colocate across mounts.
 
     Pure wiring: every operand is read or written through ``dispatch``
@@ -39,11 +42,14 @@ async def run_relay(cmd_name: str, scopes: list[PathSpec],
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared command spec.
         dispatch (Callable): Workspace operation dispatcher.
+        storage_key (Callable | None): Maps an operand to its storage
+            identity, for the transfer commands that must tell a real
+            move from one whose two prefixes address a single store.
     """
     if cmd_name == Cmd.CP:
-        return await run_cp(scopes, flag_kwargs, dispatch)
+        return await run_cp(scopes, flag_kwargs, dispatch, storage_key)
     if cmd_name == Cmd.MV:
-        return await run_mv(scopes, flag_kwargs, dispatch)
+        return await run_mv(scopes, flag_kwargs, dispatch, storage_key)
     if cmd_name == Cmd.DIFF:
         return await run_diff(scopes, flag_kwargs, dispatch)
     if cmd_name == Cmd.PASTE:
