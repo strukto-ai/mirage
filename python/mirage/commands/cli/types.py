@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
+from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
 from mirage.types import CommandSafeguard
 
@@ -66,27 +67,4 @@ class CLISpec(CommandSpec):
     config_model: type[BaseModel] | None = None
 
     def __post_init__(self) -> None:
-        if not self.name or " " in self.name:
-            raise ValueError(
-                f"cli name {self.name!r} must be a single non-empty word")
-        if self.fn is not None and self.subcommands:
-            raise ValueError(
-                f"cli {self.name!r}: a node takes fn or subcommands, "
-                f"not both")
-        if self.fn is None and not self.subcommands:
-            raise ValueError(
-                f"cli {self.name!r}: a node needs fn or subcommands")
-        if self.subcommands and (self.positional or self.rest is not None):
-            raise ValueError(
-                f"cli {self.name!r}: a group's operand is its subcommand "
-                f"word; positional/rest belong on leaves")
-        seen: set[str] = set()
-        for child in self.subcommands:
-            if child.name in seen:
-                raise ValueError(f"cli {self.name!r}: duplicate subcommand "
-                                 f"{child.name!r}")
-            seen.add(child.name)
-            if child.config_model is not None:
-                raise ValueError(
-                    f"cli {self.name!r}: subcommand {child.name!r} declares "
-                    f"config_model; only the root of a tree may")
+        validate_cli(self)

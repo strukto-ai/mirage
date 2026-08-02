@@ -87,9 +87,11 @@ describe('CLISpec', () => {
     expect(git.options[0]?.short).toBe('-C')
   })
 
-  it('rejects an empty or multi-word name', () => {
+  it('rejects an empty, multi-word, or whitespace-bearing name', () => {
     expect(() => new CLISpec({ name: '', fn: verb })).toThrow(/single non-empty word/)
     expect(() => new CLISpec({ name: 'gmail send', fn: verb })).toThrow(/single non-empty word/)
+    expect(() => new CLISpec({ name: 'gmail\tsend', fn: verb })).toThrow(/single non-empty word/)
+    expect(() => new CLISpec({ name: 'gmail\n', fn: verb })).toThrow(/single non-empty word/)
   })
 
   it('rejects fn together with subcommands', () => {

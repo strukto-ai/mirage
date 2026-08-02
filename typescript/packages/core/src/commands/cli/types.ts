@@ -71,7 +71,7 @@ export class CLISpec extends CommandSpec {
     this.write = init.write ?? false
     this.safeguard = init.safeguard ?? null
     this.configModel = init.configModel ?? null
-    if (this.name === '' || this.name.includes(' ')) {
+    if (this.name === '' || /\s/.test(this.name)) {
       throw new Error(`cli name '${this.name}' must be a single non-empty word`)
     }
     if (this.fn !== null && this.subcommands.length > 0) {

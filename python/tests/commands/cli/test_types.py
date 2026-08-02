@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli import CLISpec
@@ -82,49 +81,3 @@ def test_group_may_carry_its_own_options():
         subcommands=(CLISpec(name="status", fn=_verb), ),
     )
     assert tree.options[0].short == "-C"
-
-
-def test_name_must_be_a_single_word():
-    with pytest.raises(ValueError, match="single non-empty word"):
-        CLISpec(name="", fn=_verb)
-    with pytest.raises(ValueError, match="single non-empty word"):
-        CLISpec(name="gmail send", fn=_verb)
-
-
-def test_node_takes_fn_or_subcommands_not_both():
-    with pytest.raises(ValueError, match="not both"):
-        CLISpec(name="gws",
-                fn=_verb,
-                subcommands=(CLISpec(name="send", fn=_verb), ))
-
-
-def test_node_needs_fn_or_subcommands():
-    with pytest.raises(ValueError, match="needs fn or subcommands"):
-        CLISpec(name="gws")
-
-
-def test_group_declares_no_positional_or_rest():
-    with pytest.raises(ValueError, match="belong on leaves"):
-        CLISpec(name="gws",
-                positional=(Operand(kind=OperandKind.TEXT), ),
-                subcommands=(CLISpec(name="send", fn=_verb), ))
-    with pytest.raises(ValueError, match="belong on leaves"):
-        CLISpec(name="gws",
-                rest=Operand(kind=OperandKind.TEXT),
-                subcommands=(CLISpec(name="send", fn=_verb), ))
-
-
-def test_duplicate_subcommand_names_raise():
-    with pytest.raises(ValueError, match="duplicate subcommand 'send'"):
-        CLISpec(name="gws",
-                subcommands=(CLISpec(name="send",
-                                     fn=_verb), CLISpec(name="send",
-                                                        fn=_verb)))
-
-
-def test_config_model_is_root_only():
-    with pytest.raises(ValueError, match="only the root of a tree may"):
-        CLISpec(name="gws",
-                subcommands=(CLISpec(name="gmail",
-                                     fn=_verb,
-                                     config_model=_Config), ))
