@@ -14,6 +14,7 @@
 
 import type { CommandSafeguard, PathSpec } from '../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../config.ts'
+import { compileSpec } from '../spec/compile.ts'
 import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
 
 /**
@@ -99,6 +100,80 @@ export class CLISpec extends CommandSpec {
         )
       }
     }
+    if (this.options.length > 0 && this.subcommands.length > 0) {
+      const own = new Set(compileSpec(this).dest.values())
+      for (const child of this.subcommands) {
+        checkCollisions(this.name, own, child, [child.name])
+      }
+    }
+    Object.freeze(this)
+  }
+}
+
+/**
+ * Refuse an option spelled the same on a node and any descendant. The walk
+ * consumes group options level by level into one flag bag, so an
+ * ancestor/descendant collision would be ambiguous there; siblings may
+ * freely share spellings. Children validated themselves already, so this
+ * only compares each descendant against the ancestor set.
+ */
+function checkCollisions(
+  rootName: string,
+  ancestorDests: ReadonlySet<string>,
+  node: CLISpec,
+  path: readonly string[],
+): void {
+  if (node.options.length > 0) {
+    for (const dest of compileSpec(node).dest.values()) {
+      if (ancestorDests.has(dest)) {
+        throw new Error(
+          `cli '${rootName}': option '${dest}' collides with subcommand '${path.join(' ')}'`,
+        )
+      }
+    }
+  }
+  for (const child of node.subcommands) {
+    checkCollisions(rootName, ancestorDests, child, [...path, child.name])
+  }
+}
+
+export type WalkFlagBag = Record<string, string | boolean | number | string[]>
+
+export interface WalkResultInit {
+  leaf?: CLISpec | null
+  path?: readonly string[]
+  groupFlags?: WalkFlagBag
+  argv?: readonly string[]
+  output?: Uint8Array
+  stream?: 'stdout' | 'stderr'
+  exitCode?: number
+}
+
+/**
+ * Outcome of walking a CLI tree with one command line. Exactly one of two
+ * shapes: `leaf` set (dispatch: the resolved verb, the group flags
+ * collected on the way down keyed by canonical dashed spelling, and the
+ * argv remainder the leaf's own spec parses), or `leaf` null (rendered:
+ * `output` goes to `stream` and the line exits with `exitCode`, covering
+ * help, bare-group usage, unknown verbs, and group-level option errors).
+ */
+export class WalkResult {
+  readonly leaf: CLISpec | null
+  readonly path: readonly string[]
+  readonly groupFlags: WalkFlagBag
+  readonly argv: readonly string[]
+  readonly output: Uint8Array
+  readonly stream: 'stdout' | 'stderr'
+  readonly exitCode: number
+
+  constructor(init: WalkResultInit = {}) {
+    this.leaf = init.leaf ?? null
+    this.path = Object.freeze([...(init.path ?? [])])
+    this.groupFlags = init.groupFlags ?? {}
+    this.argv = Object.freeze([...(init.argv ?? [])])
+    this.output = init.output ?? new Uint8Array(0)
+    this.stream = init.stream ?? 'stdout'
+    this.exitCode = init.exitCode ?? 0
     Object.freeze(this)
   }
 }

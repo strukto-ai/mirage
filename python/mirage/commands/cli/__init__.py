@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.help import render_group_help
+from mirage.commands.cli.types import CLISpec, WalkResult
+from mirage.commands.cli.walk import walk
 
 __all__ = [
     "CLISpec",
+    "WalkResult",
+    "render_group_help",
+    "walk",
 ]

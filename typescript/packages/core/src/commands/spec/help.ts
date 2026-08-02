@@ -35,6 +35,11 @@ function flagDisplay(opt: Option): string {
   return parts.join(', ') + VALUE_LABEL[opt.valueKind]
 }
 
+/** Display rows [flag spelling, description] for a spec's options. */
+export function flagRows(spec: CommandSpec): [string, string][] {
+  return spec.options.map((o) => [flagDisplay(o), o.description ?? ''])
+}
+
 export function renderHelp(name: string, spec: CommandSpec): string {
   const lines: string[] = []
   if (spec.description !== null && spec.description !== '') {
@@ -57,13 +62,10 @@ export function renderHelp(name: string, spec: CommandSpec): string {
   if (spec.options.length > 0) {
     lines.push('')
     lines.push('Flags:')
-    const rows = spec.options.map((o) => [flagDisplay(o), o.description ?? ''])
-    const width = Math.max(...rows.map((r) => (r[0] ?? '').length))
+    const rows = flagRows(spec)
+    const width = Math.max(...rows.map(([flag]) => flag.length))
     for (const [flag, desc] of rows) {
-      const flagStr = flag ?? ''
-      const descStr = desc ?? ''
-      const padded = flagStr.padEnd(width, ' ')
-      lines.push(descStr === '' ? `  ${flagStr}` : `  ${padded}  ${descStr}`)
+      lines.push(desc === '' ? `  ${flag}` : `  ${flag.padEnd(width, ' ')}  ${desc}`)
     }
   }
 

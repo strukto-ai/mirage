@@ -151,6 +151,47 @@ describe('CLISpec', () => {
     ).toThrow(/only the root of a tree may/)
   })
 
+  it('rejects an option colliding between a node and a descendant', () => {
+    expect(
+      () =>
+        new CLISpec({
+          name: 'gws',
+          options: [new Option({ short: '-C', long: '--cwd', valueKind: OperandKind.TEXT })],
+          subcommands: [
+            new CLISpec({
+              name: 'gmail',
+              subcommands: [
+                new CLISpec({
+                  name: 'send',
+                  fn: verb,
+                  options: [new Option({ long: '--cwd', valueKind: OperandKind.TEXT })],
+                }),
+              ],
+            }),
+          ],
+        }),
+    ).toThrow(/option '--cwd' collides with subcommand 'gmail send'/)
+  })
+
+  it('allows sibling leaves to share option spellings', () => {
+    const spec = new CLISpec({
+      name: 'gws',
+      subcommands: [
+        new CLISpec({
+          name: 'send',
+          fn: verb,
+          options: [new Option({ long: '--to', valueKind: OperandKind.TEXT })],
+        }),
+        new CLISpec({
+          name: 'share',
+          fn: verb,
+          options: [new Option({ long: '--to', valueKind: OperandKind.TEXT })],
+        }),
+      ],
+    })
+    expect(spec.subcommands).toHaveLength(2)
+  })
+
   it('stays frozen like every spec', () => {
     const gws = tree()
     expect(Object.isFrozen(gws)).toBe(true)

@@ -30,6 +30,15 @@ def _flag_display(opt: Option) -> str:
     return ", ".join(parts) + _VALUE_LABEL[opt.value_kind]
 
 
+def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
+    """Display rows (flag spelling, description) for a spec's options.
+
+    Args:
+        spec (CommandSpec): the spec whose options to render.
+    """
+    return [(_flag_display(o), o.description or "") for o in spec.options]
+
+
 def render_help(name: str, spec: CommandSpec) -> str:
     lines: list[str] = []
     if spec.description:
@@ -53,7 +62,7 @@ def render_help(name: str, spec: CommandSpec) -> str:
     if spec.options:
         lines.append("")
         lines.append("Flags:")
-        rows = [(_flag_display(o), o.description or "") for o in spec.options]
+        rows = flag_rows(spec)
         width = max(len(flag) for flag, _ in rows)
         for flag, desc in rows:
             if desc == "":

@@ -614,7 +614,16 @@ export {
   RegisteredCommand,
   type RegisteredCommandInit,
 } from './commands/config.ts'
-export { CLISpec, type CLISpecInit, type CLIVerbFn } from './commands/cli/types.ts'
+export {
+  CLISpec,
+  type CLISpecInit,
+  type CLIVerbFn,
+  type WalkFlagBag,
+  WalkResult,
+  type WalkResultInit,
+} from './commands/cli/types.ts'
+export { renderGroupHelp } from './commands/cli/help.ts'
+export { walk } from './commands/cli/walk.ts'
 export {
   COMPOUND_EXTENSIONS,
   getExtension,

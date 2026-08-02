@@ -14,6 +14,8 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.commands.spec.compile import compile_spec
+
 if TYPE_CHECKING:
     from mirage.commands.cli.types import CLISpec
 
@@ -55,3 +57,33 @@ def validate_cli(node: "CLISpec") -> None:
             raise ValueError(
                 f"cli {node.name!r}: subcommand {child.name!r} declares "
                 f"config_model; only the root of a tree may")
+    if node.options and node.subcommands:
+        own = set(compile_spec(node).dest.values())
+        for child in node.subcommands:
+            _check_collisions(node.name, own, child, (child.name, ))
+
+
+def _check_collisions(root_name: str, ancestor_dests: set[str],
+                      node: "CLISpec", path: tuple[str, ...]) -> None:
+    """Refuse an option spelled the same on a node and any descendant.
+
+    The walk consumes group options level by level into one flag bag, so
+    an ancestor/descendant collision would be ambiguous there; siblings
+    may freely share spellings. Children validated themselves already,
+    so this only compares each descendant against the ancestor set.
+
+    Args:
+        root_name (str): the ancestor node's name, for the message.
+        ancestor_dests (set[str]): canonical spellings on the ancestor.
+        node (CLISpec): descendant being checked.
+        path (tuple[str, ...]): words from the ancestor to ``node``.
+    """
+    if node.options:
+        for dest in compile_spec(node).dest.values():
+            if dest in ancestor_dests:
+                raise ValueError(
+                    f"cli {root_name!r}: option '{dest}' collides with "
+                    f"subcommand {' '.join(path)!r}")
+    for child in node.subcommands:
+        _check_collisions(root_name, ancestor_dests, child,
+                          path + (child.name, ))
