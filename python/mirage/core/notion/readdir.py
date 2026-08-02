@@ -101,6 +101,11 @@ async def readdir(
         child_pages = [b for b in blocks if b.get("type") == "child_page"]
         entries = []
 
+        # database.json's size is stashed by the parent listing, but
+        # page.json renders from get_page plus the *recursive* block
+        # tree while this listing only holds one level of children, so
+        # sizing it here would cost an extra call pair per page. It
+        # stays size-unknown until a read hydrates it.
         page_json_entry = IndexEntry(
             id=f"{page_id}:page",
             name="page.json",

@@ -72,6 +72,11 @@ async function readdirTraces(
   const from = accessor.config.defaultFromTimestamp
   if (from !== undefined && from !== '') opts.fromTimestamp = from
   const traces = await fetchTraces(accessor.transport, opts)
+  // The list endpoint returns trace summaries while a read renders the
+  // full trace with its observations, so a size here would cost one
+  // fetchTrace per entry. Traces and prompts stay size-unknown until a
+  // read hydrates them; the dataset .jsonl files are sized because their
+  // listing already carries every item.
   const entries: [string, IndexEntry][] = []
   const names: string[] = []
   for (const t of traces) {

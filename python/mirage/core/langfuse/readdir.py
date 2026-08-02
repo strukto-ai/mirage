@@ -120,6 +120,11 @@ async def _readdir_traces(
         limit=limit,
         from_timestamp=accessor.config.default_from_timestamp,
     )
+    # The list endpoint returns trace summaries while a read renders the
+    # full trace with its observations, so a size here would cost one
+    # fetch_trace per entry. Traces and prompts stay size-unknown until a
+    # read hydrates them; the dataset .jsonl files below are sized
+    # because their listing already carries every item.
     entries = []
     names = []
     for t in traces:

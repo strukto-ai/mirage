@@ -195,6 +195,11 @@ export async function readdir(
       }
     }
     const refs = await getChildPages(accessor.transport, parsed.id)
+    // database.json's size is stashed by the parent listing, but
+    // page.json renders from getPage plus the *recursive* block tree
+    // while this listing only holds one level of children, so sizing it
+    // here would cost an extra call pair per page. It stays size-unknown
+    // until a read hydrates it.
     const entries: [string, IndexEntry][] = [
       [
         'page.json',

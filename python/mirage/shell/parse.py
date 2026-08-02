@@ -19,12 +19,73 @@ BASH_LANGUAGE = tree_sitter.Language(tree_sitter_bash.language())
 TS_PARSER = tree_sitter.Parser(BASH_LANGUAGE)
 
 
+def strip_line_continuation(command: str) -> str:
+    """Drop a trailing backslash that continues the line, as bash does.
+
+    The reader removes ``\\<newline>`` before the parser ever sees it, and
+    a backslash ending the input is the same thing with nothing left to
+    continue onto: ``echo a\\`` runs ``echo a``. Only an odd-length run
+    of trailing backslashes ends in a live one, since each earlier pair
+    is an escaped backslash (``echo a\\\\`` keeps its literal backslash).
+
+    Args:
+        command (str): the raw command line.
+    """
+    stripped = command.rstrip("\\")
+    if (len(command) - len(stripped)) % 2 == 1:
+        return command[:-1]
+    return command
+
+
+def find_unterminated_backtick(command: str) -> str | None:
+    """Locate a backtick substitution that is never closed.
+
+    tree-sitter happily parses ``echo `echo a`` as a complete command,
+    so the region has to be scanned directly. Quoting follows the shell
+    reader: single quotes protect a backtick, double quotes do not, and
+    once inside a substitution only a backslash escapes, which is why
+    ``"`echo '`'`"`` is an error in bash rather than a quoted backtick.
+
+    Args:
+        command (str): the raw command line.
+
+    Returns:
+        str | None: text from the unmatched backtick on, or None.
+    """
+    quote: str | None = None
+    opened: int | None = None
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if opened is not None:
+            if ch == "`":
+                opened = None
+            i += 1
+            continue
+        if ch == "`":
+            opened = i
+        elif ch == "'" and quote is None:
+            quote = "'"
+        elif ch == '"':
+            quote = None if quote == '"' else '"'
+        i += 1
+    return command[opened:] if opened is not None else None
+
+
 def parse(command: str) -> tree_sitter.Node:
     """Parse a shell command string into a tree-sitter AST.
 
     Returns the root tree-sitter node.
     """
-    tree = TS_PARSER.parse(command.encode())
+    tree = TS_PARSER.parse(strip_line_continuation(command).encode())
     return tree.root_node
 
 

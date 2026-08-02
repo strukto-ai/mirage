@@ -1418,6 +1418,112 @@
         "stdout": "cold=0\nread=186\nwarm=186\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sz_lancedb_every_file_size_matches_read",
+      "seq": 700114,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "n=0; t=0; for f in $(find /db -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "4/4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_every_file_size_matches_read",
+      "seq": 700115,
+      "targets": [
+        "chroma"
+      ],
+      "command": "n=0; t=0; for f in $(find /knowledge -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "6/6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_every_file_size_matches_read",
+      "seq": 700116,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "n=0; t=0; for f in $(find /db -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "12/12\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_every_file_size_matches_read",
+      "seq": 700117,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "n=0; t=0; for f in $(find /j -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; test \"$t\" -gt 0 && echo \"mismatched=$((t-n))\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "mismatched=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_database_json_size_matches_read",
+      "seq": 700118,
+      "targets": [
+        "notion"
+      ],
+      "command": "n=0; t=0; for f in $(find /notion -name 'database.json' -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1/1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_page_json_is_size_unknown_until_read",
+      "seq": 700119,
+      "targets": [
+        "notion"
+      ],
+      "command": "f=/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cold=0\nread=1211\nwarm=1211\n",
+        "stderr": ""
+      },
+      "clear_cache": true
+    },
+    {
+      "id": "sz_langfuse_jsonl_size_matches_read",
+      "seq": 700120,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "n=0; t=0; for f in $(find /lf -name \"*.jsonl\"); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3/3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_trace_json_is_size_unknown_until_read",
+      "seq": 700121,
+      "targets": [
+        "langfuse"
+      ],
+      "clear_cache": true,
+      "command": "f=/lf/traces/trace-beta.json; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cold=0\nread=694\nwarm=694\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -53,7 +53,8 @@ from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   runtime_bindings_for, whole_line_runtime)
 from mirage.runtime.types import RunResult
 from mirage.shell.job_table import JobTable
-from mirage.shell.parse import find_syntax_error, parse
+from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
+                                parse)
 from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, DriftPolicy,
                           FileEvent, FileStat, MountBackend, MountMode,
                           PathSpec, StateKey, parse_mount_mode)
@@ -1319,6 +1320,10 @@ class Workspace:
             # bash: an unparsable line exits 2 and the policy is never
             # consulted about it.
             offending = find_syntax_error(ast)
+            if offending is None:
+                # tree-sitter accepts an unclosed backtick as a complete
+                # command, so the region is scanned separately.
+                offending = find_unterminated_backtick(command)
             if offending is not None:
                 snippet = offending.strip()
                 err = (f"mirage: syntax error near {snippet!r}\n".encode()

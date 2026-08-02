@@ -36,7 +36,7 @@ import {
 } from '../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from './executor/policy/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
-import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
+import { findSyntaxError, findUnterminatedBacktick, type ShellParser } from '../shell/parse.ts'
 import { UsageError } from '../commands/errors.ts'
 import { ContentDriftError } from './snapshot/drift.ts'
 import { snapshot as writeSnapshot } from './snapshot/api.ts'
@@ -1171,7 +1171,9 @@ export class Workspace {
     const stdin = options.stdin ?? null
     const parser = await this.getShellParser()
     const root = parser.parse(command)
-    const offending = findSyntaxError(root)
+    // tree-sitter accepts an unclosed backtick as a complete command, so
+    // the region is scanned separately.
+    const offending = findSyntaxError(root) ?? findUnterminatedBacktick(command)
     if (offending !== null) {
       // The gate runs before the provision branch, mirroring Python:
       // a provision run of unparseable input reports the syntax error
