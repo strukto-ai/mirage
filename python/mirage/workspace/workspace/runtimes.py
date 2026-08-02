@@ -22,8 +22,8 @@ from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   whole_line_runtime)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.workspace.guard import reject_config_script
+from mirage.workspace.workspace.types import DispatchFn
 
-DispatchFn = Callable[..., Any]
 PrefixFn = Callable[[], list[str]]
 
 

@@ -25,6 +25,7 @@ from mirage.workspace.session import SessionStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
 from mirage.workspace.workspace.policy import PolicyRouter
 from mirage.workspace.workspace.runtimes import Runtimes
+from mirage.workspace.workspace.types import DispatchFn
 
 LineExecutor = Callable[[str, bytes | None, dict[str, str], str],
                         Awaitable[RunResult]]
@@ -80,7 +81,7 @@ def resolve_control_stores(
 
 
 def wire_runtime_world(
-        registry: MountRegistry, dispatch: Callable[..., object],
+        registry: MountRegistry, dispatch: DispatchFn,
         mount_prefixes: Callable[[], list[str]],
         entries: list[Runtime | str] | None,
         line_executor: LineExecutor) -> tuple[Runtimes, PolicyRouter]:
@@ -95,7 +96,7 @@ def wire_runtime_world(
 
     Args:
         registry (MountRegistry): mount table the bindings install on.
-        dispatch (Callable[..., object]): the workspace's op dispatch.
+        dispatch (DispatchFn): the workspace's op dispatch.
         mount_prefixes (Callable[[], list[str]]): live prefix listing.
         entries (list[Runtime | str] | None): explicit runtime world;
             None builds the default.
