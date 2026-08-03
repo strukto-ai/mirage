@@ -24,7 +24,7 @@ NUMERIC_SHORT = re.compile(r"^-\d+$")
 # core of Python int()/float() and argparse (no whitespace, underscores,
 # inf, or nan, so both languages accept exactly the same strings).
 INT_VALUE = re.compile(r"^[+-]?\d+$")
-FLOAT_VALUE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
+FLOAT_VALUE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
 # (plus ripgrep and jq upstream docs). Everything else exits 1. Keys are
