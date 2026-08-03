@@ -22,11 +22,6 @@ import type { Action, CommandContext } from './types.ts'
  * (directly or as a promise; the seam awaits either), and a hook that
  * throws fails closed (the command is refused, naming the policy).
  * Undefined hooks are detected at the seam and never called.
- *
- * preCommand fires once per classified command (including pipe
- * segments and nested evals), before flag parsing, mount resolution,
- * runtime placement, and backend I/O. Further lifecycle hooks
- * (pre/post execute, pre/post ops) arrive with their seams.
  */
 export interface Policy {
   preCommand?(ctx: CommandContext): Action | null | Promise<Action | null>
