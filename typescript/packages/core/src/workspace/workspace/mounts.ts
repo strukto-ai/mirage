@@ -15,42 +15,42 @@
 import { HISTORY_PREFIX } from '../../resource/history/history.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
-import type { CommandSafeguard, MountMode } from '../../types.ts'
+import type { Limit, MountMode } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
 
 /**
  * The `resources` mapping in resolved form: every accepted spelling
- * (bare resource, `[resource, mode]`, `[resource, mode, safeguards]`)
+ * (bare resource, `[resource, mode]`, `[resource, mode, commandLimits]`)
  * narrowed to three parallel maps. Mirrors the Python
  * `normalize_resources` in `workspace/mounts.py`.
  */
 export interface NormalizedResources {
   bare: Record<string, Resource>
   modes: Record<string, MountMode>
-  safeguards: Record<string, Record<string, CommandSafeguard>>
+  commandLimits: Record<string, Record<string, Limit>>
 }
 
 export function normalizeResources(resources: Record<string, MountSpec>): NormalizedResources {
   const bare: Record<string, Resource> = {}
   const modes: Record<string, MountMode> = {}
-  const safeguards: Record<string, Record<string, CommandSafeguard>> = {}
+  const commandLimits: Record<string, Record<string, Limit>> = {}
   for (const [prefix, spec] of Object.entries(resources)) {
     if (Array.isArray(spec)) {
-      const [resource, mode, mountSafeguards] = spec as readonly [
+      const [resource, mode, mountCommandLimits] = spec as readonly [
         Resource,
         MountMode,
-        Record<string, CommandSafeguard>?,
+        Record<string, Limit>?,
       ]
       bare[prefix] = resource
       modes[prefix] = mode
-      if (mountSafeguards !== undefined) safeguards[prefix] = mountSafeguards
+      if (mountCommandLimits !== undefined) commandLimits[prefix] = mountCommandLimits
     } else {
       bare[prefix] = spec as Resource
     }
   }
-  return { bare, modes, safeguards }
+  return { bare, modes, commandLimits }
 }
 
 export interface UnmountDeps {

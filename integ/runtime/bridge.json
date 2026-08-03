@@ -207,7 +207,7 @@
       ]
     },
     {
-      "id": "link_op_safeguard",
+      "id": "link_op_limit",
       "world": {
         "runtimes": [
           "monty",
@@ -216,7 +216,7 @@
         "mounts": {
           "/data": {
             "resource": "ram",
-            "safeguards": {
+            "limits": {
               "read": {
                 "max_bytes": 8
               }

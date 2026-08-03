@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { guardOutput } from '../../commands/builtin/utils/safeguard.ts'
+import { guardOutput } from '../../commands/builtin/utils/limit.ts'
+import { postExecuteGate } from '../../policy/index.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -49,11 +50,29 @@ export async function runCommandTree(
     return [materialized, io, execNode]
   }
   io.syncExitCode()
+  // The boundary consultation: the envelope's producer facts become
+  // the postExecute context; the built-in cap and any user policies
+  // answer with Limits (tightest merged), enforced by guardOutput.
+  const [deny, bound] = await postExecuteGate(deps.registry.policies, {
+    producer: io.producer ?? { command: '', prefixes: [], declared: null },
+    exitCode: io.exitCode,
+  })
+  if (deny !== null) {
+    const existingErr = await materialize(io.stderr)
+    const denyBytes = new TextEncoder().encode(deny.message)
+    const mergedErr = new Uint8Array(existingErr.byteLength + denyBytes.byteLength)
+    mergedErr.set(existingErr, 0)
+    mergedErr.set(denyBytes, existingErr.byteLength)
+    io.stderr = mergedErr
+    io.exitCode = deny.exitCode ?? 1
+    execNode.exitCode = io.exitCode
+    return [null, io, execNode]
+  }
   const [guarded, guardedErr, guardedCode] = await guardOutput(
     materialized,
     io.stderr,
     io.exitCode,
-    io.safeguard,
+    bound,
   )
   materialized = guarded !== null ? await materialize(guarded) : null
   io.stderr = guardedErr

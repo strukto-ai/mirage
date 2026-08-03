@@ -14,8 +14,8 @@
 
 export { VERSION } from './version.ts'
 export {
-  CommandSafeguard,
-  type CommandSafeguardInit,
+  Limit,
+  type LimitInit,
   ConsistencyPolicy,
   CapacityState,
   type CapacityResult,
@@ -141,12 +141,14 @@ export { makeGenericOps } from './ops/generic/factory.ts'
 export { extractWriteData } from './ops/write_args.ts'
 export { RAM_COMMANDS } from './commands/builtin/ram/index.ts'
 export {
-  DEFAULT_COMMAND_SAFEGUARDS,
-  FALLBACK_SAFEGUARD,
+  DEFAULT_COMMAND_LIMITS,
+  FALLBACK_LIMIT,
+  OutputCapPolicy,
   resolveAcrossMounts,
-  resolveSafeguard,
-} from './workspace/executor/policy/safeguard.ts'
-export { CommandTimeoutError, SafeguardExceededError } from './commands/builtin/utils/safeguard.ts'
+  resolveProducer,
+  resolveLimit,
+} from './policy/builtin/output_cap.ts'
+export { CommandTimeoutError, LimitExceededError } from './commands/builtin/utils/limit.ts'
 export { GENERAL_COMMANDS } from './commands/builtin/general/index.ts'
 export { GENERAL_BC } from './commands/builtin/general/bc.ts'
 export { GENERAL_CURL } from './commands/builtin/general/curl.ts'
@@ -533,10 +535,12 @@ export {
   SpecPolicy,
   VALIDITY,
   hasParentsFlag,
+  postExecuteGate,
   wildcardRegex,
   type Action,
   type CommandContext,
   type Deny,
+  type ExecuteResultContext,
   type GuardSpec,
   type MountRootQuery,
   type OpsContext,

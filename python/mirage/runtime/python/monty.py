@@ -274,7 +274,7 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         # run_async executes on Monty's own tokio pool and returns an
         # asyncio-compatible future: the loop stays free, and cancelling
         # the future halts the interpreter (verified: CPU drops to zero),
-        # so a safeguard timeout reclaims the run instead of leaking a
+        # so a limit timeout reclaims the run instead of leaking a
         # burning thread.
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()

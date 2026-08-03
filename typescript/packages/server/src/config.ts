@@ -17,7 +17,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import {
   buildResource,
-  CommandSafeguard,
+  Limit,
   ConsistencyPolicy,
   KERNEL_BACKENDS,
   MountBackend,
@@ -137,7 +137,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // normalize at the boundary: camelize the top-level keys plus the cache and
 // index blocks. Mounts are left untouched on purpose, their `config:` blocks
 // carry resource credentials whose snake_case keys (aws_access_key_id, ...)
-// are consumed downstream as-is, and command_safeguards is camelized later.
+// are consumed downstream as-is, and command_limits is camelized later.
 function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unknown> {
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
@@ -169,16 +169,16 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
   return out
 }
 
-// Workspace YAML uses Python's snake_case keys (command_safeguards, max_lines,
+// Workspace YAML uses Python's snake_case keys (command_limits, max_lines,
 // on_exceed, ...). The in-memory config stays camelCase, so normalize each
-// block's keys at the boundary before constructing the safeguard.
-function parseSafeguards(
+// block's keys at the boundary before constructing the limit.
+function parseLimits(
   raw: Record<string, Record<string, unknown>> | undefined,
-): Record<string, CommandSafeguard> {
-  const out: Record<string, CommandSafeguard> = {}
+): Record<string, Limit> {
+  const out: Record<string, Limit> = {}
   for (const [cmd, rawBlock] of Object.entries(raw ?? {})) {
-    const block = camelizeKeys(rawBlock) as RawSafeguardBlock
-    out[cmd] = new CommandSafeguard({
+    const block = camelizeKeys(rawBlock) as RawLimitBlock
+    out[cmd] = new Limit({
       ...(block.maxBytes !== undefined ? { maxBytes: block.maxBytes } : {}),
       ...(block.maxLines !== undefined ? { maxLines: block.maxLines } : {}),
       ...(block.timeoutSeconds !== undefined ? { timeoutSeconds: block.timeoutSeconds } : {}),
@@ -259,7 +259,7 @@ export function interpolateEnv<T>(value: T, env: Record<string, string>): T {
   return out as T
 }
 
-interface RawSafeguardBlock {
+interface RawLimitBlock {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
@@ -270,7 +270,7 @@ export interface MountBlock {
   resource: string
   mode?: string
   config?: Record<string, unknown>
-  command_safeguards?: Record<string, Record<string, unknown>>
+  command_limits?: Record<string, Record<string, unknown>>
   /** vfs (default), fuse, or fskit. Mirrors Python's MountBlock.backend. */
   backend?: string
   mountpoint?: string
@@ -424,7 +424,7 @@ export function loadWorkspaceConfigFile(
 }
 
 export interface WorkspaceArgs {
-  resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]>
+  resources: Record<string, [Resource, MountMode, Record<string, Limit>]>
   options: {
     mode: MountMode
     consistency: ConsistencyPolicy
@@ -506,12 +506,12 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
-  const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
+  const resources: Record<string, [Resource, MountMode, Record<string, Limit>]> = {}
   const kernelMounts: Record<string, [MountBackend, string | undefined]> = {}
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await buildResource(block.resource, block.config ?? {})
     const m = coerceMountMode(block.mode, wsMode)
-    resources[prefix] = [r, m, parseSafeguards(block.command_safeguards)]
+    resources[prefix] = [r, m, parseLimits(block.command_limits)]
     const backend = (block.backend ?? MountBackend.VFS) as MountBackend
     if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
   }

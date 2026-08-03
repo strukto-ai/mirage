@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandTimeoutError } from '../../../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError } from '../../../../commands/builtin/utils/limit.ts'
 import { Runtime } from '../../runtime.ts'
 import { EvalError } from '../../runtime_errors.ts'
 import { EVALUATOR, type Evaluator } from '../../runtime_mixin.ts'
@@ -157,7 +157,7 @@ export class MontyRuntime extends Runtime implements Evaluator {
     const pool = await this.ensurePool()
     const session = await pool.checkout()
     // Monty executes on its own worker process, so the event loop stays
-    // live to observe the safeguard deadline and the kill signal; a trip
+    // live to observe the limit deadline and the kill signal; a trip
     // SIGKILLs the worker (see killWorker). Deadline -> exit 124 via
     // CommandTimeoutError, kill -> exit 1 like the local runtime.
     const workerPid = session.workerPid

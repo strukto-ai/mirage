@@ -19,8 +19,7 @@ from typing import Any, Callable
 
 from mirage.cache.context import push_cache_manager
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.utils.safeguard import (apply_op_safeguard,
-                                                     run_with_timeout)
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
@@ -32,10 +31,11 @@ from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     with_revisions)
 from mirage.ops.config import StatOverlay
 from mirage.ops.registry import RegisteredOp
+from mirage.policy import resolve_limit
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy.safeguard import CommandSafeguard, resolve_safeguard
-from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.types import (ConsistencyPolicy, Limit, MountMode, PathSpec,
+                          Producer)
 from mirage.utils.errors import enotsup
 from mirage.utils.key_prefix import mount_key
 
@@ -134,7 +134,7 @@ class MountEntry:
         # command resolution. None until first built; invalidated on
         # register.
         self._prefix_index: dict[str, list[int]] | None = None
-        self.command_safeguards: dict[str, CommandSafeguard] = {}
+        self.command_limits: dict[str, Limit] = {}
         self._ops: dict[tuple[Any, ...], RegisteredOp] = {}
         self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
@@ -539,26 +539,26 @@ class MountEntry:
                         exit_code=1,
                         stderr=(f"{cmd_name}: read-only mount "
                                 f"at {self.prefix}".encode()))
-                # The dispatch-level guard only sees default safeguards
+                # The dispatch-level guard only sees default limits
                 # (the mount is unknown before routing), so the
                 # mount-resolved timeout must also bound the command
                 # body: eager commands do their work inside cmd.fn,
                 # where the stream-consumption guard never runs.
-                resolved_safeguard = resolve_safeguard(
+                resolved_limit = resolve_limit(
                     cmd_name,
-                    command_default=cmd.safeguard,
-                    mount_override=self.command_safeguards.get(cmd_name))
-                cmd_timeout = (resolved_safeguard.timeout_seconds
-                               if resolved_safeguard is not None else None)
+                    command_default=cmd.limit,
+                    mount_override=self.command_limits.get(cmd_name))
+                cmd_timeout = (resolved_limit.timeout_seconds
+                               if resolved_limit is not None else None)
                 result = await run_with_timeout(
                     cmd.fn(self.resource.accessor, paths, *texts, **kw),
                     cmd_timeout, cmd_name)
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,
                                                    self.revisions or None)
-                    # TODO: hand back a finalization context separately
-                    # instead of stamping policy onto io.safeguard.
-                    io.safeguard = resolved_safeguard
+                    io.producer = Producer(command=cmd_name,
+                                           prefixes=(self.prefix, ),
+                                           declared=cmd.limit)
                     return stream, io
             return None, IOResult()
         finally:
@@ -616,7 +616,9 @@ class MountEntry:
             resource_path=mount_key(path, mount_prefix),
         )
         kwargs.setdefault("index", self.resource.index)
-        op_override = self.command_safeguards.get(op_name)
+        # Per-op caps are policy and fire at the op doors (post_ops);
+        # only the timeout stays here, bounding the backend call itself.
+        op_override = self.command_limits.get(op_name)
         op_timeout = (op_override.timeout_seconds
                       if op_override is not None else None)
         prev_prefix = push_mount_prefix(mount_prefix)
@@ -628,7 +630,7 @@ class MountEntry:
                     result = await run_with_timeout(result, op_timeout,
                                                     op_name)
                 if result is not None:
-                    return await apply_op_safeguard(result, op_override)
+                    return result
             return None
         finally:
             reset_revisions(revs_token)

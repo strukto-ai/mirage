@@ -19,10 +19,11 @@ import time
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.policy import resolve_producer
+from mirage.policy.builtin import output_cap as sg
 from mirage.resource.ram import RAMResource
-from mirage.runtime.policy import safeguard as sg
 from mirage.runtime.python import LocalRuntime
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import Limit, OnExceed
 
 
 async def _slow_provision(*args, **kwargs):
@@ -31,17 +32,16 @@ async def _slow_provision(*args, **kwargs):
 
 @pytest.fixture
 def restore_defaults():
-    snapshot = dict(sg.DEFAULT_COMMAND_SAFEGUARDS)
+    snapshot = dict(sg.DEFAULT_COMMAND_LIMITS)
     yield
-    sg.DEFAULT_COMMAND_SAFEGUARDS.clear()
-    sg.DEFAULT_COMMAND_SAFEGUARDS.update(snapshot)
+    sg.DEFAULT_COMMAND_LIMITS.clear()
+    sg.DEFAULT_COMMAND_LIMITS.update(snapshot)
 
 
-def _ws(safeguards: dict | None = None) -> Workspace:
-    if safeguards:
-        return Workspace(
-            {"/data": (RAMResource(), MountMode.WRITE, safeguards)},
-            mode=MountMode.WRITE)
+def _ws(limits: dict | None = None) -> Workspace:
+    if limits:
+        return Workspace({"/data": (RAMResource(), MountMode.WRITE, limits)},
+                         mode=MountMode.WRITE)
     return Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
 
 
@@ -54,9 +54,8 @@ async def test_quick_builtin_under_default_does_not_fire():
 
 
 @pytest.mark.asyncio
-async def test_builtin_default_safeguard_fires(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.1)
+async def test_builtin_default_limit_fires(restore_defaults):
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.1)
     ws = _ws()
     r = await ws.execute("sleep 2")
     assert r.exit_code == 124
@@ -64,9 +63,8 @@ async def test_builtin_default_safeguard_fires(restore_defaults):
 
 
 @pytest.mark.asyncio
-async def test_fallback_safeguard_applies_to_unknown_command(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.05)
+async def test_fallback_limit_applies_to_unknown_command(restore_defaults):
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
     ws = _ws()
     r = await ws.execute("sleep 1")
     assert r.exit_code == 124
@@ -74,8 +72,7 @@ async def test_fallback_safeguard_applies_to_unknown_command(restore_defaults):
 
 @pytest.mark.asyncio
 async def test_pipeline_first_stage_to_trip_wins(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.1)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.1)
     ws = _ws()
     r = await ws.execute("sleep 2 | echo done")
     assert r.exit_code == 124
@@ -84,8 +81,7 @@ async def test_pipeline_first_stage_to_trip_wins(restore_defaults):
 
 @pytest.mark.asyncio
 async def test_timeout_zero_disables(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0)
     ws = _ws()
     r = await ws.execute("sleep 0.1")
     assert r.exit_code == 0
@@ -93,28 +89,27 @@ async def test_timeout_zero_disables(restore_defaults):
 
 @pytest.mark.asyncio
 async def test_mount_override_threaded_via_constructor():
-    overrides = {"cat": CommandSafeguard(timeout_seconds=42.0, max_lines=99)}
-    ws = _ws(safeguards=overrides)
+    overrides = {"cat": Limit(timeout_seconds=42.0, max_lines=99)}
+    ws = _ws(limits=overrides)
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
-    assert mount.command_safeguards["cat"].timeout_seconds == 42.0
-    assert mount.command_safeguards["cat"].max_lines == 99
+    assert mount.command_limits["cat"].timeout_seconds == 42.0
+    assert mount.command_limits["cat"].max_lines == 99
 
 
 @pytest.mark.asyncio
 async def test_mount_override_beats_command_default():
-    overrides = {"cat": CommandSafeguard(timeout_seconds=999.0)}
-    ws = _ws(safeguards=overrides)
+    overrides = {"cat": Limit(timeout_seconds=999.0)}
+    ws = _ws(limits=overrides)
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
-    from mirage.runtime.policy.safeguard import resolve_safeguard
-    resolved = resolve_safeguard(
-        "cat", mount_override=mount.command_safeguards.get("cat"))
+    from mirage.policy import resolve_limit
+    resolved = resolve_limit("cat",
+                             mount_override=mount.command_limits.get("cat"))
     assert resolved.timeout_seconds == 999.0
 
 
 @pytest.mark.asyncio
 async def test_timeout_sets_shared_cancel_event(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.05)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
     ws = _ws()
     cancel = asyncio.Event()
     r = await ws.execute("sleep 1", cancel=cancel)
@@ -123,9 +118,8 @@ async def test_timeout_sets_shared_cancel_event(restore_defaults):
 
 
 @pytest.mark.asyncio
-async def test_cross_mount_cat_honors_command_default_safeguard(
-        restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["cat"] = CommandSafeguard(max_lines=4)
+async def test_cross_mount_cat_honors_command_default_limit(restore_defaults):
+    sg.DEFAULT_COMMAND_LIMITS["cat"] = Limit(max_lines=4)
     a = RAMResource()
     b = RAMResource()
     a._store.dirs.add("/")
@@ -141,14 +135,16 @@ async def test_cross_mount_cat_honors_command_default_safeguard(
 
 
 @pytest.mark.asyncio
-async def test_fan_out_find_has_safeguard_set():
+async def test_fan_out_find_has_limit_set():
     a = RAMResource()
     a._store.dirs.add("/")
     a._store.files["/x.txt"] = b"hi\n"
     ws = Workspace({"/a/": a}, mode=MountMode.WRITE)
     r = await ws.execute("find /")
-    assert r.safeguard is not None
-    assert r.safeguard.timeout_seconds is not None
+    assert r.producer is not None
+    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    assert resolved is not None
+    assert resolved.timeout_seconds is not None
 
 
 @pytest.mark.asyncio
@@ -162,15 +158,16 @@ async def test_cross_mount_honors_per_mount_timeout_override():
     ws = Workspace(
         {
             "/a/": (a, MountMode.WRITE, {
-                "cat": CommandSafeguard(timeout_seconds=3.0)
+                "cat": Limit(timeout_seconds=3.0)
             }),
-            "/b/":
-            b,
+            "/b/": b,
         },
         mode=MountMode.WRITE)
     r = await ws.execute("cat /a/x.txt /b/y.txt")
-    assert r.safeguard is not None
-    assert r.safeguard.timeout_seconds == 3.0
+    assert r.producer is not None
+    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    assert resolved is not None
+    assert resolved.timeout_seconds == 3.0
 
 
 @pytest.mark.asyncio
@@ -186,13 +183,15 @@ async def test_fan_out_uses_tightest_timeout_among_mounts():
             "/p/":
             parent,
             "/p/sub/": (child, MountMode.WRITE, {
-                "find": CommandSafeguard(timeout_seconds=2.0)
+                "find": Limit(timeout_seconds=2.0)
             }),
         },
         mode=MountMode.WRITE)
     r = await ws.execute("find /p")
-    assert r.safeguard is not None
-    assert r.safeguard.timeout_seconds == 2.0
+    assert r.producer is not None
+    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    assert resolved is not None
+    assert resolved.timeout_seconds == 2.0
 
 
 @pytest.mark.asyncio
@@ -206,22 +205,23 @@ async def test_fan_out_tightest_when_parent_is_tighter():
     ws = Workspace(
         {
             "/p/": (parent, MountMode.WRITE, {
-                "find": CommandSafeguard(timeout_seconds=2.0)
+                "find": Limit(timeout_seconds=2.0)
             }),
             "/p/sub/": (child, MountMode.WRITE, {
-                "find": CommandSafeguard(timeout_seconds=9.0)
+                "find": Limit(timeout_seconds=9.0)
             }),
         },
         mode=MountMode.WRITE)
     r = await ws.execute("find /p")
-    assert r.safeguard is not None
-    assert r.safeguard.timeout_seconds == 2.0
+    assert r.producer is not None
+    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    assert resolved is not None
+    assert resolved.timeout_seconds == 2.0
 
 
 @pytest.mark.asyncio
 async def test_background_job_propagates_timeout(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.05)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
     ws = _ws()
     r1 = await ws.execute("sleep 2 &")
     assert r1.exit_code == 0
@@ -233,8 +233,7 @@ async def test_background_job_propagates_timeout(restore_defaults):
 
 @pytest.mark.asyncio
 async def test_stderr_redirect_does_not_swallow_timeout_exit(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.05)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
     ws = _ws()
     r = await ws.execute("sleep 2 2>&1")
     assert r.exit_code == 124
@@ -244,8 +243,7 @@ async def test_stderr_redirect_does_not_swallow_timeout_exit(restore_defaults):
 
 @pytest.mark.asyncio
 async def test_job_table_reports_completed_bg_without_wait(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.05)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.05)
     ws = _ws()
     await ws.execute("sleep 5 &")
     await asyncio.sleep(0.2)
@@ -275,7 +273,7 @@ async def test_timeout_wrap_preserves_lazy_zero_exit_on_match():
 
 @pytest.mark.asyncio
 async def test_truncation_keeps_lazy_exit_zero_on_match():
-    ws = _ws({"grep": CommandSafeguard(max_lines=2, timeout_seconds=600)})
+    ws = _ws({"grep": Limit(max_lines=2, timeout_seconds=600)})
     await ws.execute("printf 'a\\na\\na\\na\\n' > /data/f.txt")
     r = await ws.execute("grep a /data/f.txt")
     assert r.exit_code == 0
@@ -284,8 +282,7 @@ async def test_truncation_keeps_lazy_exit_zero_on_match():
 
 @pytest.mark.asyncio
 async def test_provision_dry_run_honors_timeout(monkeypatch, restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["cat"] = CommandSafeguard(
-        timeout_seconds=0.1)
+    sg.DEFAULT_COMMAND_LIMITS["cat"] = Limit(timeout_seconds=0.1)
     monkeypatch.setattr("mirage.workspace.workspace.execute.provision_node",
                         _slow_provision)
     ws = _ws()
@@ -296,8 +293,7 @@ async def test_provision_dry_run_honors_timeout(monkeypatch, restore_defaults):
 @pytest.mark.asyncio
 async def test_timeout_preserves_partial_records_and_logs(
         caplog, restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
-        timeout_seconds=0.1)
+    sg.DEFAULT_COMMAND_LIMITS["sleep"] = Limit(timeout_seconds=0.1)
     ws = _ws()
     await ws.execute("echo hello > /data/f.txt")
     before = len(ws._ops.records)
@@ -309,7 +305,7 @@ async def test_timeout_preserves_partial_records_and_logs(
 
 
 @pytest.mark.asyncio
-async def test_cross_mount_cat_aggregates_tightest_safeguard():
+async def test_cross_mount_cat_aggregates_tightest_limit():
     a = RAMResource()
     b = RAMResource()
     a._store.dirs.add("/")
@@ -319,25 +315,22 @@ async def test_cross_mount_cat_aggregates_tightest_safeguard():
     ws = Workspace(
         {
             "/a/": (a, MountMode.WRITE, {
-                "cat":
-                CommandSafeguard(max_lines=100, on_exceed=OnExceed.TRUNCATE)
+                "cat": Limit(max_lines=100, on_exceed=OnExceed.TRUNCATE)
             }),
-            "/b/":
-            (b, MountMode.WRITE, {
-                "cat": CommandSafeguard(max_lines=1, on_exceed=OnExceed.ERROR)
+            "/b/": (b, MountMode.WRITE, {
+                "cat": Limit(max_lines=1, on_exceed=OnExceed.ERROR)
             }),
         },
         mode=MountMode.WRITE)
     r = await ws.execute("cat /a/x.txt /b/y.txt")
-    assert r.safeguard.max_lines == 1
-    assert r.safeguard.on_exceed is OnExceed.ERROR
+    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    assert resolved.max_lines == 1
+    assert resolved.on_exceed is OnExceed.ERROR
 
 
 @pytest.mark.asyncio
-async def test_python3_default_safeguard_fires_like_any_command(
-        restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["python3"] = CommandSafeguard(
-        timeout_seconds=0.2)
+async def test_python3_default_limit_fires_like_any_command(restore_defaults):
+    sg.DEFAULT_COMMAND_LIMITS["python3"] = Limit(timeout_seconds=0.2)
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[LocalRuntime()])
@@ -348,12 +341,11 @@ async def test_python3_default_safeguard_fires_like_any_command(
 
 
 @pytest.mark.asyncio
-async def test_python3_mount_safeguard_fires_like_any_command(
-        restore_defaults):
+async def test_python3_mount_limit_fires_like_any_command(restore_defaults):
     ws = Workspace(
         {
             "/data": (RAMResource(), MountMode.EXEC, {
-                "python3": CommandSafeguard(timeout_seconds=0.2)
+                "python3": Limit(timeout_seconds=0.2)
             })
         },
         mode=MountMode.EXEC,
@@ -366,8 +358,7 @@ async def test_python3_mount_safeguard_fires_like_any_command(
 
 @pytest.mark.asyncio
 async def test_python3_timeout_reclaims_monty_interpreter(restore_defaults):
-    sg.DEFAULT_COMMAND_SAFEGUARDS["python3"] = CommandSafeguard(
-        timeout_seconds=0.2)
+    sg.DEFAULT_COMMAND_LIMITS["python3"] = Limit(timeout_seconds=0.2)
     ram = RAMResource()
     ram._store.files["/spin.py"] = b"n = 0\nwhile True:\n    n = n + 1\n"
     ws = Workspace({"/data": ram}, mode=MountMode.EXEC)
@@ -383,13 +374,13 @@ async def test_python3_timeout_reclaims_monty_interpreter(restore_defaults):
 
 
 @pytest.mark.asyncio
-async def test_python3_mount_safeguard_follows_script_path(restore_defaults):
+async def test_python3_mount_limit_follows_script_path(restore_defaults):
     ram = RAMResource()
     ram._store.files["/slow.py"] = b"import time; time.sleep(5)\n"
     ws = Workspace(
         {
             "/data": (ram, MountMode.EXEC, {
-                "python3": CommandSafeguard(timeout_seconds=0.2)
+                "python3": Limit(timeout_seconds=0.2)
             })
         },
         mode=MountMode.EXEC,

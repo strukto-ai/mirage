@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandTimeoutError } from '../../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
 import { Runtime } from '../runtime.ts'
 import { EvalError } from '../runtime_errors.ts'
 import { EVALUATOR, type Evaluator } from '../runtime_mixin.ts'
@@ -193,7 +193,7 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
     const err: string[] = []
     const exit = { code: 0, called: false }
     // The guest executes on this event loop, so a busy loop blocks the
-    // safeguard timer itself: the VM's interrupt hook is the only thing
+    // limit timer itself: the VM's interrupt hook is the only thing
     // that can still fire (python's epoch interruption on a thread).
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
@@ -340,7 +340,7 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
 
   /**
    * Arm the VM's interrupt hook: the only cancellation that works when
-   * the guest blocks the event loop. Trips on the safeguard deadline
+   * the guest blocks the event loop. Trips on the limit deadline
    * (recorded in the returned cell) or on an aborted signal.
    */
   private installInterrupt(

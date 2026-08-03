@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../runtime.ts'
-import { CommandTimeoutError } from '../../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
@@ -104,7 +104,7 @@ export async function handlePython(
       new ExecutionNode({ command: cmdStr, exitCode: result.exitCode }),
     ]
   } catch (err) {
-    // An in-VM safeguard interrupt is a timeout, not an interpreter
+    // An in-VM limit interrupt is a timeout, not an interpreter
     // failure: let it reach the workspace's 124 handler.
     if (err instanceof CommandTimeoutError) throw err
     if (err instanceof PyodideUnavailableError || err instanceof MontyUnavailableError) {

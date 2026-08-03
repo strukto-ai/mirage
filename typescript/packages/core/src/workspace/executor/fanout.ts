@@ -19,7 +19,6 @@ import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
-import { resolveAcrossMounts } from './policy/safeguard.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -308,7 +307,11 @@ export async function fanOutTraversal(
   }
 
   mergedIo.exitCode = finalIoExit
-  mergedIo.safeguard = resolveAcrossMounts(cmdName, mountsToRun)
+  mergedIo.producer = {
+    command: cmdName,
+    prefixes: mountsToRun.map((m) => m.prefix),
+    declared: null,
+  }
   const stderrBytes = await materialize(mergedIo.stderr)
   const exec = new ExecutionNode({
     command: cmdStr,

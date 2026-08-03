@@ -516,6 +516,309 @@
           }
         }
       ]
+    },
+    {
+      "id": "hook_pre_command_custom",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "deny_flag",
+            "command": "grep",
+            "flag": "-r",
+            "message": "grep: recursive search is not allowed here\n"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "grep -r hello /ram",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "grep: recursive search is not allowed here\n"
+          }
+        },
+        {
+          "command": "grep hello /ram/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_ops_write_lock",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "open.txt": "free\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "lock_writes",
+            "prefix": "/ram/locked/"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi > /ram/locked/f.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "/ram/locked/f.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo hi > /ram/note.txt && cat /ram/note.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/open.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "free\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_ops_read_seal",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "x.sealed": "nope\n",
+              "y.txt": "yes\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": ".sealed"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/y.txt",
+          "expect": {
+            "content": "yes\n"
+          }
+        },
+        {
+          "read_op": "/ram/x.sealed",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_ops_redact",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "clean.txt": "hello\n",
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "redact_reads",
+            "marker": "TOPSECRET"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/clean.txt",
+          "expect": {
+            "content": "hello\n"
+          }
+        },
+        {
+          "read_op": "/ram/secret.txt",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_ops_cap_and_deny_wins",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "big.log": "abcdefghij\n",
+              "note.txt": "abcdefghij\n",
+              "secret.log": "TOPSECRET plans\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "op_read_cap",
+            "suffix": ".log",
+            "max_bytes": 5
+          },
+          {
+            "name": "redact_reads",
+            "marker": "TOPSECRET"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/big.log",
+          "expect": {
+            "content": "abcde"
+          }
+        },
+        {
+          "read_op": "/ram/note.txt",
+          "expect": {
+            "content": "abcdefghij\n"
+          }
+        },
+        {
+          "read_op": "/ram/secret.log",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_cap_merges_tightest",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "1\n2\n3\n4\n5\n"
+            },
+            "limits": {
+              "cat": {
+                "max_lines": 3
+              }
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "line_cap",
+            "max_lines": 2
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cat /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n2\n",
+            "stderr_contains": "output truncated"
+          }
+        },
+        {
+          "command": "head -n 1 /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_error_mode",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "1\n2\n3\n4\n5\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "line_cap",
+            "max_lines": 2,
+            "on_exceed": "error"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cat /ram/data.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "output truncated"
+          }
+        },
+        {
+          "command": "head -n 1 /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_fail_closed",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "boom"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "policy Boom failed"
+          }
+        }
+      ]
     }
   ]
 }

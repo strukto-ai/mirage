@@ -16,12 +16,12 @@ import {
   CommandTimeoutError,
   guardOutput,
   runWithTimeout,
-} from '../../commands/builtin/utils/safeguard.ts'
+} from '../../commands/builtin/utils/limit.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { Runtime } from '../executor/runtime.ts'
 import type { RunResult } from '../executor/runtime_types.ts'
-import { resolveSafeguard } from '../executor/policy/safeguard.ts'
+import { type Policies, postExecuteGate, resolveLimit } from '../../policy/index.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Session } from '../session/session.ts'
 import { commandName } from './utils.ts'
@@ -30,7 +30,7 @@ import { commandName } from './utils.ts'
  * Hand the raw line to one runtime instead of walking its tree.
  * Mirrors the Python `run_whole_line` in `workspace/line.py`.
  *
- * A whole line is a command like any other: the same safeguard
+ * A whole line is a command like any other: the same limit
  * resolution and boundary rule as the tree, so `timeoutSeconds` answers
  * 124 and `maxBytes`/`maxLines` cap the output. `invalidate` drops
  * local read caches once the line has run: it may have written
@@ -42,11 +42,12 @@ export async function runWholeLine(
   stdin: ByteSource | null,
   session: Session,
   mounts: readonly MountEntry[],
+  policies: Policies,
   invalidate: () => Promise<void>,
 ): Promise<RunResult> {
   const data = stdin !== null ? await materialize(stdin) : null
   const name = commandName(command)
-  const guard = resolveSafeguard(name, mounts)
+  const guard = resolveLimit(name, mounts)
   let result: RunResult
   try {
     result = await runWithTimeout(
@@ -71,11 +72,23 @@ export async function runWholeLine(
   } finally {
     await invalidate()
   }
+  const [deny, bound] = await postExecuteGate(policies, {
+    producer: { command: name, prefixes: mounts.map((m) => m.prefix), declared: null },
+    exitCode: result.exitCode,
+  })
+  if (deny !== null) {
+    const denyBytes = new TextEncoder().encode(deny.message)
+    const priorErr = result.stderr !== null ? await materialize(result.stderr) : new Uint8Array()
+    const mergedErr = new Uint8Array(priorErr.byteLength + denyBytes.byteLength)
+    mergedErr.set(priorErr, 0)
+    mergedErr.set(denyBytes, priorErr.byteLength)
+    return { stdout: new Uint8Array(), stderr: mergedErr, exitCode: deny.exitCode ?? 1 }
+  }
   const [capped, cappedErr, cappedCode] = await guardOutput(
     result.stdout,
     result.stderr,
     result.exitCode,
-    guard,
+    bound,
   )
   return {
     stdout: capped !== null ? await materialize(capped) : new Uint8Array(),

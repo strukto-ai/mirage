@@ -18,7 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
-import { CommandSafeguard, MountMode, OnExceed } from '../types.ts'
+import { Limit, MountMode, OnExceed } from '../types.ts'
 import { Workspace } from './workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -44,9 +44,9 @@ async function buildWs(): Promise<Workspace> {
       mode: MountMode.WRITE,
       ops: reg,
       shellParser: parser,
-      commandSafeguards: {
-        '/a/': { cat: new CommandSafeguard({ maxLines: 4, onExceed: OnExceed.TRUNCATE }) },
-        '/b/': { cat: new CommandSafeguard({ maxLines: 2, onExceed: OnExceed.ERROR }) },
+      commandLimits: {
+        '/a/': { cat: new Limit({ maxLines: 4, onExceed: OnExceed.TRUNCATE }) },
+        '/b/': { cat: new Limit({ maxLines: 2, onExceed: OnExceed.ERROR }) },
       },
     },
   )
@@ -55,7 +55,7 @@ async function buildWs(): Promise<Workspace> {
   return ws
 }
 
-describe('connection safeguard (src)', () => {
+describe('connection limit (src)', () => {
   it('single cat /a truncates to 4', async () => {
     const ws = await buildWs()
     const res = await ws.execute('cat /a/f.txt')
@@ -64,7 +64,7 @@ describe('connection safeguard (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('semicolon: rightmost /a safeguard caps combined to 4', async () => {
+  it('semicolon: rightmost /a limit caps combined to 4', async () => {
     const ws = await buildWs()
     const res = await ws.execute('cat /b/f.txt ; cat /a/f.txt')
     await ws.close()
@@ -72,7 +72,7 @@ describe('connection safeguard (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('or: rightmost /a safeguard caps to 4', async () => {
+  it('or: rightmost /a limit caps to 4', async () => {
     const ws = await buildWs()
     const res = await ws.execute('false || cat /a/f.txt')
     await ws.close()
@@ -80,7 +80,7 @@ describe('connection safeguard (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('and: rightmost /b safeguard errors', async () => {
+  it('and: rightmost /b limit errors', async () => {
     const ws = await buildWs()
     const res = await ws.execute('cat /a/f.txt && cat /b/f.txt')
     await ws.close()
@@ -88,7 +88,7 @@ describe('connection safeguard (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('subshell: rightmost /a safeguard caps combined to 4', async () => {
+  it('subshell: rightmost /a limit caps combined to 4', async () => {
     const ws = await buildWs()
     const res = await ws.execute('( cat /b/f.txt ; cat /a/f.txt )')
     await ws.close()
@@ -96,7 +96,7 @@ describe('connection safeguard (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('repeated read keeps the per-mount safeguard (no cache-mount fallthrough)', async () => {
+  it('repeated read keeps the per-mount limit (no cache-mount fallthrough)', async () => {
     const ws = await buildWs()
     const first = await ws.execute('cat /a/f.txt')
     const second = await ws.execute('cat /a/f.txt')

@@ -28,7 +28,7 @@ import type { Session } from '../../session/session.ts'
 import { LS_FAILURE } from '../../../commands/builtin/generic/ls.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
-import { CommandTimeoutError } from '../../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { formatFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -182,13 +182,13 @@ export async function runOnMount(
   }
 
   // resolveMount may redirect a warm remote read to the cache mount, which
-  // does not carry the origin mount's per-command safeguards. Resolve the
-  // safeguard from the real (pre-redirect) mount so the cap survives the hit.
+  // does not carry the origin mount's per-command limits. Resolve the
+  // limit from the real (pre-redirect) mount so the cap survives the hit.
   // A spec can bucket a path-shaped operand as TEXT (python3's script), so
   // when the spec-split paths are empty fall back to the classified scope
   // hint before cwd, mirroring the Python executor.
   const realMount = registry.mountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
-  const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
+  const limitOverride = realMount?.commandLimits.get(cmdName) ?? null
 
   // ls/stat render stat rows from the backend's own stat, which never sees
   // namespace attr overlays (chmod/chown/touch on overlay backends) or the
@@ -224,7 +224,7 @@ export async function runOnMount(
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
-      safeguardOverride,
+      limitOverride,
     })
     let stdout = initialStdout
     // A minor problem (exit 1: an entry below the operand could not be
@@ -268,7 +268,7 @@ export async function runOnMount(
         }),
       ]
     }
-    // A safeguard timeout is not a filesystem failure: let it reach the
+    // A limit timeout is not a filesystem failure: let it reach the
     // workspace-level handler that answers with exit 124.
     if (err instanceof CommandTimeoutError) throw err
     return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandSafeguard } from '../types.ts'
+import type { Producer } from '../types.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
@@ -33,7 +33,7 @@ export interface IOResultInit {
   reads?: Record<string, ByteSource>
   writes?: Record<string, ByteSource>
   cache?: string[]
-  safeguard?: CommandSafeguard | null
+  producer?: Producer | null
 }
 
 export class IOResult {
@@ -43,12 +43,12 @@ export class IOResult {
   reads: Record<string, ByteSource>
   writes: Record<string, ByteSource>
   cache: string[]
-  // Output cap for the command that produced this result. Resolved at
-  // dispatch time by Mount.executeCmd, applied at the workspace
-  // boundary after VALUE barrier. TODO: hoist to a finalization
-  // context returned alongside (stream, io) when a second policy
-  // field appears.
-  safeguard: CommandSafeguard | null
+  // Provenance of this result (which command, spanning which
+  // mounts); merge keeps the rightmost producer, mirroring whose
+  // stream the shell shows. The workspace boundary hands it to the
+  // policy layer as context. Facts ride the envelope, policy
+  // decisions never do.
+  producer: Producer | null
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
@@ -58,7 +58,7 @@ export class IOResult {
     this.reads = init.reads ?? {}
     this.writes = init.writes ?? {}
     this.cache = init.cache ?? []
-    this.safeguard = init.safeguard ?? null
+    this.producer = init.producer ?? null
     this.streamSource = null
   }
 
@@ -116,7 +116,7 @@ export class IOResult {
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },
       cache: [...this.cache, ...other.cache],
-      safeguard: other.safeguard,
+      producer: other.producer,
     })
     result.streamSource = other
     return result

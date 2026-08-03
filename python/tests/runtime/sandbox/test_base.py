@@ -21,7 +21,7 @@ from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.types import RunArgs, RunResult
-from mirage.types import CommandSafeguard
+from mirage.types import Limit
 
 
 class RecordingSandbox(RemoteSandbox):
@@ -135,13 +135,13 @@ async def test_line_timeout_answers_124():
             await asyncio.sleep(0.5)
             return await super().exec_line(line, stdin, env, cwd)
 
-    guards = {"python3": CommandSafeguard(timeout_seconds=0.05)}
+    guards = {"python3": Limit(timeout_seconds=0.05)}
     box = SlowBox(captures=("python3", ))
     ws = Workspace({"/data": (RAMResource(), MountMode.EXEC, guards)},
                    mode=MountMode.EXEC,
                    runtimes=[box, "vfs"])
     try:
-        # A captured line obeys the same command_safeguards as any
+        # A captured line obeys the same command_limits as any
         # command: the mount's python3 timeout answers exit 124.
         io = await ws.execute("python3 train.py")
         assert io.exit_code == 124
@@ -159,7 +159,7 @@ async def test_line_output_caps_truncate_with_notice():
                             env: dict[str, str], cwd: str) -> RunResult:
             return RunResult(stdout=b"a\nb\nc\n", stderr=None, exit_code=0)
 
-    guards = {"python3": CommandSafeguard(max_lines=2)}
+    guards = {"python3": Limit(max_lines=2)}
     box = ChattyBox(captures=("python3", ))
     ws = Workspace({"/data": (RAMResource(), MountMode.EXEC, guards)},
                    mode=MountMode.EXEC,
@@ -168,7 +168,7 @@ async def test_line_output_caps_truncate_with_notice():
         io = await ws.execute("python3 train.py")
         assert io.exit_code == 0
         assert await materialize(io.stdout) == b"a\nb\n"
-        assert b"truncated at safeguard limit" in await materialize(io.stderr)
+        assert b"truncated at limit" in await materialize(io.stderr)
     finally:
         await ws.close()
 

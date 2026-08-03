@@ -16,7 +16,7 @@ import functools
 from typing import Any
 
 from mirage.commands.builtin.generic.ls import LS_FAILURE
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.errors import UsageError
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
@@ -233,7 +233,7 @@ async def run_on_mount(
         return None, IOResult(exit_code=exc.exit_code,
                               stderr=f"{exc}\n".encode())
     except CommandTimeoutError:
-        # A safeguard timeout is answered by the workspace-level handler
+        # A limit timeout is answered by the workspace-level handler
         # (exit 124), not here.
         raise
     except Exception as exc:

@@ -15,8 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.resource.base import BaseResource
-from mirage.runtime.policy.safeguard import CommandSafeguard
-from mirage.types import MountBackend, MountMode
+from mirage.types import Limit, MountBackend, MountMode
 
 
 @dataclass(frozen=True)
@@ -29,5 +28,4 @@ class Mount:
     # Where to mount, for the kernel backends. None picks a temporary
     # directory appropriate for the backend. Ignored when backend is VFS.
     mountpoint: str | None = None
-    command_safeguards: dict[str,
-                             CommandSafeguard] = field(default_factory=dict)
+    command_limits: dict[str, Limit] = field(default_factory=dict)

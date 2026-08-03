@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
-import { CommandSafeguard, MountMode } from '../../../types.ts'
+import { Limit, MountMode } from '../../../types.ts'
 import { Workspace } from '../../workspace.ts'
 import { RemoteSandbox } from './base.ts'
 import type { RunResult, RuntimeOptions } from '../runtime_types.ts'
@@ -148,13 +148,13 @@ describe('RemoteSandbox', () => {
     }
     const box = new SlowBox({ captures: ['python3'] })
     const parser = await getTestParser()
-    const guards = { python3: new CommandSafeguard({ timeoutSeconds: 0.05 }) }
+    const guards = { python3: new Limit({ timeoutSeconds: 0.05 }) }
     const ws = new Workspace(
       { '/data': [new RAMResource(), MountMode.EXEC, guards] },
       { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
     )
     try {
-      // A captured line obeys the same command safeguards as any
+      // A captured line obeys the same command limits as any
       // command: the mount's python3 timeout answers exit 124.
       const io = await ws.execute('python3 train.py')
       expect(io.exitCode).toBe(124)
@@ -172,7 +172,7 @@ describe('RemoteSandbox', () => {
     }
     const box = new ChattyBox({ captures: ['python3'] })
     const parser = await getTestParser()
-    const guards = { python3: new CommandSafeguard({ maxLines: 2 }) }
+    const guards = { python3: new Limit({ maxLines: 2 }) }
     const ws = new Workspace(
       { '/data': [new RAMResource(), MountMode.EXEC, guards] },
       { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
@@ -181,7 +181,7 @@ describe('RemoteSandbox', () => {
       const io = await ws.execute('python3 train.py')
       expect(io.exitCode).toBe(0)
       expect(DEC.decode(io.stdout)).toBe('a\nb\n')
-      expect(DEC.decode(io.stderr)).toContain('truncated at safeguard limit')
+      expect(DEC.decode(io.stderr)).toContain('truncated at limit')
     } finally {
       await ws.close()
     }

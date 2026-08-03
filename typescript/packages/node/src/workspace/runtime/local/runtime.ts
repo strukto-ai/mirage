@@ -50,7 +50,7 @@ export class LocalRuntime extends Runtime {
 
   run(args: RunArgs): Promise<RunResult> {
     return new Promise((resolve, reject) => {
-      // The signal aborts when the command's safeguard timeout trips:
+      // The signal aborts when the command's limit timeout trips:
       // spawn then SIGKILLs the child (matching the python runtime's
       // proc.kill() on cancellation) and 'close' settles the promise.
       const child = spawn(this.python, ['-c', args.code, ...args.args], {

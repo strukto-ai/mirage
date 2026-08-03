@@ -16,14 +16,12 @@ from dataclasses import dataclass, field
 from typing import TypeAlias
 
 from mirage.resource.base import BaseResource
-from mirage.runtime.policy.safeguard import CommandSafeguard
-from mirage.types import MountBackend, MountMode
+from mirage.types import Limit, MountBackend, MountMode
 from mirage.workspace.mount.spec import Mount
 
 ResourceMount: TypeAlias = (BaseResource | Mount
                             | tuple[BaseResource, MountMode]
-                            | tuple[BaseResource, MountMode,
-                                    dict[str, CommandSafeguard]])
+                            | tuple[BaseResource, MountMode, dict[str, Limit]])
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,4 +38,4 @@ class MountSpec:
     mode: MountMode
     backend: MountBackend = MountBackend.VFS
     mountpoint: str | None = None
-    safeguards: dict[str, CommandSafeguard] = field(default_factory=dict)
+    command_limits: dict[str, Limit] = field(default_factory=dict)

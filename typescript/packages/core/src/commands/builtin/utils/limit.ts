@@ -14,7 +14,7 @@
 
 import { yieldBytes } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
-import { type CommandSafeguard, OnExceed } from '../../../types.ts'
+import { type Limit, OnExceed } from '../../../types.ts'
 
 const NEWLINE = 0x0a
 const ENC = new TextEncoder()
@@ -31,10 +31,10 @@ export class CommandTimeoutError extends Error {
   }
 }
 
-export class SafeguardExceededError extends Error {
+export class LimitExceededError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = 'SafeguardExceededError'
+    this.name = 'LimitExceededError'
   }
 }
 
@@ -78,11 +78,11 @@ async function* withTimeout(
 
 export function maybeWithTimeout(
   stream: ByteSource | null,
-  safeguard: CommandSafeguard | null,
+  limit: Limit | null,
   command: string,
 ): ByteSource | null {
   if (stream === null || stream instanceof Uint8Array) return stream
-  const timeout = safeguard?.timeoutSeconds ?? null
+  const timeout = limit?.timeoutSeconds ?? null
   if (timeout === null || timeout <= 0) return stream
   return withTimeout(stream, timeout, command)
 }
@@ -109,13 +109,13 @@ function trimToLines(buf: Uint8Array, maxLines: number): Uint8Array {
   return buf
 }
 
-function buildNotice(safeguard: CommandSafeguard): Uint8Array {
+function buildNotice(limit: Limit): Uint8Array {
   const parts: string[] = []
-  if (safeguard.maxLines !== null) parts.push(`${String(safeguard.maxLines)} lines`)
-  if (safeguard.maxBytes !== null) parts.push(`${String(safeguard.maxBytes)} bytes`)
-  const limit = parts.join(' / ')
+  if (limit.maxLines !== null) parts.push(`${String(limit.maxLines)} lines`)
+  if (limit.maxBytes !== null) parts.push(`${String(limit.maxBytes)} bytes`)
+  const detail = parts.join(' / ')
   return ENC.encode(
-    `output truncated at safeguard limit (${limit}); ` +
+    `output truncated at limit (${detail}); ` +
       `narrow with grep, or read more with head -n / tail -n / ` +
       `a more specific path\n`,
   )
@@ -139,12 +139,12 @@ function countNewlines(buf: Uint8Array): number {
   return n
 }
 
-export async function applySafeguard(
+export async function applyLimit(
   src: ByteSource,
-  safeguard: CommandSafeguard | null,
+  limit: Limit | null,
 ): Promise<[ByteSource | null, IOResult]> {
-  if (safeguard === null) return [src, new IOResult()]
-  const { maxLines, maxBytes } = safeguard
+  if (limit === null) return [src, new IOResult()]
+  const { maxLines, maxBytes } = limit
   if (maxLines === null && maxBytes === null) return [src, new IOResult()]
 
   const chunks: Uint8Array[] = []
@@ -176,8 +176,8 @@ export async function applySafeguard(
   }
 
   if (!truncated) return [data, new IOResult()]
-  const notice = buildNotice(safeguard)
-  if (safeguard.onExceed === OnExceed.ERROR) {
+  const notice = buildNotice(limit)
+  if (limit.onExceed === OnExceed.ERROR) {
     return [null, new IOResult({ exitCode: 1, stderr: notice })]
   }
   return [data, new IOResult({ stderr: notice })]
@@ -194,10 +194,10 @@ export async function guardOutput(
   stdout: ByteSource | null,
   stderr: ByteSource | null,
   exitCode: number,
-  safeguard: CommandSafeguard | null,
+  limit: Limit | null,
 ): Promise<[ByteSource | null, ByteSource | null, number]> {
   if (stdout === null) return [stdout, stderr, exitCode]
-  const [data, sgIo] = await applySafeguard(stdout, safeguard)
+  const [data, sgIo] = await applyLimit(stdout, limit)
   if (sgIo.stderr !== null) {
     const existing = stderr !== null ? await materialize(stderr) : new Uint8Array()
     const added = await materialize(sgIo.stderr)
@@ -209,20 +209,16 @@ export async function guardOutput(
   return [data, stderr, sgIo.exitCode !== 0 ? sgIo.exitCode : exitCode]
 }
 
-export async function applyOpSafeguard(
-  result: unknown,
-  safeguard: CommandSafeguard | null,
-): Promise<unknown> {
-  if (safeguard === null) return result
-  if (safeguard.maxBytes === null && safeguard.maxLines === null) return result
+export async function applyOpLimit(result: unknown, limit: Limit | null): Promise<unknown> {
+  if (limit === null) return result
+  if (limit.maxBytes === null && limit.maxLines === null) return result
   const isBytes = result instanceof Uint8Array
   const isStream = result !== null && typeof result === 'object' && Symbol.asyncIterator in result
   if (!isBytes && !isStream) return result
-  const [data, sgIo] = await applySafeguard(result as ByteSource, safeguard)
+  const [data, sgIo] = await applyLimit(result as ByteSource, limit)
   if (sgIo.exitCode !== 0) {
-    const message =
-      sgIo.stderr instanceof Uint8Array ? DEC.decode(sgIo.stderr) : 'safeguard exceeded'
-    throw new SafeguardExceededError(message.trim())
+    const message = sgIo.stderr instanceof Uint8Array ? DEC.decode(sgIo.stderr) : 'limit exceeded'
+    throw new LimitExceededError(message.trim())
   }
   return data
 }

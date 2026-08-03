@@ -17,12 +17,12 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Operand, Option
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.types import CommandSafeguard
+from mirage.types import Limit
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import handle_cli
 from mirage.workspace.session import Session
@@ -128,14 +128,13 @@ async def slow_send(config, paths, *texts, **flags):
 
 
 @pytest.mark.asyncio
-async def test_leaf_safeguard_bounds_the_handler():
-    # The declared safeguard wraps the handler body like mount
+async def test_leaf_limit_bounds_the_handler():
+    # The declared limit wraps the handler body like mount
     # dispatch: a blocking leaf times out instead of hanging.
     spec = CLISpec(name="prog",
-                   subcommands=(CLISpec(
-                       name="run",
-                       fn=slow_send,
-                       safeguard=CommandSafeguard(timeout_seconds=0.05)), ))
+                   subcommands=(CLISpec(name="run",
+                                        fn=slow_send,
+                                        limit=Limit(timeout_seconds=0.05)), ))
     install = CLIInstall(name="prog", spec=spec, config=None)
     with pytest.raises(CommandTimeoutError, match="prog run"):
         await handle_cli(install, ["prog", "run"], Session("t"))

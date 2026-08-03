@@ -16,12 +16,12 @@ import errno
 
 import pytest
 
-from mirage.policy import (Action, CommandContext, Deny, GuardSpec,
-                           MountRootPolicy, OpsContext, OpsResultContext,
-                           Policies, Policy, PolicyError, post_ops_gate,
-                           pre_ops_gate)
+from mirage.policy import (Action, CommandContext, Deny, ExecuteResultContext,
+                           GuardSpec, MountRootPolicy, OpsContext,
+                           OpsResultContext, Policies, Policy, PolicyError,
+                           post_execute_gate, post_ops_gate, pre_ops_gate)
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode, PathSpec
+from mirage.types import Limit, MountMode, PathSpec, Producer
 from mirage.workspace.mount import MountRegistry
 
 
@@ -191,3 +191,76 @@ async def test_post_ops_gate_suppresses_the_result():
         await post_ops_gate(policies, "read", _path("/data/x"), False,
                             "/data/", b"a long secret payload")
     assert excinfo.value.errno == errno.EACCES
+
+
+class CapFour(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        return Limit(max_bytes=4)
+
+
+class CapTwo(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        return Limit(max_bytes=2)
+
+
+class LimitOnPre(Policy):
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        return Limit(max_bytes=1)
+
+
+class CapLines(Policy):
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        return Limit(max_lines=2)
+
+
+def _ops_result_ctx() -> OpsResultContext:
+    return OpsResultContext(op="read",
+                            path=_path("/data/x"),
+                            write=False,
+                            prefix="/data/",
+                            result=b"payload")
+
+
+@pytest.mark.asyncio
+async def test_post_ops_limits_merge_to_the_tightest():
+    policies = Policies()
+    policies.add(CapFour())
+    policies.add(CapTwo())
+    deny, bound = await policies.post_ops(_ops_result_ctx())
+    assert deny is None
+    assert bound is not None
+    assert bound.max_bytes == 2
+
+
+@pytest.mark.asyncio
+async def test_post_ops_gate_returns_the_merged_bound():
+    policies = Policies()
+    policies.add(CapFour())
+    bound = await post_ops_gate(policies, "read", _path("/data/x"), False,
+                                "/data/", b"payload")
+    assert bound is not None
+    assert bound.max_bytes == 4
+
+
+@pytest.mark.asyncio
+async def test_a_limit_is_illegal_on_pre_command():
+    policies = Policies()
+    policies.add(LimitOnPre())
+    with pytest.raises(PolicyError, match="LimitOnPre"):
+        await policies.pre_command(_ctx("ls"))
+
+
+@pytest.mark.asyncio
+async def test_post_execute_gate_merges_user_limits():
+    policies = Policies()
+    policies.add(CapLines())
+    deny, bound = await post_execute_gate(
+        policies,
+        ExecuteResultContext(producer=Producer(command="echo"), exit_code=0))
+    assert deny is None
+    assert bound is not None
+    assert bound.max_lines == 2

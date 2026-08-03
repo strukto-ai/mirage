@@ -27,11 +27,17 @@ import uuid  # noqa: E402
 from typing import Any  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
+from mirage.policy import Policy  # noqa: E402
+from mirage.policy.types import CommandContext  # noqa: E402
+from mirage.policy.types import Deny  # noqa: E402
+from mirage.policy.types import ExecuteResultContext  # noqa: E402
+from mirage.policy.types import OpsContext  # noqa: E402
+from mirage.policy.types import OpsResultContext  # noqa: E402
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.policy import ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime  # noqa: E402
 from mirage.runtime.types import RunArgs, RunResult  # noqa: E402
-from mirage.types import CommandSafeguard, PathSpec  # noqa: E402
+from mirage.types import Limit, PathSpec  # noqa: E402
 
 HOST = "python"
 SUITE_DIR = Path(__file__).parent
@@ -58,6 +64,112 @@ class EchoBox(Runtime):
         return RunResult(stdout=f"box:{line}\n".encode(),
                          stderr=None,
                          exit_code=0)
+
+
+class DenyFlag(Policy):
+    """Test-only pre_command policy: refuse a command carrying a flag."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._command = spec["command"]
+        self._flag = spec["flag"]
+        self._message = spec["message"]
+
+    async def pre_command(self, ctx: CommandContext) -> Deny | None:
+        if ctx.command == self._command and self._flag in ctx.argv:
+            return Deny(message=self._message)
+        return None
+
+
+class LockWrites(Policy):
+    """Test-only pre_ops policy: refuse write ops under a prefix."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._prefix = spec["prefix"]
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if ctx.write and ctx.path.virtual.startswith(self._prefix):
+            return Deny(message="locked\n")
+        return None
+
+
+class SealReads(Policy):
+    """Test-only pre_ops policy: refuse read ops on a path suffix."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._suffix = spec["suffix"]
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if not ctx.write and ctx.path.virtual.endswith(self._suffix):
+            return Deny(message="sealed\n")
+        return None
+
+
+class RedactReads(Policy):
+    """Test-only post_ops policy: refuse read results holding a marker."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._marker = spec["marker"].encode()
+
+    async def post_ops(self, ctx: OpsResultContext) -> Deny | None:
+        data = ctx.result if isinstance(ctx.result,
+                                        (bytes, bytearray)) else None
+        if ctx.op == "read" and data is not None and self._marker in data:
+            return Deny(message="redacted\n")
+        return None
+
+
+class OpReadCap(Policy):
+    """Test-only post_ops policy: cap read bytes on a path suffix."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._suffix = spec["suffix"]
+        self._max_bytes = spec["max_bytes"]
+
+    async def post_ops(self, ctx: OpsResultContext) -> Limit | None:
+        if ctx.op == "read" and ctx.path.virtual.endswith(self._suffix):
+            return Limit(max_bytes=self._max_bytes)
+        return None
+
+
+class LineCap(Policy):
+    """Test-only post_execute policy: bound every line's output."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._limit = Limit(**{k: v for k, v in spec.items() if k != "name"})
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Limit | None:
+        return self._limit
+
+
+class Boom(Policy):
+    """Test-only post_execute policy that throws: must fail closed."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        pass
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Limit | None:
+        raise RuntimeError("boom")
+
+
+POLICY_KINDS = {
+    "deny_flag": DenyFlag,
+    "lock_writes": LockWrites,
+    "seal_reads": SealReads,
+    "redact_reads": RedactReads,
+    "op_read_cap": OpReadCap,
+    "line_cap": LineCap,
+    "boom": Boom,
+}
+
+
+def _build_policy(spec: dict[str, Any]) -> Policy:
+    """One world policies entry, dispatched on its ``name``.
+
+    Args:
+        spec (dict[str, Any]): the entry; ``name`` picks the test policy
+            class, the remaining keys are its config.
+    """
+    return POLICY_KINDS[spec["name"]](spec)
 
 
 def _expand(value: Any) -> Any:
@@ -210,8 +322,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     for prefix, spec in mount_specs.items():
         resource = await _build_resource(spec, run_id)
         guards = {
-            cmd: CommandSafeguard(**kwargs)
-            for cmd, kwargs in spec.get("safeguards", {}).items()
+            cmd: Limit(**kwargs)
+            for cmd, kwargs in spec.get("limits", {}).items()
         }
         mounts[prefix] = (resource, MountMode.EXEC,
                           guards) if guards else resource
@@ -222,6 +334,8 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         kwargs["runtimes"] = [_build_entry(e) for e in world["runtimes"]]
     if "policy" in world:
         kwargs["policy"] = ScriptSource(world["policy"])
+    if "policies" in world:
+        kwargs["policies"] = [_build_policy(s) for s in world["policies"]]
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
     for prefix, name, data in seeds:
         await ws.dispatch("write",
@@ -278,6 +392,25 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
                 f"expected {expect.get('errno')}"
             ]
         return []
+    if "read_op" in step:
+        # Reads through the op door (the surface FUSE and programmatic
+        # access share), where pre_ops/post_ops policies fire.
+        content = ""
+        try:
+            result, _ = await ws.dispatch(
+                "read", PathSpec.from_str_path(step["read_op"]))
+            errno_name = "NONE"
+            content = bytes(result).decode()
+        except PermissionError:
+            errno_name = "EACCES"
+        problems = []
+        if errno_name != expect.get("errno", "NONE"):
+            problems.append(f"read_op errno {errno_name}, "
+                            f"expected {expect.get('errno', 'NONE')}")
+        if "content" in expect and content != expect["content"]:
+            problems.append(f"read_op content {content!r}, "
+                            f"expected {expect['content']!r}")
+        return [f"{case_id} {label}: {p}" for p in problems]
     command = step["command"]
     kwargs: dict[str, Any] = {}
     if "runtime" in step:

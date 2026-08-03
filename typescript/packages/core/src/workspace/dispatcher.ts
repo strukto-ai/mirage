@@ -15,7 +15,7 @@
 import { NOOPAccessor } from '../accessor/base.ts'
 import { applyIo } from '../cache/file/io.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
-import { applyOpSafeguard, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
+import { applyOpLimit, runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import { getExtension } from '../commands/resolve.ts'
 import { IOResult } from '../io/types.ts'
 import { eaccesReadOnly } from '../utils/errors.ts'
@@ -96,8 +96,10 @@ export class Dispatcher {
     if (caches && mount !== null && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
-        await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, cached)
-        return [cached, new IOResult({ reads: { [p.virtual]: cached } })]
+        const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, cached)
+        const served =
+          warmBound !== null ? ((await applyOpLimit(cached, warmBound)) as Uint8Array) : cached
+        return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
     if (
@@ -134,11 +136,11 @@ export class Dispatcher {
         ...fullArgs.slice(1),
       ]
     }
-    // Per-op command safeguards bind to the executing (post-follow)
+    // Per-op command limits bind to the executing (post-follow)
     // mount, and the timeout window covers only the backend op — cache
     // probes and post-write invalidation stay outside the budget —
     // mirroring Python's Mount.execute_op.
-    const opOverride = mount?.commandSafeguards.get(opName) ?? null
+    const opOverride = mount?.commandLimits.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
     // Backends name their records against the mount-relative key, so the
@@ -169,7 +171,6 @@ export class Dispatcher {
       await this.reconciler.onOpMissing(opName, p.virtual, err)
       throw err
     }
-    result = await applyOpSafeguard(result, opOverride)
     if (DISPATCH_WRITE_OPS.has(opName)) {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
       await this.invalidateAfterWriteByPath(p.virtual, observed)
@@ -180,7 +181,10 @@ export class Dispatcher {
     if (opName === 'stat' && result instanceof FileStat) {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
     }
-    await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
+    const bound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
+    if (bound !== null) {
+      result = await applyOpLimit(result, bound)
+    }
     return [result, new IOResult()]
   }
 

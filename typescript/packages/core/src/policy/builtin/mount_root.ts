@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Policy } from './base.ts'
-import type { Action, CommandContext, Deny } from './types.ts'
+import type { Policy } from '../base.ts'
+import type { Action, CommandContext, Deny } from '../types.ts'
 
 /**
  * Spot ln's -s/--symbolic by raw token scan. Same reason as

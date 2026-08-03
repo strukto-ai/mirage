@@ -25,6 +25,10 @@ import {
   MountMode,
   RAMResource,
   Workspace,
+  type Action,
+  type OpsContext,
+  type OpsResultContext,
+  type Policy,
 } from "@struktoai/mirage-node";
 
 // Size-unknown probe: a stat wrapper simulates API-backed resources (Linear,
@@ -61,6 +65,62 @@ async function runSizelessProbe(
     result.api_size_postread = (await stat(apiFile)).size;
   } finally {
     await handle.unmount();
+  }
+}
+
+// Policy probe: FUSE serves the workspace's op door, so a preOps deny
+// (sealed path) and a postOps deny (redacted content) must both surface as
+// EACCES to ordinary file APIs, while unguarded reads pass.
+class SealReadsPolicy implements Policy {
+  preOps(ctx: OpsContext): Action | null {
+    if (!ctx.write && ctx.path.virtual.endsWith(".sealed")) {
+      return { kind: "deny", message: "sealed\n" };
+    }
+    return null;
+  }
+}
+
+class RedactReadsPolicy implements Policy {
+  postOps(ctx: OpsResultContext): Action | null {
+    const data = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : null;
+    if (ctx.op === "read" && data !== null && data.includes("TOPSECRET")) {
+      return { kind: "deny", message: "redacted\n" };
+    }
+    return null;
+  }
+}
+
+async function runPolicyProbe(
+  result: Record<string, string | number | boolean | null>,
+): Promise<void> {
+  const enc = new TextEncoder();
+  const res = new RAMResource();
+  res.store.dirs.add("/");
+  res.store.files.set("/clean.txt", enc.encode("hello\n"));
+  res.store.files.set("/secret.txt", enc.encode("TOPSECRET plans\n"));
+  res.store.files.set("/x.sealed", enc.encode("nope\n"));
+  const ws = new Workspace(
+    { "/guarded": new Mount(res, { mode: MountMode.READ, backend: MountBackend.FUSE }) },
+    { policies: [new SealReadsPolicy(), new RedactReadsPolicy()] },
+  );
+  try {
+    await ws.fuseReady();
+    const mp = ws.fuseMountpoints["/guarded"];
+    result.policy_clean_read = (await readFile(`${mp}/clean.txt`, "utf8")).trim();
+    try {
+      await readFile(`${mp}/x.sealed`);
+      result.policy_sealed_eacces = false;
+    } catch (err) {
+      result.policy_sealed_eacces = (err as { code?: string }).code === "EACCES";
+    }
+    try {
+      await readFile(`${mp}/secret.txt`);
+      result.policy_redact_eacces = false;
+    } catch (err) {
+      result.policy_redact_eacces = (err as { code?: string }).code === "EACCES";
+    }
+  } finally {
+    await ws.close();
   }
 }
 
@@ -127,6 +187,7 @@ async function main(): Promise<void> {
     await ws.close();
   }
   await runSizelessProbe(result);
+  await runPolicyProbe(result);
   process.stdout.write(JSON.stringify(result) + "\n");
 }
 

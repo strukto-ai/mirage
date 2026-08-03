@@ -15,8 +15,7 @@
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.runtime.policy.safeguard import CommandSafeguard
-from mirage.types import MountBackend, MountMode
+from mirage.types import Limit, MountBackend, MountMode
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.mounts import (kernel_targets,
                                                normalize_resources)
@@ -29,7 +28,7 @@ def test_bare_resource_takes_the_default_mode():
     assert specs[0].resource is resource
     assert specs[0].mode == MountMode.WRITE
     assert specs[0].backend == MountBackend.VFS
-    assert specs[0].safeguards == {}
+    assert specs[0].command_limits == {}
 
 
 def test_pair_tuple_carries_its_own_mode():
@@ -38,13 +37,13 @@ def test_pair_tuple_carries_its_own_mode():
     assert specs[0].mode == MountMode.READ
 
 
-def test_triple_tuple_carries_safeguards():
-    guard = CommandSafeguard(timeout_seconds=1)
+def test_triple_tuple_carries_limits():
+    guard = Limit(timeout_seconds=1)
     specs = normalize_resources(
         {"/a": (RAMResource(), MountMode.READ, {
             "curl": guard
         })}, MountMode.WRITE)
-    assert specs[0].safeguards == {"curl": guard}
+    assert specs[0].command_limits == {"curl": guard}
 
 
 def test_mount_without_a_mode_falls_back_to_the_default():
@@ -81,10 +80,10 @@ def test_kernel_targets_selects_only_real_mountpoints():
     assert kernel_targets(specs) == [("/fuse", MountBackend.FUSE, "/tmp/mp")]
 
 
-def test_safeguards_are_copied_not_aliased():
-    guard = CommandSafeguard(timeout_seconds=1)
+def test_limits_are_copied_not_aliased():
+    guard = Limit(timeout_seconds=1)
     source = {"curl": guard}
     specs = normalize_resources(
         {"/a": (RAMResource(), MountMode.READ, source)}, MountMode.WRITE)
     source["wget"] = guard
-    assert set(specs[0].safeguards) == {"curl"}
+    assert set(specs[0].command_limits) == {"curl"}

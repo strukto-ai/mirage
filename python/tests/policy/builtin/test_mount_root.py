@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.policy import CommandContext, MountRootPolicy
-from mirage.policy.mount_root import has_parents_flag
+from mirage.policy.builtin.mount_root import has_parents_flag
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.mount import MountRegistry

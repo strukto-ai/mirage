@@ -18,8 +18,7 @@ from mirage.commands.errors import FindParseError
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.runtime.policy.safeguard import resolve_across_mounts
-from mirage.types import PathSpec
+from mirage.types import PathSpec, Producer
 from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -365,8 +364,9 @@ async def _fan_out_traversal(
                 final_io_exit = 1
 
     merged_io.exit_code = final_io_exit
-    merged_io.safeguard = resolve_across_mounts(cmd_name,
-                                                [primary_mount, *descendants])
+    merged_io.producer = Producer(
+        command=cmd_name,
+        prefixes=tuple(m.prefix for m in [primary_mount, *descendants]))
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
                               stderr=await materialize(merged_io.stderr))

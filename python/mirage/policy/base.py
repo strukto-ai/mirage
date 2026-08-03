@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.types import (Action, CommandContext, OpsContext,
-                                 OpsResultContext)
+from mirage.policy.types import (Action, CommandContext, ExecuteResultContext,
+                                 OpsContext, OpsResultContext)
 
 
 class Policy:
@@ -47,9 +47,22 @@ class Policy:
         return None
 
     async def post_ops(self, ctx: OpsResultContext) -> Action | None:
-        """Observe one completed VFS op; a Deny suppresses its result.
+        """Observe one completed VFS op; a Deny suppresses its result,
+        a Limit caps a byte-producing one.
 
         Args:
             ctx (OpsResultContext): the op and its raw result.
+        """
+        return None
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        """Bound one finished execute() line's output.
+
+        A Limit returned here merges with every other opining policy's
+        (tightest per field) and caps the line's stdout at the
+        workspace boundary.
+
+        Args:
+            ctx (ExecuteResultContext): the finished line's facts.
         """
         return None

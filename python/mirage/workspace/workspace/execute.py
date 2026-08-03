@@ -17,14 +17,14 @@ import logging
 from functools import partial
 from typing import Any
 
-from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
-                                                     run_with_timeout)
+from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
+                                                 run_with_timeout)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
+from mirage.policy import resolve_limit
 from mirage.provision import ProvisionResult
 from mirage.runtime.policy import PolicyDecision, PolicyDeny, PolicyError
-from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse)
 from mirage.workspace.abort import MirageAbortError
@@ -175,7 +175,7 @@ async def execute_line(
         exec_recursion = partial(recurse, ws, cancel, decision)
         if provision:
             name = command_name(command)
-            guard = resolve_safeguard(name) if name else None
+            guard = resolve_limit(name) if name else None
             timeout = guard.timeout_seconds if guard is not None else None
             return await run_with_timeout(
                 provision_node(ws._registry, ws.dispatch, plan_eval_stub,
@@ -185,7 +185,7 @@ async def execute_line(
         if line_runtime is not None:
             io = await run_whole_line(
                 line_runtime, command, stdin, effective_session,
-                ws._registry.mounts(),
+                ws._registry.mounts(), ws._registry.policies,
                 ws._dispatcher.invalidate_all_after_remote)
             session.last_exit_code = io.exit_code
             return io

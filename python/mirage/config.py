@@ -28,7 +28,7 @@ from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import ScriptSource
-from mirage.types import (KERNEL_BACKENDS, CommandSafeguard, ConsistencyPolicy,
+from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, Limit,
                           MountBackend, MountMode)
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
@@ -259,8 +259,7 @@ class MountBlock(BaseModel):
     resource: str
     mode: MountMode | None = None
     config: dict[str, Any] = Field(default_factory=dict)
-    command_safeguards: dict[str,
-                             CommandSafeguard] = Field(default_factory=dict)
+    command_limits: dict[str, Limit] = Field(default_factory=dict)
     # How the mount is exposed: vfs (default, mirage's own filesystem only),
     # fuse, or fskit. mountpoint is honored by the kernel backends.
     backend: MountBackend = MountBackend.VFS
@@ -422,7 +421,7 @@ class WorkspaceConfig(BaseModel):
             resources[prefix] = Mount(
                 resource=prov,
                 mode=mode,
-                command_safeguards=block.command_safeguards,
+                command_limits=block.command_limits,
             )
         kwargs: dict[str, Any] = {
             "resources": resources,

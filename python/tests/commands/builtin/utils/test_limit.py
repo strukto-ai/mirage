@@ -17,13 +17,12 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
-                                                     apply_safeguard,
-                                                     maybe_with_timeout,
-                                                     run_with_timeout)
+from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
+                                                 apply_limit,
+                                                 maybe_with_timeout,
+                                                 run_with_timeout)
 from mirage.io.types import materialize
-from mirage.runtime.policy.safeguard import CommandSafeguard
-from mirage.types import OnExceed
+from mirage.types import Limit, OnExceed
 
 _TEN = b"".join(f"line{i}\n".encode() for i in range(10))
 
@@ -47,22 +46,22 @@ async def _sleep_forever():
 
 
 @pytest.mark.asyncio
-async def test_no_safeguard_passthrough():
-    out, io = await apply_safeguard(_TEN, None)
+async def test_no_limit_passthrough():
+    out, io = await apply_limit(_TEN, None)
     assert out == _TEN and io.exit_code == 0 and io.stderr is None
 
 
 @pytest.mark.asyncio
 async def test_under_limit_not_truncated():
-    sg = CommandSafeguard(max_lines=100)
-    out, io = await apply_safeguard(_TEN, sg)
+    sg = Limit(max_lines=100)
+    out, io = await apply_limit(_TEN, sg)
     assert out == _TEN and io.stderr is None
 
 
 @pytest.mark.asyncio
 async def test_truncate_by_lines():
-    sg = CommandSafeguard(max_lines=3)
-    out, io = await apply_safeguard(_TEN, sg)
+    sg = Limit(max_lines=3)
+    out, io = await apply_limit(_TEN, sg)
     assert out == b"line0\nline1\nline2\n"
     assert io.exit_code == 0
     assert b"truncated" in (await materialize(io.stderr))
@@ -70,8 +69,8 @@ async def test_truncate_by_lines():
 
 @pytest.mark.asyncio
 async def test_error_by_lines():
-    sg = CommandSafeguard(max_lines=3, on_exceed=OnExceed.ERROR)
-    out, io = await apply_safeguard(_TEN, sg)
+    sg = Limit(max_lines=3, on_exceed=OnExceed.ERROR)
+    out, io = await apply_limit(_TEN, sg)
     assert out is None
     assert io.exit_code == 1
     assert b"truncated" in (await materialize(io.stderr))
@@ -79,46 +78,44 @@ async def test_error_by_lines():
 
 @pytest.mark.asyncio
 async def test_truncate_by_bytes():
-    sg = CommandSafeguard(max_bytes=10)
-    out, io = await apply_safeguard(_TEN, sg)
+    sg = Limit(max_bytes=10)
+    out, io = await apply_limit(_TEN, sg)
     assert out == _TEN[:10]
     assert b"truncated" in (await materialize(io.stderr))
 
 
 @pytest.mark.asyncio
 async def test_streaming_input_truncates_and_stops_early():
-    sg = CommandSafeguard(max_lines=2)
-    out, io = await apply_safeguard(_stream(_TEN), sg)
+    sg = Limit(max_lines=2)
+    out, io = await apply_limit(_stream(_TEN), sg)
     assert out == b"line0\nline1\n"
     assert b"truncated" in (await materialize(io.stderr))
 
 
-def test_maybe_with_timeout_passthrough_when_no_safeguard():
+def test_maybe_with_timeout_passthrough_when_no_limit():
     stream = _stream(_TEN)
     assert maybe_with_timeout(stream, None, "cat") is stream
 
 
 def test_maybe_with_timeout_passthrough_when_bytes():
-    assert maybe_with_timeout(_TEN, CommandSafeguard(timeout_seconds=1),
-                              "cat") == _TEN
+    assert maybe_with_timeout(_TEN, Limit(timeout_seconds=1), "cat") == _TEN
 
 
 def test_maybe_with_timeout_passthrough_when_no_timeout():
     stream = _stream(_TEN)
-    assert maybe_with_timeout(stream, CommandSafeguard(max_lines=3),
-                              "cat") is stream
+    assert maybe_with_timeout(stream, Limit(max_lines=3), "cat") is stream
 
 
 def test_maybe_with_timeout_passthrough_when_nonpositive():
     stream = _stream(_TEN)
-    assert maybe_with_timeout(stream, CommandSafeguard(timeout_seconds=0),
+    assert maybe_with_timeout(stream, Limit(timeout_seconds=0),
                               "cat") is stream
 
 
 @pytest.mark.asyncio
 async def test_maybe_with_timeout_wraps_and_fires():
-    wrapped = maybe_with_timeout(_slow_stream(),
-                                 CommandSafeguard(timeout_seconds=0.1), "cat")
+    wrapped = maybe_with_timeout(_slow_stream(), Limit(timeout_seconds=0.1),
+                                 "cat")
     with pytest.raises(CommandTimeoutError):
         await materialize(wrapped)
 

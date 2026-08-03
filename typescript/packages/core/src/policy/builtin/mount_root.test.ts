@@ -14,11 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode, PathSpec } from '../types.ts'
-import { MountRegistry } from '../workspace/mount/registry.ts'
+import { RAMResource } from '../../resource/ram/ram.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import { MountRegistry } from '../../workspace/mount/registry.ts'
 import { MountRootPolicy, hasParentsFlag } from './mount_root.ts'
-import type { CommandContext } from './types.ts'
+import type { CommandContext } from '../types.ts'
 
 function registry(): MountRegistry {
   return new MountRegistry({ '/data': new RAMResource() }, MountMode.WRITE, {})

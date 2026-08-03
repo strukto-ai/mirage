@@ -18,11 +18,11 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.ops.config import OpsMount
-from mirage.policy import MountRootPolicy, Policies
+from mirage.policy import MountRootPolicy, OutputCapPolicy, Policies
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
-from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -85,11 +85,14 @@ class MountRegistry:
         self.runtime_unavailable: dict[str, str] = {}
         # Command admission policies. Policies itself is a bare
         # mechanism; the registry seeds the POSIX mount-root rule
-        # (mount-root semantics are mount semantics) and user policies
-        # follow it (Workspace guards= / policies= / yaml guards:).
+        # (mount-root semantics are mount semantics) and the built-in
+        # output cap (fed the per-mount overrides), and user policies
+        # follow them (Workspace guards= / policies= / yaml guards:).
         # Registry-hosted like runtime_bindings so the executor reaches
         # them without new parameter threading.
-        self.policies = Policies([MountRootPolicy()])
+        self.policies = Policies(
+            [MountRootPolicy(),
+             OutputCapPolicy(self.limit_override)])
 
         # Installed CLIs. Not mount state: CLIs are fully separate from
         # mounts (a CLI exists because it was installed, never because
@@ -197,6 +200,22 @@ class MountRegistry:
             if m.prefix == prefix:
                 return m
         raise ValueError(f"no mount with prefix {prefix!r}")
+
+    def limit_override(self, prefix: str, name: str) -> Limit | None:
+        """One mount's configured cap for a command or op name.
+
+        The lookup OutputCapPolicy is seeded with; tolerant of a
+        prefix that matches no mount (unmounted between stamp and
+        boundary) by answering None.
+
+        Args:
+            prefix (str): the mount prefix as stamped at dispatch.
+            name (str): command or op name.
+        """
+        for m in self._mounts:
+            if m.prefix == prefix or m.prefix.rstrip("/") == prefix:
+                return m.command_limits.get(name)
+        return None
 
     def is_mount_root(self, path: str) -> bool:
         stripped = path.strip("/")

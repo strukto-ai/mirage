@@ -15,9 +15,9 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.builtin.utils.safeguard import SafeguardExceededError
+from mirage.commands.builtin.utils.limit import LimitExceededError
 from mirage.resource.ram import RAMResource
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import Limit, OnExceed, PathSpec
 
 
 async def _read_long(accessor, scope, *args, **kwargs):
@@ -36,54 +36,62 @@ async def _ws_mount():
     ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
     await ws.execute("echo hi > /data/f.txt")
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
-    return mount
+    return ws, mount
+
+
+async def _dispatch_read(ws):
+    # Op caps are policy and fire at the op doors, not inside
+    # Mount.execute_op; route through the dispatcher door.
+    result, _ = await ws._dispatcher.dispatch(
+        "read", PathSpec.from_str_path("/data/f.txt"))
+    return result
 
 
 @pytest.mark.asyncio
 async def test_vfs_read_truncates_to_max_bytes(monkeypatch):
-    mount = await _ws_mount()
-    mount.command_safeguards["read"] = CommandSafeguard(max_bytes=5)
+    ws, mount = await _ws_mount()
+    mount.command_limits["read"] = Limit(max_bytes=5)
     monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_long)
-    assert await mount.execute_op("read", "/data/f.txt") == b"hello"
+    assert await _dispatch_read(ws) == b"hello"
 
 
 @pytest.mark.asyncio
 async def test_vfs_read_truncates_to_max_lines(monkeypatch):
-    mount = await _ws_mount()
-    mount.command_safeguards["read"] = CommandSafeguard(max_lines=2)
+    ws, mount = await _ws_mount()
+    mount.command_limits["read"] = Limit(max_lines=2)
     monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_lines)
-    assert await mount.execute_op("read", "/data/f.txt") == b"a\nb\n"
+    assert await _dispatch_read(ws) == b"a\nb\n"
 
 
 @pytest.mark.asyncio
 async def test_vfs_read_on_exceed_error_raises(monkeypatch):
-    mount = await _ws_mount()
-    mount.command_safeguards["read"] = CommandSafeguard(
-        max_bytes=5, on_exceed=OnExceed.ERROR)
+    ws, mount = await _ws_mount()
+    mount.command_limits["read"] = Limit(max_bytes=5, on_exceed=OnExceed.ERROR)
     monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_long)
-    with pytest.raises(SafeguardExceededError):
-        await mount.execute_op("read", "/data/f.txt")
+    with pytest.raises(LimitExceededError):
+        await _dispatch_read(ws)
 
 
 @pytest.mark.asyncio
 async def test_vfs_read_within_limit_untouched(monkeypatch):
-    mount = await _ws_mount()
-    mount.command_safeguards["read"] = CommandSafeguard(max_bytes=100)
+    ws, mount = await _ws_mount()
+    mount.command_limits["read"] = Limit(max_bytes=100)
     monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_short)
-    assert await mount.execute_op("read", "/data/f.txt") == b"hi"
+    assert await _dispatch_read(ws) == b"hi"
 
 
 @pytest.mark.asyncio
 async def test_vfs_unconfigured_read_untouched(monkeypatch):
-    mount = await _ws_mount()
+    ws, mount = await _ws_mount()
     monkeypatch.setattr(mount._ops[("read", None)], "fn", _read_long)
-    assert await mount.execute_op("read", "/data/f.txt") == b"hello world"
+    assert await _dispatch_read(ws) == b"hello world"
 
 
 @pytest.mark.asyncio
 async def test_vfs_stat_not_capped_by_byte_limit(monkeypatch):
-    mount = await _ws_mount()
-    mount.command_safeguards["stat"] = CommandSafeguard(max_bytes=1)
-    result = await mount.execute_op("stat", "/data/f.txt")
+    ws, mount = await _ws_mount()
+    mount.command_limits["stat"] = Limit(max_bytes=1)
+    result, _ = await ws._dispatcher.dispatch(
+        "stat", PathSpec.from_str_path("/data/f.txt"))
     assert result is not None
     assert not isinstance(result, (bytes, bytearray))

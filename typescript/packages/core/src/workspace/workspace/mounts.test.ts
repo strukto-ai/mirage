@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { RAMResource } from '../../resource/ram/ram.ts'
-import { CommandSafeguard, MountMode } from '../../types.ts'
+import { Limit, MountMode } from '../../types.ts'
 import { normalizeResources } from './mounts.ts'
 
 describe('normalizeResources', () => {
@@ -24,7 +24,7 @@ describe('normalizeResources', () => {
     const normalized = normalizeResources({ '/a': resource })
     expect(normalized.bare['/a']).toBe(resource)
     expect(normalized.modes['/a']).toBeUndefined()
-    expect(normalized.safeguards['/a']).toBeUndefined()
+    expect(normalized.commandLimits['/a']).toBeUndefined()
   })
 
   it('pins the mode from a pair entry', () => {
@@ -32,11 +32,11 @@ describe('normalizeResources', () => {
     expect(normalized.modes['/a']).toBe(MountMode.READ)
   })
 
-  it('carries safeguards from a triple entry', () => {
-    const guard = new CommandSafeguard({ timeoutSeconds: 1 })
+  it('carries commandLimits from a triple entry', () => {
+    const guard = new Limit({ timeoutSeconds: 1 })
     const normalized = normalizeResources({
       '/a': [new RAMResource(), MountMode.READ, { curl: guard }],
     })
-    expect(normalized.safeguards['/a']).toEqual({ curl: guard })
+    expect(normalized.commandLimits['/a']).toEqual({ curl: guard })
   })
 })

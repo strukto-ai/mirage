@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { CLISpec, type CLIVerbFn, type CLIVerbOpts } from '../../../commands/cli/types.ts'
 import { Operand, Option } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { CommandSafeguard, type PathSpec } from '../../../types.ts'
+import { Limit, type PathSpec } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { Session } from '../../session/session.ts'
 import { handleCli } from './cli.ts'
@@ -136,8 +136,8 @@ describe('handleCli', () => {
     )
   })
 
-  it('the leaf safeguard bounds the handler', async () => {
-    // The declared safeguard wraps the handler body like mount
+  it('the leaf limit bounds the handler', async () => {
+    // The declared limit wraps the handler body like mount
     // dispatch: a blocking leaf times out instead of hanging.
     const slow: CLIVerbFn = async () => {
       await new Promise((resolve) => setTimeout(resolve, 500))
@@ -149,7 +149,7 @@ describe('handleCli', () => {
         new CLISpec({
           name: 'run',
           fn: slow,
-          safeguard: new CommandSafeguard({ timeoutSeconds: 0.05 }),
+          limit: new Limit({ timeoutSeconds: 0.05 }),
         }),
       ],
     })

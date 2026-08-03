@@ -14,7 +14,7 @@
 
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError } from '../../commands/builtin/utils/limit.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'

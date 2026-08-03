@@ -106,7 +106,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       resp = await fetch(applyProxy(url), init)
     } catch (err) {
       // A transport failure carries no status. Abort (the timeout) has to
-      // propagate as itself so the safeguard layer can report it.
+      // propagate as itself so the limit layer can report it.
       if (err instanceof DOMException && err.name === 'AbortError') throw err
       const { host, port } = endpoint(url)
       throw new HttpConnectError(host, port)

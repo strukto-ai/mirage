@@ -15,21 +15,21 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { CommandSafeguard, MountMode, PathSpec } from '../types.ts'
+import { Limit, MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-describe('dispatch applies safeguards on the executing mount', () => {
-  it('a symlink into a safeguarded mount gets the target mount safeguard', async () => {
+describe('dispatch applies limits on the executing mount', () => {
+  it('a symlink into a limited mount gets the target mount limit', async () => {
     const parser = await getTestParser()
     const data = new RAMResource()
     const plain = new RAMResource()
     const ws = new Workspace(
       {
-        '/data': [data, MountMode.EXEC, { read: new CommandSafeguard({ maxBytes: 8 }) }],
+        '/data': [data, MountMode.EXEC, { read: new Limit({ maxBytes: 8 }) }],
         '/r': plain,
       },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
@@ -39,7 +39,7 @@ describe('dispatch applies safeguards on the executing mount', () => {
       await ws.execute('ln -s /data/big.txt /r/link')
       const direct = (await ws.dispatch('read', '/data/big.txt')) as Uint8Array
       const viaLink = (await ws.dispatch('read', '/r/link')) as Uint8Array
-      // The link lives on the unsafeguarded mount, but the read executes
+      // The link lives on the unlimited mount, but the read executes
       // on /data: its maxBytes cap must apply either way.
       expect(DEC.decode(viaLink)).toBe(DEC.decode(direct))
       expect(direct.byteLength).toBeLessThan(ENC.encode('0123456789abcdef\n').byteLength)

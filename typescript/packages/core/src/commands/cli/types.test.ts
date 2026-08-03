@@ -75,7 +75,7 @@ describe('CLISpec', () => {
     const single = new CLISpec({ name: 'hello', fn: verb })
     expect(single.subcommands).toEqual([])
     expect(single.write).toBe(false)
-    expect(single.safeguard).toBeNull()
+    expect(single.limit).toBeNull()
   })
 
   it('allows group-level options', () => {

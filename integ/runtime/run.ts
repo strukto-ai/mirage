@@ -19,7 +19,7 @@ import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client
 import { MongoClient } from "mongodb";
 import {
   buildRuntime,
-  CommandSafeguard,
+  Limit,
   MongoDBResource,
   MountMode,
   PathSpec,
@@ -30,7 +30,13 @@ import {
   ScriptSource,
   snakeToCamel,
   Workspace,
+  type Action,
+  type CommandContext,
+  type ExecuteResultContext,
   type MountSpec,
+  type OpsContext,
+  type OpsResultContext,
+  type Policy,
   type Resource,
   type RunResult,
   type RuntimeEntry,
@@ -52,6 +58,7 @@ interface Expect {
   stderr_contains?: string;
   throws_contains?: string;
   errno?: string;
+  content?: string;
 }
 
 interface Step {
@@ -61,19 +68,34 @@ interface Step {
   add_runtime?: string;
   s3_put?: { key: string; body: string };
   rename?: { src: string; dst: string };
+  read_op?: string;
   expect?: Expect;
 }
 
 interface MountSpecJson {
   resource: string;
   files?: Record<string, string>;
-  safeguards?: Record<string, Record<string, unknown>>;
+  limits?: Record<string, Record<string, unknown>>;
 }
 
 interface World {
   runtimes?: (string | Record<string, unknown>)[];
   policy?: string;
+  policies?: PolicySpec[];
   mounts?: Record<string, MountSpecJson>;
+}
+
+interface PolicySpec {
+  name: string;
+  command?: string;
+  flag?: string;
+  message?: string;
+  prefix?: string;
+  suffix?: string;
+  marker?: string;
+  max_bytes?: number;
+  max_lines?: number;
+  on_exceed?: string;
 }
 
 interface Case {
@@ -113,6 +135,110 @@ class EchoBox extends Runtime {
       exitCode: 0,
     });
   }
+}
+
+// Test-only policies, one per hook, mirroring the Python runner: the
+// world's `policies` entries pick a class by `name` and carry its config.
+class DenyFlag implements Policy {
+  private readonly spec: PolicySpec;
+  constructor(spec: PolicySpec) {
+    this.spec = spec;
+  }
+  preCommand(ctx: CommandContext): Action | null {
+    if (ctx.command === this.spec.command && ctx.argv.includes(this.spec.flag ?? "")) {
+      return { kind: "deny", message: this.spec.message ?? "" };
+    }
+    return null;
+  }
+}
+
+class LockWrites implements Policy {
+  private readonly prefix: string;
+  constructor(spec: PolicySpec) {
+    this.prefix = spec.prefix ?? "";
+  }
+  preOps(ctx: OpsContext): Action | null {
+    if (ctx.write && ctx.path.virtual.startsWith(this.prefix)) {
+      return { kind: "deny", message: "locked\n" };
+    }
+    return null;
+  }
+}
+
+class SealReads implements Policy {
+  private readonly suffix: string;
+  constructor(spec: PolicySpec) {
+    this.suffix = spec.suffix ?? "";
+  }
+  preOps(ctx: OpsContext): Action | null {
+    if (!ctx.write && ctx.path.virtual.endsWith(this.suffix)) {
+      return { kind: "deny", message: "sealed\n" };
+    }
+    return null;
+  }
+}
+
+class RedactReads implements Policy {
+  private readonly marker: string;
+  constructor(spec: PolicySpec) {
+    this.marker = spec.marker ?? "";
+  }
+  postOps(ctx: OpsResultContext): Action | null {
+    const data = ctx.result instanceof Uint8Array ? DEC.decode(ctx.result) : null;
+    if (ctx.op === "read" && data !== null && data.includes(this.marker)) {
+      return { kind: "deny", message: "redacted\n" };
+    }
+    return null;
+  }
+}
+
+class OpReadCap implements Policy {
+  private readonly suffix: string;
+  private readonly maxBytes: number;
+  constructor(spec: PolicySpec) {
+    this.suffix = spec.suffix ?? "";
+    this.maxBytes = spec.max_bytes ?? 0;
+  }
+  postOps(ctx: OpsResultContext): Action | null {
+    if (ctx.op === "read" && ctx.path.virtual.endsWith(this.suffix)) {
+      return new Limit({ maxBytes: this.maxBytes });
+    }
+    return null;
+  }
+}
+
+class LineCap implements Policy {
+  private readonly limit: Limit;
+  constructor(spec: PolicySpec) {
+    const { name: _name, ...fields } = spec;
+    this.limit = new Limit(camelizeKeys(fields));
+  }
+  postExecute(): Action | null {
+    return this.limit;
+  }
+}
+
+class Boom implements Policy {
+  constructor(_spec: PolicySpec) {}
+  postExecute(_ctx: ExecuteResultContext): Action | null {
+    throw new Error("boom");
+  }
+}
+
+const POLICY_KINDS: Record<string, new (spec: PolicySpec) => Policy> = {
+  deny_flag: DenyFlag,
+  lock_writes: LockWrites,
+  seal_reads: SealReads,
+  redact_reads: RedactReads,
+  op_read_cap: OpReadCap,
+  line_cap: LineCap,
+  boom: Boom,
+};
+
+function buildPolicy(spec: PolicySpec): Policy {
+  const cls = POLICY_KINDS[spec.name];
+  if (cls === undefined) throw new Error(`unknown policy kind: ${spec.name}`);
+  return new cls(spec);
 }
 
 function expand(value: unknown): unknown {
@@ -237,9 +363,9 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   for (const [prefix, spec] of Object.entries(mountSpecs)) {
     const resource = await buildResource(spec, runId);
     const guards = Object.fromEntries(
-      Object.entries(spec.safeguards ?? {}).map(([cmd, kwargs]) => [
+      Object.entries(spec.limits ?? {}).map(([cmd, kwargs]) => [
         cmd,
-        new CommandSafeguard(camelizeKeys(kwargs)),
+        new Limit(camelizeKeys(kwargs)),
       ]),
     );
     mounts[prefix] =
@@ -251,6 +377,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   const options: Record<string, unknown> = { mode: MountMode.EXEC };
   if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry);
   if (world.policy !== undefined) options.policy = new ScriptSource(world.policy);
+  if (world.policies !== undefined) options.policies = world.policies.map(buildPolicy);
   const ws = new Workspace(mounts, options);
   for (const [prefix, name, content] of seeds) {
     await ws.dispatch("write", `${prefix}/${name}`, [ENC.encode(content)]);
@@ -307,6 +434,28 @@ async function runStep(ws: Workspace, caseId: string, index: number, step: Step)
       return [`${caseId} ${label}: rename errno ${errnoName}, expected ${expect.errno}`];
     }
     return [];
+  }
+  if (step.read_op !== undefined) {
+    // Reads through the op door (the surface FUSE and programmatic
+    // access share), where preOps/postOps policies fire.
+    let errnoName = "NONE";
+    let content = "";
+    try {
+      const result = await ws.dispatch("read", step.read_op, []);
+      content = DEC.decode(result as Uint8Array);
+    } catch (err) {
+      errnoName = (err as { code?: string }).code ?? "NONE";
+    }
+    const problems: string[] = [];
+    if (errnoName !== (expect.errno ?? "NONE")) {
+      problems.push(`read_op errno ${errnoName}, expected ${expect.errno ?? "NONE"}`);
+    }
+    if (expect.content !== undefined && content !== expect.content) {
+      problems.push(
+        `read_op content ${JSON.stringify(content)}, expected ${JSON.stringify(expect.content)}`,
+      );
+    }
+    return problems.map((p) => `${caseId} ${label}: ${p}`);
   }
   const command = step.command ?? "";
   const options: Record<string, unknown> = {};

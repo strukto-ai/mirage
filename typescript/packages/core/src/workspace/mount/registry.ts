@@ -20,8 +20,8 @@ import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cachesReads, type Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
-import { MountRootPolicy, Policies } from '../../policy/index.ts'
-import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import { MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
+import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { MountEntry } from './mount.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -76,7 +76,10 @@ export class MountRegistry {
   // are mount semantics) and user policies follow it (Workspace
   // guards/policies options). Registry-hosted like vfsRuntime so the
   // executor reaches them without new threading.
-  readonly policies = new Policies([new MountRootPolicy()])
+  readonly policies = new Policies([
+    new MountRootPolicy(),
+    new OutputCapPolicy((prefix, name) => this.limitOverride(prefix, name)),
+  ])
   // Installed CLIs. Not mount state: CLIs are fully separate from
   // mounts (a CLI exists because it was installed, never because
   // storage was mounted). The registry object is just the vehicle that
@@ -214,6 +217,20 @@ export class MountRegistry {
     const norm = normalizePrefix(prefix)
     for (const m of this.mountList) {
       if (m.prefix === norm) return m
+    }
+    return null
+  }
+
+  /**
+   * One mount's configured cap for a command or op name. The lookup
+   * OutputCapPolicy is seeded with; tolerant of a prefix that matches
+   * no mount (unmounted between stamp and boundary) by answering null.
+   */
+  limitOverride(prefix: string, name: string): Limit | null {
+    for (const m of this.mountList) {
+      if (m.prefix === prefix || m.prefix.replace(/\/+$/, '') === prefix) {
+        return m.commandLimits.get(name) ?? null
+      }
     }
     return null
   }

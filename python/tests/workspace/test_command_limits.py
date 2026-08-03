@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.resource.ram import RAMResource
-from mirage.types import CommandSafeguard, MountMode, OnExceed
+from mirage.types import Limit, MountMode, OnExceed
 from mirage.workspace import Workspace
 
 
@@ -27,10 +27,10 @@ def _build_ws(n_lines: int) -> Workspace:
     return Workspace({"/": (r, MountMode.WRITE)})
 
 
-def _override(ws: Workspace, name: str, safeguard: CommandSafeguard) -> None:
+def _override(ws: Workspace, name: str, limit: Limit) -> None:
     mounts = list(ws._registry._mounts)
     for m in mounts:
-        m.command_safeguards[name] = safeguard
+        m.command_limits[name] = limit
 
 
 async def _run(ws: Workspace, cmd: str):
@@ -71,7 +71,7 @@ def test_pipe_terminal_under_limit_no_notice():
 
 def test_mount_override_caps_small():
     ws = _build_ws(5)
-    _override(ws, "cat", CommandSafeguard(max_lines=3))
+    _override(ws, "cat", Limit(max_lines=3))
     code, out, err = asyncio.run(_run(ws, "cat /big.txt"))
     assert code == 0
     assert out == "line0\nline1\nline2\n"
@@ -80,8 +80,7 @@ def test_mount_override_caps_small():
 
 def test_on_exceed_error_mode():
     ws = _build_ws(5)
-    _override(ws, "cat", CommandSafeguard(max_lines=3,
-                                          on_exceed=OnExceed.ERROR))
+    _override(ws, "cat", Limit(max_lines=3, on_exceed=OnExceed.ERROR))
     code, out, err = asyncio.run(_run(ws, "cat /big.txt"))
     assert code == 1
     assert out == ""

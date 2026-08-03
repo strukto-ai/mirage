@@ -317,7 +317,7 @@
       ]
     },
     {
-      "id": "safeguard_timeout",
+      "id": "limit_timeout",
       "world": {
         "runtimes": [
           "monty",
@@ -329,7 +329,7 @@
             "files": {
               "slow.py": "n = 0\nfor i in range(300000000):\n    n = n + 1\n"
             },
-            "safeguards": {
+            "limits": {
               "python3": {
                 "timeout_seconds": 1
               }

@@ -19,11 +19,15 @@ from typing import Any
 from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.spec import SpecPolicy
-from mirage.policy.types import (VALIDITY, CommandContext, Deny, GuardSpec,
-                                 OpsContext, OpsResultContext)
-from mirage.types import PathSpec
+from mirage.policy.types import (VALIDITY, CommandContext, Deny,
+                                 ExecuteResultContext, GuardSpec, OpsContext,
+                                 OpsResultContext)
+from mirage.types import Limit, PathSpec
 
 logger = logging.getLogger(__name__)
+
+HookContext = (CommandContext | OpsContext | OpsResultContext
+               | ExecuteResultContext)
 
 
 async def pre_ops_gate(policies: "Policies", op: str, path: PathSpec,
@@ -53,8 +57,12 @@ async def pre_ops_gate(policies: "Policies", op: str, path: PathSpec,
 
 
 async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
-                        write: bool, prefix: str, result: Any) -> None:
+                        write: bool, prefix: str, result: Any) -> Limit | None:
     """Fire post_ops at an op door; a Deny suppresses the result.
+
+    Returns the merged Limit bound (tightest per field across every
+    opining policy) for the door to apply to a byte-producing result,
+    or None when no policy bounds this op.
 
     Args:
         policies (Policies): the workspace's admission policies.
@@ -65,8 +73,8 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
         result (Any): the op's raw result, offered to the hooks.
     """
     if not policies.wants("post_ops"):
-        return
-    deny = await policies.post_ops(
+        return None
+    deny, bound = await policies.post_ops(
         OpsResultContext(op=op,
                          path=path,
                          write=write,
@@ -75,6 +83,25 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
     if deny is not None:
         raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
                            path.virtual)
+    return bound
+
+
+async def post_execute_gate(
+        policies: "Policies",
+        ctx: ExecuteResultContext) -> tuple[Deny | None, Limit | None]:
+    """Fire post_execute at the workspace boundary.
+
+    Returns the fail-closed Deny (a raising policy) if any, and the
+    merged Limit bound for the boundary to enforce on the line's
+    output stream.
+
+    Args:
+        policies (Policies): the workspace's policies.
+        ctx (ExecuteResultContext): the finished line's facts.
+    """
+    if not policies.wants("post_execute"):
+        return None, None
+    return await policies.post_execute(ctx)
 
 
 class Policies:
@@ -134,9 +161,16 @@ class Policies:
                     break
         self._wanted = frozenset(wanted)
 
-    async def _fire(self, hook: str, ctx: CommandContext | OpsContext
-                    | OpsResultContext, subject: str) -> Deny | None:
+    async def _fire(self, hook: str, ctx: HookContext,
+                    subject: str) -> tuple[Deny | None, Limit | None]:
+        """One loop for every hook: first Deny wins, Limits merge.
+
+        A refusal short-circuits (limits are moot once the result is
+        suppressed); Limit actions accumulate and aggregate to the
+        tightest value per field.
+        """
         base = getattr(Policy, hook)
+        limits: list[Limit] = []
         for policy in self._policies:
             if getattr(type(policy), hook) is base:
                 continue
@@ -145,16 +179,18 @@ class Policies:
                 action = await getattr(policy, hook)(ctx)
             except Exception as exc:
                 logger.error("%s policy %s raised: %s", hook, name, exc)
-                return Deny(f"{subject}: policy {name} failed: {exc}\n")
+                return Deny(f"{subject}: policy {name} failed: {exc}\n"), None
             if action is None:
                 continue
-            if not isinstance(action,
-                              Deny) or action.kind not in VALIDITY[hook]:
-                raise PolicyError(
-                    f"{hook} of {name} returned {action!r}; "
-                    f"legal kinds here: {sorted(VALIDITY[hook])}")
-            return action
-        return None
+            legal = VALIDITY[hook]
+            if isinstance(action, Deny) and Deny.kind in legal:
+                return action, None
+            if isinstance(action, Limit) and Limit.kind in legal:
+                limits.append(action)
+                continue
+            raise PolicyError(f"{hook} of {name} returned {action!r}; "
+                              f"legal kinds here: {sorted(legal)}")
+        return None, Limit.aggr(limits)
 
     async def pre_command(self, ctx: CommandContext) -> Deny | None:
         """Fire pre_command across the policies; first Deny wins.
@@ -162,7 +198,8 @@ class Policies:
         Args:
             ctx (CommandContext): the classified command.
         """
-        return await self._fire("pre_command", ctx, ctx.command)
+        deny, _ = await self._fire("pre_command", ctx, ctx.command)
+        return deny
 
     async def pre_ops(self, ctx: OpsContext) -> Deny | None:
         """Fire pre_ops across the policies; first Deny wins.
@@ -170,13 +207,25 @@ class Policies:
         Args:
             ctx (OpsContext): the op about to run.
         """
-        return await self._fire("pre_ops", ctx, ctx.op)
+        deny, _ = await self._fire("pre_ops", ctx, ctx.op)
+        return deny
 
-    async def post_ops(self, ctx: OpsResultContext) -> Deny | None:
-        """Fire post_ops across the policies; a Deny suppresses the
-        result.
+    async def post_ops(
+            self, ctx: OpsResultContext) -> tuple[Deny | None, Limit | None]:
+        """Fire post_ops; a Deny suppresses the result, Limits merge.
 
         Args:
             ctx (OpsResultContext): the op and its raw result.
         """
         return await self._fire("post_ops", ctx, ctx.op)
+
+    async def post_execute(
+            self,
+            ctx: ExecuteResultContext) -> tuple[Deny | None, Limit | None]:
+        """Fire post_execute; Limits merge to the boundary bound.
+
+        Args:
+            ctx (ExecuteResultContext): the finished line's facts.
+        """
+        return await self._fire("post_execute", ctx, ctx.producer.command
+                                or "line")

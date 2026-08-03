@@ -20,7 +20,7 @@ import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { ShellParser } from '../../shell/parse.ts'
-import type { CommandSafeguard, ConsistencyPolicy, DriftPolicy, MountMode } from '../../types.ts'
+import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode } from '../../types.ts'
 import type { GuardSpec, Policy } from '../../policy/index.ts'
 import type { PolicyDecision, PolicyFn } from '../executor/policy/index.ts'
 import type { RuntimeEntry } from '../executor/runtime.ts'
@@ -31,18 +31,18 @@ import type { WorkspaceStateStore } from '../store/base.ts'
 /**
  * One mount entry: a bare resource takes the workspace default mode, a
  * `[resource, mode]` pair pins the mount's own mode, and an optional
- * third element attaches per-command safeguards (mirrors the Python
- * `(resource, mode, safeguards)` tuple form).
+ * third element attaches per-command limits (mirrors the Python
+ * `(resource, mode, limits)` tuple form).
  */
 export type MountSpec =
   | Resource
   | readonly [Resource, MountMode]
-  | readonly [Resource, MountMode, Record<string, CommandSafeguard>]
+  | readonly [Resource, MountMode, Record<string, Limit>]
 
 export interface WorkspaceOptions {
   mode?: MountMode
   consistency?: ConsistencyPolicy
-  commandSafeguards?: Record<string, Record<string, CommandSafeguard>>
+  commandLimits?: Record<string, Record<string, Limit>>
   /**
    * Behaviour for the post-load drift check on fingerprinted reads. Only
    * consulted by `Workspace.load` / `Workspace.fromState`; fresh

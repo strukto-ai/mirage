@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandSafeguard, MountBackend, MountMode, Resource } from '@struktoai/mirage-core'
+import type { Limit, MountBackend, MountMode, Resource } from '@struktoai/mirage-core'
 
 export interface MountSpecOptions {
   /** Per-mount mode override; falls back to the workspace default when unset. */
@@ -27,7 +27,7 @@ export interface MountSpecOptions {
    * directory appropriate for the backend. Ignored when backend is `vfs`.
    */
   mountpoint?: string
-  commandSafeguards?: Record<string, CommandSafeguard>
+  commandLimits?: Record<string, Limit>
 }
 
 export class Mount {

@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.context import assert_mount_allowed, effective_mount_mode
 from mirage.observe import OpRecord
@@ -247,8 +248,10 @@ class Ops:
         # completed backend op, so the caches and observation must
         # reflect it before the deny suppresses it.
         if self._policies is not None:
-            await post_ops_gate(self._policies, op, scope, write, mount_prefix,
-                                result)
+            bound = await post_ops_gate(self._policies, op, scope, write,
+                                        mount_prefix, result)
+            if bound is not None:
+                result = await apply_op_limit(result, bound)
         if (op == "stat" and self._stat_overlay is not None
                 and isinstance(result, FileStat)):
             return self._stat_overlay(path, result)

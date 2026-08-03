@@ -1,9 +1,9 @@
 mode: WRITE
 consistency: LAZY
 
-# Same /s3 mount as workspace.yaml, plus per-mount command_safeguards so the
+# Same /s3 mount as workspace.yaml, plus per-mount command_limits so the
 # guards can be observed firing from the CLI. Python-only: the TS config
-# schema does not yet carry command_safeguards, so this lives in its own file
+# schema does not yet carry command_limits, so this lives in its own file
 # to keep the shared workspace.yaml usable from both CLIs.
 mounts:
   /s3:
@@ -13,7 +13,7 @@ mounts:
       region: ${AWS_DEFAULT_REGION}
       aws_access_key_id: ${AWS_ACCESS_KEY_ID}
       aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
-    command_safeguards:
+    command_limits:
       # Cap head output at 10 lines and keep going (exit 0 + notice).
       head:
         max_lines: 10

@@ -21,7 +21,7 @@ from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
-from mirage.types import CommandSafeguard
+from mirage.types import Limit
 from mirage.version import __version__
 
 HELP_OPTION = Option(
@@ -109,7 +109,7 @@ class RegisteredCommand:
     src: str | None = None
     dst: str | None = None
     write: bool = False
-    safeguard: CommandSafeguard | None = None
+    limit: Limit | None = None
 
 
 def command(
@@ -122,7 +122,7 @@ def command(
     dry_run: Callable[..., Any] | None = None,
     aggregate: Callable[..., Any] | None = None,
     write: bool = False,
-    safeguard: CommandSafeguard | None = None,
+    limit: Limit | None = None,
 ) -> Callable[..., Any]:
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -139,7 +139,7 @@ def command(
                 provision_fn=provision or dry_run,
                 aggregate=aggregate,
                 write=write,
-                safeguard=safeguard,
+                limit=limit,
             )
             cmds.append(rc)
         setattr(wrapped_fn, "_registered_commands", cmds)

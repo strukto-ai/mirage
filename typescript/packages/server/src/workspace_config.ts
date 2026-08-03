@@ -14,7 +14,7 @@
 
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
+import type { Limit, MountSpec } from '@struktoai/mirage-node'
 import { Workspace, newWorkspaceId } from '@struktoai/mirage-node'
 import { configToWorkspaceArgs, loadWorkspaceConfigFile } from './config.ts'
 
@@ -70,10 +70,10 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
   const config = loadWorkspaceConfigFile(configPath)
   const args = await configToWorkspaceArgs(config)
   const resources: Record<string, MountSpec> = {}
-  const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
-  for (const [prefix, [resource, mode, safeguards]] of Object.entries(args.resources)) {
+  const commandLimits: Record<string, Record<string, Limit>> = {}
+  for (const [prefix, [resource, mode, limits]] of Object.entries(args.resources)) {
     resources[prefix] = [resource, mode]
-    if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
+    if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
   }
   const workspace = new Workspace(resources, {
     mode: args.options.mode,
@@ -82,7 +82,7 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
     ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
     workspaceId: args.options.workspaceId ?? newWorkspaceId(),
     ...(args.options.store !== undefined ? { store: args.options.store } : {}),
-    ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
+    ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
     ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
     ...(args.options.index !== undefined ? { index: args.options.index } : {}),
     ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),

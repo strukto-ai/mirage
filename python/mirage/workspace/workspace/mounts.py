@@ -32,7 +32,7 @@ def normalize_resources(resources: dict[str, ResourceMount],
 
     Raises:
         TypeError: a tuple entry is not (resource, mode) or
-            (resource, mode, command_safeguards).
+            (resource, mode, command_limits).
     """
     specs: list[MountSpec] = []
     for prefix, value in resources.items():
@@ -45,18 +45,19 @@ def normalize_resources(resources: dict[str, ResourceMount],
                     if value.mode is not None else default_mode,
                     backend=value.backend,
                     mountpoint=value.mountpoint,
-                    safeguards=dict(value.command_safeguards or {}),
+                    command_limits=dict(value.command_limits or {}),
                 ))
         elif isinstance(value, tuple):
             if len(value) not in (2, 3):
                 raise TypeError("resource tuples must be (resource, mode) or "
-                                "(resource, mode, command_safeguards)")
-            safeguards = dict(value[2]) if len(value) == 3 and value[2] else {}
+                                "(resource, mode, command_limits)")
+            command_limits = dict(
+                value[2]) if len(value) == 3 and value[2] else {}
             specs.append(
                 MountSpec(prefix=prefix,
                           resource=value[0],
                           mode=value[1],
-                          safeguards=safeguards))
+                          command_limits=command_limits))
         else:
             specs.append(
                 MountSpec(prefix=prefix, resource=value, mode=default_mode))
@@ -90,8 +91,8 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
     for spec in specs:
         spec.resource.set_index(index)
         entry = registry.mount(spec.prefix, spec.resource, spec.mode)
-        if spec.safeguards:
-            entry.command_safeguards.update(spec.safeguards)
+        if spec.command_limits:
+            entry.command_limits.update(spec.command_limits)
     implicit_root = registry.root_mount is None
     if implicit_root:
         registry.mount("/", RAMResource(), default_mode)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../types.ts'
+import { Limit, type PathSpec } from '../types.ts'
 import type { Policy } from './base.ts'
 import { PolicyDenied, PolicyError } from './errors.ts'
 import { SpecPolicy } from './spec.ts'
@@ -20,6 +20,7 @@ import {
   VALIDITY,
   type CommandContext,
   type Deny,
+  type ExecuteResultContext,
   type GuardSpec,
   type OpsContext,
   type OpsResultContext,
@@ -47,7 +48,12 @@ export async function preOpsGate(
   }
 }
 
-/** Fire postOps at the op door; a Deny suppresses the result. */
+/**
+ * Fire postOps at the op door; a Deny suppresses the result. Returns
+ * the merged Limit bound (tightest per field across every opining
+ * policy) for the door to apply to a byte-producing result, or null
+ * when no policy bounds this op.
+ */
 export async function postOpsGate(
   policies: Policies,
   op: string,
@@ -55,12 +61,26 @@ export async function postOpsGate(
   write: boolean,
   prefix: string,
   result: unknown,
-): Promise<void> {
-  if (!policies.wants('postOps')) return
-  const deny = await policies.postOps({ op, path, write, prefix, result })
+): Promise<Limit | null> {
+  if (!policies.wants('postOps')) return null
+  const [deny, bound] = await policies.postOps({ op, path, write, prefix, result })
   if (deny !== null) {
     throw new PolicyDenied(deny.message.replace(/\n$/, ''), path.virtual)
   }
+  return bound
+}
+
+/**
+ * Fire postExecute at the workspace boundary. Returns the fail-closed
+ * Deny (a throwing policy) if any, and the merged Limit bound for the
+ * boundary to enforce on the line's output stream.
+ */
+export async function postExecuteGate(
+  policies: Policies,
+  ctx: ExecuteResultContext,
+): Promise<[Deny | null, Limit | null]> {
+  if (!policies.wants('postExecute')) return [null, null]
+  return policies.postExecute(ctx)
 }
 
 /**
@@ -115,7 +135,8 @@ export class Policies {
     const hooked =
       typeof candidate.preCommand === 'function' ||
       typeof candidate.preOps === 'function' ||
-      typeof candidate.postOps === 'function'
+      typeof candidate.postOps === 'function' ||
+      typeof candidate.postExecute === 'function'
     if (!hooked && 'reason' in entry) {
       this.policies.push(new SpecPolicy(entry))
     } else {
@@ -124,25 +145,37 @@ export class Policies {
     this.rescan()
   }
 
+  /**
+   * One loop for every hook: the first Deny wins (limits are moot once
+   * the result is suppressed), Limit actions accumulate and merge
+   * to the tightest value per field.
+   */
   private async fire(
     hook: Hook,
-    ctx: CommandContext | OpsContext | OpsResultContext,
+    ctx: CommandContext | OpsContext | OpsResultContext | ExecuteResultContext,
     subject: string,
-  ): Promise<Deny | null> {
+  ): Promise<[Deny | null, Limit | null]> {
+    const limits: Limit[] = []
     for (const policy of this.policies) {
       const fn = policy[hook]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'
       let action
       try {
-        action = await fn.call(policy, ctx as CommandContext & OpsContext & OpsResultContext)
+        action = await fn.call(
+          policy,
+          ctx as CommandContext & OpsContext & OpsResultContext & ExecuteResultContext,
+        )
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
-        return {
-          kind: 'deny',
-          message: `${subject}: policy ${name} failed: ${detail}\n`,
-          exitCode: 1,
-        }
+        return [
+          {
+            kind: 'deny',
+            message: `${subject}: policy ${name} failed: ${detail}\n`,
+            exitCode: 1,
+          },
+          null,
+        ]
       }
       if (action === null) continue
       const kind: unknown = typeof action === 'object' ? action.kind : undefined
@@ -152,23 +185,31 @@ export class Policies {
             `legal kinds here: ${[...VALIDITY[hook]].join(', ')}`,
         )
       }
-      return action
+      if (action.kind === 'deny') return [action, null]
+      limits.push(action)
     }
-    return null
+    return [null, Limit.aggr(limits)]
   }
 
   /** Fire preCommand across the policies; the first Deny wins. */
   async preCommand(ctx: CommandContext): Promise<Deny | null> {
-    return this.fire('preCommand', ctx, ctx.command)
+    const [deny] = await this.fire('preCommand', ctx, ctx.command)
+    return deny
   }
 
   /** Fire preOps across the policies; the first Deny wins. */
   async preOps(ctx: OpsContext): Promise<Deny | null> {
-    return this.fire('preOps', ctx, ctx.op)
+    const [deny] = await this.fire('preOps', ctx, ctx.op)
+    return deny
   }
 
-  /** Fire postOps across the policies; a Deny suppresses the result. */
-  async postOps(ctx: OpsResultContext): Promise<Deny | null> {
+  /** Fire postOps; a Deny suppresses the result, Limits merge. */
+  async postOps(ctx: OpsResultContext): Promise<[Deny | null, Limit | null]> {
     return this.fire('postOps', ctx, ctx.op)
+  }
+
+  /** Fire postExecute; Limits merge to the boundary bound. */
+  async postExecute(ctx: ExecuteResultContext): Promise<[Deny | null, Limit | null]> {
+    return this.fire('postExecute', ctx, ctx.producer.command || 'line')
   }
 }

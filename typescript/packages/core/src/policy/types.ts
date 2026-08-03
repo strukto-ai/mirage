@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../types.ts'
+import type { Limit, PathSpec, Producer } from '../types.ts'
 
 /**
  * The one registry question policy hooks may ask. MountRegistry
@@ -38,11 +38,12 @@ export interface Deny {
 
 /**
  * The closed vocabulary of policy answers: a hook returns an Action to
- * state an opinion or null to stay silent. Grows arm by arm as further
- * lifecycle hooks land; each hook accepts a fixed set of kinds
- * (VALIDITY), enforced at the seam.
+ * state an opinion or null to stay silent. Deny refuses (first opinion
+ * wins); Limit bounds (every opinion merges to the tightest,
+ * Limit.aggr). Each hook accepts a fixed set of kinds (VALIDITY),
+ * enforced at the seam.
  */
-export type Action = Deny
+export type Action = Deny | Limit
 
 /**
  * A declarative guard: refuse matching commands on matching paths.
@@ -88,9 +89,24 @@ export interface OpsResultContext {
   result: unknown
 }
 
-export const VALIDITY: Readonly<Record<'preCommand' | 'preOps' | 'postOps', ReadonlySet<string>>> =
-  {
-    preCommand: new Set(['deny']),
-    preOps: new Set(['deny']),
-    postOps: new Set(['deny']),
-  }
+/**
+ * One finished execute() line, as postExecute hooks see it. Fires at
+ * the workspace boundary before the line's output stream is
+ * finalized, so a Limit returned here bounds what the caller sees.
+ * `producer` is the provenance of the surviving stream (the rightmost
+ * command, per shell semantics), with an empty command when no
+ * dispatch site stamped one.
+ */
+export interface ExecuteResultContext {
+  producer: Producer
+  exitCode: number
+}
+
+export const VALIDITY: Readonly<
+  Record<'preCommand' | 'preOps' | 'postOps' | 'postExecute', ReadonlySet<string>>
+> = {
+  preCommand: new Set(['deny']),
+  preOps: new Set(['deny']),
+  postOps: new Set(['deny', 'limit']),
+  postExecute: new Set(['limit']),
+}

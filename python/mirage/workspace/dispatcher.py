@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
+from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.io import IOResult
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
@@ -83,8 +84,10 @@ class Dispatcher:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):
-                await post_ops_gate(policies, op, path, write, mount.prefix,
-                                    cached)
+                bound = await post_ops_gate(policies, op, path, write,
+                                            mount.prefix, cached)
+                if bound is not None:
+                    cached = await apply_op_limit(cached, bound)
                 return cached, IOResult(reads={path.virtual: cached})
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -110,7 +113,10 @@ class Dispatcher:
             await self.invalidate_after_write(mount, path, observed=observed)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
                 await self.invalidate_after_write(mount, kwargs["dst"])
-        await post_ops_gate(policies, op, path, write, mount.prefix, result)
+        bound = await post_ops_gate(policies, op, path, write, mount.prefix,
+                                    result)
+        if bound is not None:
+            result = await apply_op_limit(result, bound)
         return result, IOResult()
 
     async def stat(self, path: str) -> FileStat:

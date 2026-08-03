@@ -21,6 +21,8 @@ import tempfile
 
 from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background
+from mirage.policy import Policy
+from mirage.policy.types import Deny, OpsContext, OpsResultContext
 from mirage.resource.ram import RAMResource
 from mirage.types import FileStat
 
@@ -45,6 +47,65 @@ class SizelessOps:
 
 
 API_CONTENT = b'{"messages": 2}\n'
+
+
+class SealReadsPolicy(Policy):
+    """pre_ops deny: a sealed path never reaches the backend."""
+
+    async def pre_ops(self, ctx: OpsContext) -> Deny | None:
+        if not ctx.write and ctx.path.virtual.endswith(".sealed"):
+            return Deny(message="sealed\n")
+        return None
+
+
+class RedactReadsPolicy(Policy):
+    """post_ops deny: refuse read results carrying a marker."""
+
+    async def post_ops(self, ctx: OpsResultContext) -> Deny | None:
+        data = ctx.result if isinstance(ctx.result,
+                                        (bytes, bytearray)) else None
+        if ctx.op == "read" and data is not None and b"TOPSECRET" in data:
+            return Deny(message="redacted\n")
+        return None
+
+
+def run_policy_probe(result: dict[str, object]) -> None:
+    """Record that op policies gate the kernel path too.
+
+    FUSE serves the workspace's op door, so a pre_ops deny (sealed
+    path) and a post_ops deny (redacted content) must both surface as
+    EACCES to ordinary file APIs, while unguarded reads pass.
+
+    Args:
+        result (dict[str, object]): the probe result to extend.
+    """
+    res = RAMResource()
+    res._store.dirs.add("/")
+    res._store.files["/clean.txt"] = b"hello\n"
+    res._store.files["/secret.txt"] = b"TOPSECRET plans\n"
+    res._store.files["/x.sealed"] = b"nope\n"
+    with Workspace(
+        {
+            "/guarded": Mount(
+                res, mode=MountMode.READ, backend=MountBackend.FUSE)
+        },
+            policies=[SealReadsPolicy(),
+                      RedactReadsPolicy()]) as ws:
+        mp = ws.fuse_mountpoints["/guarded"]
+        with open(f"{mp}/clean.txt", "rb") as fh:
+            result["policy_clean_read"] = fh.read().decode().strip()
+        try:
+            with open(f"{mp}/x.sealed", "rb") as fh:
+                fh.read()
+            result["policy_sealed_eacces"] = False
+        except PermissionError:
+            result["policy_sealed_eacces"] = True
+        try:
+            with open(f"{mp}/secret.txt", "rb") as fh:
+                fh.read()
+            result["policy_redact_eacces"] = False
+        except PermissionError:
+            result["policy_redact_eacces"] = True
 
 
 def run_sizeless_probe(result: dict[str, object]) -> None:
@@ -135,6 +196,7 @@ def main() -> None:
         result["collision_rejected"] = collision
 
     run_sizeless_probe(result)
+    run_policy_probe(result)
     print(json.dumps(result))
 
 

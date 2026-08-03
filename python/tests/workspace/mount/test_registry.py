@@ -378,7 +378,7 @@ def _remote_registry_with_cache():
 @pytest.mark.asyncio
 async def test_resolve_mount_keeps_cached_read_on_real_mount():
     # Warm reads are served in place by with_read_cache, so a cached
-    # read-only command stays on its real mount (keeping its safeguards and
+    # read-only command stays on its real mount (keeping its limits and
     # custom handlers) instead of being redirected to the cache mount.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")

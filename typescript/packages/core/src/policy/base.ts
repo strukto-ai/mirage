@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Action, CommandContext, OpsContext, OpsResultContext } from './types.ts'
+import type {
+  Action,
+  CommandContext,
+  ExecuteResultContext,
+  OpsContext,
+  OpsResultContext,
+} from './types.ts'
 
 /**
  * One concern's answers to the workspace lifecycle.
@@ -31,6 +37,13 @@ export interface Policy {
    * belong at preCommand or precomputed into policy state.
    */
   preOps?(ctx: OpsContext): Action | null | Promise<Action | null>
-  /** Observe one completed VFS op; a Deny suppresses its result. */
+  /** Observe one completed VFS op; a Deny suppresses its result, a
+   * Limit caps a byte-producing one. */
   postOps?(ctx: OpsResultContext): Action | null | Promise<Action | null>
+  /**
+   * Bound one finished execute() line's output. A Limit returned here
+   * merges with every other opining policy's (tightest per field) and
+   * caps the line's stdout at the workspace boundary.
+   */
+  postExecute?(ctx: ExecuteResultContext): Action | null | Promise<Action | null>
 }

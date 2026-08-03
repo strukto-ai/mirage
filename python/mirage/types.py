@@ -16,17 +16,17 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated, Any, ClassVar, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
 
 class Aggr:
-    """Declares how one CommandSafeguard field aggregates across guards.
+    """Declares how one Limit field aggregates across stacked limits.
 
     Attach to a field via Annotated[..., Aggr(rule)]; ``rule`` takes the
-    list of that field's values across the stacked safeguards and returns
-    the aggregated value. CommandSafeguard.aggr reads these rules so each
+    list of that field's values across the stacked limits and returns
+    the aggregated value. Limit.aggr reads these rules so each
     field's aggregation behavior lives next to the field.
 
     Args:
@@ -269,7 +269,17 @@ def _prefer_error(values: Iterable["OnExceed"]) -> "OnExceed":
                                   for v in values) else OnExceed.TRUNCATE)
 
 
-class CommandSafeguard(BaseModel):
+class Limit(BaseModel):
+    """A bound on a result: the policy layer's limit arm and the shape
+    every cap config parses into.
+
+    Carries its fields inline (the Deny precedent: an action is its
+    payload). ``kind`` is the wire discriminant; ``aggr`` is the
+    composition law (AND to the tightest per bound, ANY on error mode).
+    """
+
+    kind: ClassVar[str] = "limit"
+
     max_bytes: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
     max_lines: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
     timeout_seconds: Annotated[float | None, Aggr(_min_positive)] = None
@@ -278,19 +288,19 @@ class CommandSafeguard(BaseModel):
     @classmethod
     def aggr(
         cls,
-        safeguards: "Iterable[CommandSafeguard | None]",
-    ) -> "CommandSafeguard | None":
-        """Aggregate several safeguards using each field's declared rule.
+        limits: "Iterable[Limit | None]",
+    ) -> "Limit | None":
+        """Aggregate several limits using each field's declared rule.
 
         Every field carries an Aggr(rule) in its annotation; this applies
-        that rule to the field's values across the present guards. Returns
-        None when nothing is configured. Used wherever guards stack
-        (cross-mount fan-out, layered configs).
+        that rule to the field's values across the present limits. Returns
+        None when nothing is configured. Used wherever bounds stack
+        (policy composition, cross-mount fan-out, layered configs).
 
         Args:
-            safeguards (Iterable[CommandSafeguard | None]): guards to merge.
+            limits (Iterable[Limit | None]): limits to merge.
         """
-        present = [s for s in safeguards if s is not None]
+        present = [s for s in limits if s is not None]
         if not present:
             return None
         kwargs: dict[str, Any] = {}
@@ -301,6 +311,30 @@ class CommandSafeguard(BaseModel):
             kwargs[name] = rule.reduce(
                 values) if rule is not None else values[0]
         return cls(**kwargs)
+
+
+@dataclass(frozen=True, slots=True)
+class Producer:
+    """Provenance of a result: who produced it, and where.
+
+    Rides the IO envelope from the dispatch site to the workspace
+    boundary; merge keeps the rightmost producer, so this names the
+    command whose stream the caller actually sees. Post-layer policies
+    (output caps today; budgets and attribution later) read it as
+    context. Facts only: policy decisions never travel on the
+    envelope.
+
+    Args:
+        command (str): the producing command's name.
+        prefixes (tuple[str, ...]): mount prefixes the command spanned.
+        declared (Limit | None): the bound the command's own
+            registration declared, when the dispatch site knows it
+            (e.g. a CLI leaf); None for commands with no declaration.
+    """
+
+    command: str
+    prefixes: tuple[str, ...] = ()
+    declared: Limit | None = None
 
 
 class VFSWriteOp(str, Enum):

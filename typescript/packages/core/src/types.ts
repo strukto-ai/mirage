@@ -106,7 +106,7 @@ export const DriftPolicy = Object.freeze({
 export type DriftPolicy = (typeof DriftPolicy)[keyof typeof DriftPolicy]
 
 /**
- * Behaviour when a command's output exceeds its safeguard cap.
+ * Behaviour when a command's output exceeds its limit cap.
  * TRUNCATE returns the truncated bytes + a notice on stderr.
  * ERROR returns no stdout and exits 1 with the same notice.
  */
@@ -117,7 +117,7 @@ export const OnExceed = Object.freeze({
 
 export type OnExceed = (typeof OnExceed)[keyof typeof OnExceed]
 
-export interface CommandSafeguardInit {
+export interface LimitInit {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
@@ -129,13 +129,21 @@ function minPositive(values: (number | null)[]): number | null {
   return positives.length > 0 ? Math.min(...positives) : null
 }
 
-export class CommandSafeguard {
+/**
+ * A bound on a result: the policy layer's limit arm and the shape
+ * every cap config parses into. Carries its fields inline (the Deny
+ * precedent: an action is its payload). `kind` is the wire
+ * discriminant; `aggr` is the composition law (AND to the tightest
+ * per bound, ANY on error mode).
+ */
+export class Limit {
+  readonly kind = 'limit' as const
   readonly maxBytes: number | null
   readonly maxLines: number | null
   readonly timeoutSeconds: number | null
   readonly onExceed: OnExceed
 
-  constructor(init: CommandSafeguardInit = {}) {
+  constructor(init: LimitInit = {}) {
     const maxBytes = init.maxBytes ?? null
     const maxLines = init.maxLines ?? null
     const timeoutSeconds = init.timeoutSeconds ?? null
@@ -156,10 +164,10 @@ export class CommandSafeguard {
     this.onExceed = init.onExceed ?? OnExceed.TRUNCATE
   }
 
-  static aggr(safeguards: Iterable<CommandSafeguard | null>): CommandSafeguard | null {
-    const present = [...safeguards].filter((s): s is CommandSafeguard => s !== null)
+  static aggr(limits: Iterable<Limit | null>): Limit | null {
+    const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
-    return new CommandSafeguard({
+    return new Limit({
       maxBytes: minPositive(present.map((s) => s.maxBytes)),
       maxLines: minPositive(present.map((s) => s.maxLines)),
       timeoutSeconds: minPositive(present.map((s) => s.timeoutSeconds)),
@@ -168,6 +176,23 @@ export class CommandSafeguard {
         : OnExceed.TRUNCATE,
     })
   }
+}
+
+/**
+ * Provenance of a result: who produced it, and where.
+ *
+ * Rides the IO envelope from the dispatch site to the workspace
+ * boundary; merge keeps the rightmost producer, so this names the
+ * command whose stream the caller actually sees. Post-layer policies
+ * (output caps today; budgets and attribution later) read it as
+ * context. Facts only: policy decisions never travel on the envelope.
+ * `declared` is the bound the command's own registration declared,
+ * when the dispatch site knows it (e.g. a CLI leaf).
+ */
+export interface Producer {
+  readonly command: string
+  readonly prefixes: readonly string[]
+  readonly declared: Limit | null
 }
 
 export const ResourceName = Object.freeze({

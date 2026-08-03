@@ -20,17 +20,17 @@ from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
                                                         is_cross_mount)
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.types import Strategy
-from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
+from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.config import version_request
 from mirage.commands.spec import SPECS
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.policy import resolve_limit, resolve_producer
 from mirage.runtime.policy import PolicyDecision
-from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
-from mirage.types import PathSpec
+from mirage.types import PathSpec, Producer
 from mirage.workspace.executor.command.cli import handle_cli
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
@@ -217,9 +217,10 @@ async def handle_command(
                            for w in cross_parsed.warnings).encode()
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn + existing
-        # The native sub-runs carry their own mount's safeguard; the
-        # cross-mount command as a whole uses the strictest one across the
-        # operand mounts, regardless of which sub-run merged last.
+        # The native sub-runs carry their own mount's scope; the
+        # cross-mount command as a whole is bounded by the strictest
+        # cap across the operand mounts, regardless of which sub-run
+        # merged last.
         mounts = []
         for s in path_scopes:
             try:
@@ -227,8 +228,10 @@ async def handle_command(
             except ValueError:
                 # a scope outside any mount contributes nothing here
                 pass
-        io.safeguard = resolve_safeguard(cmd_name, mounts)
-        stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
+        io.producer = Producer(command=cmd_name,
+                               prefixes=tuple(m.prefix for m in mounts))
+        stdout = maybe_with_timeout(stdout, resolve_limit(cmd_name, mounts),
+                                    cmd_name)
         return stdout, io, await exec_node(cmd_str, io, path_scopes)
 
     # Reject unsupported cross-mount commands. Path-flag targets count: a
@@ -328,7 +331,9 @@ async def handle_command(
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn_bytes + existing
 
-    stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
-    io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
+    resolved = (resolve_producer(io.producer, registry.limit_override)
+                if io.producer is not None else None)
+    stdout = maybe_with_timeout(stdout, resolved, cmd_name)
+    io.stderr = maybe_with_timeout(io.stderr, resolved, cmd_name)
 
     return stdout, io, await exec_node(cmd_str, io, paths)

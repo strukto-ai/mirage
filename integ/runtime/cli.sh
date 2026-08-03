@@ -5,7 +5,7 @@
 # workspace create`) and executed with `mirage execute`. This is the
 # yaml -> daemon -> CLI construction path: entry captures, config
 # blocks, per-entry scripts (policy), the global route, per-mount
-# command_safeguards, and the per-line --runtime argument.
+# command_limits, and the per-line --runtime argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put)
 # or a runner-local test runtime (echobox) or non-ram mounts are
@@ -73,7 +73,7 @@ write_world_yaml() {
   jq '{mode: "EXEC",
        mounts: ((.mounts // {"/ram": {"resource": "ram"}})
          | map_values({resource: .resource}
-             + (if .safeguards then {command_safeguards: .safeguards} else {} end)))}
+             + (if .limits then {command_limits: .limits} else {} end)))}
       + (if .runtimes then {runtimes: .runtimes} else {} end)
       + (if .policy then {policy: .policy} else {} end)' \
     <<<"$world_json" > "$work/ws.yaml"

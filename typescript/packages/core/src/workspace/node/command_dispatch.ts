@@ -37,8 +37,8 @@ import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { handleCommand } from '../executor/command.ts'
 import { pathFlagScopes } from '../executor/command/routing.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../executor/policy/safeguard.ts'
+import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { resolveLimit } from '../../policy/index.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
@@ -316,9 +316,9 @@ async function runCommandBody(
 
   const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry)
 
-  // Safeguards resolve against the expanded name, so `$CMD`-style
+  // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
-  const resolved = argv.name !== '' ? resolveSafeguard(argv.name) : null
+  const resolved = argv.name !== '' ? resolveLimit(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands).

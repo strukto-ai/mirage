@@ -14,10 +14,15 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
+import type { Policy } from '../policy/base.ts'
+import { PolicyDenied } from '../policy/errors.ts'
+import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { Limit, MountMode } from '../types.ts'
 import { enotdir } from '../utils/errors.ts'
 import { Workspace } from './workspace.ts'
+
+const DEC = new TextDecoder()
 
 function mkWorkspace(): Workspace {
   const resource = new RAMResource()
@@ -137,5 +142,86 @@ describe('WorkspaceFS existence probes', () => {
     await expect(ws.fs.exists('/data/a.txt')).rejects.toThrow('/data/a.txt')
     await expect(ws.fs.isDir('/data/a.txt')).rejects.toThrow('/data/a.txt')
     await expect(ws.fs.isFile('/data/a.txt')).rejects.toThrow('/data/a.txt')
+  })
+})
+
+// The fs facade is an op door like the dispatcher: FUSE and programmatic
+// access read through it, so policy hooks must fire here too.
+describe('WorkspaceFS policy door', () => {
+  class SealReads implements Policy {
+    preOps(ctx: OpsContext): Action | null {
+      if (!ctx.write && ctx.path.virtual.endsWith('.sealed')) {
+        return { kind: 'deny', message: 'sealed\n' }
+      }
+      return null
+    }
+  }
+
+  class RedactReads implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      const data = ctx.result instanceof Uint8Array ? ctx.result : null
+      if (ctx.op === 'read' && data !== null && DEC.decode(data).includes('TOPSECRET')) {
+        return { kind: 'deny', message: 'redacted\n' }
+      }
+      return null
+    }
+  }
+
+  class CapReads implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read' && ctx.path.virtual.endsWith('.log')) {
+        return new Limit({ maxBytes: 5 })
+      }
+      return null
+    }
+  }
+
+  class LockWrites implements Policy {
+    preOps(ctx: OpsContext): Action | null {
+      if (ctx.write && ctx.path.virtual.startsWith('/data/locked/')) {
+        return { kind: 'deny', message: 'locked\n' }
+      }
+      return null
+    }
+  }
+
+  function mkGuarded(): Workspace {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    return new Workspace(
+      { '/data': resource },
+      {
+        mode: MountMode.WRITE,
+        ops,
+        policies: [new SealReads(), new RedactReads(), new CapReads(), new LockWrites()],
+      },
+    )
+  }
+
+  it('preOps denies a read through the facade with EACCES', async () => {
+    const ws = mkGuarded()
+    await ws.fs.writeFile('/data/x.sealed', 'nope\n')
+    await expect(ws.fs.readFile('/data/x.sealed')).rejects.toThrow(PolicyDenied)
+  })
+
+  it('postOps denies on result content the pre hook cannot see', async () => {
+    const ws = mkGuarded()
+    await ws.fs.writeFile('/data/secret.txt', 'TOPSECRET plans\n')
+    await expect(ws.fs.readFile('/data/secret.txt')).rejects.toThrow(PolicyDenied)
+    await ws.fs.writeFile('/data/clean.txt', 'hello\n')
+    expect(await ws.fs.readFileText('/data/clean.txt')).toBe('hello\n')
+  })
+
+  it('postOps Limit caps facade read bytes', async () => {
+    const ws = mkGuarded()
+    await ws.fs.writeFile('/data/big.log', 'abcdefghij\n')
+    expect(DEC.decode(await ws.fs.readFile('/data/big.log'))).toBe('abcde')
+  })
+
+  it('preOps denies a facade write before the backend runs', async () => {
+    const ws = mkGuarded()
+    await expect(ws.fs.writeFile('/data/locked/f.txt', 'hi')).rejects.toThrow(PolicyDenied)
+    expect(await ws.fs.exists('/data/locked/f.txt')).toBe(false)
   })
 })

@@ -16,7 +16,7 @@ import asyncio
 
 import tree_sitter
 
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.errors import ExitSignal

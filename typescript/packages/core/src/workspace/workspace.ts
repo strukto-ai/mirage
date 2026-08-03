@@ -26,9 +26,9 @@ import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import type { CLISpec } from '../commands/cli/types.ts'
-import { runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
+import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from './cli/types.ts'
-import { resolveSafeguard } from './executor/policy/safeguard.ts'
+import { resolveLimit } from '../policy/index.ts'
 import { JobTable } from '../shell/job_table.ts'
 import type { ShellParser } from '../shell/parse.ts'
 import { DriftQueue, installDriftState } from './snapshot/drift.ts'
@@ -238,16 +238,16 @@ export class Workspace {
         mount.registerGeneral(cmd)
       }
     }
-    for (const [prefix, safeguards] of Object.entries({
-      ...normalized.safeguards,
-      ...(options.commandSafeguards ?? {}),
+    for (const [prefix, commandLimits] of Object.entries({
+      ...normalized.commandLimits,
+      ...(options.commandLimits ?? {}),
     })) {
       const mount = this.registry.mountForPrefix(prefix)
       if (mount === null) {
-        throw new Error(`commandSafeguards references unknown mount prefix: ${prefix}`)
+        throw new Error(`commandLimits references unknown mount prefix: ${prefix}`)
       }
-      for (const [cmd, sg] of Object.entries(safeguards)) {
-        mount.commandSafeguards.set(cmd, sg)
+      for (const [cmd, sg] of Object.entries(commandLimits)) {
+        mount.commandLimits.set(cmd, sg)
       }
     }
     this.fs = new WorkspaceFS(
@@ -259,6 +259,8 @@ export class Workspace {
       },
       this.namespace,
       (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
+      this.registry.policies,
+      (path) => this.registry.mountFor(path)?.prefix ?? '',
     )
   }
 
@@ -687,7 +689,7 @@ export class Workspace {
     // The Dispatcher owns the rest — symlink follow, resolution (its
     // resolveFn is Workspace.resolve, so lazy open and mount grants
     // happen there), cache read-through, mode enforcement, per-op
-    // safeguards on the executing mount, revisions, overlay stat, and
+    // commandLimits on the executing mount, revisions, overlay stat, and
     // post-write invalidation — the same single path Python's
     // Workspace.dispatch delegates to.
     const [result] = await this.dispatcher.dispatch(
@@ -747,7 +749,7 @@ export class Workspace {
     // plan to honest UNKNOWN instead of resolving via execution.
     const executeFn: ExecuteFn = () => Promise.resolve(new IOResult())
     const provName = commandName(command)
-    const provResolved = provName !== '' ? resolveSafeguard(provName) : null
+    const provResolved = provName !== '' ? resolveLimit(provName) : null
     const provTimeout = provResolved !== null ? provResolved.timeoutSeconds : null
     return runWithTimeout(
       provisionNode(

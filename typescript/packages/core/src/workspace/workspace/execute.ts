@@ -241,6 +241,7 @@ async function runParsedLine(
       stdin,
       effectiveSession,
       env.registry.allMounts(),
+      env.registry.policies,
       () => env.invalidateAllAfterRemote(),
     )
     targetSession.lastExitCode = result.exitCode

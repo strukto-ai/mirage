@@ -17,9 +17,9 @@ import errno
 import pytest
 
 from mirage import Action, CommandContext, Deny, GuardSpec, Policy, Workspace
-from mirage.policy import OpsContext, OpsResultContext
+from mirage.policy import ExecuteResultContext, OpsContext, OpsResultContext
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import Limit, MountMode, OnExceed
 
 
 class NoInterpreters(Policy):
@@ -214,5 +214,163 @@ async def test_pre_ops_policy_holds_on_the_dispatcher_door():
         assert b"Permission denied" in result.stderr
         ok = await ws.execute("touch /data/free && echo done")
         assert b"done" in ok.stdout
+    finally:
+        await ws.close()
+
+
+class CapLines(Policy):
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        return Limit(max_lines=2)
+
+
+class CapReadBytes(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.op == "read":
+            return Limit(max_bytes=4)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_user_limit_policy_caps_line_output():
+    # A user Limit merges with the built-in cap (tightest wins) and
+    # bounds what execute() returns.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(CapLines())
+        await ws.ops.write("/data/big.txt", b"1\n2\n3\n4\n5\n")
+        r = await ws.execute("cat /data/big.txt")
+        assert (await r.stdout_str()).count("\n") == 2
+        assert "output truncated" in (await r.stderr_str())
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_user_limit_policy_caps_op_reads():
+    # A post_ops Limit bounds the programmatic door too: ws.ops (and
+    # FUSE behind it) serve capped bytes.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(CapReadBytes())
+        await ws.ops.write("/data/f.txt", b"hello world")
+        assert await ws.ops.read("/data/f.txt") == b"hell"
+    finally:
+        await ws.close()
+
+
+class CapBytesHard(Policy):
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        return Limit(max_bytes=4, on_exceed=OnExceed.ERROR)
+
+
+class Boom(Policy):
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        raise RuntimeError("boom")
+
+
+class DenyReads(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.op == "read":
+            return Deny("reads are suppressed\n")
+        return None
+
+
+class SeeProducer(Policy):
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        self.seen.append(ctx.producer.command)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_two_limit_policies_merge_to_the_tightest_end_to_end():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(CapLines())
+        ws.policies.add(SuppressNothingCapThree())
+        await ws.ops.write("/data/big.txt", b"1\n2\n3\n4\n5\n")
+        r = await ws.execute("cat /data/big.txt")
+        # CapLines says 2, SuppressNothingCapThree says 3: tightest wins.
+        assert (await r.stdout_str()).count("\n") == 2
+    finally:
+        await ws.close()
+
+
+class SuppressNothingCapThree(Policy):
+
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        return Limit(max_lines=3)
+
+
+@pytest.mark.asyncio
+async def test_error_mode_limit_fails_the_line():
+    # ANY-error: a user policy in error mode turns overflow into exit 1
+    # with no stdout, GNU-style notice on stderr.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(CapBytesHard())
+        await ws.ops.write("/data/f.txt", b"hello world\n")
+        r = await ws.execute("cat /data/f.txt")
+        assert r.exit_code == 1
+        assert r.stdout is None or await r.stdout_str() == ""
+        assert "output truncated" in (await r.stderr_str())
+        ok = await ws.execute("echo ok")
+        assert ok.exit_code == 0  # within the bound: no refusal
+        assert await ok.stdout_str() == "ok\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_post_ops_deny_beats_a_limit():
+    # A refusal suppresses the result; bounding it would be meaningless.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(CapReadBytes())
+        ws.policies.add(DenyReads())
+        await ws.ops.write("/data/f.txt", b"hello world")
+        with pytest.raises(PermissionError) as excinfo:
+            await ws.ops.read("/data/f.txt")
+        assert "reads are suppressed" in str(excinfo.value)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_raising_post_execute_policy_fails_the_line_closed():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        ws.policies.add(Boom())
+        r = await ws.execute("echo hi")
+        assert r.exit_code == 1
+        err = await r.stderr_str()
+        assert "Boom" in err
+        assert "boom" in err
+        assert r.stdout is None or await r.stdout_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_post_execute_sees_the_rightmost_producer():
+    # The provenance a policy reads follows shell semantics: the tail
+    # of a pipe, the right side of `;` and `||`.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        spy = SeeProducer()
+        ws.policies.add(spy)
+        await ws.ops.write("/data/f.txt", b"a\nb\n")
+        await ws.execute("cat /data/f.txt | wc -l")
+        await ws.execute("cat /data/f.txt ; head -n 1 /data/f.txt")
+        await ws.execute("false || cat /data/f.txt")
+        assert spy.seen == ["wc", "head", "cat"]
     finally:
         await ws.close()

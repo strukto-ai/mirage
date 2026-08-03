@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { bindCommands, catchAll, runtimeBindingsFor, type Runtime } from '../runtime.ts'
-import { CommandTimeoutError, runWithTimeout } from '../../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { EvalError } from '../runtime_errors.ts'
 import { isEvaluator, type Evaluator } from '../runtime_mixin.ts'
 import type { EvalValue } from '../runtime_types.ts'
@@ -30,7 +30,7 @@ import {
 } from './types.ts'
 
 /** Policy evaluation is bounded: a hung script must not freeze every
- * line (command safeguards resolve after policy, so nothing above this
+ * line (command limits resolve after policy, so nothing above this
  * layer would). Matches the python POLICY_EVAL_TIMEOUT_SECONDS; a
  * holder object so tests can tighten it. */
 export const POLICY_EVAL_TIMEOUT = { seconds: 10 }

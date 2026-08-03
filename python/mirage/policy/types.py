@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
 
-from mirage.types import PathSpec
+from mirage.types import Limit, PathSpec, Producer
 
 
 class MountRootQuery(Protocol):
@@ -30,20 +30,8 @@ class MountRootQuery(Protocol):
         ...
 
 
-class Action:
-    """Base of every policy answer.
-
-    A hook returns an Action to state an opinion or None to stay
-    silent. ``kind`` is the wire discriminant, mirrored by the
-    TypeScript union tag; each hook accepts a fixed set of kinds
-    (VALIDITY), enforced at the seam.
-    """
-
-    kind: ClassVar[str] = ""
-
-
 @dataclass(frozen=True, slots=True)
-class Deny(Action):
+class Deny:
     """Refuse the command with a message on stderr.
 
     Args:
@@ -56,6 +44,13 @@ class Deny(Action):
 
     message: str
     exit_code: int = 1
+
+
+# The closed vocabulary of policy answers: a hook returns an Action to
+# state an opinion or None to stay silent. Deny refuses (first opinion
+# wins); Limit bounds (every opinion merges to the tightest, Limit.aggr).
+# Each hook accepts a fixed set of kinds (VALIDITY), enforced loud.
+Action = Deny | Limit
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +137,27 @@ class OpsResultContext:
     result: Any
 
 
+@dataclass(frozen=True, slots=True)
+class ExecuteResultContext:
+    """One finished execute() line, as post_execute hooks see it.
+
+    Fires at the workspace boundary before the line's output stream is
+    finalized, so a Limit returned here bounds what the caller sees.
+
+    Args:
+        producer (Producer): provenance of the surviving stream (the
+            rightmost command, per shell semantics); a Producer with an
+            empty command when no dispatch site stamped one.
+        exit_code (int): the line's exit code so far.
+    """
+
+    producer: Producer
+    exit_code: int
+
+
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind}),
     "pre_ops": frozenset({Deny.kind}),
-    "post_ops": frozenset({Deny.kind}),
+    "post_ops": frozenset({Deny.kind, Limit.kind}),
+    "post_execute": frozenset({Limit.kind}),
 }

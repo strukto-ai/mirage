@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import {
-  type CommandSafeguard,
+  type Limit,
   createShellParser,
   type ExecuteOptions,
   type ExecuteResult,
@@ -56,16 +56,16 @@ export class Workspace extends CoreWorkspace {
 
   constructor(resources: Record<string, MountSpec | Mount>, options: NodeWorkspaceOptions = {}) {
     const specs: Record<string, MountSpec> = {}
-    const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {
-      ...(options.commandSafeguards ?? {}),
+    const commandLimits: Record<string, Record<string, Limit>> = {
+      ...(options.commandLimits ?? {}),
     }
     const mountTargets: [string, MountBackend, string | undefined][] = []
     for (const [prefix, value] of Object.entries(resources)) {
       if (value instanceof Mount) {
         specs[prefix] =
           value.options.mode !== undefined ? [value.resource, value.options.mode] : value.resource
-        if (value.options.commandSafeguards !== undefined)
-          commandSafeguards[prefix] = value.options.commandSafeguards
+        if (value.options.commandLimits !== undefined)
+          commandLimits[prefix] = value.options.commandLimits
         const backend = value.options.backend ?? MountBackend.VFS
         if (KERNEL_BACKENDS.includes(backend))
           mountTargets.push([prefix, backend, value.options.mountpoint])
@@ -75,7 +75,7 @@ export class Workspace extends CoreWorkspace {
     }
     super(specs, {
       ...options,
-      ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
+      ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
       shellParserFactory: options.shellParserFactory ?? loadShellParser,
     })
     if (mountTargets.length > 0) {

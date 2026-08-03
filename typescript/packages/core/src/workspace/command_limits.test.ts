@@ -18,7 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
-import { CommandSafeguard, MountMode, OnExceed } from '../types.ts'
+import { Limit, MountMode, OnExceed } from '../types.ts'
 import { Workspace } from './workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -42,8 +42,8 @@ function buildWs(nLines: number): Workspace {
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
 }
 
-function overrideSafeguard(ws: Workspace, name: string, sg: CommandSafeguard): void {
-  for (const m of ws.registry.allMounts()) m.commandSafeguards.set(name, sg)
+function overrideLimit(ws: Workspace, name: string, sg: Limit): void {
+  for (const m of ws.registry.allMounts()) m.commandLimits.set(name, sg)
 }
 
 async function runCmd(
@@ -58,7 +58,7 @@ async function runCmd(
   }
 }
 
-describe('Workspace command safeguard', () => {
+describe('Workspace command limit', () => {
   it('cat truncates at default 2000 lines', async () => {
     const ws = buildWs(2500)
     const { code, out, err } = await runCmd(ws, 'cat /big.txt')
@@ -87,14 +87,14 @@ describe('Workspace command safeguard', () => {
 
   it('mount override caps below default', async () => {
     const ws = buildWs(5)
-    overrideSafeguard(ws, 'cat', new CommandSafeguard({ maxLines: 3 }))
+    overrideLimit(ws, 'cat', new Limit({ maxLines: 3 }))
     const { code, out, err } = await runCmd(ws, 'cat /big.txt')
     expect(code).toBe(0)
     expect(out).toBe('line0\nline1\nline2\n')
     expect(err).toContain('truncated')
   })
 
-  it('commandSafeguards constructor option caps below default', async () => {
+  it('commandLimits constructor option caps below default', async () => {
     const ram = new RAMResource()
     const registry = new OpsRegistry()
     registry.registerResource(ram)
@@ -105,7 +105,7 @@ describe('Workspace command safeguard', () => {
         mode: MountMode.WRITE,
         ops: registry,
         shellParser: parser,
-        commandSafeguards: { '/': { cat: new CommandSafeguard({ maxLines: 3 }) } },
+        commandLimits: { '/': { cat: new Limit({ maxLines: 3 }) } },
       },
     )
     const { code, out, err } = await runCmd(ws, 'cat /big.txt')
@@ -114,7 +114,7 @@ describe('Workspace command safeguard', () => {
     expect(err).toContain('truncated')
   })
 
-  it('commandSafeguards constructor option rejects an unknown prefix', () => {
+  it('commandLimits constructor option rejects an unknown prefix', () => {
     const ram = new RAMResource()
     const registry = new OpsRegistry()
     registry.registerResource(ram)
@@ -126,7 +126,7 @@ describe('Workspace command safeguard', () => {
             mode: MountMode.WRITE,
             ops: registry,
             shellParser: parser,
-            commandSafeguards: { '/missing': { cat: new CommandSafeguard({ maxLines: 3 }) } },
+            commandLimits: { '/missing': { cat: new Limit({ maxLines: 3 }) } },
           },
         ),
     ).toThrow(/unknown mount prefix/)
@@ -134,7 +134,7 @@ describe('Workspace command safeguard', () => {
 
   it('onExceed=ERROR drops stdout + exits 1', async () => {
     const ws = buildWs(5)
-    overrideSafeguard(ws, 'cat', new CommandSafeguard({ maxLines: 3, onExceed: OnExceed.ERROR }))
+    overrideLimit(ws, 'cat', new Limit({ maxLines: 3, onExceed: OnExceed.ERROR }))
     const { code, out, err } = await runCmd(ws, 'cat /big.txt')
     expect(code).toBe(1)
     expect(out).toBe('')

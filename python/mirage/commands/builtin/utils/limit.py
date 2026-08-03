@@ -18,7 +18,7 @@ import time
 from collections.abc import AsyncIterator
 
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import Limit, OnExceed
 from mirage.utils.stream import ensure_stream
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class CommandTimeoutError(Exception):
         self.seconds = seconds
 
 
-class SafeguardExceededError(Exception):
+class LimitExceededError(Exception):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
@@ -62,27 +62,27 @@ async def with_timeout(
 
 def maybe_with_timeout(
     stream: ByteSource | None,
-    safeguard: CommandSafeguard | None,
+    limit: Limit | None,
     command: str,
 ) -> ByteSource | None:
-    """Wrap a byte stream with a timeout if the safeguard calls for one.
+    """Wrap a byte stream with a timeout if the limit calls for one.
 
     Returns the stream untouched when it is None, already bytes, or the
-    safeguard has no positive timeout. Single source of the wrap rule
+    limit has no positive timeout. Single source of the wrap rule
     shared by stdout, stderr, and any other stream channel.
 
     Args:
         stream (ByteSource | None): the stream to maybe wrap.
-        safeguard (CommandSafeguard | None): resolved safeguard.
+        limit (Limit | None): resolved limit.
         command (str): command name for the timeout message.
     """
     if stream is None or isinstance(stream, bytes):
         return stream
-    if safeguard is None or not safeguard.timeout_seconds:
+    if limit is None or not limit.timeout_seconds:
         return stream
-    if safeguard.timeout_seconds <= 0:
+    if limit.timeout_seconds <= 0:
         return stream
-    return with_timeout(stream, safeguard.timeout_seconds, command)
+    return with_timeout(stream, limit.timeout_seconds, command)
 
 
 async def run_with_timeout(coro, seconds: float | None, name: str):
@@ -114,26 +114,26 @@ def _trim_to_lines(buf: bytes, max_lines: int) -> bytes:
     return buf
 
 
-def _build_notice(safeguard: CommandSafeguard) -> bytes:
+def _build_notice(limit: Limit) -> bytes:
     parts: list[str] = []
-    if safeguard.max_lines is not None:
-        parts.append(f"{safeguard.max_lines} lines")
-    if safeguard.max_bytes is not None:
-        parts.append(f"{safeguard.max_bytes} bytes")
-    limit = " / ".join(parts)
-    return (f"output truncated at safeguard limit ({limit}); "
+    if limit.max_lines is not None:
+        parts.append(f"{limit.max_lines} lines")
+    if limit.max_bytes is not None:
+        parts.append(f"{limit.max_bytes} bytes")
+    detail = " / ".join(parts)
+    return (f"output truncated at limit ({detail}); "
             "narrow with grep, or read more with head -n / tail -n / "
             "a more specific path\n").encode()
 
 
-async def apply_safeguard(
+async def apply_limit(
     src: ByteSource,
-    safeguard: CommandSafeguard | None,
+    limit: Limit | None,
 ) -> tuple[ByteSource | None, IOResult]:
-    if safeguard is None:
+    if limit is None:
         return src, IOResult()
-    max_lines = safeguard.max_lines
-    max_bytes = safeguard.max_bytes
+    max_lines = limit.max_lines
+    max_bytes = limit.max_bytes
     if max_lines is None and max_bytes is None:
         return src, IOResult()
     buf = bytearray()
@@ -151,8 +151,8 @@ async def apply_safeguard(
     data = bytes(buf)
     if not truncated:
         return data, IOResult()
-    notice = _build_notice(safeguard)
-    if safeguard.on_exceed is OnExceed.ERROR:
+    notice = _build_notice(limit)
+    if limit.on_exceed is OnExceed.ERROR:
         return None, IOResult(exit_code=1, stderr=notice)
     return data, IOResult(stderr=notice)
 
@@ -161,7 +161,7 @@ async def guard_output(
     stdout: ByteSource | None,
     stderr: ByteSource | None,
     exit_code: int,
-    safeguard: CommandSafeguard | None,
+    limit: Limit | None,
 ) -> tuple[ByteSource | None, ByteSource | None, int]:
     """Apply output caps at a boundary and merge the outcome.
 
@@ -174,11 +174,11 @@ async def guard_output(
         stderr (ByteSource | None): the error stream to carry the
             notice.
         exit_code (int): the run's exit code.
-        safeguard (CommandSafeguard | None): resolved safeguard.
+        limit (Limit | None): resolved limit.
     """
     if stdout is None:
         return stdout, stderr, exit_code
-    data, sg_io = await apply_safeguard(stdout, safeguard)
+    data, sg_io = await apply_limit(stdout, limit)
     if sg_io.stderr is not None:
         existing = (await materialize(stderr) if stderr is not None else b"")
         stderr = existing + await materialize(sg_io.stderr)
@@ -187,30 +187,30 @@ async def guard_output(
     return data, stderr, exit_code
 
 
-async def apply_op_safeguard(result, safeguard: CommandSafeguard | None):
+async def apply_op_limit(result, limit: Limit | None):
     """Apply byte/line caps to a byte-producing VFS op result.
 
     VFS ops have no stderr/exit envelope, so on TRUNCATE the capped bytes
     are returned (and the notice logged) and on ERROR a
-    SafeguardExceededError is raised. Non-byte results (stat, listings)
+    LimitExceededError is raised. Non-byte results (stat, listings)
     and unconfigured guards pass through untouched.
 
     Args:
         result: the op result (capped only when bytes or a byte stream).
-        safeguard (CommandSafeguard | None): resolved op safeguard.
+        limit (Limit | None): resolved op limit.
     """
-    if safeguard is None:
+    if limit is None:
         return result
-    if safeguard.max_bytes is None and safeguard.max_lines is None:
+    if limit.max_bytes is None and limit.max_lines is None:
         return result
     if not isinstance(result,
                       (bytes, bytearray)) and not hasattr(result, "__aiter__"):
         return result
-    data, sg_io = await apply_safeguard(result, safeguard)
+    data, sg_io = await apply_limit(result, limit)
     if sg_io.exit_code != 0:
         message = (await sg_io.stderr_str()
-                   if sg_io.stderr else "safeguard exceeded")
-        raise SafeguardExceededError(message.strip())
+                   if sg_io.stderr else "limit exceeded")
+        raise LimitExceededError(message.strip())
     if sg_io.stderr:
         logger.debug("vfs op output truncated: %s",
                      (await sg_io.stderr_str()).strip())

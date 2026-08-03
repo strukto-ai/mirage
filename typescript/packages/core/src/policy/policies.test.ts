@@ -19,14 +19,21 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
-import { MountMode, PathSpec } from '../types.ts'
+import { Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import type { Policy } from './base.ts'
-import { MountRootPolicy } from './mount_root.ts'
+import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PolicyDenied } from './errors.ts'
-import { Policies, postOpsGate, preOpsGate } from './policies.ts'
-import type { Action, CommandContext, GuardSpec, OpsContext, OpsResultContext } from './types.ts'
+import { Policies, postExecuteGate, postOpsGate, preOpsGate } from './policies.ts'
+import type {
+  Action,
+  CommandContext,
+  ExecuteResultContext,
+  GuardSpec,
+  OpsContext,
+  OpsResultContext,
+} from './types.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -366,6 +373,204 @@ describe('workspace policies', () => {
       const refused = await ws.execute('touch /data/prod/x.txt')
       expect(refused.exitCode).not.toBe(0)
       expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class CapFour implements Policy {
+  postOps(_ctx: OpsResultContext): Action | null {
+    return new Limit({ maxBytes: 4 })
+  }
+}
+
+class CapTwo implements Policy {
+  postOps(_ctx: OpsResultContext): Action | null {
+    return new Limit({ maxBytes: 2 })
+  }
+}
+
+class LimitOnPre implements Policy {
+  preCommand(_ctx: CommandContext): Action | null {
+    return new Limit({ maxBytes: 1 })
+  }
+}
+
+class CapLines implements Policy {
+  postExecute(_ctx: ExecuteResultContext): Action | null {
+    return new Limit({ maxLines: 2 })
+  }
+}
+
+describe('Limit', () => {
+  const opsCtx = (): OpsResultContext => ({
+    op: 'read',
+    path: path('/data/x'),
+    write: false,
+    prefix: '/data/',
+    result: new TextEncoder().encode('payload'),
+  })
+
+  it('postOps limits merge to the tightest', async () => {
+    const policies = new Policies()
+    policies.add(new CapFour())
+    policies.add(new CapTwo())
+    const [deny, bound] = await policies.postOps(opsCtx())
+    expect(deny).toBeNull()
+    expect(bound?.maxBytes).toBe(2)
+  })
+
+  it('postOpsGate returns the merged bound', async () => {
+    const policies = new Policies()
+    policies.add(new CapFour())
+    const bound = await postOpsGate(policies, 'read', path('/data/x'), false, '/data/', null)
+    expect(bound?.maxBytes).toBe(4)
+  })
+
+  it('a limit is illegal on preCommand', async () => {
+    const policies = new Policies()
+    policies.add(new LimitOnPre())
+    await expect(policies.preCommand(ctx('ls', []))).rejects.toThrow(/LimitOnPre/)
+  })
+
+  it('postExecuteGate merges user limits', async () => {
+    const policies = new Policies()
+    policies.add(new CapLines())
+    const [deny, bound] = await postExecuteGate(policies, {
+      producer: { command: 'echo', prefixes: [], declared: null },
+      exitCode: 0,
+    })
+    expect(deny).toBeNull()
+    expect(bound?.maxLines).toBe(2)
+  })
+
+  it('a user limit policy caps line output', async () => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new CapLines())
+      await ws.dispatch('write', '/data/big.txt', [new TextEncoder().encode('1\n2\n3\n4\n5\n')])
+      const r = await ws.execute('cat /data/big.txt')
+      const out = new TextDecoder().decode(r.stdout)
+      expect(out.split('\n').filter((l) => l !== '').length).toBe(2)
+      expect(new TextDecoder().decode(r.stderr)).toContain('output truncated')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a postOps limit caps the op door', async () => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new CapFour())
+      await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world')])
+      const served = await ws.dispatch('read', '/data/f.txt')
+      expect(new TextDecoder().decode(served as Uint8Array)).toBe('hell')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class CapThree implements Policy {
+  postExecute(_ctx: ExecuteResultContext): Action | null {
+    return new Limit({ maxLines: 3 })
+  }
+}
+
+class CapBytesHard implements Policy {
+  postExecute(_ctx: ExecuteResultContext): Action | null {
+    return new Limit({ maxBytes: 4, onExceed: OnExceed.ERROR })
+  }
+}
+
+class Boom implements Policy {
+  postExecute(_ctx: ExecuteResultContext): Action | null {
+    throw new Error('boom')
+  }
+}
+
+class DenyReads implements Policy {
+  postOps(ctx: OpsResultContext): Action | null {
+    return ctx.op === 'read' ? { kind: 'deny', message: 'reads are suppressed\n' } : null
+  }
+}
+
+class SeeProducer implements Policy {
+  readonly seen: string[] = []
+  postExecute(ctx: ExecuteResultContext): Action | null {
+    this.seen.push(ctx.producer.command)
+    return null
+  }
+}
+
+describe('Limit end to end', () => {
+  it('two limit policies merge to the tightest', async () => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new CapLines())
+      ws.policies.add(new CapThree())
+      await ws.dispatch('write', '/data/big.txt', [new TextEncoder().encode('1\n2\n3\n4\n5\n')])
+      const r = await ws.execute('cat /data/big.txt')
+      const out = new TextDecoder().decode(r.stdout)
+      expect(out.split('\n').filter((l) => l !== '').length).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('an error-mode limit fails the line', async () => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new CapBytesHard())
+      await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world\n')])
+      const r = await ws.execute('cat /data/f.txt')
+      expect(r.exitCode).toBe(1)
+      expect(new TextDecoder().decode(r.stderr)).toContain('output truncated')
+      const ok = await ws.execute('echo ok')
+      expect(ok.exitCode).toBe(0)
+      expect(new TextDecoder().decode(ok.stdout)).toBe('ok\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a postOps deny beats a limit', async () => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new CapFour())
+      ws.policies.add(new DenyReads())
+      await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world')])
+      await expect(ws.dispatch('read', '/data/f.txt')).rejects.toThrow(/reads are suppressed/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a throwing postExecute policy fails the line closed', async () => {
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new Boom())
+      const r = await ws.execute('echo hi')
+      expect(r.exitCode).toBe(1)
+      const err = new TextDecoder().decode(r.stderr)
+      expect(err).toContain('Boom')
+      expect(err).toContain('boom')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('postExecute sees the rightmost producer', async () => {
+    const ws = executableWorkspace()
+    try {
+      const spy = new SeeProducer()
+      ws.policies.add(spy)
+      await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('a\nb\n')])
+      await ws.execute('cat /data/f.txt | wc -l')
+      await ws.execute('cat /data/f.txt ; head -n 1 /data/f.txt')
+      await ws.execute('false || cat /data/f.txt')
+      expect(spy.seen).toEqual(['wc', 'head', 'cat'])
     } finally {
       await ws.close()
     }

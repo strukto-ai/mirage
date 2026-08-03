@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.types import CommandSafeguard
+from mirage.types import Producer
 
 ByteSource = bytes | AsyncIterator[bytes]
 
@@ -47,12 +47,12 @@ class IOResult:
         reads (dict[str, ByteSource]): Paths read with content or streams.
         writes (dict[str, ByteSource]): Paths written with content or streams.
         cache (list[str]): Paths worth caching (from reads or writes).
-        safeguard (CommandSafeguard | None): Output cap for the command
-            that produced this result, resolved at dispatch time and
-            applied to the final output at the workspace boundary.
-            TODO: hoist this and any future finalization-policy fields
-            off IOResult (output data) into a separate
-            FinalizationContext returned alongside (stream, io).
+        producer (Producer | None): provenance of this result (which
+            command, spanning which mounts); merge keeps the rightmost
+            producer, mirroring whose stream the shell shows. The
+            workspace boundary hands it to the policy layer as
+            context. Facts ride the envelope, policy decisions never
+            do.
         _stream_source (IOResult | None): Reference to the original IOResult
             that owns the lazy stream. Needed because streaming commands
             (e.g. grep) set exit_code lazily via exit_on_empty — the
@@ -79,7 +79,7 @@ class IOResult:
     reads: dict[str, ByteSource] = field(default_factory=dict)
     writes: dict[str, ByteSource] = field(default_factory=dict)
     cache: list[str] = field(default_factory=list)
-    safeguard: CommandSafeguard | None = None
+    producer: Producer | None = None
     _stream_source: "IOResult | None" = field(default=None, repr=False)
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -142,7 +142,7 @@ class IOResult:
                 **other.writes
             },
             cache=self.cache + other.cache,
-            safeguard=other.safeguard,
+            producer=other.producer,
         )
         result._stream_source = other
         return result

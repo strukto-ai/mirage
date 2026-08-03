@@ -43,8 +43,8 @@ import {
   findExprTail,
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
-import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from './policy/safeguard.ts'
+import { maybeWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { resolveProducer, resolveLimit } from '../../policy/index.ts'
 import type { ExecuteNodeFn, JobHandlerResult } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { versionRequest } from '../../commands/config.ts'
@@ -262,17 +262,21 @@ export async function handleCommand(
       csIo.stderr = concatBytes([csWarn, csExisting])
       csExec.stderr = concatBytes([csWarn, csExec.stderr])
     }
-    // The native sub-runs carry their own mount's safeguard; the cross-mount
-    // command as a whole uses the strictest one across the operand mounts,
-    // regardless of which sub-run merged last.
+    // The native sub-runs carry their own mount's scope; the cross-mount
+    // command as a whole is bounded by the strictest cap across the
+    // operand mounts, regardless of which sub-run merged last.
     const mounts: MountEntry[] = []
     for (const s of pathScopes) {
       const m = registry.mountFor(s.virtual)
       if (m !== null) mounts.push(m)
     }
-    csIo.safeguard = resolveSafeguard(cmdName, mounts)
+    csIo.producer = {
+      command: cmdName,
+      prefixes: mounts.map((m) => m.prefix),
+      declared: null,
+    }
     csExec.paths = pathScopes
-    return [maybeWithTimeout(csStdout, csIo.safeguard, cmdName), csIo, csExec]
+    return [maybeWithTimeout(csStdout, resolveLimit(cmdName, mounts), cmdName), csIo, csExec]
   }
 
   // Path-flag targets count: a command bound to one mount cannot write its
@@ -426,8 +430,12 @@ export async function handleCommand(
     const existing = await materialize(io.stderr)
     io.stderr = concatBytes([warnBytes, existing])
   }
-  stdout = maybeWithTimeout(stdout, io.safeguard, cmdName)
-  io.stderr = maybeWithTimeout(io.stderr, io.safeguard, cmdName)
+  const resolved =
+    io.producer !== null
+      ? resolveProducer(io.producer, (prefix, name) => registry.limitOverride(prefix, name))
+      : null
+  stdout = maybeWithTimeout(stdout, resolved, cmdName)
+  io.stderr = maybeWithTimeout(io.stderr, resolved, cmdName)
   const stderrBytes = await materialize(io.stderr)
   const exec = new ExecutionNode({
     command: cmdStr,

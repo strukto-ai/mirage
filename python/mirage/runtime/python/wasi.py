@@ -58,7 +58,7 @@ class WasiRuntime(Runtime):
     Runs execute on a worker thread with the GIL released, and each run
     gets its own epoch-interruption engine: cancelling the `run` task
     bumps the epoch, which traps the run and reclaims the thread, so a
-    safeguard timeout stops the interpreter instead of leaking it.
+    limit timeout stops the interpreter instead of leaking it.
 
     The build directory comes from the config `home` (the yaml entry's
     ``config`` block ends up here) or the MIRAGE_WASI_HOME environment

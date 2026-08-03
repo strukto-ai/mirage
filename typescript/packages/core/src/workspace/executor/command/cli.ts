@@ -20,11 +20,11 @@ import { renderHelp } from '../../../commands/spec/help.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { concatBytes } from '../../../core/jq/format.ts'
-import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/safeguard.ts'
+import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
-import { resolveSafeguard } from '../policy/safeguard.ts'
+import { resolveLimit } from '../../../policy/index.ts'
 import { optionError, parseFlags } from './flags.ts'
 
 // argparse add_help: a leaf answers --help with its own help unless it
@@ -118,12 +118,12 @@ export async function handleCli(
     // fn-bearing nodes as leaf; reaching this is a bug.
     throw new Error(`walk returned a leaf without fn for '${prog}'`)
   }
-  // The leaf's declared safeguard bounds the handler body and its
+  // The leaf's declared limit bounds the handler body and its
   // streams, exactly like mount dispatch: without the wrap a blocking
   // leaf hangs forever and an unbounded-output leaf ignores its own
   // limits.
-  const safeguard = resolveSafeguard(prog, [], leaf.safeguard)
-  const timeout = safeguard?.timeoutSeconds ?? null
+  const limit = resolveLimit(prog, [], leaf.limit)
+  const timeout = limit?.timeoutSeconds ?? null
   const out = await runWithTimeout(
     Promise.resolve(fn(install.config, paths, texts, { stdin, flags })),
     timeout,
@@ -134,7 +134,7 @@ export async function handleCli(
   if (out !== null) {
     ;[stdout, io] = out
   }
-  io.safeguard = safeguard
+  io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
   if (warnings.length > 0) {
     const warn = new TextEncoder().encode(warnings.map((w) => `${prog}: ${w}\n`).join(''))
@@ -142,8 +142,8 @@ export async function handleCli(
     io.stderr = concatBytes([warn, existing])
   }
 
-  stdout = maybeWithTimeout(stdout, io.safeguard, prog)
-  io.stderr = maybeWithTimeout(io.stderr, io.safeguard, prog)
+  stdout = maybeWithTimeout(stdout, limit, prog)
+  io.stderr = maybeWithTimeout(io.stderr, limit, prog)
 
   const stderrBytes = await materialize(io.stderr)
   return [

@@ -90,7 +90,7 @@ class QuickJsRuntime(Runtime, EvaluatorMixin):
 
     Each run gets its own epoch-interruption engine (via the shared
     wasm runtime), so a cancelled run traps it and reclaims the
-    thread; a safeguard timeout stops the engine instead of leaking it.
+    thread; a limit timeout stops the engine instead of leaking it.
 
     The module comes from the config `home` (the yaml entry's
     ``config`` block ends up here) or the MIRAGE_QUICKJS_HOME

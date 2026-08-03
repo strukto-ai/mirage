@@ -280,25 +280,25 @@ describe('configToWorkspaceArgs', () => {
     expect(args.options.workspaceId).toBe('agent-ws-7')
   })
 
-  it('parses per-mount command_safeguards (snake_case YAML) into the resource tuple', async () => {
+  it('parses per-mount command_limits (snake_case YAML) into the resource tuple', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: {
         '/': {
           resource: 'ram',
-          command_safeguards: {
+          command_limits: {
             cat: { max_lines: 10, timeout_seconds: 5, on_exceed: 'error' },
           },
         },
       },
     })
     const args = await configToWorkspaceArgs(cfg)
-    const safeguards = args.resources['/']?.[2]
-    expect(safeguards?.cat?.maxLines).toBe(10)
-    expect(safeguards?.cat?.timeoutSeconds).toBe(5)
-    expect(safeguards?.cat?.onExceed).toBe('error')
+    const limits = args.resources['/']?.[2]
+    expect(limits?.cat?.maxLines).toBe(10)
+    expect(limits?.cat?.timeoutSeconds).toBe(5)
+    expect(limits?.cat?.onExceed).toBe('error')
   })
 
-  it('defaults to no command_safeguards when omitted', async () => {
+  it('defaults to no command_limits when omitted', async () => {
     const cfg = loadWorkspaceConfig({ mounts: { '/': { resource: 'ram' } } })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.resources['/']?.[2]).toEqual({})
@@ -306,7 +306,7 @@ describe('configToWorkspaceArgs', () => {
 
   it('rejects an invalid on_exceed value', async () => {
     const cfg = loadWorkspaceConfig({
-      mounts: { '/': { resource: 'ram', command_safeguards: { cat: { on_exceed: 'boom' } } } },
+      mounts: { '/': { resource: 'ram', command_limits: { cat: { on_exceed: 'boom' } } } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/invalid onExceed/)
   })

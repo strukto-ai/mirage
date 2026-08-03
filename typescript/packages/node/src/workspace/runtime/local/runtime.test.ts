@@ -51,7 +51,7 @@ describe('LocalRuntime', () => {
     ).rejects.toThrow(/local python interpreter not found/)
   })
 
-  it('an aborted signal kills the interpreter (safeguard timeout path)', async () => {
+  it('an aborted signal kills the interpreter (limit timeout path)', async () => {
     const rt = new LocalRuntime()
     const ctl = new AbortController()
     const started = Date.now()

@@ -14,12 +14,13 @@
 
 from collections.abc import Awaitable, Callable
 
-from mirage.commands.builtin.utils.safeguard import (guard_output,
-                                                     run_with_timeout)
+from mirage.commands.builtin.utils.limit import guard_output, run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
+from mirage.policy import (ExecuteResultContext, Policies, post_execute_gate,
+                           resolve_limit)
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy.safeguard import resolve_safeguard
+from mirage.types import Producer
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.session import Session
 from mirage.workspace.workspace.utils import command_name
@@ -27,27 +28,28 @@ from mirage.workspace.workspace.utils import command_name
 
 async def run_whole_line(
         runtime: Runtime, command: str, stdin: ByteSource | None,
-        session: Session, mounts: list[MountEntry],
+        session: Session, mounts: list[MountEntry], policies: Policies,
         invalidate: Callable[[], Awaitable[None]]) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
-    A whole line is a command like any other: the same safeguard
-    resolution and boundary rule as the tree, so ``timeout_seconds``
-    answers 124 and ``max_bytes``/``max_lines`` cap the output.
+    A whole line is a command like any other: the same boundary
+    consultation as the tree, so ``timeout_seconds`` answers 124 and
+    the policies' merged Limit caps the output.
 
     Args:
         runtime (Runtime): the runtime that captured the whole line.
         command (str): the raw command line.
         stdin (ByteSource | None): bytes piped into the line.
         session (Session): session supplying cwd and env.
-        mounts (list[MountEntry]): mounts whose per-command safeguards
-            apply.
+        mounts (list[MountEntry]): mounts the line may span (every
+            mount: a whole-line runtime sees the full workspace).
+        policies (Policies): the workspace's policies.
         invalidate (Callable[[], Awaitable[None]]): drops local read
             caches once the line has run.
     """
     data = await materialize(stdin) if stdin is not None else None
     name = command_name(command)
-    guard = resolve_safeguard(name, mounts)
+    guard = resolve_limit(name, mounts)
     timeout = guard.timeout_seconds if guard is not None else None
     try:
         result = await run_with_timeout(
@@ -57,7 +59,16 @@ async def run_whole_line(
         # The line may have written anywhere in the runtime's view of
         # the workspace; local read caches are stale.
         await invalidate()
+    producer = Producer(command=name, prefixes=tuple(m.prefix for m in mounts))
+    deny, bound = await post_execute_gate(
+        policies,
+        ExecuteResultContext(producer=producer, exit_code=result.exit_code))
+    if deny is not None:
+        existing = result.stderr or b""
+        return IOResult(exit_code=deny.exit_code,
+                        stdout=None,
+                        stderr=existing + deny.message.encode())
     stdout, stderr, exit_code = await guard_output(result.stdout or b"",
                                                    result.stderr,
-                                                   result.exit_code, guard)
+                                                   result.exit_code, bound)
     return IOResult(exit_code=exit_code, stdout=stdout, stderr=stderr)

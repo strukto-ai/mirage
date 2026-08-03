@@ -31,7 +31,7 @@ class LocalRuntime(Runtime):
 
     Each run spawns `<interpreter> -c <code>`; the code sees the host
     filesystem and environment, not the workspace mounts. Cancelling the
-    run kills the subprocess, so a safeguard timeout reclaims it.
+    run kills the subprocess, so a limit timeout reclaims it.
 
     The interpreter defaults to the one running mirage; point the
     config `home` (the yaml entry's ``config`` block ends up here) or

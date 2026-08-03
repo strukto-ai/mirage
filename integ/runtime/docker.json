@@ -129,7 +129,7 @@
         "mounts": {
           "/ram": {
             "resource": "ram",
-            "safeguards": {
+            "limits": {
               "sleep": {
                 "timeout_seconds": 1
               }

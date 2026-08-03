@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { CommandSafeguard, OnExceed } from '../../../types.ts'
-import { applySafeguard } from './safeguard.ts'
+import { Limit, OnExceed } from '../../../types.ts'
+import { applyLimit } from './limit.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -33,47 +33,47 @@ async function bytesOf(out: Uint8Array | AsyncIterable<Uint8Array> | null): Prom
   return materialize(out)
 }
 
-describe('applySafeguard', () => {
-  it('passes through when safeguard is null', async () => {
-    const [out, io] = await applySafeguard(TEN, null)
+describe('applyLimit', () => {
+  it('passes through when limit is null', async () => {
+    const [out, io] = await applyLimit(TEN, null)
     expect(await bytesOf(out)).toEqual(TEN)
     expect(io.exitCode).toBe(0)
     expect(io.stderr).toBeNull()
   })
 
   it('passes through when under limit', async () => {
-    const sg = new CommandSafeguard({ maxLines: 100 })
-    const [out, io] = await applySafeguard(TEN, sg)
+    const sg = new Limit({ maxLines: 100 })
+    const [out, io] = await applyLimit(TEN, sg)
     expect(await bytesOf(out)).toEqual(TEN)
     expect(io.stderr).toBeNull()
   })
 
   it('truncates by lines', async () => {
-    const sg = new CommandSafeguard({ maxLines: 3 })
-    const [out, io] = await applySafeguard(TEN, sg)
+    const sg = new Limit({ maxLines: 3 })
+    const [out, io] = await applyLimit(TEN, sg)
     expect(DEC.decode(await bytesOf(out))).toBe('line0\nline1\nline2\n')
     expect(io.exitCode).toBe(0)
     expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
   })
 
   it('error mode returns null stdout + exit 1', async () => {
-    const sg = new CommandSafeguard({ maxLines: 3, onExceed: OnExceed.ERROR })
-    const [out, io] = await applySafeguard(TEN, sg)
+    const sg = new Limit({ maxLines: 3, onExceed: OnExceed.ERROR })
+    const [out, io] = await applyLimit(TEN, sg)
     expect(out).toBeNull()
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
   })
 
   it('truncates by bytes', async () => {
-    const sg = new CommandSafeguard({ maxBytes: 10 })
-    const [out, io] = await applySafeguard(TEN, sg)
+    const sg = new Limit({ maxBytes: 10 })
+    const [out, io] = await applyLimit(TEN, sg)
     expect(await bytesOf(out)).toEqual(TEN.subarray(0, 10))
     expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
   })
 
   it('truncates streaming input early', async () => {
-    const sg = new CommandSafeguard({ maxLines: 2 })
-    const [out, io] = await applySafeguard(stream(TEN), sg)
+    const sg = new Limit({ maxLines: 2 })
+    const [out, io] = await applyLimit(stream(TEN), sg)
     expect(DEC.decode(await bytesOf(out))).toBe('line0\nline1\n')
     expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
   })

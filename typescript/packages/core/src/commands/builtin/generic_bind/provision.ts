@@ -659,7 +659,7 @@ export function withDefaultProvisions<A extends Accessor>(
       src: c.src,
       dst: c.dst,
       write: c.write,
-      safeguard: c.safeguard,
+      limit: c.limit,
     })
   })
 }

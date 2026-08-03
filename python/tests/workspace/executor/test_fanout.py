@@ -23,7 +23,7 @@ class TraversalMount:
         self.output = output
         self.exit_code = exit_code
         self.error = error
-        self.command_safeguards = {}
+        self.command_limits = {}
 
     async def execute_cmd(self, *args, **kwargs):
         if self.error is not None:

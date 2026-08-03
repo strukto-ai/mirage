@@ -13,30 +13,43 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy.base import Policy
+from mirage.policy.builtin import (DEFAULT_COMMAND_LIMITS, FALLBACK_LIMIT,
+                                   MountRootPolicy, OutputCapPolicy,
+                                   resolve_across_mounts, resolve_limit,
+                                   resolve_producer)
 from mirage.policy.errors import PolicyDenied, PolicyError
-from mirage.policy.mount_root import MountRootPolicy
-from mirage.policy.policies import Policies, post_ops_gate, pre_ops_gate
+from mirage.policy.policies import (Policies, post_execute_gate, post_ops_gate,
+                                    pre_ops_gate)
 from mirage.policy.spec import SpecPolicy, wildcard_regex
 from mirage.policy.types import (VALIDITY, Action, CommandContext, Deny,
-                                 GuardSpec, MountRootQuery, OpsContext,
-                                 OpsResultContext)
+                                 ExecuteResultContext, GuardSpec, Limit,
+                                 MountRootQuery, OpsContext, OpsResultContext)
 
 __all__ = [
     "Action",
     "CommandContext",
+    "DEFAULT_COMMAND_LIMITS",
     "Deny",
+    "ExecuteResultContext",
+    "FALLBACK_LIMIT",
     "GuardSpec",
+    "Limit",
     "MountRootPolicy",
     "MountRootQuery",
     "OpsContext",
     "OpsResultContext",
+    "OutputCapPolicy",
     "Policies",
     "Policy",
     "PolicyDenied",
     "PolicyError",
     "SpecPolicy",
     "VALIDITY",
+    "post_execute_gate",
     "post_ops_gate",
     "pre_ops_gate",
+    "resolve_across_mounts",
+    "resolve_producer",
+    "resolve_limit",
     "wildcard_regex",
 ]

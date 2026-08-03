@@ -70,7 +70,7 @@ def test_single_verb_cli_is_a_leaf_root():
     curl_like = CLISpec(name="hello", fn=_verb)
     assert curl_like.subcommands == ()
     assert curl_like.write is False
-    assert curl_like.safeguard is None
+    assert curl_like.limit is None
 
 
 def test_group_may_carry_its_own_options():

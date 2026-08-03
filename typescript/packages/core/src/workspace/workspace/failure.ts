@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError } from '../../commands/builtin/utils/limit.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { ContentDriftError } from '../snapshot/drift.ts'
 

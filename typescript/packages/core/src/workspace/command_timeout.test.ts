@@ -15,13 +15,13 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { DEFAULT_COMMAND_SAFEGUARDS } from './executor/policy/safeguard.ts'
+import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { Runtime } from './executor/runtime.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
-import { CommandSafeguard, MountMode } from '../types.ts'
+import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace.ts'
 
 class SignalProbeRuntime extends Runtime {
@@ -54,7 +54,7 @@ beforeAll(async () => {
 })
 
 afterEach(() => {
-  delete DEFAULT_COMMAND_SAFEGUARDS.sleep
+  delete DEFAULT_COMMAND_LIMITS.sleep
 })
 
 function buildWs(): Workspace {
@@ -66,7 +66,7 @@ function buildWs(): Workspace {
 
 describe('command timeout', () => {
   it('quick command under default does not fire', async () => {
-    DEFAULT_COMMAND_SAFEGUARDS.sleep = new CommandSafeguard({ timeoutSeconds: 1 })
+    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 1 })
     const ws = buildWs()
     try {
       const r = await ws.execute('sleep 0.05')
@@ -76,8 +76,8 @@ describe('command timeout', () => {
     }
   })
 
-  it('default safeguard fires with attributed stderr and exit 124', async () => {
-    DEFAULT_COMMAND_SAFEGUARDS.sleep = new CommandSafeguard({ timeoutSeconds: 0.05 })
+  it('default limit fires with attributed stderr and exit 124', async () => {
+    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0.05 })
     const ws = buildWs()
     try {
       const r = await ws.execute('sleep 2')
@@ -89,7 +89,7 @@ describe('command timeout', () => {
   })
 
   it('pipeline: first stage to trip wins', async () => {
-    DEFAULT_COMMAND_SAFEGUARDS.sleep = new CommandSafeguard({ timeoutSeconds: 0.05 })
+    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0.05 })
     const ws = buildWs()
     try {
       const r = await ws.execute('sleep 2 | echo done')
@@ -101,7 +101,7 @@ describe('command timeout', () => {
   })
 
   it('timeout of zero disables the guard', async () => {
-    DEFAULT_COMMAND_SAFEGUARDS.sleep = new CommandSafeguard({ timeoutSeconds: 0 })
+    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0 })
     const ws = buildWs()
     try {
       const r = await ws.execute('sleep 0.05')
@@ -112,7 +112,7 @@ describe('command timeout', () => {
   })
 })
 
-// python3 is guarded like any other command: the same safeguard surface,
+// python3 is guarded like any other command: the same limit surface,
 // the same enforcement point, exit 124. ~2s of interpreter work against a
 // 0.25s budget; the deadline SIGKILLs monty's worker, so close() never
 // waits on it.
@@ -120,10 +120,10 @@ const SLOW_SCRIPT = "printf 'n = 0\\nfor i in range(100000000):\\n    n = n + 1\
 
 describe('python3 command timeout', () => {
   afterEach(() => {
-    delete DEFAULT_COMMAND_SAFEGUARDS.python3
+    delete DEFAULT_COMMAND_LIMITS.python3
   })
 
-  function buildPyWs(safeguards?: Record<string, Record<string, CommandSafeguard>>): Workspace {
+  function buildPyWs(limits?: Record<string, Record<string, Limit>>): Workspace {
     const ram = new RAMResource()
     const registry = new OpsRegistry()
     registry.registerResource(ram)
@@ -134,13 +134,13 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: ['monty', 'quickjs', 'vfs'],
-        ...(safeguards !== undefined ? { commandSafeguards: safeguards } : {}),
+        ...(limits !== undefined ? { commandLimits: limits } : {}),
       },
     )
   }
 
-  it('default safeguard fires like any other command', async () => {
-    DEFAULT_COMMAND_SAFEGUARDS.python3 = new CommandSafeguard({ timeoutSeconds: 0.25 })
+  it('default limit fires like any other command', async () => {
+    DEFAULT_COMMAND_LIMITS.python3 = new Limit({ timeoutSeconds: 0.25 })
     const ws = buildPyWs()
     try {
       await ws.execute(SLOW_SCRIPT)
@@ -152,9 +152,9 @@ describe('python3 command timeout', () => {
     }
   }, 60_000)
 
-  it('mount-level safeguard fires like any other command', async () => {
+  it('mount-level limit fires like any other command', async () => {
     const ws = buildPyWs({
-      '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.25 }) },
+      '/data': { python3: new Limit({ timeoutSeconds: 0.25 }) },
     })
     try {
       await ws.execute(SLOW_SCRIPT)
@@ -166,9 +166,9 @@ describe('python3 command timeout', () => {
     }
   }, 60_000)
 
-  it('mount-level safeguard follows the script path, not cwd', async () => {
+  it('mount-level limit follows the script path, not cwd', async () => {
     const ws = buildPyWs({
-      '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.25 }) },
+      '/data': { python3: new Limit({ timeoutSeconds: 0.25 }) },
     })
     try {
       await ws.execute(SLOW_SCRIPT)
@@ -192,8 +192,8 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: [probe, 'vfs'],
-        commandSafeguards: {
-          '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.1 }) },
+        commandLimits: {
+          '/data': { python3: new Limit({ timeoutSeconds: 0.1 }) },
         },
       },
     )
@@ -206,7 +206,7 @@ describe('python3 command timeout', () => {
     }
   }, 60_000)
 
-  it('a busy pyodide loop trips the safeguard instead of wedging the event loop', async () => {
+  it('a busy pyodide loop trips the limit instead of wedging the event loop', async () => {
     const ram = new RAMResource()
     const registry = new OpsRegistry()
     registry.registerResource(ram)
@@ -217,8 +217,8 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: ['pyodide', 'vfs'],
-        commandSafeguards: {
-          '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.5 }) },
+        commandLimits: {
+          '/data': { python3: new Limit({ timeoutSeconds: 0.5 }) },
         },
       },
     )
@@ -233,9 +233,9 @@ describe('python3 command timeout', () => {
     }
   }, 120_000)
 
-  it('a busy monty loop trips the safeguard and the worker is reclaimed', async () => {
+  it('a busy monty loop trips the limit and the worker is reclaimed', async () => {
     const ws = buildPyWs({
-      '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.25 }) },
+      '/data': { python3: new Limit({ timeoutSeconds: 0.25 }) },
     })
     try {
       const r = await ws.execute('cd /data && python3 -c "while True: pass"')
@@ -247,7 +247,7 @@ describe('python3 command timeout', () => {
     }
   }, 60_000)
 
-  it('a busy JS loop trips the safeguard instead of wedging the event loop', async () => {
+  it('a busy JS loop trips the limit instead of wedging the event loop', async () => {
     const ram = new RAMResource()
     const registry = new OpsRegistry()
     registry.registerResource(ram)
@@ -258,8 +258,8 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: ['quickjs', 'vfs'],
-        commandSafeguards: {
-          '/data': { node: new CommandSafeguard({ timeoutSeconds: 0.3 }) },
+        commandLimits: {
+          '/data': { node: new Limit({ timeoutSeconds: 0.3 }) },
         },
       },
     )

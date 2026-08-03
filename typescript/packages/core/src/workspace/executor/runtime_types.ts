@@ -27,14 +27,14 @@ export interface RunArgs {
    */
   flags?: Record<string, unknown>
   /**
-   * Aborted when the command's safeguard timeout trips, so a runtime
+   * Aborted when the command's limit timeout trips, so a runtime
    * holding external resources (the local subprocess) can reclaim
    * them. Python needs no equivalent: asyncio cancels the run task
    * and the runtime cleans up in its CancelledError handler.
    */
   signal?: AbortSignal
   /**
-   * The safeguard timeout, for engines that execute on the event loop
+   * The limit timeout, for engines that execute on the event loop
    * (quickjs) and must interrupt themselves in-VM: a guest that blocks
    * the loop also blocks the timer that would abort `signal`.
    */

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
-from mirage.types import CommandSafeguard
+from mirage.types import Limit
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
@@ -64,7 +64,7 @@ class CLISpec(CommandSpec):
         subcommands (tuple[CLISpec, ...]): child nodes (argparse
             ``add_subparsers().add_parser(...)``).
         write (bool): leaf mutates backend state (policy classification).
-        safeguard (CommandSafeguard | None): safeguard category for the
+        limit (Limit | None): limit category for the
             leaf.
         config_model (type[BaseModel] | None): root only. Pydantic model
             validating an installation's config from YAML ``clis:`` or
@@ -75,11 +75,11 @@ class CLISpec(CommandSpec):
     fn: Callable[..., Any] | None = None
     subcommands: tuple["CLISpec", ...] = ()
     write: bool = False
-    # hash=False: CommandSafeguard is a mutable dataclass, and the
+    # hash=False: Limit is a mutable dataclass, and the
     # frozen CLISpec must stay hashable for compile_spec's per-spec
     # cache. Equality still compares the field; only the hash skips it
     # (a collision is legal, a TypeError is not).
-    safeguard: CommandSafeguard | None = field(default=None, hash=False)
+    limit: Limit | None = field(default=None, hash=False)
     config_model: type[BaseModel] | None = None
 
     def __post_init__(self) -> None:

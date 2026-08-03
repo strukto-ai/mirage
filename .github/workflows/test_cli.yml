@@ -148,13 +148,13 @@ jobs:
           fi
 
           echo
-          echo "--- per-mount command safeguards"
+          echo "--- per-mount command limits"
           cat > /tmp/sg.yaml <<'YAML'
           mounts:
             /:
               resource: ram
               mode: WRITE
-              command_safeguards:
+              command_limits:
                 cat:
                   max_lines: 2
                   on_exceed: truncate
@@ -164,7 +164,7 @@ jobs:
             /:
               resource: ram
               mode: WRITE
-              command_safeguards:
+              command_limits:
                 cat:
                   max_lines: 2
                   on_exceed: error
@@ -435,13 +435,13 @@ jobs:
           fi
 
           echo
-          echo "--- per-mount command safeguards"
+          echo "--- per-mount command limits"
           cat > /tmp/sg.yaml <<'YAML'
           mounts:
             /:
               resource: ram
               mode: WRITE
-              command_safeguards:
+              command_limits:
                 cat:
                   max_lines: 2
                   on_exceed: truncate
@@ -451,7 +451,7 @@ jobs:
             /:
               resource: ram
               mode: WRITE
-              command_safeguards:
+              command_limits:
                 cat:
                   max_lines: 2
                   on_exceed: error
