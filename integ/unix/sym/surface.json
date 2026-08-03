@@ -27,7 +27,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/symx/sub && echo hello > /data/symx/real.txt && ln -s /data/symx/real.txt /data/symx/flink && ln -s /data/symx/sub /data/symx/dlink && ln -s /data/symx/none /data/symx/dangle",
+      "command": "mkdir -p /data/symx/sub && echo hello > /data/symx/sub/keep.txt && echo hello > /data/symx/real.txt && ln -s /data/symx/real.txt /data/symx/flink && ln -s /data/symx/sub /data/symx/dlink && ln -s /data/symx/none /data/symx/dangle",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -234,7 +234,7 @@
       "command": "ls /data/symx/dlink",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "keep.txt\n",
         "stderr": ""
       }
     },
@@ -302,7 +302,7 @@
       "command": "ls -R /data/symx",
       "expect": {
         "exit": 0,
-        "stdout": "/data/symx:\ndangle\ndlink\nflink\nreal.txt\nsub\n\n/data/symx/sub:\n",
+        "stdout": "/data/symx:\ndangle\ndlink\nflink\nreal.txt\nsub\n\n/data/symx/sub:\nkeep.txt\n",
         "stderr": ""
       }
     },
@@ -370,7 +370,7 @@
       "command": "find /data/symx -type f",
       "expect": {
         "exit": 0,
-        "stdout": "/data/symx/real.txt\n",
+        "stdout": "/data/symx/real.txt\n/data/symx/sub/keep.txt\n",
         "stderr": ""
       }
     },
@@ -744,7 +744,7 @@
       "command": "du -a /data/symx",
       "expect": {
         "exit": 0,
-        "stdout": "15\t/data/symx/dangle\n14\t/data/symx/dlink\n19\t/data/symx/flink\n6\t/data/symx/real.txt\n54\t/data/symx\n",
+        "stdout": "15\t/data/symx/dangle\n14\t/data/symx/dlink\n19\t/data/symx/flink\n6\t/data/symx/real.txt\n6\t/data/symx/sub/keep.txt\n6\t/data/symx/sub\n60\t/data/symx\n",
         "stderr": ""
       }
     },
