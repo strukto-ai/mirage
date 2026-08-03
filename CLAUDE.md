@@ -70,9 +70,22 @@ they bite:
   under "Command wrappers and flags", and `stat_overlay` is delivered the same
   way.
   `LinkView` bundles every link fact (`stat_at`, `children`, `subtree`,
-  `resolve`, `exists`) so a command that grows a new need adds a field read, not
-  a new keyword threaded through `execute_cmd`, the builder and the generic.
-  Commands wired today: `ls`, `stat`, `find`, `du`, `file`.
+  `resolve`, `exists`, `target_stat`) so a command that grows a new need adds a
+  field read, not a new keyword threaded through `execute_cmd`, the builder and
+  the generic. Families wired today: `ls`, `stat`, `find`, `du`, `file`.
+  `exists` and `target_stat` answer through the op dispatcher, not one
+  backend's stat, so a link that points into another mount resolves correctly.
+- **A bespoke command in one of those families must declare it too.** The
+  opt-in is the whole mechanism, so a backend that ships its own `find`/`ls`/
+  `du`/`stat`/`file` and omits the parameter still runs, still exits 0, and
+  simply cannot see a link, which nothing notices until someone makes one on
+  that backend. `tests/commands/test_links_optin.py` asserts it instead: it
+  derives the link-aware names from the generic builders and fails naming any
+  registered command that shadows one without accepting `links`. TypeScript
+  needs no equivalent because wrappers forward the whole `opts` object, so a
+  generic reads `opts.links` whatever the wrapper declares; the one command
+  that walks its own tree (`email/find`) calls `linkResults` directly for the
+  same reason.
 - **Merge links in the generic, above the native-op/walk fork.** `find` and `du`
   each have two paths: a backend with a native op (`find_core`, `du_size`/
   `du_entries`) and a backend walked by `readdir`. Link merging lives in one

@@ -274,7 +274,12 @@ export { unzipGeneric } from './commands/builtin/generic/unzip.ts'
 export { zipGeneric } from './commands/builtin/generic/zip_cmd.ts'
 export { tarGeneric } from './commands/builtin/generic/tar.ts'
 export { realpathGeneric } from './commands/builtin/generic/realpath.ts'
-export { findGeneric, findSizeMtimeError, invalidFindArg } from './commands/builtin/generic/find.ts'
+export {
+  findGeneric,
+  findSizeMtimeError,
+  invalidFindArg,
+  linkResults,
+} from './commands/builtin/generic/find.ts'
 export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'

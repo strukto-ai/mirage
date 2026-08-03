@@ -690,11 +690,15 @@ def _link_view(link: FileStat) -> LinkView:
     async def _exists(virtual: str) -> bool:
         return True
 
+    async def _target_stat(virtual: str) -> FileStat | None:
+        return None
+
     return LinkView(stat_at=lambda v: link if v.endswith("flink") else None,
                     children=lambda d: [],
                     subtree=lambda d: [],
                     resolve=lambda v: v,
-                    exists=_exists)
+                    exists=_exists,
+                    target_stat=_target_stat)
 
 
 _LINK_ROW = FileStat(name="flink",

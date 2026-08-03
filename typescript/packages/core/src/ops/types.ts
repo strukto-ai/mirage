@@ -38,4 +38,8 @@ export interface LinkView {
   // Whether anything is actually there, resolved through the workspace
   // rather than one backend, so a link across mounts answers correctly.
   exists(path: string): Promise<boolean>
+  // What a link points at (`-L` reports the target's identity, not the
+  // link's), null when it dangles or loops. Resolved through the
+  // workspace too, for the same reason.
+  targetStat(path: string): Promise<FileStat | null>
 }

@@ -36,7 +36,12 @@ import { stat as emailStat } from '../../../core/email/stat.ts'
 import { EMAIL_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
 import { fnmatch } from '@struktoai/mirage-core'
-import { findSizeMtimeError, invalidFindArg } from '@struktoai/mirage-core'
+import {
+  findSizeMtimeError,
+  invalidFindArg,
+  linkResults,
+  optionsTree,
+} from '@struktoai/mirage-core'
 
 const resolveGlob = resolveGlobOf(EMAIL_IO)
 
@@ -126,6 +131,27 @@ async function findCommand(
     if (inameFlag !== null && !fnmatch(entryName.toLowerCase(), inameFlag.toLowerCase())) continue
     results.push(p)
   }
+  // This command walks email itself instead of going through the shared
+  // generic, so it has to merge namespace links the same way the generic
+  // does or a link under an email mount would be invisible here only.
+  const prefix = mountPrefixOf(p0.virtual, p0.resourcePath)
+  results.push(
+    ...(await linkResults(
+      opts.links ?? null,
+      p0.virtual === '/' ? '/' : rstripSlash(p0.virtual),
+      prefix,
+      searchKey,
+      optionsTree({ name: nameFlag, iname: inameFlag }),
+      minDepth,
+      maxDepth,
+      null,
+      null,
+      null,
+      null,
+      false,
+    )),
+  )
+  results.sort()
   const out: ByteSource = formatRecords(results)
   return [out, new IOResult()]
 }

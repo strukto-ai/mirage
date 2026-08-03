@@ -14,9 +14,8 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.errors import FS_ERRORS
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import CycleError, respell_raw
+from mirage.utils.path import respell_raw
 
 
 def parse_find_args(
@@ -201,8 +200,7 @@ async def find(
                                         search_path.mount_path.strip("/"),
                                         args,
                                         args.tree,
-                                        follow=follow,
-                                        stat=stat))
+                                        follow=follow))
     results = respell_raw(results, search_path.virtual, search_path.raw_path)
     return format_records(results), IOResult()
 
@@ -291,46 +289,6 @@ async def _walk_collect(
                                 maxdepth, depth + 1, acc)
 
 
-async def _link_target_stat(
-    links: LinkView,
-    stat: Callable[..., Awaitable[FileStat]],
-    path: str,
-    prefix: str,
-    index: IndexCacheStore | None,
-) -> FileStat | None:
-    """The stat of what a link points at, or None when it dangles.
-
-    Under -L the reported entity is the target, so its type drives
-    -type and its size and mtime drive -size and -mtime. A target that
-    cannot be resolved or stat'd leaves the link reported as itself,
-    which is what GNU does with a broken link under -L.
-
-    Args:
-        links (LinkView): the namespace's symlink facts.
-        stat (Callable): backend stat.
-        path (str): absolute virtual path of the link.
-        prefix (str): mount prefix the backend keys are relative to.
-        index (IndexCacheStore | None): listing cache for the stat.
-    """
-    try:
-        target = links.resolve(path)
-    except CycleError:
-        return None
-    spec = PathSpec(virtual=target,
-                    directory=target,
-                    resolved=False,
-                    resource_path=mount_key(target, prefix))
-    # The two find paths bind stat differently: the native path hands in
-    # an index-bound callable taking just the spec, the readdir walk one
-    # taking (spec, index). Both reach here, so the index decides which.
-    try:
-        if index is None:
-            return await stat(spec)
-        return await stat(spec, index)
-    except FS_ERRORS:
-        return None
-
-
 async def link_results(
     links: LinkView | None,
     search_root: str,
@@ -339,8 +297,6 @@ async def link_results(
     args: FindArgs,
     tree: PredNode,
     follow: bool = False,
-    stat: Callable[..., Awaitable[FileStat]] | None = None,
-    index: IndexCacheStore | None = None,
 ) -> list[str]:
     """Namespace symlinks under the search root that match the expression.
 
@@ -368,10 +324,6 @@ async def link_results(
         args (FindArgs): parsed find expression.
         tree (PredNode): the prefix-stamped predicate tree.
         follow (bool): whether -L asked for the target's identity.
-        stat (Callable | None): backend stat, used only under ``follow``.
-            The two find paths bind it differently, hence the open
-            signature; ``index`` decides which arity to call.
-        index (IndexCacheStore | None): listing cache for that stat.
     """
     if links is None:
         return []
@@ -386,8 +338,8 @@ async def link_results(
         entries.append((search_root, own))
     for path, st in entries:
         kind = "l"
-        if follow and stat is not None:
-            target = await _link_target_stat(links, stat, path, prefix, index)
+        if follow:
+            target = await links.target_stat(path)
             if target is not None:
                 kind = ("d" if target.type == FileType.DIRECTORY else "f")
                 st = target
@@ -504,7 +456,5 @@ async def walk_find(
                                       search_key,
                                       args,
                                       tree,
-                                      follow=follow,
-                                      stat=stat,
-                                      index=index))
+                                      follow=follow))
     return sorted(results)

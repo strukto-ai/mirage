@@ -383,6 +383,7 @@ describe('link operands on backends with different readdir shapes', () => {
     subtree: () => [],
     resolve: (v: string) => v,
     exists: () => Promise.resolve(true),
+    targetStat: () => Promise.resolve(null),
   }
 
   const missing = (p: PathSpec): Promise<never> => Promise.reject(new Error(`ENOENT: ${p.virtual}`))

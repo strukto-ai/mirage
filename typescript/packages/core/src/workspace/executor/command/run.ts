@@ -19,9 +19,9 @@ import { assertMountAllowed, MountNotAllowedError } from '../../../context/sessi
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { LinkView, StatOverlay } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { pathExists } from '../builtins/links.ts'
+import { linkTargetStat, pathExists } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { VfsRuntime, type Runtime } from '../runtime.ts'
@@ -192,7 +192,7 @@ export async function runOnMount(
   // Symlinks are namespace state no backend readdir or stat can see. A
   // command that does not read `links` off its context ignores it, so
   // there is no list of symlink-aware commands to keep in step.
-  const links = linkView(namespace ?? null, dispatch)
+  const links = linkView(namespace ?? null, dispatch, statOverlay)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -279,7 +279,11 @@ function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<str
 // Which commands actually receive this is decided by whether the
 // handler reads `links` off its context, so there is no list of
 // symlink-aware commands to keep in step here or anywhere else.
-function linkView(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
+function linkView(
+  namespace: Namespace | null,
+  dispatch: DispatchFn,
+  overlay: StatOverlay | null,
+): LinkView | null {
   if (!namespace?.hasLinks()) return null
   return {
     statAt: (path: string) => namespace.linkStatAt(path),
@@ -287,6 +291,7 @@ function linkView(namespace: Namespace | null, dispatch: DispatchFn): LinkView |
     subtree: (directory: string) => namespace.linkStatsBelow(directory),
     resolve: (path: string) => namespace.follow(path),
     exists: (path: string) => pathExists(dispatch, path),
+    targetStat: (path: string) => linkTargetStat(namespace, dispatch, path, overlay),
   }
 }
 

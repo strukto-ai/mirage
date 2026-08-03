@@ -29,6 +29,7 @@ from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import search_messages
 from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
@@ -73,6 +74,8 @@ async def find(
     empty: bool = False,
     prefix: str = "",
     index: IndexCacheStore,
+    L: bool = False,
+    links: LinkView | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
@@ -106,7 +109,9 @@ async def find(
                                        stat=partial(_stat, accessor),
                                        is_dir_name=is_dir_name,
                                        index=index,
-                                       args=args))
+                                       args=args,
+                                       links=links,
+                                       follow=L))
     return format_records(results), IOResult()
 
 

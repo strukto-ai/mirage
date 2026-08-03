@@ -286,11 +286,16 @@ async def _always_exists(virtual: str) -> bool:
     return True
 
 
+async def _no_target(virtual: str) -> FileStat | None:
+    return None
+
+
 _LINKS = LinkView(stat_at=_link_lookup,
                   children=lambda directory: [],
                   subtree=lambda directory: [],
                   resolve=lambda virtual: virtual,
-                  exists=_always_exists)
+                  exists=_always_exists,
+                  target_stat=_no_target)
 
 
 @pytest.mark.asyncio

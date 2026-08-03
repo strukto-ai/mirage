@@ -126,37 +126,6 @@ function extractOrNames(name: string | null, texts: readonly string[]): string[]
   return names
 }
 
-// The stat of what a link points at, or null when it dangles. Under -L
-// the reported entity is the target, so its type drives -type and its
-// size and mtime drive -size and -mtime. A target that cannot be
-// resolved or stat'd leaves the link reported as itself, which is what
-// GNU does with a broken link under -L.
-async function linkTargetStat(
-  links: LinkView,
-  stat: (spec: PathSpec) => Promise<FileStat>,
-  path: string,
-  prefix: string,
-): Promise<FileStat | null> {
-  let target: string
-  try {
-    target = links.resolve(path)
-  } catch {
-    return null
-  }
-  try {
-    return await stat(
-      new PathSpec({
-        virtual: target,
-        directory: target,
-        resolved: false,
-        resourcePath: mountKey(target, prefix),
-      }),
-    )
-  } catch {
-    return null
-  }
-}
-
 // Namespace symlinks under the search root that match the expression.
 //
 // Symlinks live in the namespace, not in any backend, so a backend's
@@ -172,7 +141,7 @@ async function linkTargetStat(
 // link stays 'l' (GNU reports the link itself when the target cannot be
 // stat'd). -size and -mtime then compare the target's stat, since that
 // is the file being reported.
-async function linkResults(
+export async function linkResults(
   links: LinkView | null,
   searchRoot: string,
   prefix: string,
@@ -185,7 +154,6 @@ async function linkResults(
   mtimeMin: number | null,
   mtimeMax: number | null,
   follow: boolean,
-  stat: ((spec: PathSpec) => Promise<FileStat>) | undefined,
 ): Promise<string[]> {
   if (links === null) return []
   const out: string[] = []
@@ -199,9 +167,8 @@ async function linkResults(
   for (const [path, ownStat] of entries) {
     let st = ownStat
     let kind: FindEntry['kind'] = 'l'
-    // `links` is non-null past the early return above.
-    if (follow && stat !== undefined) {
-      const target = await linkTargetStat(links, stat, path, prefix)
+    if (follow) {
+      const target = await links.targetStat(path)
       if (target !== null) {
         kind = target.type === FileType.DIRECTORY ? 'd' : 'f'
         st = target
@@ -362,7 +329,6 @@ export async function findGeneric(
         effMtimeMin,
         effMtimeMax,
         fl.asBool('L'),
-        stat,
       ),
     )
     withLinks.sort()

@@ -105,6 +105,33 @@ async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
         return False
 
 
+async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
+                           virtual: str) -> FileStat | None:
+    """The stat of what a link points at, or None when it dangles.
+
+    Under ``-L`` the reported entity is the target, so its type drives
+    ``-type`` and its size and mtime drive ``-size`` and ``-mtime``. The
+    stat goes through dispatch rather than one backend because a link
+    may point into another mount.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path of the link.
+    """
+    try:
+        target = namespace.follow(virtual)
+    except CycleError:
+        return None
+    spec = PathSpec(virtual=target,
+                    directory=target[:target.rfind("/") + 1] or "/",
+                    resource_path="")
+    try:
+        return await _stat_or_none(dispatch, spec)
+    except (OSError, ValueError):
+        return None
+
+
 async def handle_readlink(
     namespace: Namespace,
     dispatch: Callable[..., Any],
@@ -306,6 +333,7 @@ __all__ = [
     "follow_paths",
     "handle_ln",
     "handle_readlink",
+    "link_target_stat",
     "path_exists",
     "link_flags",
     "prepare_mv",

@@ -23,6 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import LsSortBy, PathSpec
 
 
@@ -47,6 +48,8 @@ async def ls(
     d: bool = False,
     F: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    L: bool = False,
+    links: LinkView | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
@@ -64,4 +67,6 @@ async def ls(
         list_dir=d,
         classify=F,
         index=index,
+        links=links,
+        deref=L,
     )

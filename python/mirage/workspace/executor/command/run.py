@@ -27,7 +27,8 @@ from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.table import VfsRuntime
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import format_fs_error
-from mirage.workspace.executor.builtins.links import path_exists
+from mirage.workspace.executor.builtins.links import (link_target_stat,
+                                                      path_exists)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -131,7 +132,9 @@ def link_view(namespace: Namespace | None,
                     children=namespace.link_stats_under,
                     subtree=namespace.link_stats_below,
                     resolve=namespace.follow,
-                    exists=functools.partial(path_exists, dispatch))
+                    exists=functools.partial(path_exists, dispatch),
+                    target_stat=functools.partial(link_target_stat, namespace,
+                                                  dispatch))
 
 
 def namespace_stat_overlay(namespace: Namespace, virtual: str,

@@ -17,6 +17,7 @@ import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError, gnuDirname, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
@@ -272,6 +273,37 @@ export async function pathExists(dispatch: DispatchFn, virtual: string): Promise
   } catch {
     return false
   }
+}
+
+// The stat of what a link points at, or null when it dangles.
+//
+// Under -L the reported entity is the target, so its type drives -type
+// and its size and mtime drive -size and -mtime. The stat goes through
+// dispatch rather than one backend because a link may point into
+// another mount, and through the overlay because the target's mtime may
+// be namespace state (touch results, observed writes). Python gets the
+// overlay from the ops dispatcher itself; here it is applied on the way
+// out, against the resolved path rather than the link's.
+export async function linkTargetStat(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  virtual: string,
+  overlay: StatOverlay | null,
+): Promise<FileStat | null> {
+  let target: string
+  try {
+    target = namespace.follow(virtual)
+  } catch {
+    return null
+  }
+  let stat: FileStat | null
+  try {
+    stat = await statOrNull(dispatch, PathSpec.fromStrPath(target, ''))
+  } catch {
+    return null
+  }
+  if (stat === null || overlay === null) return stat
+  return overlay(target, stat)
 }
 
 // Print a symlink's target, GNU readlink semantics.

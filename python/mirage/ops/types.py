@@ -30,6 +30,8 @@ LinkResolve = Callable[[str], str]
 # Whether a virtual path names anything, resolved through the workspace
 # rather than one backend, so a link across mounts answers correctly.
 LinkExists = Callable[[str], Awaitable[bool]]
+# The stat of what a link points at, None when it dangles or loops.
+LinkTargetStat = Callable[[str], Awaitable["FileStat | None"]]
 
 
 @dataclass(frozen=True)
@@ -57,3 +59,7 @@ class LinkView:
     # are needed to tell a live link from a broken one.
     resolve: LinkResolve
     exists: LinkExists
+    # What a link points at (`-L` reports the target's identity, not the
+    # link's), resolved through the workspace so a link that crosses
+    # mounts still answers.
+    target_stat: LinkTargetStat
