@@ -51,7 +51,6 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
-import { checkMountRootGuard } from './command/guard.ts'
 import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
@@ -139,22 +138,29 @@ export async function handleCommand(
     if (p instanceof PathSpec) pathScopes.push(p)
   }
   const rawArgv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
-  const guardResult = checkMountRootGuard(cmdName, pathScopes, registry, rawArgv)
-  if (guardResult !== null) {
-    const errBytes = new TextEncoder().encode(guardResult.message)
+  const deny = await registry.policies.preCommand({
+    command: cmdName,
+    paths: pathScopes,
+    argv: rawArgv,
+    cwd: session.cwd,
+    registry,
+  })
+  if (deny !== null) {
+    const errBytes = new TextEncoder().encode(deny.message)
+    const exitCode = deny.exitCode ?? 1
     return [
       null,
-      new IOResult({ exitCode: guardResult.exitCode, stderr: errBytes }),
+      new IOResult({ exitCode, stderr: errBytes }),
       new ExecutionNode({
         command: cmdStr,
         stderr: errBytes,
-        exitCode: guardResult.exitCode,
+        exitCode,
       }),
     ]
   }
 
   // Unknown name: nobody registers it; fail like bash before any
-  // backend work. The mount-root guard stays ahead of this so
+  // backend work. The admission policies stay ahead of this so
   // protective refusals keep their specific messages.
   if (route(cmdName, session, registry) === Consumer.UNKNOWN) {
     const errBytes = new TextEncoder().encode(`${cmdName}: command not found\n`)

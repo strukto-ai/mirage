@@ -18,6 +18,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.ops.config import OpsMount
+from mirage.policy import MountRootPolicy, Policies
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
@@ -81,6 +82,13 @@ class MountRegistry:
         # so the refusal at dispatch carries the install hint without
         # any command naming a runtime class.
         self.runtime_unavailable: dict[str, str] = {}
+        # Command admission policies. Policies itself is a bare
+        # mechanism; the registry seeds the POSIX mount-root rule
+        # (mount-root semantics are mount semantics) and user policies
+        # follow it (Workspace guards= / policies= / yaml guards:).
+        # Registry-hosted like runtime_bindings so the executor reaches
+        # them without new parameter threading.
+        self.policies = Policies([MountRootPolicy()])
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None

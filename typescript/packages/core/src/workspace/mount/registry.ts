@@ -20,6 +20,7 @@ import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cachesReads, type Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
+import { MountRootPolicy, Policies } from '../../policy/index.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -69,6 +70,12 @@ export class MountRegistry {
   // Catch-all when its captures are empty; explicit captures make
   // unclaimed commands an admission failure (126).
   vfsRuntime: Runtime | null = null
+  // Command admission policies. Policies itself is a bare mechanism;
+  // the registry seeds the POSIX mount-root rule (mount-root semantics
+  // are mount semantics) and user policies follow it (Workspace
+  // guards/policies options). Registry-hosted like vfsRuntime so the
+  // executor reaches them without new threading.
+  readonly policies = new Policies([new MountRootPolicy()])
 
   setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler

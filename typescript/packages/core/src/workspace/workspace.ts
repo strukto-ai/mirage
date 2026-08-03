@@ -43,6 +43,7 @@ import {
   parseMountMode,
   PathSpec,
 } from '../types.ts'
+import type { Policies } from '../policy/index.ts'
 import type { PolicyFn } from './executor/policy/index.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
@@ -164,6 +165,13 @@ export class Workspace {
     })
     if (typeof options.policy === 'string') throw scriptStringError('policy')
     this.policy = options.policy ?? null
+    // Admission policies, consulted in registration order after the
+    // built-ins the registry seeds: declarative guards first, then
+    // Policy instances, then anything added later through
+    // ws.policies.add(). The runtime policy (policy option) is the
+    // line-level counterpart until it is absorbed as a hook.
+    for (const guard of options.guards ?? []) this.registry.policies.add(guard)
+    for (const entry of options.policies ?? []) this.registry.policies.add(entry)
     this.policyRouter = new PolicyRouter(
       this.runtimes,
       this.policy,
@@ -361,6 +369,15 @@ export class Workspace {
   }
 
   // ── Public accessors aligned with Python's Workspace API ────────────
+
+  /**
+   * The workspace's admission policies; add() registers more. Ordered,
+   * built-ins first; on a pre hook the first Deny wins, and adding a
+   * policy can only tighten the workspace.
+   */
+  get policies(): Policies {
+    return this.registry.policies
+  }
 
   get ops(): OpsRegistry {
     return this.opsRegistry

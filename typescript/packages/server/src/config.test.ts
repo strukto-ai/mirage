@@ -396,4 +396,35 @@ describe('configToWorkspaceArgs', () => {
       endpoint_url: 'http://localhost:9000',
     })
   })
+
+  it('guards block compiles to guard specs', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      guards: [
+        {
+          reason: 'production data is protected',
+          commands: ['rm', 'mv'],
+          paths: ['/data/prod/*'],
+        },
+        { reason: 'interpreters are off', commands: ['python3'] },
+      ],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.guards).toEqual([
+      {
+        reason: 'production data is protected',
+        commands: ['rm', 'mv'],
+        paths: ['/data/prod/*'],
+      },
+      { reason: 'interpreters are off', commands: ['python3'] },
+    ])
+  })
+
+  it('a guard without a reason fails loud', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      guards: [{ commands: ['rm'] }],
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reason/)
+  })
 })

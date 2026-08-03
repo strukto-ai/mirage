@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from mirage import MountBackend, MountMode, Workspace
+from mirage import GuardSpec, MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
                            RedisStoreBlock, S3StoreBlock, WorkspaceConfig,
@@ -363,3 +363,26 @@ policy: policy.js
     kwargs = cfg.to_workspace_kwargs()
     assert kwargs["policy"] == ScriptSource("null", language="js")
     assert kwargs["policy"].language == "js"
+
+
+def test_guards_block_compiles_to_guard_specs(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+guards:
+  - reason: production data is protected
+    commands: [rm, mv]
+    paths: ["/data/prod/*"]
+  - reason: interpreters are off
+    commands: [python3]
+""")
+    cfg = load_config(cfg_file)
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["guards"] == [
+        GuardSpec(reason="production data is protected",
+                  commands=("rm", "mv"),
+                  paths=("/data/prod/*", )),
+        GuardSpec(reason="interpreters are off", commands=("python3", )),
+    ]

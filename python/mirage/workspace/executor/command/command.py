@@ -26,6 +26,7 @@ from mirage.commands.spec import SPECS
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.policy import CommandContext
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.call_stack import CallStack
@@ -33,7 +34,6 @@ from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
-from mirage.workspace.executor.command.guard import check_mount_root_guard
 from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
                                                        default_cwd_operand,
                                                        merge_scopes,
@@ -117,10 +117,15 @@ async def handle_command(
     # Use dispatch to read/write across mounts directly.
     path_scopes = [p for p in parts[1:] if isinstance(p, PathSpec)]
     raw_argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
-    early_guard = check_mount_root_guard(cmd_name, path_scopes, registry,
-                                         raw_argv)
-    if early_guard is not None:
-        msg, code = early_guard
+    deny = await registry.policies.pre_command(
+        CommandContext(command=cmd_name,
+                       paths=tuple(path_scopes),
+                       argv=tuple(raw_argv),
+                       cwd=session.cwd,
+                       registry=registry))
+    if deny is not None:
+        msg = deny.message
+        code = deny.exit_code
         return None, IOResult(exit_code=code,
                               stderr=msg.encode()), ExecutionNode(
                                   command=cmd_str,
@@ -128,7 +133,7 @@ async def handle_command(
                                   stderr=msg.encode())
 
     # Unknown name: nobody registers it; fail like bash before any
-    # backend work. The mount-root guard stays ahead of this so
+    # backend work. The admission policies stay ahead of this so
     # protective refusals keep their specific messages.
     if route(cmd_name, session, registry) is Consumer.UNKNOWN:
         err = f"{cmd_name}: command not found\n".encode()

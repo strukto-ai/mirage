@@ -31,6 +31,7 @@ import {
   buildRuntime,
   type RuntimeEntry,
   type FileCache,
+  type GuardSpec,
   type IndexConfig,
   type RedisIndexConfig,
   type Resource,
@@ -187,6 +188,34 @@ function parseSafeguards(
   return out
 }
 
+// Mirrors Python's GuardBlock: reason is required, commands/paths are
+// optional string lists. Compiled by the workspace into declarative
+// admission policies (see core policy/spec.ts).
+function parseGuards(entries: unknown): GuardSpec[] {
+  if (!Array.isArray(entries)) throw new Error('config `guards` must be a list')
+  return entries.map((entry) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error('each guard must be a mapping with a `reason`')
+    }
+    const block = entry as Record<string, unknown>
+    const reason = block.reason
+    if (typeof reason !== 'string' || reason === '') {
+      throw new Error('each guard needs a non-empty string `reason`')
+    }
+    for (const key of ['commands', 'paths']) {
+      const v = block[key]
+      if (v !== undefined && (!Array.isArray(v) || v.some((s) => typeof s !== 'string'))) {
+        throw new Error(`guard \`${key}\` must be a list of strings`)
+      }
+    }
+    return {
+      reason,
+      ...(block.commands !== undefined ? { commands: block.commands as string[] } : {}),
+      ...(block.paths !== undefined ? { paths: block.paths as string[] } : {}),
+    }
+  })
+}
+
 const VAR_RE = /\$\{([A-Z_][A-Z0-9_]*)\}/g
 
 function walkInterpolate(v: unknown, env: Record<string, string>, missing: string[]): unknown {
@@ -299,6 +328,7 @@ export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   runtimes?: (string | Record<string, unknown>)[] | null
   policy?: string | null
+  guards?: unknown[] | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -386,6 +416,7 @@ export interface WorkspaceArgs {
     store?: WorkspaceStateStore
     runtimes?: RuntimeEntry[]
     policy?: ScriptSource
+    guards?: GuardSpec[]
   }
   kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
@@ -482,6 +513,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
         : {}),
       ...(cfg.policy !== undefined && cfg.policy !== null
         ? { policy: loadScriptSource(cfg.policy) }
+        : {}),
+      ...(cfg.guards !== undefined && cfg.guards !== null
+        ? { guards: parseGuards(cfg.guards) }
         : {}),
     },
     kernelMounts,

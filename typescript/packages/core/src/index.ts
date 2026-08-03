@@ -527,6 +527,20 @@ export {
   type PolicyVerdict,
 } from './workspace/executor/policy/index.ts'
 export {
+  MountRootPolicy,
+  Policies,
+  SpecPolicy,
+  VALIDITY,
+  hasParentsFlag,
+  wildcardRegex,
+  type Action,
+  type CommandContext,
+  type Deny,
+  type GuardSpec,
+  type MountRootQuery,
+  type Policy,
+} from './policy/index.ts'
+export {
   buildRuntime,
   candidates,
   registerRuntime,

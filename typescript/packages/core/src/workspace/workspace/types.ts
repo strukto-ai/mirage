@@ -20,6 +20,7 @@ import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { ShellParser } from '../../shell/parse.ts'
 import type { CommandSafeguard, ConsistencyPolicy, DriftPolicy, MountMode } from '../../types.ts'
+import type { GuardSpec, Policy } from '../../policy/index.ts'
 import type { PolicyDecision, PolicyFn } from '../executor/policy/index.ts'
 import type { RuntimeEntry } from '../executor/runtime.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
@@ -84,6 +85,19 @@ export interface WorkspaceOptions {
    * failure (exit 126).
    */
   policy?: PolicyFn
+  /**
+   * Declarative admission guards, compiled to policies and checked
+   * after the built-in POSIX mount-root rules: refuse a classified
+   * command by name and path before flag parsing, mount resolution,
+   * runtime placement, and backend I/O.
+   */
+  guards?: readonly GuardSpec[]
+  /**
+   * Admission policies registered after `guards`. Each defines only
+   * the lifecycle hooks it cares about; on a pre hook the first Deny
+   * wins and adding a policy can only tighten the workspace.
+   */
+  policies?: readonly (Policy | GuardSpec)[]
 }
 
 export class ExecuteResult {

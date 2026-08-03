@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
+from mirage.policy import GuardSpec
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
@@ -222,6 +223,21 @@ class StoreBlock(BaseModel):
     workspace: StoreGroupBlock | None = None
 
 
+class GuardBlock(BaseModel):
+    """One declarative command guard (the yaml ``guards:`` entries).
+
+    Compiled to a GuardSpec: refuse the named commands (all commands
+    when empty) whenever an operand matches one of the ``*``/``?``
+    path patterns (regardless of operands when empty).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+    commands: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(default_factory=list)
+
+
 class MountBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -350,6 +366,10 @@ class WorkspaceConfig(BaseModel):
     # load. Its last expression names the runtime for the line, or
     # None to fall to entry scripts.
     policy: str | None = None
+    # Declarative command guards, checked after the built-in POSIX
+    # mount-root rules; the policy script is the line-level
+    # counterpart.
+    guards: list[GuardBlock] | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str | None = None
@@ -406,6 +426,12 @@ class WorkspaceConfig(BaseModel):
             kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
         if self.policy is not None:
             kwargs["policy"] = _load_script_source(self.policy)
+        if self.guards is not None:
+            kwargs["guards"] = [
+                GuardSpec(reason=g.reason,
+                          commands=tuple(g.commands),
+                          paths=tuple(g.paths)) for g in self.guards
+            ]
         return kwargs
 
     def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:

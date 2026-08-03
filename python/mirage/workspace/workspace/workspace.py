@@ -28,6 +28,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
 from mirage.ops import Ops
+from mirage.policy import GuardSpec, Policies, Policy
 from mirage.provision import ProvisionResult
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
@@ -96,8 +97,19 @@ class Workspace:
         session_store: SessionStore | None = None,
         runtimes: list[Runtime | str] | None = None,
         policy: PolicyFn | None = None,
+        guards: list[GuardSpec] | None = None,
+        policies: list[Policy | GuardSpec] | None = None,
     ) -> None:
         self._registry = MountRegistry()
+        # Admission policies, consulted in registration order after the
+        # built-ins the registry seeds: declarative guards first, then
+        # Policy instances, then anything added later through
+        # ws.policies.add(). The runtime policy (policy=) is the
+        # line-level counterpart until it is absorbed as a hook.
+        for spec in guards or []:
+            self._registry.policies.add(spec)
+        for entry in policies or []:
+            self._registry.policies.add(entry)
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
@@ -188,6 +200,15 @@ class Workspace:
     @property
     def cache(self) -> FileCacheMixin:
         return self._cache
+
+    @property
+    def policies(self) -> Policies:
+        """The workspace's admission policies; add() registers more.
+
+        Ordered, built-ins first; on a pre hook the first Deny wins,
+        and adding a policy can only tighten the workspace.
+        """
+        return self._registry.policies
 
     @property
     def max_drain_bytes(self) -> int | None:
