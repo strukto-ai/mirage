@@ -16,9 +16,9 @@ from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyError
 from mirage.policy.mount_root import MountRootPolicy
 from mirage.policy.policies import Policies
-from mirage.policy.spec import GuardSpec, SpecPolicy, wildcard_regex
+from mirage.policy.spec import SpecPolicy, wildcard_regex
 from mirage.policy.types import (VALIDITY, Action, CommandContext, Deny,
-                                 MountRootQuery)
+                                 GuardSpec, MountRootQuery)
 
 __all__ = [
     "Action",

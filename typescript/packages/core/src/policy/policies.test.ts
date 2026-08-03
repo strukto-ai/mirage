@@ -25,8 +25,7 @@ import { Workspace } from '../workspace/workspace.ts'
 import type { Policy } from './base.ts'
 import { MountRootPolicy } from './mount_root.ts'
 import { Policies } from './policies.ts'
-import type { GuardSpec } from './spec.ts'
-import type { Action, CommandContext } from './types.ts'
+import type { Action, CommandContext, GuardSpec } from './types.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))

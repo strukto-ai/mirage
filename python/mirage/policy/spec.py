@@ -13,32 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from dataclasses import dataclass
 
 from mirage.policy.base import Policy
-from mirage.policy.types import Action, CommandContext, Deny
-
-
-@dataclass(frozen=True, slots=True)
-class GuardSpec:
-    """A declarative guard: refuse matching commands on matching paths.
-
-    The YAML ``guards:`` block and ``Workspace(guards=[...])`` accept
-    this shape; ``Policies.add`` compiles it to a SpecPolicy. Patterns
-    match the absolute virtual path with ``*`` (any run, including
-    ``/``) and ``?`` (any one character).
-
-    Args:
-        reason (str): why the command is refused, shown on stderr.
-        commands (tuple[str, ...]): command names the guard applies to;
-            empty means every command.
-        paths (tuple[str, ...]): path patterns; empty refuses the
-            command regardless of its operands.
-    """
-
-    reason: str
-    commands: tuple[str, ...] = ()
-    paths: tuple[str, ...] = ()
+from mirage.policy.types import Action, CommandContext, Deny, GuardSpec
 
 
 def wildcard_regex(pattern: str) -> re.Pattern[str]:

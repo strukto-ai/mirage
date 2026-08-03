@@ -15,11 +15,12 @@
 export type { Policy } from './base.ts'
 export { MountRootPolicy, hasParentsFlag } from './mount_root.ts'
 export { Policies } from './policies.ts'
-export { SpecPolicy, wildcardRegex, type GuardSpec } from './spec.ts'
+export { SpecPolicy, wildcardRegex } from './spec.ts'
 export {
   VALIDITY,
   type Action,
   type CommandContext,
   type Deny,
+  type GuardSpec,
   type MountRootQuery,
 } from './types.ts'

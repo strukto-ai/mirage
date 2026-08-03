@@ -44,6 +44,20 @@ export interface Deny {
  */
 export type Action = Deny
 
+/**
+ * A declarative guard: refuse matching commands on matching paths.
+ * The YAML `guards:` block and `Workspace({guards: [...]})` accept
+ * this shape; `Policies.add` compiles it to a SpecPolicy. Patterns
+ * match the absolute virtual path with `*` (any run, including `/`)
+ * and `?` (any one character). Empty `commands` means every command;
+ * empty `paths` refuses the command regardless of its operands.
+ */
+export interface GuardSpec {
+  reason: string
+  commands?: readonly string[]
+  paths?: readonly string[]
+}
+
 /** Facts about one classified command, as preCommand hooks see it. */
 export interface CommandContext {
   command: string

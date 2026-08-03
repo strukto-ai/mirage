@@ -14,8 +14,8 @@
 
 import type { Policy } from './base.ts'
 import { PolicyError } from './errors.ts'
-import { SpecPolicy, type GuardSpec } from './spec.ts'
-import { VALIDITY, type CommandContext, type Deny } from './types.ts'
+import { SpecPolicy } from './spec.ts'
+import { VALIDITY, type CommandContext, type Deny, type GuardSpec } from './types.ts'
 
 /**
  * Ordered policies; on a pre hook the first Deny wins.

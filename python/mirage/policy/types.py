@@ -59,6 +59,28 @@ class Deny(Action):
 
 
 @dataclass(frozen=True, slots=True)
+class GuardSpec:
+    """A declarative guard: refuse matching commands on matching paths.
+
+    The YAML ``guards:`` block and ``Workspace(guards=[...])`` accept
+    this shape; ``Policies.add`` compiles it to a SpecPolicy. Patterns
+    match the absolute virtual path with ``*`` (any run, including
+    ``/``) and ``?`` (any one character).
+
+    Args:
+        reason (str): why the command is refused, shown on stderr.
+        commands (tuple[str, ...]): command names the guard applies to;
+            empty means every command.
+        paths (tuple[str, ...]): path patterns; empty refuses the
+            command regardless of its operands.
+    """
+
+    reason: str
+    commands: tuple[str, ...] = ()
+    paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CommandContext:
     """Facts about one classified command, as pre_command hooks see it.
 

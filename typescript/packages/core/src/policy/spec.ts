@@ -13,21 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Policy } from './base.ts'
-import type { Action, CommandContext } from './types.ts'
-
-/**
- * A declarative guard: refuse matching commands on matching paths.
- * The YAML `guards:` block and `Workspace({guards: [...]})` accept
- * this shape; `Policies.add` compiles it to a SpecPolicy. Patterns
- * match the absolute virtual path with `*` (any run, including `/`)
- * and `?` (any one character). Empty `commands` means every command;
- * empty `paths` refuses the command regardless of its operands.
- */
-export interface GuardSpec {
-  reason: string
-  commands?: readonly string[]
-  paths?: readonly string[]
-}
+import type { Action, CommandContext, GuardSpec } from './types.ts'
 
 /**
  * Compile a `*`/`?` wildcard into an anchored regex. Deliberately not

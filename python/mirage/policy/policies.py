@@ -16,8 +16,8 @@ import logging
 
 from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyError
-from mirage.policy.spec import GuardSpec, SpecPolicy
-from mirage.policy.types import VALIDITY, CommandContext, Deny
+from mirage.policy.spec import SpecPolicy
+from mirage.policy.types import VALIDITY, CommandContext, Deny, GuardSpec
 
 logger = logging.getLogger(__name__)
 
