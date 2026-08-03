@@ -273,6 +273,40 @@
       }
     },
     {
+      "id": "symx_find_deref_type_f",
+      "seq": 838,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find -L /data/symx -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/symx/flink\n/data/symx/sub/inner.txt\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "symx_find_last_wins_l",
       "seq": 839,
       "targets": [
@@ -307,8 +341,76 @@
       }
     },
     {
+      "id": "symx_find_deref_type_d",
+      "seq": 841,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find -L /data/symx -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/symx\n/data/symx/dlink\n/data/symx/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_find_deref_type_l",
+      "seq": 842,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find -L /data/symx -type l",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
       "id": "symy_cleanup",
-      "seq": 840,
+      "seq": 845,
       "targets": [
         "ram",
         "disk",

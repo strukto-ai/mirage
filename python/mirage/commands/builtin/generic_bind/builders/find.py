@@ -45,6 +45,7 @@ async def find(
     index: IndexCacheStore = NULL_INDEX,
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
+    L: bool = False,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -53,7 +54,7 @@ async def find(
     if ops.find is None:
         return await _find_walk(ops, accessor, paths, texts, name, type, size,
                                 mtime, maxdepth, iname, path, mindepth, empty,
-                                index, stat_overlay, links)
+                                index, stat_overlay, links, L)
     stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
     if stat is not None and stat_overlay is not None:
         # -mtime must see namespace times (touch results, observed
@@ -75,7 +76,8 @@ async def find(
                               path=path,
                               mindepth=mindepth,
                               empty=empty,
-                              links=links)
+                              links=links,
+                              follow=L)
 
 
 def _no_dir_hint(_name: str) -> bool | None:
@@ -99,6 +101,8 @@ async def _find_walk(
     index: IndexCacheStore,
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
+    L: bool = False,
+    H: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
@@ -127,7 +131,8 @@ async def _find_walk(
                                  is_dir_name=hint,
                                  index=index,
                                  args=args,
-                                 links=links)
+                                 links=links,
+                                 follow=L)
         # GNU prints each result under the operand as typed; walk_find
         # returns virtual paths, so rebase like generic_find does.
         results.extend(respell_raw(walked, search.virtual, search.raw_path))

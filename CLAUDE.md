@@ -85,17 +85,17 @@ Follow policy is two symmetric tables in `workspace/route/constants.py`, both
 read off the raw command line (operand rewriting happens before flag parsing):
 `NO_FOLLOW_COMMANDS` lists commands that lstat (`rm`, `mv`, `ln`, `readlink`,
 `rmdir`, `unlink`, `stat`, `file`, `du`, `find`), with `DEREFERENCE_FLAGS`
-naming the flag that turns following back on (`-L`, plus `-H` for `find`);
+naming the flag that turns following back on (`-L`). `find` states its policy as
+a leading `-P`/`-H`/`-L` option instead, last one wins, so it lives in
+`LAST_WINS_LINK_OPTIONS`;
 `NO_FOLLOW_FLAGS` is the mirror, for a following command that a flag makes lstat
 (`ls -l` and `ls -d` report a command-line link itself, while a bare `ls`
 dereferences a link to a directory, and `ls -L` overrides both).
 
-Those tables only cover the *operand*. `-L` must also be honored below it, and
-that is the generic's job, not the router's: `ls -L` stats each link child and
-reports the target under the link's own name, and `du -L` withholds the link
-table so links are not counted as entries of their own. `find`'s leading `-P`/`-H`/`-L` are options, not predicates, so the
-expression splitter consumes them before scanning for the tail. Known gap: `du -L` undercounts a link that points outside the operand's own subtree, where GNU
-would traverse into it. Rendering derives from one fact: `link_stat` builds
+Those tables only cover the *operand*; honoring `-L` below it is the generic's
+job, not the router's.
+
+Rendering derives from one fact: `link_stat` builds
 the row with `FileType.SYMLINK` and the target under `FileStat.extra`
 (`LINK_TARGET_KEY`), so `lrwxrwxrwx`, the `name -> target` column, `-F`'s `@`,
 and `file`'s "symbolic link to" all follow from it without a second lookup.

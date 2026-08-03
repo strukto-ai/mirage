@@ -14,8 +14,9 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.dates import iso_timestamp
+from mirage.utils.errors import FS_ERRORS
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import respell_raw
+from mirage.utils.path import CycleError, respell_raw
 
 
 def parse_find_args(
@@ -131,6 +132,7 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     links: LinkView | None = None,
+    follow: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     search_path = paths[0]
     args = parse_find_args(texts,
@@ -192,10 +194,15 @@ async def find(
     results = apply_mount_prefix(results, root_prefix)
     root_path = (search_path.virtual.rstrip("/")
                  if search_path.virtual != "/" else "/")
-    results = sorted(
-        results +
-        link_results(links, root_path, root_prefix,
-                     search_path.mount_path.strip("/"), args, args.tree))
+    results = sorted(results +
+                     await link_results(links,
+                                        root_path,
+                                        root_prefix,
+                                        search_path.mount_path.strip("/"),
+                                        args,
+                                        args.tree,
+                                        follow=follow,
+                                        stat=stat))
     results = respell_raw(results, search_path.virtual, search_path.raw_path)
     return format_records(results), IOResult()
 
@@ -284,13 +291,56 @@ async def _walk_collect(
                                 maxdepth, depth + 1, acc)
 
 
-def link_results(
+async def _link_target_stat(
+    links: LinkView,
+    stat: Callable[..., Awaitable[FileStat]],
+    path: str,
+    prefix: str,
+    index: IndexCacheStore | None,
+) -> FileStat | None:
+    """The stat of what a link points at, or None when it dangles.
+
+    Under -L the reported entity is the target, so its type drives
+    -type and its size and mtime drive -size and -mtime. A target that
+    cannot be resolved or stat'd leaves the link reported as itself,
+    which is what GNU does with a broken link under -L.
+
+    Args:
+        links (LinkView): the namespace's symlink facts.
+        stat (Callable): backend stat.
+        path (str): absolute virtual path of the link.
+        prefix (str): mount prefix the backend keys are relative to.
+        index (IndexCacheStore | None): listing cache for the stat.
+    """
+    try:
+        target = links.resolve(path)
+    except CycleError:
+        return None
+    spec = PathSpec(virtual=target,
+                    directory=target,
+                    resolved=False,
+                    resource_path=mount_key(target, prefix))
+    # The two find paths bind stat differently: the native path hands in
+    # an index-bound callable taking just the spec, the readdir walk one
+    # taking (spec, index). Both reach here, so the index decides which.
+    try:
+        if index is None:
+            return await stat(spec)
+        return await stat(spec, index)
+    except FS_ERRORS:
+        return None
+
+
+async def link_results(
     links: LinkView | None,
     search_root: str,
     prefix: str,
     search_key: str,
     args: FindArgs,
     tree: PredNode,
+    follow: bool = False,
+    stat: Callable[..., Awaitable[FileStat]] | None = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     """Namespace symlinks under the search root that match the expression.
 
@@ -300,9 +350,15 @@ def link_results(
     link matches.
 
     GNU find without -L reports the link itself and never walks through
-    it, so a link is always kind ``l`` (never ``f``/``d``) and is never
-    descended into. Its size is the target string`s length, which is
-    what ``-size`` compares, and it carries the link`s own mtime.
+    it, so a link is kind ``l`` (never ``f``/``d``). Its size is the
+    target string`s length, which is what ``-size`` compares, and it
+    carries the link`s own mtime.
+
+    Under ``-L`` a link is classified by what it points at instead: a
+    link to a file tests as ``f``, a link to a directory as ``d``, and
+    only a dangling link stays ``l`` (GNU reports the link itself when
+    the target cannot be stat'd). ``-size`` and ``-mtime`` then compare
+    the target's stat, since that is the file being reported.
 
     Args:
         links (LinkView | None): the namespace's symlink facts.
@@ -311,6 +367,11 @@ def link_results(
         search_key (str): mount-relative key of the search root.
         args (FindArgs): parsed find expression.
         tree (PredNode): the prefix-stamped predicate tree.
+        follow (bool): whether -L asked for the target's identity.
+        stat (Callable | None): backend stat, used only under ``follow``.
+            The two find paths bind it differently, hence the open
+            signature; ``index`` decides which arity to call.
+        index (IndexCacheStore | None): listing cache for that stat.
     """
     if links is None:
         return []
@@ -324,6 +385,12 @@ def link_results(
     if own is not None:
         entries.append((search_root, own))
     for path, st in entries:
+        kind = "l"
+        if follow and stat is not None:
+            target = await _link_target_stat(links, stat, path, prefix, index)
+            if target is not None:
+                kind = ("d" if target.type == FileType.DIRECTORY else "f")
+                st = target
         key = path[len(prefix
                        ):] if prefix and path.startswith(prefix) else path
         rel = key.strip("/")
@@ -336,7 +403,7 @@ def link_results(
             continue
         entry = FindEntry(key=key,
                           name=path.rsplit("/", 1)[-1],
-                          kind="l",
+                          kind=kind,
                           depth=depth,
                           is_empty=None)
         if not keep(entry, tree, args.mindepth):
@@ -368,6 +435,7 @@ async def walk_find(
     index: IndexCacheStore,
     args: FindArgs,
     links: LinkView | None = None,
+    follow: bool = False,
 ) -> list[str]:
     collected: list[tuple[str, str]] = []
     prefix = mount_prefix_of(search_path.virtual, search_path.resource_path)
@@ -430,6 +498,13 @@ async def walk_find(
             if args.mtime_max is not None and ts > args.mtime_max:
                 continue
         results.append(p)
-    results.extend(
-        link_results(links, root_path, prefix, search_key, args, tree))
+    results.extend(await link_results(links,
+                                      root_path,
+                                      prefix,
+                                      search_key,
+                                      args,
+                                      tree,
+                                      follow=follow,
+                                      stat=stat,
+                                      index=index))
     return sorted(results)

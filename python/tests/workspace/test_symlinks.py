@@ -636,3 +636,46 @@ async def test_du_totals_include_links():
     total = int(r.stdout.decode().split("\t")[0])
     # hello\n plus both link targets.
     assert total == 6 + len("/data/dir/real.txt") + len("/data/dir")
+
+
+@pytest.mark.asyncio
+async def test_find_dash_l_classifies_a_link_by_its_target():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/d/sub")
+    await ws.execute("echo hello > /data/d/real.txt")
+    await ws.execute("echo inner > /data/d/sub/inner.txt")
+    await ws.execute("ln -s /data/d/real.txt /data/d/flink")
+    await ws.execute("ln -s /data/d/sub /data/d/dlink")
+    await ws.execute("ln -s /data/nowhere /data/d/dangle")
+
+    r = await ws.execute("find -L /data/d -type f")
+    assert r.stdout.decode().splitlines() == [
+        "/data/d/flink",
+        "/data/d/real.txt",
+        "/data/d/sub/inner.txt",
+    ]
+    r = await ws.execute("find -L /data/d -type d")
+    assert r.stdout.decode().splitlines() == [
+        "/data/d",
+        "/data/d/dlink",
+        "/data/d/sub",
+    ]
+    # Only a dangling link stays type l under -L.
+    r = await ws.execute("find -L /data/d -type l")
+    assert r.stdout.decode().splitlines() == ["/data/d/dangle"]
+
+
+@pytest.mark.asyncio
+async def test_find_without_dash_l_reports_every_link_as_l():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/d/sub")
+    await ws.execute("echo hello > /data/d/real.txt")
+    await ws.execute("ln -s /data/d/real.txt /data/d/flink")
+    await ws.execute("ln -s /data/d/sub /data/d/dlink")
+    r = await ws.execute("find /data/d -type l")
+    assert r.stdout.decode().splitlines() == [
+        "/data/d/dlink",
+        "/data/d/flink",
+    ]
+    r = await ws.execute("find /data/d -type f")
+    assert r.stdout.decode().splitlines() == ["/data/d/real.txt"]

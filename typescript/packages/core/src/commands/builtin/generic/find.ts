@@ -18,7 +18,7 @@ import { isEnoent, modifiedTs } from '../../../core/generic/find.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'
-import { PathSpec, type FileStat } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { respellRaw } from '../../../utils/path.ts'
@@ -126,6 +126,37 @@ function extractOrNames(name: string | null, texts: readonly string[]): string[]
   return names
 }
 
+// The stat of what a link points at, or null when it dangles. Under -L
+// the reported entity is the target, so its type drives -type and its
+// size and mtime drive -size and -mtime. A target that cannot be
+// resolved or stat'd leaves the link reported as itself, which is what
+// GNU does with a broken link under -L.
+async function linkTargetStat(
+  links: LinkView,
+  stat: (spec: PathSpec) => Promise<FileStat>,
+  path: string,
+  prefix: string,
+): Promise<FileStat | null> {
+  let target: string
+  try {
+    target = links.resolve(path)
+  } catch {
+    return null
+  }
+  try {
+    return await stat(
+      new PathSpec({
+        virtual: target,
+        directory: target,
+        resolved: false,
+        resourcePath: mountKey(target, prefix),
+      }),
+    )
+  } catch {
+    return null
+  }
+}
+
 // Namespace symlinks under the search root that match the expression.
 //
 // Symlinks live in the namespace, not in any backend, so a backend's
@@ -133,10 +164,15 @@ function extractOrNames(name: string | null, texts: readonly string[]): string[]
 // keeps a mount's symlink behavior from depending on its backend.
 //
 // GNU find without -L reports the link itself and never walks through
-// it, so a link is always kind 'l' and is never descended into. Its
-// size is the target string's length, which is what -size compares, and
-// it carries the link's own mtime.
-function linkResults(
+// it, so a link is kind 'l'. Its size is the target string's length,
+// which is what -size compares, and it carries the link's own mtime.
+//
+// Under -L a link is classified by what it points at instead: a link to
+// a file tests as 'f', a link to a directory as 'd', and only a dangling
+// link stays 'l' (GNU reports the link itself when the target cannot be
+// stat'd). -size and -mtime then compare the target's stat, since that
+// is the file being reported.
+async function linkResults(
   links: LinkView | null,
   searchRoot: string,
   prefix: string,
@@ -148,7 +184,9 @@ function linkResults(
   maxSize: number | null,
   mtimeMin: number | null,
   mtimeMax: number | null,
-): string[] {
+  follow: boolean,
+  stat: ((spec: PathSpec) => Promise<FileStat>) | undefined,
+): Promise<string[]> {
   if (links === null) return []
   const out: string[] = []
   // GNU find's default is -P: a start point that is itself a symlink is
@@ -158,7 +196,17 @@ function linkResults(
   const entries = [...links.subtree(searchRoot)]
   const own = links.statAt(searchRoot)
   if (own !== null) entries.push([searchRoot, own])
-  for (const [path, st] of entries) {
+  for (const [path, ownStat] of entries) {
+    let st = ownStat
+    let kind: FindEntry['kind'] = 'l'
+    // `links` is non-null past the early return above.
+    if (follow && stat !== undefined) {
+      const target = await linkTargetStat(links, stat, path, prefix)
+      if (target !== null) {
+        kind = target.type === FileType.DIRECTORY ? 'd' : 'f'
+        st = target
+      }
+    }
     const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
     const rel = key.replace(/^\/+|\/+$/g, '')
     const depth =
@@ -170,7 +218,7 @@ function linkResults(
           ? 0
           : rel.split('/').length
     if (maxDepth !== null && depth > maxDepth) continue
-    const entry: FindEntry = { key, name: path.split('/').pop() ?? path, kind: 'l', depth }
+    const entry: FindEntry = { key, name: path.split('/').pop() ?? path, kind, depth }
     if (!keep(entry, tree, minDepth)) continue
     const size = st.size ?? 0
     if (minSize !== null && size < minSize) continue
@@ -301,7 +349,7 @@ export async function findGeneric(
         : rootMatches
     const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
     const withLinks = filtered.concat(
-      linkResults(
+      await linkResults(
         opts.links ?? null,
         rootPath,
         prefix,
@@ -313,6 +361,8 @@ export async function findGeneric(
         expr !== null ? expr.maxSize : maxSize,
         effMtimeMin,
         effMtimeMax,
+        fl.asBool('L'),
+        stat,
       ),
     )
     withLinks.sort()

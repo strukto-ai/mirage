@@ -461,4 +461,46 @@ describe('symlinks (namespace-backed)', () => {
     expect(dec((await ws.execute('stat -L /data/link.txt')).stdout)).toContain('type=text')
     await ws.close()
   })
+  it('find -L classifies a link by its target', async () => {
+    const ws = buildWorkspace()
+    for (const c of [
+      'mkdir -p /data/d/sub',
+      'echo hello > /data/d/real.txt',
+      'echo inner > /data/d/sub/inner.txt',
+      'ln -s /data/d/real.txt /data/d/flink',
+      'ln -s /data/d/sub /data/d/dlink',
+      'ln -s /data/nowhere /data/d/dangle',
+    ]) {
+      await ws.execute(c)
+    }
+    const f = await ws.execute('find -L /data/d -type f')
+    expect(dec(f.stdout).trimEnd().split('\n')).toEqual([
+      '/data/d/flink',
+      '/data/d/real.txt',
+      '/data/d/sub/inner.txt',
+    ])
+    const d = await ws.execute('find -L /data/d -type d')
+    expect(dec(d.stdout).trimEnd().split('\n')).toEqual(['/data/d', '/data/d/dlink', '/data/d/sub'])
+    // Only a dangling link stays type l under -L.
+    const l = await ws.execute('find -L /data/d -type l')
+    expect(dec(l.stdout).trimEnd().split('\n')).toEqual(['/data/d/dangle'])
+    await ws.close()
+  })
+
+  it('find without -L reports every link as l', async () => {
+    const ws = buildWorkspace()
+    for (const c of [
+      'mkdir -p /data/d/sub',
+      'echo hello > /data/d/real.txt',
+      'ln -s /data/d/real.txt /data/d/flink',
+      'ln -s /data/d/sub /data/d/dlink',
+    ]) {
+      await ws.execute(c)
+    }
+    const l = await ws.execute('find /data/d -type l')
+    expect(dec(l.stdout).trimEnd().split('\n')).toEqual(['/data/d/dlink', '/data/d/flink'])
+    const f = await ws.execute('find /data/d -type f')
+    expect(dec(f.stdout).trimEnd().split('\n')).toEqual(['/data/d/real.txt'])
+    await ws.close()
+  })
 })
