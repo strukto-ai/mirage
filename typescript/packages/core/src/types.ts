@@ -231,6 +231,7 @@ export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
 
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
+  SYMLINK: 'symlink',
   TEXT: 'text',
   BINARY: 'binary',
   JSON: 'json',
@@ -244,6 +245,11 @@ export const FileType = Object.freeze({
 } as const)
 
 export type FileType = (typeof FileType)[keyof typeof FileType]
+
+// FileStat.extra key holding a symlink's target, verbatim as it was
+// typed. A link has no backend inode, so this is the only place the
+// target travels with the stat row.
+export const LINK_TARGET_KEY = 'link_target'
 
 export interface FileStatInit {
   name: string

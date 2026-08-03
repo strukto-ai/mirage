@@ -25,7 +25,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gridfs.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.config import StatOverlay
+from mirage.ops.types import StatOverlay
 from mirage.types import PathSpec
 
 

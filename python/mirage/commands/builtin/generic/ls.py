@@ -6,10 +6,11 @@ from mirage.commands.builtin.utils.formatting import format_ls_long
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.io.types import IOResult
+from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
-from mirage.utils.path import respell_one
+from mirage.utils.path import CycleError, respell_one
 
 Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
 Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
@@ -83,13 +84,20 @@ def exit_status_for(warnings: list[LsWarning]) -> int:
     return LS_MINOR_PROBLEM if warnings else LS_OK
 
 
+# GNU -F suffixes: a directory gets "/", a symlink "@". The link mark
+# rides the row's type, so it needs no separate lookup.
+_CLASSIFY_SUFFIX = {FileType.DIRECTORY: "/", FileType.SYMLINK: "@"}
+
+
 def format_simple(entries: list[FileStat],
                   *,
                   classify: bool = False) -> list[str]:
     out: list[str] = []
     for e in entries:
-        is_dir = classify and e.type == FileType.DIRECTORY
-        out.append(e.name + "/" if is_dir else e.name)
+        suffix = ""
+        if classify and e.type is not None:
+            suffix = _CLASSIFY_SUFFIX.get(e.type, "")
+        out.append(e.name + suffix)
     return out
 
 
@@ -146,6 +154,62 @@ async def _file_entry(
     return s.model_copy(update={"name": path.raw_path})
 
 
+async def _deref_entry(
+    directory: PathSpec,
+    link: FileStat,
+    links: LinkView,
+    stat: Stat,
+    index: IndexCacheStore,
+) -> FileStat | None:
+    """The target's stat for a link child under -L, or None if unreadable.
+
+    GNU ``ls -L`` reports the referenced file while keeping the link's
+    own name, so a dangling link falls back to the link row rather than
+    dropping out of the listing.
+
+    Args:
+        directory (PathSpec): the directory being listed.
+        link (FileStat): the link's own row, whose name is kept.
+        links (LinkView): the namespace's symlink facts.
+        stat (Stat): backend stat.
+        index (IndexCacheStore): listing cache.
+    """
+    child = directory.virtual.rstrip("/") + "/" + link.name
+    try:
+        target = links.resolve(child)
+    except CycleError:
+        return None
+    spec = PathSpec(virtual=target,
+                    directory=target,
+                    resolved=False,
+                    resource_path=rekey(directory.virtual,
+                                        directory.resource_path, target))
+    try:
+        return (await stat(spec, index)).model_copy(update={"name": link.name})
+    except (OSError, ValueError):
+        return None
+
+
+def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
+    """The row for an operand that is itself a symlink, else None.
+
+    A link has no backend inode, so readdir and stat both fail on one;
+    without this a link operand reads as a missing file, and a dangling
+    link fails the whole listing (GNU prints its row and exits 0).
+    Named with the operand's own spelling, like every other ls row.
+
+    Args:
+        path (PathSpec): the operand being listed.
+        links (LinkView | None): the namespace's symlink facts.
+    """
+    if links is None:
+        return None
+    row = links.stat_at(path.virtual)
+    if row is None:
+        return None
+    return row.model_copy(update={"name": path.raw_path})
+
+
 def _child_spec(path: PathSpec, name: str) -> PathSpec:
     child = path.child(name)
     return PathSpec(virtual=child,
@@ -162,7 +226,26 @@ async def _stat_entries(
     stat: Stat,
     all_files: bool,
     index: IndexCacheStore,
+    links: LinkView | None = None,
+    deref: bool = False,
 ) -> tuple[list[FileStat], list[LsWarning]]:
+    """Stat every name in a directory, plus the symlinks living there.
+
+    Args:
+        path (PathSpec): the directory being listed.
+        names (list[str]): entry paths from the backend readdir.
+        stat (Stat): backend stat.
+        all_files (bool): keep dotfiles.
+        index (IndexCacheStore): listing cache.
+        links (LinkView | None): the namespace's symlink facts. Links
+            have no backend inode, so readdir never names them; merging
+            here means every caller (plain, -R, -F, -l, sorting) sees
+            them without knowing they are special.
+        deref (bool): -L, report the target's stat under the link's own
+            name instead of the link row. A dereferenced directory link
+            then carries FileType.DIRECTORY, which is what makes -R
+            descend it.
+    """
     stats: list[FileStat] = []
     warnings: list[LsWarning] = []
     for entry in names:
@@ -184,6 +267,15 @@ async def _stat_entries(
         if not all_files and s.name.startswith("."):
             continue
         stats.append(s)
+    seen = {s.name for s in stats}
+    for link in (links.children(path.virtual) if links is not None else []):
+        if link.name in seen:
+            continue
+        if not all_files and link.name.startswith("."):
+            continue
+        resolved = (await _deref_entry(path, link, links, stat, index)
+                    if deref and links is not None else None)
+        stats.append(resolved if resolved is not None else link)
     return stats, warnings
 
 
@@ -198,6 +290,8 @@ async def probe_operand(
     recursive: bool = False,
     command_line_arg: bool = True,
     index: IndexCacheStore = NULL_INDEX,
+    links: LinkView | None = None,
+    deref: bool = False,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -212,6 +306,7 @@ async def probe_operand(
         command_line_arg (bool): False below an operand, where GNU downgrades
             a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
+        links (LinkView | None): the namespace's symlink facts.
     """
     warnings: list[LsWarning] = []
     try:
@@ -220,6 +315,9 @@ async def probe_operand(
         row = await _file_entry(path, stat, index)
         if row is not None:
             return Operand(path, row, []), warnings
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return Operand(path, link_row, []), warnings
         warnings.append(
             LsWarning(
                 f"ls: cannot access '{path.raw_path}': "
@@ -230,12 +328,20 @@ async def probe_operand(
         row = await _file_entry(path, stat, index)
         if row is not None:
             return Operand(path, row, []), warnings
+        # Backends without real directories answer readdir on a link
+        # with an empty list instead of raising, so the link operand has
+        # to be caught here too or it renders as an empty directory.
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return Operand(path, link_row, []), warnings
 
     entries, entry_ws = await _stat_entries(path,
                                             names,
                                             stat=stat,
                                             all_files=all_files,
-                                            index=index)
+                                            index=index,
+                                            links=links,
+                                            deref=deref)
     warnings.extend(entry_ws)
     entries = sort_stats(entries, sort_by, reverse)
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
@@ -252,7 +358,9 @@ async def probe_operand(
                                                   reverse=reverse,
                                                   recursive=True,
                                                   command_line_arg=False,
-                                                  index=index)
+                                                  index=index,
+                                                  links=links,
+                                                  deref=deref)
             groups.extend(child.groups)
             warnings.extend(child_ws)
     return Operand(path, None, groups), warnings
@@ -270,6 +378,8 @@ async def walk(
     list_dir: bool = False,
     command_line_arg: bool = True,
     index: IndexCacheStore = NULL_INDEX,
+    links: LinkView | None = None,
+    deref: bool = False,
 ) -> WalkResult:
     """Flat listing for one operand: a directory's entries, or the operand
     itself when it is not one. ``recursive`` flattens the whole subtree in
@@ -287,8 +397,12 @@ async def walk(
         command_line_arg (bool): False below an operand, where GNU downgrades
             a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
+        links (LinkView | None): the namespace's symlink facts.
     """
     if list_dir:
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return WalkResult([link_row])
         try:
             listed = await stat(path, index)
         except (OSError, ValueError) as exc:
@@ -309,7 +423,9 @@ async def walk(
                                             reverse=reverse,
                                             recursive=recursive,
                                             command_line_arg=command_line_arg,
-                                            index=index)
+                                            index=index,
+                                            links=links,
+                                            deref=deref)
     if operand.row is not None:
         return WalkResult([operand.row], warnings)
     entries = [e for _, group in operand.groups for e in group]
@@ -389,6 +505,8 @@ async def ls(
     list_dir: bool = False,
     classify: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    links: LinkView | None = None,
+    deref: bool = False,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -402,7 +520,9 @@ async def ls(
                                 readdir=readdir,
                                 stat=stat,
                                 list_dir=True,
-                                index=index)
+                                index=index,
+                                links=links,
+                                deref=deref)
             rows.extend(result.entries)
             warnings.extend(result.warnings)
         if len(rows) > 1:
@@ -424,7 +544,9 @@ async def ls(
                                             sort_by=sort_by,
                                             reverse=reverse,
                                             recursive=recursive,
-                                            index=index)
+                                            index=index,
+                                            links=links,
+                                            deref=deref)
         warnings.extend(p_ws)
         operands.append(operand)
     if len(operands) > 1:

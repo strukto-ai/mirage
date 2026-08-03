@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic.du import (ComputeEntries, ComputeSize,
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn)
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 
@@ -147,8 +148,10 @@ async def du(
     max_depth: str | None = None,
     d: str | None = None,
     c: bool = False,
+    L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
+    links: LinkView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -178,6 +181,13 @@ async def du(
         max_depth=max_depth,
         d=d,
         truncated=lambda: budget.hit,
+        # -L dereferences: the operand was already rewritten at
+        # dispatch, and withholding the link table stops the links below
+        # it from being counted as entries in their own right, which is
+        # what GNU does (it follows each one and finds the target
+        # already accounted for). A link pointing outside the operand's
+        # own subtree is undercounted; GNU would traverse into it.
+        links=None if L else links,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
 

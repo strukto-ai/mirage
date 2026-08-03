@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.config import StatOverlay
+from mirage.ops.types import LinkView, StatOverlay
 from mirage.types import PathSpec
 from mirage.utils.path import respell_raw
 
@@ -44,6 +44,7 @@ async def find(
     empty: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -52,7 +53,7 @@ async def find(
     if ops.find is None:
         return await _find_walk(ops, accessor, paths, texts, name, type, size,
                                 mtime, maxdepth, iname, path, mindepth, empty,
-                                index, stat_overlay)
+                                index, stat_overlay, links)
     stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
     if stat is not None and stat_overlay is not None:
         # -mtime must see namespace times (touch results, observed
@@ -73,7 +74,8 @@ async def find(
                               iname=iname,
                               path=path,
                               mindepth=mindepth,
-                              empty=empty)
+                              empty=empty,
+                              links=links)
 
 
 def _no_dir_hint(_name: str) -> bool | None:
@@ -96,6 +98,7 @@ async def _find_walk(
     empty: bool,
     index: IndexCacheStore,
     stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
@@ -123,7 +126,8 @@ async def _find_walk(
                                  stat=stat_fn,
                                  is_dir_name=hint,
                                  index=index,
-                                 args=args)
+                                 args=args,
+                                 links=links)
         # GNU prints each result under the operand as typed; walk_find
         # returns virtual paths, so rebase like generic_find does.
         results.extend(respell_raw(walked, search.virtual, search.raw_path))

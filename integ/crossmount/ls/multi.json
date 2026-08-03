@@ -30,7 +30,7 @@
       "command": "ls /data/sub /data2",
       "expect": {
         "exit": 0,
-        "stdout": "arch.zip\ndeep\nnested.txt\nlink.txt\nxm.txt\nxm_copy.txt\nxm_moved.txt\nxm_link.txt\n",
+        "stdout": "arch.zip\ndeep\nlink.txt\nnested.txt\nxm.txt\nxm_copy.txt\nxm_link.txt\nxm_moved.txt\n",
         "stderr": ""
       }
     }

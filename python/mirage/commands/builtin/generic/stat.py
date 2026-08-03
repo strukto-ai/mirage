@@ -5,6 +5,7 @@ from mirage.commands.builtin.utils.formatting import _ls_mode_string
 from mirage.commands.builtin.utils.output import format_records
 from mirage.core.timeutil import iso_to_epoch
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
@@ -16,6 +17,7 @@ _ASCII_DIGITS = frozenset("0123456789")
 
 _TYPE_LABELS = {
     FileType.DIRECTORY: "directory",
+    FileType.SYMLINK: "symbolic link",
     FileType.TEXT: "regular file",
     FileType.BINARY: "regular file",
     FileType.JSON: "regular file",
@@ -52,11 +54,20 @@ def _type_label(s: FileStat) -> str:
 def _effective_mode(s: FileStat) -> int:
     if s.mode is not None:
         return s.mode & 0o7777
-    return 0o755 if s.type == FileType.DIRECTORY else 0o644
+    if s.type == FileType.DIRECTORY:
+        return 0o755
+    # A symlink carries no permission bits of its own; GNU reports 0777.
+    if s.type == FileType.SYMLINK:
+        return 0o777
+    return 0o644
 
 
 def _type_bits(s: FileStat) -> int:
-    return 0o040000 if s.type == FileType.DIRECTORY else 0o100000
+    if s.type == FileType.DIRECTORY:
+        return 0o040000
+    if s.type == FileType.SYMLINK:
+        return 0o120000
+    return 0o100000
 
 
 def _owner(value: int | str | None) -> str:
@@ -230,19 +241,52 @@ def _format_stat(fmt: str, s: FileStat, name: str) -> str:
     return "".join(parts)
 
 
+def _render_stat(s: FileStat) -> str:
+    """Render the default (no -c) stat line.
+
+    Args:
+        s (FileStat): the stat to render.
+    """
+    return (f"name={s.name} size={s.size} modified={s.modified}"
+            f" type={s.type.value if s.type else None}")
+
+
 async def stat(
     paths: list[PathSpec],
     *,
     stat_fn: Callable[..., Awaitable[FileStat]],
     c: str | None = None,
     f: str | None = None,
+    L: bool = False,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Report file status, GNU stat semantics.
+
+    Args:
+        paths (list[PathSpec]): operands to stat.
+        stat_fn (Callable): backend stat for a resolved path.
+        c (str | None): output format string.
+        f (str | None): output format string (alias of -c here).
+        L (bool): dereference symlinks instead of reporting the link.
+        links (LinkView | None): the namespace's symlink facts;
+            absent when the workspace holds no links.
+    """
     if not paths:
         raise ValueError("stat: missing operand")
     fmt = c if c is not None else f
     lines: list[str] = []
     err = b""
     for p in paths:
+        # GNU stat lstats: a symlink operand reports the link itself,
+        # not its target, unless -L asks to dereference. A link has no
+        # backend inode, so the namespace is the only authority for it.
+        linked = None if L or links is None else links.stat_at(p.virtual)
+        if linked is not None:
+            if fmt is not None:
+                lines.append(_format_stat(fmt, linked, p.raw_path))
+            else:
+                lines.append(_render_stat(linked))
+            continue
         try:
             s = await stat_fn(p)
         except FS_ERRORS as exc:
@@ -252,9 +296,7 @@ async def stat(
         if fmt is not None:
             lines.append(_format_stat(fmt, s, p.raw_path))
         else:
-            lines.append(f"name={s.name} size={s.size}"
-                         f" modified={s.modified}"
-                         f" type={s.type.value if s.type else None}")
+            lines.append(_render_stat(s))
     io = IOResult(exit_code=1 if err else 0, stderr=err or None)
     if not lines:
         return None, io

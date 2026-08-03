@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.find_eval import (FindArgs, FindEntry,
+from mirage.commands.builtin.find_eval import (FindArgs, FindEntry, PredNode,
                                                args_to_tree, keep,
                                                prefix_path_nodes,
                                                tree_has_empty)
@@ -11,6 +11,7 @@ from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -129,6 +130,7 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     empty: bool = False,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     search_path = paths[0]
     args = parse_find_args(texts,
@@ -141,7 +143,13 @@ async def find(
                            path=path,
                            mindepth=mindepth,
                            empty=empty)
-    if stat is not None:
+    # A start point that is itself a symlink has no backend inode, so
+    # neither the existence guard nor the backend walk can see it. GNU's
+    # default -P reports the link and stops there, which is exactly what
+    # link_results emits below.
+    root_is_link = (links is not None
+                    and links.stat_at(search_path.virtual) is not None)
+    if stat is not None and not root_is_link:
         try:
             await stat(search_path)
         except (FileNotFoundError, ValueError) as exc:
@@ -158,7 +166,7 @@ async def find(
     # only see native times and would drop files whose mtime lives in
     # the namespace (touch results, observed writes).
     push_mtime = stat is None
-    results = await find_core(
+    results: list[str] = [] if root_is_link else await find_core(
         search_path,
         name=args.name,
         type=args.type,
@@ -182,6 +190,12 @@ async def find(
                                            stat=stat,
                                            mount_prefix=root_prefix)
     results = apply_mount_prefix(results, root_prefix)
+    root_path = (search_path.virtual.rstrip("/")
+                 if search_path.virtual != "/" else "/")
+    results = sorted(
+        results +
+        link_results(links, root_path, root_prefix,
+                     search_path.mount_path.strip("/"), args, args.tree))
     results = respell_raw(results, search_path.virtual, search_path.raw_path)
     return format_records(results), IOResult()
 
@@ -241,7 +255,7 @@ async def _walk_collect(
     index: IndexCacheStore,
     maxdepth: int | None,
     depth: int,
-    acc: list[tuple[str, bool]],
+    acc: list[tuple[str, str]],
 ) -> None:
     if maxdepth is not None and depth > maxdepth:
         return
@@ -260,7 +274,7 @@ async def _walk_collect(
             is_dir = st is not None and st.type == FileType.DIRECTORY
         else:
             is_dir = hint
-        acc.append((trimmed, is_dir))
+        acc.append((trimmed, "d" if is_dir else "f"))
         if is_dir:
             child_spec = PathSpec(virtual=trimmed,
                                   directory=trimmed,
@@ -268,6 +282,80 @@ async def _walk_collect(
                                   resource_path=mount_key(trimmed, prefix))
             await _walk_collect(readdir, stat, is_dir_name, child_spec, index,
                                 maxdepth, depth + 1, acc)
+
+
+def link_results(
+    links: LinkView | None,
+    search_root: str,
+    prefix: str,
+    search_key: str,
+    args: FindArgs,
+    tree: PredNode,
+) -> list[str]:
+    """Namespace symlinks under the search root that match the expression.
+
+    Symlinks live in the namespace, not in any backend, so neither a
+    readdir walk nor a backend`s native find op can see them. Both find
+    paths merge them through here so one implementation decides what a
+    link matches.
+
+    GNU find without -L reports the link itself and never walks through
+    it, so a link is always kind ``l`` (never ``f``/``d``) and is never
+    descended into. Its size is the target string`s length, which is
+    what ``-size`` compares, and it carries the link`s own mtime.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        search_root (str): absolute virtual path of the search root.
+        prefix (str): mount prefix the backend keys are relative to.
+        search_key (str): mount-relative key of the search root.
+        args (FindArgs): parsed find expression.
+        tree (PredNode): the prefix-stamped predicate tree.
+    """
+    if links is None:
+        return []
+    out: list[str] = []
+    # GNU find's default is -P: a start point that is itself a symlink is
+    # reported as the link and never walked through. The backend cannot
+    # see it at all, so the subtree scan below (which only covers
+    # entries *under* the root) would miss it.
+    entries = list(links.subtree(search_root))
+    own = links.stat_at(search_root)
+    if own is not None:
+        entries.append((search_root, own))
+    for path, st in entries:
+        key = path[len(prefix
+                       ):] if prefix and path.startswith(prefix) else path
+        rel = key.strip("/")
+        if search_key:
+            depth = 0 if rel == search_key else rel.count(
+                "/") - search_key.count("/")
+        else:
+            depth = 0 if rel == "" else rel.count("/") + 1
+        if args.maxdepth is not None and depth > args.maxdepth:
+            continue
+        entry = FindEntry(key=key,
+                          name=path.rsplit("/", 1)[-1],
+                          kind="l",
+                          depth=depth,
+                          is_empty=None)
+        if not keep(entry, tree, args.mindepth):
+            continue
+        size = st.size or 0
+        if args.min_size is not None and size < args.min_size:
+            continue
+        if args.max_size is not None and size > args.max_size:
+            continue
+        if args.mtime_min is not None or args.mtime_max is not None:
+            ts = _modified_ts(st.modified)
+            if ts is None:
+                continue
+            if args.mtime_min is not None and ts < args.mtime_min:
+                continue
+            if args.mtime_max is not None and ts > args.mtime_max:
+                continue
+        out.append(path)
+    return out
 
 
 async def walk_find(
@@ -279,15 +367,17 @@ async def walk_find(
     is_dir_name: Callable[[str], bool | None],
     index: IndexCacheStore,
     args: FindArgs,
+    links: LinkView | None = None,
 ) -> list[str]:
-    collected: list[tuple[str, bool]] = []
+    collected: list[tuple[str, str]] = []
     prefix = mount_prefix_of(search_path.virtual, search_path.resource_path)
     search_key = search_path.mount_path.strip("/")
     root_path = (search_path.virtual.rstrip("/")
                  if search_path.virtual != "/" else "/")
     root_stat = await _stat_entry(stat, root_path, prefix, index)
     if root_stat is not None:
-        collected.append((root_path, root_stat.type == FileType.DIRECTORY))
+        collected.append(
+            (root_path, "d" if root_stat.type == FileType.DIRECTORY else "f"))
     # GNU depth convention: the search root is depth 0, its children are
     # depth 1.
     await _walk_collect(readdir, stat, is_dir_name, search_path, index,
@@ -295,7 +385,8 @@ async def walk_find(
     tree = prefix_path_nodes(args_to_tree(args), prefix)
     need_empty = tree_has_empty(tree)
     results: list[str] = []
-    for p, is_dir in sorted(collected):
+    for p, kind in sorted(collected):
+        is_dir = kind == "d"
         entry_name = p.rsplit("/", 1)[-1]
         key = p[len(prefix):] if prefix and p.startswith(prefix) else p
         rel = key.strip("/")
@@ -310,7 +401,7 @@ async def walk_find(
                                              index)
         entry = FindEntry(key=key,
                           name=entry_name,
-                          kind="d" if is_dir else "f",
+                          kind=kind,
                           depth=depth,
                           is_empty=is_empty)
         if not keep(entry, tree, args.mindepth):
@@ -339,4 +430,6 @@ async def walk_find(
             if args.mtime_max is not None and ts > args.mtime_max:
                 continue
         results.append(p)
-    return results
+    results.extend(
+        link_results(links, root_path, prefix, search_key, args, tree))
+    return sorted(results)

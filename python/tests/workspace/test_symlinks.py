@@ -334,3 +334,305 @@ async def test_grep_follows_link():
     r = await ws.execute("grep beta /data/link.txt")
     assert r.exit_code == 0
     assert "beta" in r.stdout.decode()
+
+
+async def _seeded():
+    """A tree with one file link and one directory link."""
+    ws = _ws()
+    await ws.execute("mkdir -p /data/dir")
+    await ws.execute("echo hello > /data/dir/real.txt")
+    await ws.execute("ln -s /data/dir/real.txt /data/link.txt")
+    await ws.execute("ln -s /data/dir /data/dlink")
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_find_lists_symlinks():
+    """GNU find reports links; they were invisible to the walk before."""
+    ws = await _seeded()
+    r = await ws.execute("find /data")
+    assert r.stdout.decode().splitlines() == [
+        "/data",
+        "/data/dir",
+        "/data/dir/real.txt",
+        "/data/dlink",
+        "/data/link.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_type_l_matches_only_links():
+    ws = await _seeded()
+    r = await ws.execute("find /data -type l")
+    assert r.stdout.decode().splitlines() == ["/data/dlink", "/data/link.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_type_f_excludes_links():
+    """A link is kind 'l', never 'f', matching GNU's default -P."""
+    ws = await _seeded()
+    r = await ws.execute("find /data -type f")
+    assert r.stdout.decode().splitlines() == ["/data/dir/real.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_type_d_excludes_a_link_to_a_directory():
+    ws = await _seeded()
+    r = await ws.execute("find /data -type d")
+    assert r.stdout.decode().splitlines() == ["/data", "/data/dir"]
+
+
+@pytest.mark.asyncio
+async def test_find_name_matches_a_link():
+    ws = await _seeded()
+    r = await ws.execute("find /data -name 'link*'")
+    assert r.stdout.decode().splitlines() == ["/data/link.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_does_not_descend_through_a_directory_link():
+    """Without -L, GNU reports the link and never walks through it, so
+    the target's contents appear once, under the real directory."""
+    ws = await _seeded()
+    r = await ws.execute("find /data -name real.txt")
+    assert r.stdout.decode().splitlines() == ["/data/dir/real.txt"]
+
+
+@pytest.mark.asyncio
+async def test_find_maxdepth_prunes_links_too():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/sub")
+    await ws.execute("ln -s /data/t /data/sub/deep.txt")
+    r = await ws.execute("find /data -maxdepth 1")
+    assert "/data/sub/deep.txt" not in r.stdout.decode()
+
+
+@pytest.mark.asyncio
+async def test_find_size_compares_the_target_string_length():
+    """A link's size is len(target), the way lstat reports it."""
+    ws = _ws()
+    await ws.execute("ln -s /data/abc /data/l")
+    r = await ws.execute("find /data -type l -size -2c")
+    assert r.stdout.decode() == ""
+    r = await ws.execute("find /data -type l -size +2c")
+    assert r.stdout.decode().splitlines() == ["/data/l"]
+
+
+@pytest.mark.asyncio
+async def test_ls_long_renders_a_link_the_way_gnu_does():
+    """lrwxrwxrwx, the target string's length as the size, name -> target."""
+    ws = await _seeded()
+    r = await ws.execute("ls -l /data")
+    lines = r.stdout.decode().splitlines()
+    link_line = next(x for x in lines if "link.txt" in x)
+    assert link_line.startswith("lrwxrwxrwx 1 ")
+    assert link_line.endswith("link.txt -> /data/dir/real.txt")
+    assert f" {len('/data/dir/real.txt')} " in link_line
+
+
+@pytest.mark.asyncio
+async def test_ls_classify_marks_links_with_an_at_sign():
+    ws = await _seeded()
+    r = await ws.execute("ls -F /data")
+    assert "link.txt@" in r.stdout.decode()
+
+
+@pytest.mark.asyncio
+async def test_stat_reports_the_link_and_dash_l_reports_the_target():
+    ws = await _seeded()
+    r = await ws.execute("stat /data/link.txt")
+    assert "type=symlink" in r.stdout.decode()
+    assert f"size={len('/data/dir/real.txt')}" in r.stdout.decode()
+    r = await ws.execute("stat -L /data/link.txt")
+    assert "type=text" in r.stdout.decode()
+    assert "size=6" in r.stdout.decode()
+
+
+@pytest.mark.asyncio
+async def test_stat_format_directives_on_a_link():
+    ws = await _seeded()
+    r = await ws.execute("stat -c '%F %A' /data/link.txt")
+    assert r.stdout.decode().strip() == "symbolic link lrwxrwxrwx"
+
+
+async def _dangling():
+    """The seeded tree plus a link whose target does not exist."""
+    ws = await _seeded()
+    await ws.execute("ln -s /data/nope /data/dangle")
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_ls_long_reports_a_link_operand_without_following_it():
+    """GNU ls -l names a command-line link, never its target."""
+    ws = await _seeded()
+    r = await ws.execute("ls -l /data/link.txt")
+    assert r.exit_code == 0
+    line = r.stdout.decode().strip()
+    assert line.startswith("lrwxrwxrwx")
+    assert line.endswith("/data/link.txt -> /data/dir/real.txt")
+
+
+@pytest.mark.asyncio
+async def test_ls_long_on_a_dangling_link_succeeds():
+    """A broken link used to fail the whole listing with exit 2."""
+    ws = await _dangling()
+    r = await ws.execute("ls -l /data/dangle")
+    assert r.exit_code == 0
+    assert not r.stderr
+    assert r.stdout.decode().strip().endswith("/data/dangle -> /data/nope")
+
+
+@pytest.mark.asyncio
+async def test_ls_long_on_a_directory_link_shows_the_link():
+    """GNU: -l suppresses the command-line dereference bare ls does."""
+    ws = await _seeded()
+    r = await ws.execute("ls -l /data/dlink")
+    assert r.stdout.decode().strip().endswith("/data/dlink -> /data/dir")
+
+
+@pytest.mark.asyncio
+async def test_bare_ls_still_dereferences_a_directory_link():
+    """Without -l/-d GNU lists what the link points at."""
+    ws = await _seeded()
+    r = await ws.execute("ls /data/dlink")
+    assert r.stdout.decode() == "real.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_ls_recursive_lists_links_and_does_not_descend_them():
+    ws = await _dangling()
+    r = await ws.execute("ls -R /data")
+    out = r.stdout.decode()
+    assert out.split("\n")[:5] == [
+        "/data:", "dangle", "dir", "dlink", "link.txt"
+    ]
+    # dir is descended, dlink is not: one group header per real directory.
+    assert "/data/dir:" in out
+    assert "/data/dlink:" not in out
+
+
+@pytest.mark.asyncio
+async def test_readlink_e_fails_on_a_dangling_link():
+    """GNU -e requires the whole resolved path to exist."""
+    ws = await _dangling()
+    r = await ws.execute("readlink -e /data/dangle")
+    assert r.exit_code == 1
+    assert r.stdout.decode() == ""
+
+
+@pytest.mark.asyncio
+async def test_readlink_f_prints_a_dangling_target():
+    """GNU -f only requires the parent, so a broken link still prints."""
+    ws = await _dangling()
+    r = await ws.execute("readlink -f /data/dangle")
+    assert r.exit_code == 0
+    assert r.stdout.decode() == "/data/nope\n"
+
+
+@pytest.mark.asyncio
+async def test_readlink_f_fails_when_the_parent_is_missing():
+    ws = await _seeded()
+    r = await ws.execute("readlink -f /data/missing/x")
+    assert r.exit_code == 1
+    assert r.stdout.decode() == ""
+
+
+@pytest.mark.asyncio
+async def test_readlink_m_requires_nothing_to_exist():
+    ws = await _seeded()
+    r = await ws.execute("readlink -m /data/missing/x")
+    assert r.exit_code == 0
+    assert r.stdout.decode() == "/data/missing/x\n"
+
+
+@pytest.mark.asyncio
+async def test_file_describes_a_link_instead_of_following_it():
+    ws = await _seeded()
+    r = await ws.execute("file /data/link.txt")
+    assert r.stdout.decode() == (
+        "/data/link.txt: symbolic link to /data/dir/real.txt\n")
+
+
+@pytest.mark.asyncio
+async def test_file_calls_a_dangling_link_broken():
+    ws = await _dangling()
+    r = await ws.execute("file /data/dangle")
+    assert r.exit_code == 0
+    assert r.stdout.decode() == (
+        "/data/dangle: broken symbolic link to /data/nope\n")
+
+
+@pytest.mark.asyncio
+async def test_file_keeps_a_relative_target_verbatim():
+    """GNU prints the stored target, not a resolved one."""
+    ws = _ws()
+    await ws.execute("echo world > /data/rel.txt")
+    await ws.execute("ln -s rel.txt /data/relative")
+    r = await ws.execute("file /data/relative")
+    assert r.stdout.decode() == "/data/relative: symbolic link to rel.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_file_dash_l_follows_the_link():
+    ws = await _seeded()
+    r = await ws.execute("file -L /data/link.txt")
+    assert "symbolic link" not in r.stdout.decode()
+    assert "text" in r.stdout.decode()
+
+
+@pytest.mark.asyncio
+async def test_file_mime_reports_the_link_inode_type():
+    ws = await _seeded()
+    r = await ws.execute("file -i /data/link.txt")
+    assert r.stdout.decode() == (
+        "/data/link.txt: inode/symlink; charset=binary\n")
+
+
+@pytest.mark.asyncio
+async def test_du_a_accounts_for_links():
+    """Links were invisible to du; GNU lists one line per link under -a."""
+    ws = await _dangling()
+    r = await ws.execute("du -a /data")
+    listed = [line.split("\t")[1] for line in r.stdout.decode().splitlines()]
+    assert "/data/dangle" in listed
+    assert "/data/dlink" in listed
+    assert "/data/link.txt" in listed
+
+
+@pytest.mark.asyncio
+async def test_du_without_a_omits_link_lines():
+    """Links are files: GNU prints a line per directory unless -a."""
+    ws = await _dangling()
+    r = await ws.execute("du /data")
+    listed = [line.split("\t")[1] for line in r.stdout.decode().splitlines()]
+    assert listed == ["/data/dir", "/data"]
+
+
+@pytest.mark.asyncio
+async def test_du_sizes_a_link_by_its_target_length():
+    """Deliberate divergence: GNU counts blocks (0), mirage counts bytes."""
+    ws = await _seeded()
+    r = await ws.execute("du /data/link.txt")
+    size, name = r.stdout.decode().strip().split("\t")
+    assert name == "/data/link.txt"
+    assert int(size) == len("/data/dir/real.txt")
+
+
+@pytest.mark.asyncio
+async def test_du_does_not_follow_a_link_operand():
+    """GNU du reports the link itself without -L."""
+    ws = await _seeded()
+    r = await ws.execute("du /data/dlink")
+    lines = r.stdout.decode().strip().split("\n")
+    assert len(lines) == 1
+    assert lines[0].split("\t")[1] == "/data/dlink"
+
+
+@pytest.mark.asyncio
+async def test_du_totals_include_links():
+    ws = await _seeded()
+    r = await ws.execute("du -s /data")
+    total = int(r.stdout.decode().split("\t")[0])
+    # hello\n plus both link targets.
+    assert total == 6 + len("/data/dir/real.txt") + len("/data/dir")

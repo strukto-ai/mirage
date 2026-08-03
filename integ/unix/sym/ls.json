@@ -30,7 +30,7 @@
       "command": "ls -F /data/symd",
       "expect": {
         "exit": 0,
-        "stdout": "t.txt\nl.txt@\n",
+        "stdout": "l.txt@\nt.txt\n",
         "stderr": ""
       }
     },
@@ -61,10 +61,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls -l /data/symd | grep -- '->'",
+      "command": "ls -l /data/symd | grep -- '->' | sed -E 's/ [A-Z][a-z]{2} +[0-9]+ [0-9]{2}:[0-9]{2} / /'",
       "expect": {
         "exit": 0,
-        "stdout": "l\t-\t-\tl.txt -> /data/symd/t.txt\n",
+        "stdout": "lrwxrwxrwx 1 user user 16 l.txt -> /data/symd/t.txt\n",
         "stderr": ""
       }
     }

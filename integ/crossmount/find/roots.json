@@ -28,7 +28,7 @@
       "command": "find /data/sub /data2 -name '*.txt'",
       "expect": {
         "exit": 0,
-        "stdout": "/data/sub/deep/a.txt\n/data/sub/deep/b.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data2/xm.txt\n/data2/xm_copy.txt\n/data2/xm_moved.txt\n",
+        "stdout": "/data/sub/deep/a.txt\n/data/sub/deep/b.txt\n/data/sub/deep/deeper.txt\n/data/sub/link.txt\n/data/sub/nested.txt\n/data2/xm.txt\n/data2/xm_copy.txt\n/data2/xm_link.txt\n/data2/xm_moved.txt\n",
         "stderr": ""
       }
     }

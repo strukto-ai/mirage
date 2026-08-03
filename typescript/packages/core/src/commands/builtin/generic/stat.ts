@@ -28,6 +28,7 @@ const DEFAULT_OWNER = 'user'
 
 const TYPE_LABELS: Record<string, string> = {
   [FileType.DIRECTORY]: 'directory',
+  [FileType.SYMLINK]: 'symbolic link',
   [FileType.TEXT]: 'regular file',
   [FileType.BINARY]: 'regular file',
   [FileType.JSON]: 'regular file',
@@ -40,11 +41,16 @@ function typeLabel(s: FileStat): string {
 
 function effectiveMode(s: FileStat): number {
   if (s.mode !== null) return s.mode & 0o7777
-  return s.type === FileType.DIRECTORY ? 0o755 : 0o644
+  if (s.type === FileType.DIRECTORY) return 0o755
+  // A symlink carries no permission bits of its own; GNU reports 0777.
+  if (s.type === FileType.SYMLINK) return 0o777
+  return 0o644
 }
 
 function typeBits(s: FileStat): number {
-  return s.type === FileType.DIRECTORY ? 0o040000 : 0o100000
+  if (s.type === FileType.DIRECTORY) return 0o040000
+  if (s.type === FileType.SYMLINK) return 0o120000
+  return 0o100000
 }
 
 function owner(value: number | string | null): string {
@@ -213,7 +219,24 @@ export async function statGeneric(
   const fmt = fl.asStr('c') ?? fl.asStr('f') ?? null
   const lines: string[] = []
   let err = ''
+  const links = fl.asBool('L') ? null : (opts.links ?? null)
   for (const p of paths) {
+    // GNU stat lstats: a symlink operand reports the link itself, not
+    // its target, unless -L asks to dereference. A link has no backend
+    // inode, so the namespace is the only authority for it.
+    const linked = links?.statAt(p.virtual) ?? null
+    if (linked !== null) {
+      if (fmt !== null) {
+        lines.push(formatStat(fmt, linked, p.rawPath))
+      } else {
+        const sizeStr = linked.size === null ? 'None' : String(linked.size)
+        const modStr = linked.modified ?? 'None'
+        lines.push(
+          `name=${linked.name} size=${sizeStr} modified=${modStr} type=${linked.type ?? 'None'}`,
+        )
+      }
+      continue
+    }
     let s: FileStat
     try {
       s = await stat(p)

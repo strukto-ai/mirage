@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import type { StatOverlay } from '../../../ops/config.ts'
+import type { StatOverlay } from '../../../ops/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import {
   FileType,

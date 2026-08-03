@@ -264,11 +264,28 @@ export async function prepareMv(
   return { items: rewritten, postUnlink: targetDst, postRename, early: null }
 }
 
-export function handleReadlink(
+// Whether a resolved virtual path names something that exists.
+export async function pathExists(dispatch: DispatchFn, virtual: string): Promise<boolean> {
+  const spec = PathSpec.fromStrPath(virtual, '')
+  try {
+    return (await statOrNull(dispatch, spec)) !== null
+  } catch {
+    return false
+  }
+}
+
+// Print a symlink's target, GNU readlink semantics.
+//
+// The three canonicalizing flags differ only in how much of the resolved
+// path has to exist: -m requires nothing, -f requires every component
+// but the last, and -e requires all of it. A path that falls short
+// prints nothing and exits 1.
+export async function handleReadlink(
   namespace: Namespace,
+  dispatch: DispatchFn,
   session: Session,
   args: (string | PathSpec)[],
-): Result {
+): Promise<Result> {
   const [flags, operands] = splitFlags(args, 'fenm')
   if (operands.length === 0) {
     return errorResult('readlink', 'readlink: missing operand\n')
@@ -281,12 +298,24 @@ export function handleReadlink(
     if (canonical) {
       // -f/-e/-m canonicalize: resolve every symlink (including a trailing
       // one) and normalize the path, GNU realpath-style.
+      let resolved: string
       try {
-        lines.push(norm(namespace.follow(absOp)))
+        resolved = norm(namespace.follow(absOp))
       } catch (err) {
         if (!(err instanceof CycleError)) throw err
         exitCode = 1
+        continue
       }
+      const probe = flags.has('e')
+        ? resolved
+        : flags.has('f')
+          ? resolved.slice(0, resolved.lastIndexOf('/')) || '/'
+          : null
+      if (probe !== null && !(await pathExists(dispatch, probe))) {
+        exitCode = 1
+        continue
+      }
+      lines.push(resolved)
       continue
     }
     const target = namespace.readlink(absOp)

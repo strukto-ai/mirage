@@ -30,7 +30,7 @@
       "command": "du -a /data2 | sed 's/^[0-9]*\\t//' | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/data2\n/data2/xm.txt\n/data2/xm_copy.txt\n/data2/xm_moved.txt\n",
+        "stdout": "/data2\n/data2/xm.txt\n/data2/xm_copy.txt\n/data2/xm_link.txt\n/data2/xm_moved.txt\n",
         "stderr": ""
       }
     },
@@ -64,7 +64,7 @@
       "command": "du -a /data /data2 | sed 's/^[0-9]*\\t//' | grep -c '^/data2/'",
       "expect": {
         "exit": 0,
-        "stdout": "3\n",
+        "stdout": "4\n",
         "stderr": ""
       }
     }

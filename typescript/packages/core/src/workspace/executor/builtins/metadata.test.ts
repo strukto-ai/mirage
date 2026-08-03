@@ -179,7 +179,10 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     await run(ws, 'ln -s /data/f.txt /data/link')
     await run(ws, 'chmod 640 /data/link')
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain('-rw-r----- 1 user user 5')
+    // The mode lands on the target, not the link. The link's own row is
+    // listed too and is wider, so the size column pads f.txt's 5.
+    expect(out).toContain('-rw-r----- 1 user user  5')
+    expect(out).toContain('lrwxrwxrwx')
     await ws.close()
   })
 

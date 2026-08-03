@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import type { StatOverlay } from '../../../../ops/config.ts'
+import type { StatOverlay } from '../../../../ops/types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { NativeCopy, PathSpec, StatFn } from '../../../../types.ts'
 import { walkFind } from '../../../../core/generic/find.ts'

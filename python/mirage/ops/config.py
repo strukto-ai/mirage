@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -72,6 +71,14 @@ class NamespaceLinks(Protocol):
         """
         ...
 
+    def link_stat_at(self, path: str) -> FileStat | None:
+        """The link's own stat (lstat), None when ``path`` is not a link.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        ...
+
     async def symlink(self, link: str, target: str, mtime: float) -> None:
         """Create or overwrite a symlink entry.
 
@@ -89,9 +96,6 @@ class NamespaceLinks(Protocol):
             path (str): absolute virtual path.
         """
         ...
-
-
-StatOverlay = Callable[[str, FileStat], FileStat]
 
 
 @dataclass

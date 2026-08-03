@@ -248,7 +248,10 @@ async def test_chmod_follows_symlink():
     await _run(ws, "ln -s /data/f.txt /data/link")
     await _run(ws, "chmod 640 /data/link")
     _, out, _ = await _run(ws, "ls -l /data")
-    assert "-rw-r----- 1 user user 5" in out
+    # The mode lands on the target, not the link. The link's own row is
+    # listed too and is wider, so the size column pads f.txt's 5.
+    assert "-rw-r----- 1 user user  5 Jan  1 00:00 f.txt" in out
+    assert "lrwxrwxrwx" in out
 
 
 @pytest.mark.asyncio

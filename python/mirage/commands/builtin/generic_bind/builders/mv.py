@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic_bind.builders.cp import overlayable_stat
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.config import StatOverlay
+from mirage.ops.types import StatOverlay
 from mirage.types import NativeMove, PathSpec
 
 

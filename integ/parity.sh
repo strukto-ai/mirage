@@ -58,6 +58,9 @@ YML
 
 freeport() { lsof -ti:8765 2>/dev/null | xargs kill -9 2>/dev/null; sleep 1; }
 sout() { jq -r '.stdout // .result.stdout // empty'; }
+# Drop `ls -l`'s timestamp column so a row can be compared verbatim; the
+# mode, owner, size and `name -> target` are all stable.
+no_ls_time() { sed -E 's/ [A-Z][a-z]{2} +[0-9]+ [0-9]{2}:[0-9]{2} / /'; }
 serr() { jq -r '.stderr // .result.stderr // empty'; }
 sexit() { jq -r '.exit_code // .exitCode // .result.exit_code // empty'; }
 verdict() { jq -r 'if (.exit_code // .exitCode // .result.exit_code // 1) == 0 then "allowed" else "denied" end'; }
@@ -109,7 +112,7 @@ probe() {
   echo "sym.readlink=$($cli execute -w pw -c 'readlink /data/link.txt' </dev/null | sout)"
   echo "sym.cat_follow=$($cli execute -w pw -c 'cat /data/link.txt' </dev/null | sout)"
   echo "sym.write_through=$($cli execute -w pw -c 'echo via >> /data/link.txt && tail -n 1 /data/s.txt' </dev/null | sout)"
-  echo "sym.ls_arrow=$($cli execute -w pw -c 'ls -l /data | grep -- "->"' </dev/null | sout)"
+  echo "sym.ls_arrow=$($cli execute -w pw -c 'ls -l /data | grep -- "->"' </dev/null | sout | no_ls_time)"
   echo "sym.mv_entry=$($cli execute -w pw -c 'mv /data/link.txt /data/moved.txt && readlink /data/moved.txt' </dev/null | sout)"
   echo "sym.rm_entry=$($cli execute -w pw -c 'rm /data/moved.txt; readlink /data/moved.txt' </dev/null | sexit)"
   echo "sym.dangle=$($cli execute -w pw -c 'ln -s /data/none /data/d.txt; cat /data/d.txt' </dev/null | sexit)"
@@ -256,7 +259,9 @@ expect "fuse.operates" "alive"
 expect "sym.readlink" "/data/s.txt"
 expect "sym.cat_follow" "sym1"
 expect "sym.write_through" "via"
-expect "sym.ls_arrow" "$(printf 'l\t-\t-\tlink.txt -> /data/s.txt')"
+# A link row is a real GNU row now: lrwxrwxrwx (a link carries no
+# permission bits of its own) and the size is the target's length.
+expect "sym.ls_arrow" "lrwxrwxrwx 1 user user 11 link.txt -> /data/s.txt"
 expect "sym.mv_entry" "/data/s.txt"
 expect "sym.rm_entry" "1"
 expect "sym.dangle" "1"

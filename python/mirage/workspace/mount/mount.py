@@ -30,14 +30,15 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
-from mirage.ops.config import StatOverlay
 from mirage.ops.registry import RegisteredOp
+from mirage.ops.types import LinkView, StatOverlay
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.utils.errors import enotsup
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.params import accepts_kwarg
 
 
 def _wrap_cmd_streams(
@@ -442,6 +443,7 @@ class MountEntry:
         runtime: Runtime | None = None,
         runtime_unavailable: str | None = None,
         stat_overlay: StatOverlay | None = None,
+        links: LinkView | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -457,7 +459,10 @@ class MountEntry:
             stdin (ByteSource | None): stdin data.
             cwd (str): virtual cwd from session.
             stat_overlay (StatOverlay | None): namespace attr merge for
-                stat-rendering commands (ls); injected only when passed.
+                stat-rendering commands (ls).
+            links (LinkView | None): the namespace's symlink facts.
+                Both reach only the handlers that name them as a
+                parameter, so no list of command names is kept here.
         """
         extension = get_extension(paths[0].virtual) if paths else None
 
@@ -517,8 +522,10 @@ class MountEntry:
         if env is not None:
             kw["env"] = env
         kw["exec_allowed"] = exec_allowed
-        if stat_overlay is not None:
-            kw["stat_overlay"] = stat_overlay
+        # Facts the dispatcher can offer but not every command wants.
+        # A command opts in by naming the parameter; see accepts_kwarg.
+        offered = {"stat_overlay": stat_overlay, "links": links}
+        offered = {k: v for k, v in offered.items() if v is not None}
         if runtime is not None:
             kw["runtime"] = runtime
         if runtime_unavailable is not None:
@@ -550,8 +557,13 @@ class MountEntry:
                     mount_override=self.command_safeguards.get(cmd_name))
                 cmd_timeout = (resolved_safeguard.timeout_seconds
                                if resolved_safeguard is not None else None)
+                call_kw = kw | {
+                    key: value
+                    for key, value in offered.items()
+                    if accepts_kwarg(cmd.fn, key)
+                }
                 result = await run_with_timeout(
-                    cmd.fn(self.resource.accessor, paths, *texts, **kw),
+                    cmd.fn(self.resource.accessor, paths, *texts, **call_kw),
                     cmd_timeout, cmd_name)
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,

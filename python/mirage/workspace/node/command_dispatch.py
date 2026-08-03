@@ -32,7 +32,8 @@ from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.route import NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS
+from mirage.workspace.route import (NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
+                                    dereferences, reports_link)
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -486,7 +487,7 @@ async def _run_argv(
         return await handle_ln(namespace, session, operands)
 
     if name == "readlink":
-        return handle_readlink(namespace, session, operands)
+        return await handle_readlink(namespace, dispatch, session, operands)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with
     #    overlay fallback; they run their own link follow) ──
@@ -532,7 +533,9 @@ async def _run_argv(
                     namespace, dispatch, operands)
                 if early is not None:
                     return early
-            elif name not in NO_FOLLOW_COMMANDS:
+            elif not reports_link(
+                    name, argv.words) and (name not in NO_FOLLOW_COMMANDS
+                                           or dereferences(name, argv.words)):
                 operands = follow_paths(namespace, operands)
         except CycleError as exc:
             err = (f"{name}: {exc}: "

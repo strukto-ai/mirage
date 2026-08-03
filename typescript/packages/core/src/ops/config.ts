@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat } from '../types.ts'
-
 // Ops with lstat semantics: they act on the entry named by the path, so
 // no stat surface (dispatch, the fs facade, FUSE) may rewrite their
 // operand through the symlink table.
@@ -48,5 +46,3 @@ export interface NamespaceLinks {
   // Drop a node entry; true when one existed.
   unlink(path: string): Promise<boolean>
 }
-
-export type StatOverlay = (path: string, stat: FileStat) => FileStat

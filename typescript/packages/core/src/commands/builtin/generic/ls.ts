@@ -18,6 +18,7 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { LinkView } from '../../../ops/types.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { gnuStrerror } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -45,6 +46,14 @@ interface WalkOpts {
   sortBy: SortBy
   reverse: boolean
   recursive: boolean
+  // Links have no backend inode, so readdir never names them. Merging
+  // them in means every caller (plain, -R, -F, -l, sorting) sees them
+  // without knowing they are special.
+  links: LinkView | null
+  // -L reports the target's stat under the link's own name. A
+  // dereferenced directory link then carries FileType.DIRECTORY, which
+  // is what makes -R descend it.
+  deref: boolean
 }
 
 // One ls operand once its kind is known. `row` is set when the operand is not
@@ -81,8 +90,15 @@ function childSpec(entryPath: string, prefix: string): PathSpec {
   })
 }
 
+// GNU -F suffixes: a directory gets "/", a symlink "@". The link mark
+// rides the row's type, so it needs no separate lookup.
+const CLASSIFY_SUFFIX: Partial<Record<FileType, string>> = {
+  [FileType.DIRECTORY]: '/',
+  [FileType.SYMLINK]: '@',
+}
+
 function formatShort(s: FileStat, classify: boolean): string {
-  const suffix = classify && s.type === FileType.DIRECTORY ? '/' : ''
+  const suffix = (classify && s.type != null ? CLASSIFY_SUFFIX[s.type] : undefined) ?? ''
   return `${s.name}${suffix}`
 }
 
@@ -166,6 +182,9 @@ async function listDir(
   dir: PathSpec,
   all: boolean,
   warnings: LsWarning[],
+  links: LinkView | null,
+  deref: boolean,
+  stat2: Stat,
 ): Promise<FileStat[]> {
   const entries = await readdir(dir)
   const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
@@ -185,7 +204,66 @@ async function listDir(
     }
     stats.push(outcome.value)
   }
+  const seen = new Set(stats.map((s) => s.name))
+  for (const link of links?.children(dir.virtual) ?? []) {
+    if (seen.has(link.name)) continue
+    const resolved = deref && links !== null ? await derefEntry(dir, link, links, stat2) : null
+    stats.push(resolved ?? link)
+  }
   return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
+}
+
+// The row for an operand that is itself a symlink, else null.
+//
+// A link has no backend inode, so readdir and stat both fail on one;
+// without this a link operand reads as a missing file, and a dangling
+// link fails the whole listing (GNU prints its row and exits 0). Named
+// with the operand's own spelling, like every other ls row.
+// The target's stat for a link child under -L, or null if unreadable.
+// GNU `ls -L` reports the referenced file while keeping the link's own
+// name, so a dangling link falls back to the link row.
+async function derefEntry(
+  directory: PathSpec,
+  link: FileStat,
+  links: LinkView,
+  stat: Stat,
+): Promise<FileStat | null> {
+  const child = `${rstripSlash(directory.virtual)}/${link.name}`
+  let target: string
+  try {
+    target = links.resolve(child)
+  } catch {
+    return null
+  }
+  const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.resourcePath))
+  try {
+    const s = await stat(spec)
+    return new FileStat({
+      name: link.name,
+      size: s.size,
+      modified: s.modified,
+      type: s.type,
+      mode: s.mode,
+      uid: s.uid,
+      gid: s.gid,
+      extra: s.extra,
+    })
+  } catch {
+    return null
+  }
+}
+
+function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
+  const row = links?.statAt(path.virtual) ?? null
+  if (row === null) return null
+  return new FileStat({
+    name: path.rawPath,
+    size: row.size,
+    modified: row.modified,
+    type: row.type,
+    mode: row.mode,
+    extra: row.extra,
+  })
 }
 
 // List one operand and report whether it turned out to be a directory.
@@ -199,10 +277,12 @@ async function probeOperand(
 ): Promise<Operand> {
   let stats: FileStat[]
   try {
-    stats = await listDir(readdir, stat, path, opts.all, warnings)
+    stats = await listDir(readdir, stat, path, opts.all, warnings, opts.links, opts.deref, stat)
   } catch (err) {
     const row = await fileEntry(stat, path)
     if (row !== null) return { path, row, groups: [] }
+    const link = linkRow(path, opts.links)
+    if (link !== null) return { path, row: link, groups: [] }
     warnings.push({
       message: `ls: cannot access '${path.rawPath}': ${errText(err)}`,
       serious: commandLineArg,
@@ -212,6 +292,11 @@ async function probeOperand(
   if (stats.length === 0) {
     const row = await fileEntry(stat, path)
     if (row !== null) return { path, row, groups: [] }
+    // Backends without real directories answer readdir on a link with
+    // an empty list instead of throwing, so the link operand has to be
+    // caught here too or it renders as an empty directory.
+    const link = linkRow(path, opts.links)
+    if (link !== null) return { path, row: link, groups: [] }
   }
   const entries = sortStats(stats, opts.sortBy, opts.reverse)
   const groups: [PathSpec, FileStat[]][] = [[path, entries]]
@@ -303,6 +388,8 @@ export async function lsGeneric(
   const recursive = fl.asBool('R')
   const listDirItself = fl.asBool('d')
   const sortBy: SortBy = fl.asBool('t') ? 'time' : fl.asBool('S') ? 'size' : 'name'
+  const links = opts.links ?? null
+  const deref = fl.asBool('L')
   const warnings: LsWarning[] = []
   const lines: string[] = []
 
@@ -311,6 +398,11 @@ export async function lsGeneric(
     // with no headers.
     const collected: FileStat[] = []
     for (const p of targets) {
+      const link = linkRow(p, links)
+      if (link !== null) {
+        collected.push(link)
+        continue
+      }
       try {
         // GNU ls -d prints the operand as given.
         collected.push(asOperand(await stat(p), p))
@@ -326,7 +418,7 @@ export async function lsGeneric(
     return finish(lines, warnings)
   }
 
-  const walkOpts: WalkOpts = { all, sortBy, reverse, recursive }
+  const walkOpts: WalkOpts = { all, sortBy, reverse, recursive, links, deref }
   const probed: Operand[] = []
   for (const p of targets) {
     probed.push(await probeOperand(readdir, stat, p, walkOpts, warnings, true))

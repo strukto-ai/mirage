@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op,
                                                           overlaid_stat)
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.config import StatOverlay
+from mirage.ops.types import LinkView, StatOverlay
 from mirage.types import PathSpec
 
 
@@ -33,8 +33,10 @@ async def stat(
     stdin: bytes | None = None,
     c: str | None = None,
     f: str | None = None,
+    L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -46,7 +48,12 @@ async def stat(
                           partial(ops.stat, accessor),
                           stat_overlay,
                           index=index)
-    return await generic_stat(paths, stat_fn=stat_fn, c=c, f=f)
+    return await generic_stat(paths,
+                              stat_fn=stat_fn,
+                              c=c,
+                              f=f,
+                              L=L,
+                              links=links)
 
 
 BUILDER = Builder('stat', stat, None, False, None)

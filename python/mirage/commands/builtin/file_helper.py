@@ -12,7 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.constants import FILE_MIME_MAP
 from mirage.types import FileStat, FileType
+
+
+def format_file_result(
+    path: str,
+    result: FileType | str,
+    brief: bool,
+    mime: bool,
+) -> str:
+    """Render one ``file`` output line.
+
+    Args:
+        path (str): operand as typed, omitted under -b.
+        result (FileType | str): detected type, or a ready description.
+        brief (bool): -b, drop the filename column.
+        mime (bool): -i, map the type to its MIME spelling.
+    """
+    key = result.value if isinstance(result, FileType) else str(result)
+    desc = FILE_MIME_MAP.get(key, key) if mime else key
+    if brief:
+        return desc
+    return f"{path}: {desc}"
 
 
 def _detect(path: str, header: bytes, s: FileStat) -> FileType | str:

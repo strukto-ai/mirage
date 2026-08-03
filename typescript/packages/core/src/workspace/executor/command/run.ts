@@ -19,7 +19,9 @@ import { assertMountAllowed, MountNotAllowedError } from '../../../context/sessi
 import type { PathSpec } from '../../../types.ts'
 import { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
+import type { LinkView } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { pathExists } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { VfsRuntime, type Runtime } from '../runtime.ts'
@@ -196,14 +198,13 @@ export async function runOnMount(
   // cp/mv -u freshness checks compare the same merged mtimes, and
   // find -mtime filters on them (touch results, observed writes).
   const statOverlay =
-    (cmdName === 'ls' ||
-      cmdName === 'stat' ||
-      cmdName === 'cp' ||
-      cmdName === 'mv' ||
-      cmdName === 'find') &&
     namespace !== undefined
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
       : null
+  // Symlinks are namespace state no backend readdir or stat can see. A
+  // command that does not read `links` off its context ignores it, so
+  // there is no list of symlink-aware commands to keep in step.
+  const links = linkView(namespace ?? null, dispatch)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -223,6 +224,7 @@ export async function runOnMount(
       execAllowed: registry.isExecAllowed(),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
+      ...(links !== null ? { links } : {}),
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       safeguardOverride,
     })
@@ -232,9 +234,6 @@ export async function runOnMount(
     // that output; only a failed operand (exit 2) has nothing to augment.
     if (cmdName === 'ls' && io.exitCode !== LS_FAILURE) {
       stdout = await injectChildMounts(stdout, registry, paths, flags, session.cwd)
-      if (namespace?.hasLinks() === true) {
-        stdout = await injectLinks(stdout, namespace, paths, flags, session.cwd)
-      }
     }
     if (cmdName === 'find') {
       const [newStdout, actionErr] = await applyFindActions(stdout, flags, registry, session.cwd)
@@ -287,38 +286,45 @@ function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<str
 // namespace state, invisible to backend readdir, so `ls` surfaces them the
 // same way child mounts are surfaced. Long form renders GNU-style
 // `name -> target`.
-async function injectLinks(
-  stdout: ByteSource | null,
-  namespace: Namespace,
-  paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
-  cwd: string,
-): Promise<ByteSource | null> {
-  if (flagKwargs.d === true || flagKwargs.R === true) return stdout
-  if (paths.length > 1) return stdout
-  const listed = paths.length === 1 && paths[0] !== undefined ? paths[0].virtual : cwd
-  const links = namespace.linksUnder(listed)
-  if (links.size === 0) return stdout
+// The symlink facts on offer, or null when there are no links.
+//
+// Which commands actually receive this is decided by whether the
+// handler reads `links` off its context, so there is no list of
+// symlink-aware commands to keep in step here or anywhere else.
+function linkView(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
+  if (!namespace?.hasLinks()) return null
+  return {
+    statAt: (path: string) => namespace.linkStatAt(path),
+    children: (directory: string) => namespace.linkStatsUnder(directory),
+    subtree: (directory: string) => namespace.linkStatsBelow(directory),
+    resolve: (path: string) => namespace.follow(path),
+    exists: (path: string) => pathExists(dispatch, path),
+  }
+}
 
-  const existing = stdout === null ? '' : new TextDecoder().decode(await materialize(stdout))
-  const long = flagKwargs.args_l === true
-  const classify = flagKwargs.F === true
-  const present = new Set<string>()
+// Names already rendered in an ls listing, for injection dedup.
+//
+// Long rows come in two shapes: the degraded `mode\t-\t-\tname` form
+// used for entries with neither size nor mtime, and the full GNU row
+// whose name is the ninth whitespace-separated field. Splitting on tabs
+// alone reads a full row as a single field, so a name would never match
+// and an injected row could duplicate an entry the backend already
+// listed.
+function listedNames(existing: string, longForm: boolean): Set<string> {
+  const names = new Set<string>()
   for (const line of existing.split('\n')) {
     if (line === '') continue
-    const name = long ? (line.split('\t').pop() ?? '') : line.replace(/[/*@|=]$/, '')
-    if (name !== '') present.add(name)
+    if (!longForm) {
+      names.add(line.replace(/[/*@|=]$/, ''))
+    } else if (line.includes('\t')) {
+      names.add(line.split('\t').pop() ?? '')
+    } else {
+      const parts = line.split(/\s+/)
+      if (parts.length >= 9) names.add(parts.slice(8).join(' '))
+    }
   }
-  const extras: string[] = []
-  for (const n of [...links.keys()].sort()) {
-    if (present.has(n)) continue
-    if (long) extras.push(`l\t-\t-\t${n} -> ${links.get(n) ?? ''}`)
-    else extras.push(classify ? `${n}@` : n)
-  }
-  if (extras.length === 0) return stdout
-  const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
-  const combined = existing + sep + extras.join('\n') + '\n'
-  return new TextEncoder().encode(combined)
+  names.delete('')
+  return names
 }
 
 async function injectChildMounts(
@@ -338,12 +344,7 @@ async function injectChildMounts(
   const existing = stdout === null ? '' : new TextDecoder().decode(await materialize(stdout))
   const long = flagKwargs.args_l === true
   const classify = flagKwargs.F === true
-  const present = new Set<string>()
-  for (const line of existing.split('\n')) {
-    if (line === '') continue
-    const name = long ? (line.split('\t').pop() ?? '') : line.replace(/[/*@|=]$/, '')
-    if (name !== '') present.add(name)
-  }
+  const present = listedNames(existing, long)
   const extras: string[] = []
   for (const n of childNames) {
     if (present.has(n)) continue

@@ -326,7 +326,8 @@ export {
   resolveGlobWith,
   spellMatch,
 } from './utils/glob_walk.ts'
-export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'
+export { detectFileType, formatFileResult } from './commands/builtin/file_helper.ts'
+export { FILE_MIME_MAP, MIME_SYMLINK } from './commands/builtin/constants.ts'
 export {
   type AggregateResult,
   concatAggregate,

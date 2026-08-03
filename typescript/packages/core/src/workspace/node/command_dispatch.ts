@@ -85,7 +85,12 @@ import {
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS } from '../route/index.ts'
+import {
+  NO_FOLLOW_COMMANDS,
+  UNSUPPORTED_BUILTINS,
+  dereferences,
+  reportsLink,
+} from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
@@ -635,7 +640,7 @@ async function runArgv(
     return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
-    return handleReadlink(namespace, session, operands)
+    return await handleReadlink(namespace, dispatch, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with
@@ -695,7 +700,10 @@ async function runArgv(
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
         if (prepared.early !== null) return prepared.early
-      } else if (!NO_FOLLOW_COMMANDS.has(name)) {
+      } else if (
+        !reportsLink(name, argv.words) &&
+        (!NO_FOLLOW_COMMANDS.has(name) || dereferences(name, argv.words))
+      ) {
         operands = followPaths(namespace, operands)
       }
     } catch (err) {

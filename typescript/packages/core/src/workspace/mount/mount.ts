@@ -22,7 +22,7 @@ import type {
   RegisteredCommand,
 } from '../../commands/config.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
-import type { StatOverlay } from '../../ops/config.ts'
+import type { LinkView, StatOverlay } from '../../ops/types.ts'
 
 const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
@@ -394,6 +394,7 @@ export class MountEntry {
       execAllowed?: boolean
       runtime?: Runtime
       statOverlay?: StatOverlay
+      links?: LinkView
       signal?: AbortSignal
       safeguardOverride?: CommandSafeguard | null
     } = {},
@@ -447,6 +448,7 @@ export class MountEntry {
       ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
       ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
       ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
+      ...(opts.links !== undefined ? { links: opts.links } : {}),
     }
 
     return runWithMountPrefix(mountPrefix, () =>

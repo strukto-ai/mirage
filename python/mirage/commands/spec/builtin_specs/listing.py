@@ -29,6 +29,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-R"),
             Option(short="-d"),
             Option(short="-F"),
+            Option(short="-L"),
             # Accepted no-op like grep --color (#471).
             Option(long="--color", type="str", value_optional=True),
         ),
@@ -39,6 +40,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-c", type="str"),
             Option(short="-f", type="str"),
+            Option(short="-L"),
         ),
         rest=Operand(type="path"),
     ),
@@ -61,6 +63,11 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-iname", type="str", multiple=True),
             Option(short="-path", type="str", multiple=True),
             Option(short="-mindepth", type="str", multiple=True),
+            # GNU find's link policy: -P (no follow) is the default, -H
+            # follows only the start point, -L follows everything.
+            Option(short="-P"),
+            Option(short="-H"),
+            Option(short="-L"),
             Option(short="-print"),
             Option(short="-print0"),
             Option(short="-delete"),
@@ -96,6 +103,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-a"),
             Option(short="-d", long="--max-depth", type="str"),
             Option(short="-c"),
+            Option(short="-L"),
+            Option(short="-P"),
         ),
         rest=Operand(type="path"),
     ),
@@ -118,6 +127,8 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-b"),
             Option(short="-i"),
+            Option(short="-L"),
+            Option(short="-h"),
         ),
         rest=Operand(type="path"),
     ),
