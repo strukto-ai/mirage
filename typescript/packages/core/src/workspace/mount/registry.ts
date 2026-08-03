@@ -228,7 +228,7 @@ export class MountRegistry {
    */
   limitOverride(prefix: string, name: string): Limit | null {
     for (const m of this.mountList) {
-      if (m.prefix === prefix || m.prefix.replace(/\/+$/, '') === prefix) {
+      if (m.prefix === prefix || rstripSlash(m.prefix) === prefix) {
         return m.commandLimits.get(name) ?? null
       }
     }

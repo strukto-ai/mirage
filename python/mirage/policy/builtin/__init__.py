@@ -16,7 +16,7 @@ from mirage.policy.builtin.mount_root import MountRootPolicy
 from mirage.policy.builtin.output_cap import (DEFAULT_COMMAND_LIMITS,
                                               FALLBACK_LIMIT, OutputCapPolicy,
                                               resolve_across_mounts,
-                                              resolve_producer, resolve_limit)
+                                              resolve_limit, resolve_producer)
 
 __all__ = [
     "DEFAULT_COMMAND_LIMITS",
