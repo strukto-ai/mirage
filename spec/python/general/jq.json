@@ -269,8 +269,7 @@
       "required": false,
       "short": "-r",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -284,8 +283,7 @@
       "required": false,
       "short": "-c",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -299,19 +297,18 @@
       "required": false,
       "short": "-s",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     }
   ],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "provided_by": [],
+      "type": "str"
     }
   ],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "provided_by": [],
+    "type": "path"
   }
 }

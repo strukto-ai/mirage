@@ -14,7 +14,7 @@
 
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
-import type { OperandKind } from '../../commands/spec/types.ts'
+import type { ValueType } from '../../commands/spec/types.ts'
 import { type CommandSpec } from '../../commands/spec/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
@@ -40,9 +40,9 @@ export function specForCommand(
 // are positional, not value sets, so the same word can be TEXT in one slot
 // and PATH in another (`grep '*.txt' *.txt`). Null marks flag tokens and
 // ignored words (default classification applies).
-export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (OperandKind | null)[] {
+export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (ValueType | null)[] {
   const parsed = parseCommand(spec, [...argv], '/')
-  const kinds: (OperandKind | null)[] = [...parsed.wordKinds]
+  const kinds: (ValueType | null)[] = [...parsed.wordKinds]
   for (let i = 0; i < argv.length; i++) {
     const word = argv[i]
     if (word !== undefined && spec.ignoreTokens.has(word)) kinds[i] = null

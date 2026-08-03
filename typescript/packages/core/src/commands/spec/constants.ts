@@ -39,6 +39,7 @@ export const NUMERIC_SHORT = /^-\d+$/
 // the portable core of Python int() and argparse (no whitespace, no
 // underscores, so both languages accept exactly the same strings).
 export const INT_VALUE = /^[+-]?\d+$/
+export const FLOAT_VALUE = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/
 
 // GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
 // (plus ripgrep and jq upstream docs). Everything else exits 1.

@@ -17,7 +17,7 @@ import { sendMessage } from '../../../core/gmail/send.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -26,21 +26,17 @@ const SPEC = new CommandSpec({
   options: [
     new Option({
       long: '--to',
-      valueKind: OperandKind.TEXT,
-      description: 'Recipient email address (required)',
-    }),
+      type: 'str',
+      description: 'Recipient email address (required)' }),
     new Option({
       long: '--subject',
-      valueKind: OperandKind.TEXT,
-      description: 'Email subject line (required)',
-    }),
+      type: 'str',
+      description: 'Email subject line (required)' }),
     new Option({
       long: '--body',
-      valueKind: OperandKind.TEXT,
-      description: "Email body text; use $'\\n' or printf for real newlines (required)",
-    }),
-  ],
-})
+      type: 'str',
+      description: "Email body text; use $'\\n' or printf for real newlines (required)" }),
+  ] })
 
 async function gwsGmailSendCommand(
   accessor: GmailAccessor,
@@ -70,5 +66,4 @@ export const GMAIL_GWS_SEND = command({
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailSendCommand,
-  write: true,
-})
+  write: true })

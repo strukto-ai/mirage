@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { INT_VALUE } from './constants.ts'
-import { type CommandSpec, OperandKind } from './types.ts'
+import { FLOAT_VALUE, INT_VALUE } from './constants.ts'
+import { type CommandSpec, type ValueType } from './types.ts'
 
 /**
  * A CommandSpec lowered into the lookup tables the parser walks.
@@ -53,11 +53,14 @@ export class CompiledSpec {
   /** Canonical spellings of int-typed options; the parser refuses a
    * non-integer value at parse time (argparse `type=int`). */
   readonly intDests: ReadonlySet<string>
+  /** Canonical spellings of float-typed options, refused the same way
+   * (argparse `type=float`). */
+  readonly floatDests: ReadonlySet<string>
   /** Value kind per spelling (parse-time lookup). */
-  readonly kindOf: ReadonlyMap<string, OperandKind>
+  readonly kindOf: ReadonlyMap<string, ValueType>
   /** Value kind per canonical spelling, for post-parse PATH/TEXT value
    * collection. */
-  readonly kindByDest: ReadonlyMap<string, OperandKind>
+  readonly kindByDest: ReadonlyMap<string, ValueType>
   /** Spelling -> canonical spelling. */
   readonly dest: ReadonlyMap<string, string>
   /** Canonical spellings that accumulate repeated values into a list. */
@@ -78,7 +81,7 @@ export class CompiledSpec {
    * option declares it. */
   readonly numericDest: string | null
   /** Kind of the rest operand. */
-  readonly restKind: OperandKind | null
+  readonly restKind: ValueType | null
 
   constructor(fields: {
     boolSpellings: ReadonlySet<string>
@@ -90,8 +93,9 @@ export class CompiledSpec {
     longSpellings: readonly string[]
     longSignatures: ReadonlyMap<string, string>
     intDests: ReadonlySet<string>
-    kindOf: ReadonlyMap<string, OperandKind>
-    kindByDest: ReadonlyMap<string, OperandKind>
+    floatDests: ReadonlySet<string>
+    kindOf: ReadonlyMap<string, ValueType>
+    kindByDest: ReadonlyMap<string, ValueType>
     dest: ReadonlyMap<string, string>
     multipleDests: ReadonlySet<string>
     countDests: ReadonlySet<string>
@@ -99,7 +103,7 @@ export class CompiledSpec {
     requiredDests: readonly string[]
     defaults: ReadonlyMap<string, string>
     numericDest: string | null
-    restKind: OperandKind | null
+    restKind: ValueType | null
   }) {
     this.boolSpellings = fields.boolSpellings
     this.valueSpellings = fields.valueSpellings
@@ -110,6 +114,7 @@ export class CompiledSpec {
     this.longSpellings = fields.longSpellings
     this.longSignatures = fields.longSignatures
     this.intDests = fields.intDests
+    this.floatDests = fields.floatDests
     this.kindOf = fields.kindOf
     this.kindByDest = fields.kindByDest
     this.dest = fields.dest
@@ -144,8 +149,9 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const longSpellings: string[] = []
   const longSignatures = new Map<string, string>()
   const intDests = new Set<string>()
-  const kindOf = new Map<string, OperandKind>()
-  const kindByDest = new Map<string, OperandKind>()
+  const floatDests = new Set<string>()
+  const kindOf = new Map<string, ValueType>()
+  const kindByDest = new Map<string, ValueType>()
   const dest = new Map<string, string>()
   const multipleDests = new Set<string>()
   const countDests = new Set<string>()
@@ -157,27 +163,30 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   for (const opt of spec.options) {
     const canonical = opt.long ?? opt.short
     if (canonical === null) continue
-    if (opt.count && opt.valueKind !== OperandKind.NONE) {
+    if (opt.count && opt.type !== 'bool') {
       throw new Error(`option '${canonical}': count requires a boolean flag (valueKind NONE)`)
     }
-    if (opt.valueKind === OperandKind.NONE && (opt.choices.length > 0 || opt.default !== null)) {
+    if (opt.type === 'bool' && (opt.choices.length > 0 || opt.default !== null)) {
       throw new Error(`option '${canonical}': choices and default require a value flag`)
     }
     if (opt.choices.length > 0 && opt.default !== null && !opt.choices.includes(opt.default)) {
       throw new Error(`option '${canonical}': default '${opt.default}' is not one of its choices`)
     }
     if (opt.type === 'int') {
-      if (opt.valueKind === OperandKind.NONE) {
-        throw new Error(`option '${canonical}': type 'int' requires a value flag`)
-      }
       if (opt.default !== null && !INT_VALUE.test(opt.default)) {
         throw new Error(`option '${canonical}': default '${opt.default}' is not an integer`)
       }
       intDests.add(canonical)
     }
+    if (opt.type === 'float') {
+      if (opt.default !== null && !FLOAT_VALUE.test(opt.default)) {
+        throw new Error(`option '${canonical}': default '${opt.default}' is not a number`)
+      }
+      floatDests.add(canonical)
+    }
     if (opt.short !== null) dest.set(opt.short, canonical)
     if (opt.long !== null) dest.set(opt.long, canonical)
-    if (opt.valueKind !== OperandKind.NONE) kindByDest.set(canonical, opt.valueKind)
+    if (opt.type !== 'bool') kindByDest.set(canonical, opt.type)
     if (opt.multiple) multipleDests.add(canonical)
     if (opt.count) countDests.add(canonical)
     if (opt.choices.length > 0) choicesByDest.set(canonical, opt.choices)
@@ -185,17 +194,17 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     if (opt.default !== null) defaults.set(canonical, opt.default)
 
     if (opt.short !== null) {
-      if (opt.valueKind === OperandKind.NONE) {
+      if (opt.type === 'bool') {
         boolSpellings.add(opt.short)
       } else if (opt.valueOptional) {
         // GNU optional argument: the bare short is boolean and a value
         // only rides attached to the same token.
         boolSpellings.add(opt.short)
         if (opt.shortValue) attachSpellings.push(opt.short)
-        kindOf.set(opt.short, opt.valueKind)
+        kindOf.set(opt.short, opt.type)
       } else {
         valueSpellings.push(opt.short)
-        kindOf.set(opt.short, opt.valueKind)
+        kindOf.set(opt.short, opt.type)
         if (opt.numericShorthand) numericDest = canonical
       }
     }
@@ -206,27 +215,26 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
       longSignatures.set(
         opt.long,
         [
-          opt.valueKind,
+          opt.type,
           String(opt.valueOptional),
           String(opt.multiple),
           String(opt.count),
           opt.choices.join(','),
           String(opt.required),
           String(opt.default),
-          opt.type,
         ].join('|'),
       )
-      if (opt.valueKind === OperandKind.NONE) {
+      if (opt.type === 'bool') {
         longBoolSpellings.add(opt.long)
       } else if (opt.valueOptional) {
         // GNU optional argument: bare form is boolean, value only
         // attaches via `=`; a detached next token is an operand.
         longBoolSpellings.add(opt.long)
         longOptionalSpellings.add(opt.long)
-        kindOf.set(opt.long, opt.valueKind)
+        kindOf.set(opt.long, opt.type)
       } else {
         longValueSpellings.add(opt.long)
-        kindOf.set(opt.long, opt.valueKind)
+        kindOf.set(opt.long, opt.type)
       }
     }
   }
@@ -246,6 +254,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     longSpellings,
     longSignatures,
     intDests,
+    floatDests,
     kindOf,
     kindByDest,
     dest,
@@ -255,7 +264,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     requiredDests,
     defaults,
     numericDest,
-    restKind: spec.rest !== null ? spec.rest.kind : null,
+    restKind: spec.rest !== null ? spec.rest.type : null,
   })
   CACHE.set(spec, compiled)
   return compiled

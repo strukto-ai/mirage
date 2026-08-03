@@ -144,7 +144,6 @@
       "short": "-f",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -159,7 +158,6 @@
       "short": "-t",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -173,8 +171,7 @@
       "required": false,
       "short": "-c",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -188,14 +185,13 @@
       "required": false,
       "short": "-o",
       "short_value": true,
-      "type": "str",
-      "value_kind": "path",
+      "type": "path",
       "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "provided_by": [],
+    "type": "path"
   }
 }

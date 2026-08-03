@@ -12,12 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type CommandSpec, OperandKind, type Option } from './types.ts'
+import { type CommandSpec, type ValueType, type Option } from './types.ts'
 
-const VALUE_LABEL: Record<OperandKind, string> = {
-  [OperandKind.NONE]: '',
-  [OperandKind.PATH]: ' <path>',
-  [OperandKind.TEXT]: ' <text>',
+function valueLabel(valueType: ValueType): string {
+  if (valueType === 'bool') return ''
+  return valueType === 'path' ? ' <path>' : ' <text>'
 }
 
 // Python's rstrip('\n'). A `/\n+$/` regex is a polynomial ReDoS on a long
@@ -32,7 +31,7 @@ function flagDisplay(opt: Option): string {
   const parts: string[] = []
   if (opt.short !== null) parts.push(opt.short)
   if (opt.long !== null) parts.push(opt.long)
-  return parts.join(', ') + VALUE_LABEL[opt.valueKind]
+  return parts.join(', ') + valueLabel(opt.type)
 }
 
 /** Display rows [flag spelling, description] for a spec's options. */
@@ -63,10 +62,10 @@ export function renderHelp(
   if (spec.options.length > 0) usageBits.push('[flags]')
   if (subcommands.length > 0) usageBits.push('<command> [<args>]')
   for (const op of spec.positional) {
-    usageBits.push(op.kind === OperandKind.PATH ? '<path>' : '<text>')
+    usageBits.push(op.type === 'path' ? '<path>' : '<text>')
   }
   if (spec.rest !== null) {
-    usageBits.push(spec.rest.kind === OperandKind.PATH ? '[<path>...]' : '[<text>...]')
+    usageBits.push(spec.rest.type === 'path' ? '[<path>...]' : '[<text>...]')
   }
   lines.push(`Usage: ${usageBits.join(' ')}`)
 

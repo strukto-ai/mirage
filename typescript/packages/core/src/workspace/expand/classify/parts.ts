@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { OperandKind } from '../../../commands/spec/types.ts'
+import { type ValueType } from '../../../commands/spec/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { classifyWord } from './heuristic.ts'
@@ -27,7 +27,7 @@ export function classifyParts(
   parts: string[],
   registry: MountRegistry,
   cwd: string,
-  wordKinds: readonly (OperandKind | null)[] | null = null,
+  wordKinds: readonly (ValueType | null)[] | null = null,
 ): (string | PathSpec)[] {
   if (parts.length === 0) return []
   const result: (string | PathSpec)[] = [parts[0] ?? '']
@@ -35,9 +35,9 @@ export function classifyParts(
     const w = parts[i]
     if (w === undefined) continue
     const kind = wordKinds !== null ? (wordKinds[i - 1] ?? null) : null
-    if (kind === OperandKind.TEXT) {
+    if (kind !== null && kind !== 'path') {
       result.push(w)
-    } else if (kind === OperandKind.PATH) {
+    } else if (kind === 'path') {
       result.push(classifyBarePath(w, registry, cwd))
     } else {
       result.push(classifyWord(w, registry, cwd))

@@ -290,19 +290,18 @@
       "required": false,
       "short": "-f",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     }
   ],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "provided_by": [],
+      "type": "str"
     },
     {
-      "kind": "path",
-      "provided_by": []
+      "provided_by": [],
+      "type": "path"
     }
   ],
   "rest": null

@@ -144,7 +144,7 @@ function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
 }
 
 function serializeOperand(op: Operand): Record<string, unknown> {
-  return { kind: op.kind, provided_by: [...op.providedBy] }
+  return { provided_by: [...op.providedBy], type: op.type }
 }
 
 function serializeOption(o: Option): Record<string, unknown> {
@@ -160,7 +160,6 @@ function serializeOption(o: Option): Record<string, unknown> {
     short: o.short,
     short_value: o.shortValue,
     type: o.type,
-    value_kind: o.valueKind,
     value_optional: o.valueOptional,
   }
 }

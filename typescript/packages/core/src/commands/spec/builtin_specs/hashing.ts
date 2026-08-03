@@ -12,28 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandSpec, Operand, OperandKind, Option } from '../types.ts'
+import { CommandSpec, Operand, Option } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   base64: new CommandSpec({
     options: [
       new Option({ short: '-d', long: '--decode' }),
       new Option({ short: '-D' }),
-      new Option({ short: '-w', long: '--wrap', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-w', long: '--wrap', type: 'str' }),
       new Option({ short: '-i', long: '--ignore-garbage' }),
     ],
-    positional: [new Operand({ kind: OperandKind.PATH })],
-  }),
+    positional: [new Operand({ type: 'path' })] }),
   cmp: new CommandSpec({
     options: [
       new Option({ short: '-l' }),
       new Option({ short: '-s' }),
-      new Option({ short: '-n', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-n', type: 'str' }),
       new Option({ short: '-b' }),
-      new Option({ short: '-i', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-i', type: 'str' }),
     ],
-    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
-  }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
   diff: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -44,18 +42,16 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-q' }),
       new Option({ short: '-r' }),
     ],
-    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
-  }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
   iconv: new CommandSpec({
     options: [
-      new Option({ short: '-f', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-t', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-f', type: 'str' }),
+      new Option({ short: '-t', type: 'str' }),
       new Option({ short: '-c' }),
-      new Option({ short: '-o', valueKind: OperandKind.PATH }),
+      new Option({ short: '-o', type: 'path' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
-  md5: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
+    rest: new Operand({ type: 'path' }) }),
+  md5: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
   md5sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -69,17 +65,15 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   patch: new CommandSpec({
     options: [
-      new Option({ short: '-p', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-p', type: 'str' }),
       new Option({ short: '-R' }),
-      new Option({ short: '-i', valueKind: OperandKind.PATH }),
+      new Option({ short: '-i', type: 'path' }),
       new Option({ short: '-N' }),
     ],
-    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
-  }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
   sha1sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -93,8 +87,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   sha256sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -108,8 +101,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   sha384sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -123,8 +115,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   sha512sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -138,18 +129,15 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   xxd: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
       new Option({ short: '-p' }),
-      new Option({ short: '-l', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-c', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-s', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-g', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-l', type: 'str' }),
+      new Option({ short: '-c', type: 'str' }),
+      new Option({ short: '-s', type: 'str' }),
+      new Option({ short: '-g', type: 'str' }),
       new Option({ short: '-u' }),
     ],
-    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
-  }),
-}
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }) }

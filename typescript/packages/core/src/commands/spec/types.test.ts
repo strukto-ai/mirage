@@ -13,24 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CommandSpec, Operand, OperandKind, Option, ParsedArgs } from './types.ts'
+import { CommandSpec, Operand, Option, ParsedArgs } from './types.ts'
 
-describe('OperandKind', () => {
-  it('has NONE/PATH/TEXT', () => {
-    expect(OperandKind.NONE).toBe('none')
-    expect(OperandKind.PATH).toBe('path')
-    expect(OperandKind.TEXT).toBe('text')
-  })
-
-  it('is frozen', () => {
-    expect(Object.isFrozen(OperandKind)).toBe(true)
+describe('ValueType', () => {
+  it('covers the five members through Option', () => {
+    expect(new Option({ short: '-v' }).type).toBe('bool')
+    expect(new Option({ long: '--x', type: 'str' }).type).toBe('str')
+    expect(new Option({ long: '--n', type: 'int' }).type).toBe('int')
+    expect(new Option({ long: '--r', type: 'float' }).type).toBe('float')
+    expect(new Option({ long: '--f', type: 'path' }).type).toBe('path')
   })
 })
 
 describe('Option', () => {
-  it('defaults value_kind to NONE', () => {
+  it('defaults type to bool', () => {
     const o = new Option({ short: '-l' })
-    expect(o.valueKind).toBe(OperandKind.NONE)
+    expect(o.type).toBe('bool')
     expect(o.short).toBe('-l')
     expect(o.long).toBeNull()
   })
@@ -42,8 +40,8 @@ describe('Option', () => {
 })
 
 describe('Operand', () => {
-  it('defaults kind to PATH', () => {
-    expect(new Operand().kind).toBe(OperandKind.PATH)
+  it('defaults type to path', () => {
+    expect(new Operand().type).toBe('path')
   })
 })
 
@@ -84,9 +82,9 @@ describe('ParsedArgs helpers', () => {
   const parsed = new ParsedArgs({
     flags: { '-l': true, '--name': 'README' },
     args: [
-      ['/ram/x', OperandKind.PATH],
-      ['literal', OperandKind.TEXT],
-      ['/ram/y', OperandKind.PATH],
+      ['/ram/x', 'path'],
+      ['literal', 'str'],
+      ['/ram/y', 'path'],
     ],
     pathFlagValues: ['/ram/z'],
   })

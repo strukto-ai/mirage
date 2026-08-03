@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandSpec, Operand, OperandKind, Option } from '../types.ts'
+import { CommandSpec, Operand, Option } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   df: new CommandSpec({
@@ -24,34 +24,31 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-a' }),
       new Option({ short: '-T' }),
       new Option({ short: '-P' }),
-      new Option({ short: '-B', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-B', type: 'str' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   du: new CommandSpec({
     options: [
       new Option({ short: '-h' }),
       new Option({ short: '-s' }),
       new Option({ short: '-a' }),
-      new Option({ short: '-d', long: '--max-depth', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-d', long: '--max-depth', type: 'str' }),
       new Option({ short: '-c' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   file: new CommandSpec({
     options: [new Option({ short: '-b' }), new Option({ short: '-i' })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   find: new CommandSpec({
     options: [
-      new Option({ short: '-name', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-type', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-maxdepth', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-size', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-mtime', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-iname', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-path', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-mindepth', valueKind: OperandKind.TEXT, multiple: true }),
+      new Option({ short: '-name', type: 'str', multiple: true }),
+      new Option({ short: '-type', type: 'str', multiple: true }),
+      new Option({ short: '-maxdepth', type: 'str', multiple: true }),
+      new Option({ short: '-size', type: 'str', multiple: true }),
+      new Option({ short: '-mtime', type: 'str', multiple: true }),
+      new Option({ short: '-iname', type: 'str', multiple: true }),
+      new Option({ short: '-path', type: 'str', multiple: true }),
+      new Option({ short: '-mindepth', type: 'str', multiple: true }),
       new Option({ short: '-print' }),
       new Option({ short: '-print0' }),
       new Option({ short: '-delete' }),
@@ -65,9 +62,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-and' }),
       new Option({ short: '-not' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-    ignoreTokens: ['(', ')'],
-  }),
+    rest: new Operand({ type: 'path' }),
+    ignoreTokens: ['(', ')'] }),
   ls: new CommandSpec({
     options: [
       new Option({ short: '-l' }),
@@ -82,29 +78,24 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-d' }),
       new Option({ short: '-F' }),
       // Accepted no-op like grep --color (#471).
-      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--color', type: 'str', valueOptional: true }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   pwd: new CommandSpec({
     options: [new Option({ short: '-P' }), new Option({ short: '-L' })],
-    rest: new Operand({ kind: OperandKind.TEXT }),
-  }),
+    rest: new Operand({ type: 'str' }) }),
   stat: new CommandSpec({
     options: [
-      new Option({ short: '-c', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-f', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-c', type: 'str' }),
+      new Option({ short: '-f', type: 'str' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   tree: new CommandSpec({
     options: [
       new Option({ short: '-a' }),
-      new Option({ short: '-L', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-I', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-L', type: 'str' }),
+      new Option({ short: '-I', type: 'str' }),
       new Option({ short: '-d' }),
-      new Option({ short: '-P', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-P', type: 'str' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
-}
+    rest: new Operand({ type: 'path' }) }) }

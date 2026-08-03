@@ -15,15 +15,13 @@
 import {
   CommandSpec,
   IOResult,
-  OperandKind,
   Option,
   ResourceName,
   command,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type PathSpec,
-} from '@struktoai/mirage-core'
+  type PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { sendMessage } from '../../../core/email/send.ts'
 
@@ -31,11 +29,10 @@ const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--to', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--subject', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--body', valueKind: OperandKind.TEXT }),
-  ],
-})
+    new Option({ long: '--to', type: 'str' }),
+    new Option({ long: '--subject', type: 'str' }),
+    new Option({ long: '--body', type: 'str' }),
+  ] })
 
 async function emailSendCommand(
   accessor: EmailAccessor,
@@ -65,5 +62,4 @@ export const EMAIL_SEND = command({
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailSendCommand,
-  write: true,
-})
+  write: true })

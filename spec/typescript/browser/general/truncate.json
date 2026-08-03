@@ -74,13 +74,12 @@
       "short": "-s",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "provided_by": [],
+    "type": "path"
   }
 }

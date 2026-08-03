@@ -15,15 +15,13 @@
 import {
   CommandSpec,
   IOResult,
-  OperandKind,
   Option,
   ResourceName,
   command,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type PathSpec,
-} from '@struktoai/mirage-core'
+  type PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { fetchMessage } from '../../../core/email/_client.ts'
 import { forwardMessage } from '../../../core/email/send.ts'
@@ -32,11 +30,10 @@ const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--uid', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--folder', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--to', valueKind: OperandKind.TEXT }),
-  ],
-})
+    new Option({ long: '--uid', type: 'str' }),
+    new Option({ long: '--folder', type: 'str' }),
+    new Option({ long: '--to', type: 'str' }),
+  ] })
 
 async function emailForwardCommand(
   accessor: EmailAccessor,
@@ -67,5 +64,4 @@ export const EMAIL_FORWARD = command({
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailForwardCommand,
-  write: true,
-})
+  write: true })

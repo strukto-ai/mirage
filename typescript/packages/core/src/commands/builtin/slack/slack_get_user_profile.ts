@@ -17,13 +17,12 @@ import { getUserProfile } from '../../../core/slack/users.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
-  options: [new Option({ long: '--user_id', valueKind: OperandKind.TEXT })],
-})
+  options: [new Option({ long: '--user_id', type: 'str' })] })
 
 async function slackGetUserProfileCommand(
   accessor: SlackAccessor,
@@ -43,5 +42,4 @@ export const SLACK_GET_USER_PROFILE = command({
   name: 'slack-get-user-profile',
   resource: ResourceName.SLACK,
   spec: SPEC,
-  fn: slackGetUserProfileCommand,
-})
+  fn: slackGetUserProfileCommand })

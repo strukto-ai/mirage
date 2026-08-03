@@ -17,9 +17,8 @@ import {
   COMPOUND_EXTENSIONS,
   getExtension,
   materializeStdout,
-  stripPrefixFromPathKwargs,
-} from './resolve.ts'
-import { CommandSpec, OperandKind, Option } from './spec/types.ts'
+  stripPrefixFromPathKwargs } from './resolve.ts'
+import { CommandSpec, Option } from './spec/types.ts'
 
 describe('getExtension', () => {
   it('returns the dotted extension for simple paths', () => {
@@ -63,8 +62,7 @@ describe('materializeStdout', () => {
 
 describe('stripPrefixFromPathKwargs', () => {
   const spec = new CommandSpec({
-    options: [new Option({ short: '-o', valueKind: OperandKind.PATH })],
-  })
+    options: [new Option({ short: '-o', type: 'path' })] })
 
   it('strips a matching prefix from PATH-kind flag values', () => {
     const result = stripPrefixFromPathKwargs({ o: '/ram/out.txt' }, spec, '/ram')

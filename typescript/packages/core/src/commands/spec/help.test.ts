@@ -14,17 +14,16 @@
 
 import { describe, expect, it } from 'vitest'
 import { renderHelp } from './help.ts'
-import { CommandSpec, OperandKind, Option } from './types.ts'
+import { CommandSpec, Option } from './types.ts'
 
 describe('renderHelp', () => {
   it('renders name, description, usage, and flag table', () => {
     const spec = new CommandSpec({
       description: 'Send a thing.',
       options: [
-        new Option({ long: '--to', valueKind: OperandKind.TEXT, description: 'Recipient' }),
-        new Option({ long: '--help', valueKind: OperandKind.NONE, description: 'Show help' }),
-      ],
-    })
+        new Option({ long: '--to', type: 'str', description: 'Recipient' }),
+        new Option({ long: '--help', type: 'bool', description: 'Show help' }),
+      ] })
     const out = renderHelp('gws thing send', spec)
     expect(out).toContain('gws thing send: Send a thing.')
     expect(out).toContain('Usage: gws thing send [flags]')
@@ -42,10 +41,9 @@ describe('renderHelp', () => {
   it('trails the epilog after the flag table, one blank line apart', () => {
     const spec = new CommandSpec({
       options: [
-        new Option({ long: '--help', valueKind: OperandKind.NONE, description: 'Show help' }),
+        new Option({ long: '--help', type: 'bool', description: 'Show help' }),
       ],
-      epilog: 'Services:\n  drive\n',
-    })
+      epilog: 'Services:\n  drive\n' })
     const out = renderHelp('gws', spec)
     expect(out.endsWith('\n  --help  Show help\n\nServices:\n  drive\n')).toBe(true)
   })
@@ -71,11 +69,9 @@ describe('renderHelp with subcommands', () => {
         new Option({
           short: '-C',
           long: '--cwd',
-          valueKind: OperandKind.TEXT,
-          description: 'run as if started there',
-        }),
-      ],
-    })
+          type: 'str',
+          description: 'run as if started there' }),
+      ] })
     const rows: [string, string][] = [
       ['gmail', 'Gmail messages\nlong tail ignored'],
       ['docs', ''],

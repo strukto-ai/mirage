@@ -13,7 +13,7 @@
   "options": [],
   "positional": [],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "provided_by": [],
+    "type": "str"
   }
 }

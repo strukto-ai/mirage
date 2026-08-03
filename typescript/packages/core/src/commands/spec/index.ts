@@ -23,7 +23,7 @@ export {
   FlagView,
   Operand,
   type OperandInit,
-  OperandKind,
+  type ValueType,
   Option,
   type OptionInit,
   ParsedArgs,

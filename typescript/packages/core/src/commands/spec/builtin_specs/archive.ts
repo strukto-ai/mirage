@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandSpec, Operand, OperandKind, Option } from '../types.ts'
+import { CommandSpec, Operand, Option } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   gunzip: new CommandSpec({
@@ -22,8 +22,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-c' }),
       new Option({ short: '-t' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   gzip: new CommandSpec({
     options: [
       new Option({ short: '-d' }),
@@ -40,8 +39,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-8' }),
       new Option({ short: '-9' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   tar: new CommandSpec({
     options: [
       new Option({ short: '-c' }),
@@ -51,31 +49,27 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-j' }),
       new Option({ short: '-J' }),
       new Option({ short: '-v' }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH }),
-      new Option({ short: '-C', valueKind: OperandKind.PATH }),
-      new Option({ long: '--strip-components', valueKind: OperandKind.TEXT }),
-      new Option({ long: '--exclude', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-f', type: 'path' }),
+      new Option({ short: '-C', type: 'path' }),
+      new Option({ long: '--strip-components', type: 'str' }),
+      new Option({ long: '--exclude', type: 'str' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    rest: new Operand({ type: 'path' }) }),
   unzip: new CommandSpec({
     options: [
       new Option({ short: '-o' }),
       new Option({ short: '-l' }),
-      new Option({ short: '-d', valueKind: OperandKind.PATH }),
+      new Option({ short: '-d', type: 'path' }),
       new Option({ short: '-q' }),
       new Option({ short: '-p' }),
       new Option({ short: '-t' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
-  zcat: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
+    rest: new Operand({ type: 'path' }) }),
+  zcat: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
   zip: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
       new Option({ short: '-j' }),
       new Option({ short: '-q' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
-}
+    rest: new Operand({ type: 'path' }) }) }

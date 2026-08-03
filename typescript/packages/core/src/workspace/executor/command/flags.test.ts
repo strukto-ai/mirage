@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { SPECS } from '../../../commands/spec/index.ts'
 import { PathSpec } from '../../../types.ts'
-import { CommandSpec, OperandKind, Option } from '../../../commands/spec/types.ts'
+import { CommandSpec, Option } from '../../../commands/spec/types.ts'
 import { optionError, parseFlags } from './flags.ts'
 
 function path(virtual: string): PathSpec {
@@ -52,10 +52,9 @@ describe('optionError scan order', () => {
   it('reports the first scan error like GNU', () => {
     const spec = new CommandSpec({
       options: [
-        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--context', type: 'str' }),
         new Option({ long: '--count' }),
-      ],
-    })
+      ] })
     const dec = new TextDecoder()
     const ambiguousFirst = parseFlags(['--c', '--bogus', 'x'], spec, 'grep', '/')
     const refusal = optionError(
@@ -68,6 +67,7 @@ describe('optionError scan order', () => {
         ambiguousFirst[8],
         ambiguousFirst[9],
         ambiguousFirst[10],
+        ambiguousFirst[11],
       ] as const),
     )
     expect(refusal).not.toBeNull()
@@ -83,6 +83,7 @@ describe('optionError scan order', () => {
         invalidFirst[8],
         invalidFirst[9],
         invalidFirst[10],
+        invalidFirst[11],
       ] as const),
     )
     expect(flipped).not.toBeNull()

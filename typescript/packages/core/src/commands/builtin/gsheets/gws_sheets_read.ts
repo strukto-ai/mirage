@@ -17,17 +17,16 @@ import { readValues } from '../../../core/gsheets/read.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, Operand, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Operand, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--spreadsheet', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--range', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--spreadsheet', type: 'str' }),
+    new Option({ long: '--range', type: 'str' }),
   ],
-  rest: new Operand({ kind: OperandKind.PATH }),
-})
+  rest: new Operand({ type: 'path' }) })
 
 async function gwsSheetsReadCommand(
   accessor: GoogleApiAccessor,
@@ -52,5 +51,4 @@ export const GSHEETS_GWS_READ = command({
   name: 'gws sheets +read',
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
-  fn: gwsSheetsReadCommand,
-})
+  fn: gwsSheetsReadCommand })

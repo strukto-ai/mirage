@@ -21,7 +21,7 @@ import { classifyParts } from './classify/index.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
-import { OperandKind } from '../../commands/spec/types.ts'
+import { type ValueType } from '../../commands/spec/types.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 import type { TSNodeLike } from './variable.ts'
 
@@ -87,12 +87,12 @@ export async function expandArgv(
   const name = expanded.slice(0, consumed).join(' ')
 
   const policy = wordPolicy(route(name, session, registry))
-  let wordKinds: (OperandKind | null)[] | null = null
+  let wordKinds: (ValueType | null)[] | null = null
   if (policy === WordPolicy.MOUNT) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
-      const extra: (OperandKind | null)[] = new Array<OperandKind | null>(consumed - 1).fill(
-        OperandKind.TEXT,
+      const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill(
+        'str',
       )
       wordKinds = [...extra, ...specWordKinds(spec, expanded.slice(consumed))]
     }

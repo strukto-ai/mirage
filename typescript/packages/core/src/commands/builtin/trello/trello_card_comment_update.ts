@@ -18,19 +18,18 @@ import { normalizeComment } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--card_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--comment_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--text', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--text_file', valueKind: OperandKind.PATH }),
-  ],
-})
+    new Option({ long: '--card_id', type: 'str' }),
+    new Option({ long: '--comment_id', type: 'str' }),
+    new Option({ long: '--text', type: 'str' }),
+    new Option({ long: '--text_file', type: 'path' }),
+  ] })
 
 async function trelloCardCommentUpdateCommand(
   accessor: TrelloAccessor,
@@ -50,8 +49,7 @@ async function trelloCardCommentUpdateCommand(
     inlineText,
     filePath: textFile,
     stdin: opts.stdin,
-    errorMessage: 'comment text is required',
-  })
+    errorMessage: 'comment text is required' })
   const comment = await commentUpdate(accessor.transport, cardId, commentId, text)
   return [ENC.encode(JSON.stringify(normalizeComment(comment, cardId))), new IOResult()]
 }
@@ -61,5 +59,4 @@ export const TRELLO_CARD_COMMENT_UPDATE = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCommentUpdateCommand,
-  write: true,
-})
+  write: true })

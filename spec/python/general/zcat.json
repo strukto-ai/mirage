@@ -260,7 +260,7 @@
   "options": [],
   "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "provided_by": [],
+    "type": "path"
   }
 }

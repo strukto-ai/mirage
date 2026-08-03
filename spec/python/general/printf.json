@@ -13,12 +13,12 @@
   "options": [],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "provided_by": [],
+      "type": "str"
     }
   ],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "provided_by": [],
+    "type": "str"
   }
 }

@@ -87,8 +87,7 @@
       "required": false,
       "short": "-f",
       "short_value": true,
-      "type": "str",
-      "value_kind": "path",
+      "type": "path",
       "value_optional": false
     },
     {
@@ -103,7 +102,6 @@
       "short": "-n",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -118,7 +116,6 @@
       "short": "-b",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -132,8 +129,7 @@
       "required": false,
       "short": "-k",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -147,8 +143,7 @@
       "required": false,
       "short": "-s",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -162,8 +157,7 @@
       "required": false,
       "short": null,
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -177,8 +171,7 @@
       "required": false,
       "short": null,
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     },
     {
@@ -192,19 +185,18 @@
       "required": false,
       "short": "-z",
       "short_value": true,
-      "type": "str",
-      "value_kind": "none",
+      "type": "bool",
       "value_optional": false
     }
   ],
   "positional": [
     {
-      "kind": "path",
-      "provided_by": []
+      "provided_by": [],
+      "type": "path"
     }
   ],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "provided_by": [],
+    "type": "str"
   }
 }

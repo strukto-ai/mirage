@@ -44,7 +44,7 @@ function renderOptionsTable(spec: {
   options: readonly {
     short?: string | null
     long?: string | null
-    valueKind: string
+    type: string
     description?: string | null
   }[]
 }): string[] {
@@ -56,7 +56,7 @@ function renderOptionsTable(spec: {
   for (const opt of spec.options) {
     const short = opt.short ?? ''
     const long = opt.long ?? ''
-    lines.push(`| ${short} | ${long} | ${opt.valueKind} | ${opt.description ?? ''} |`)
+    lines.push(`| ${short} | ${long} | ${opt.type} | ${opt.description ?? ''} |`)
   }
   lines.push('')
   return lines

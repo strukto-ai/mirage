@@ -17,17 +17,16 @@ import { appendText } from '../../../core/gdocs/write.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, Operand, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Operand, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--document', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--text', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--document', type: 'str' }),
+    new Option({ long: '--text', type: 'str' }),
   ],
-  rest: new Operand({ kind: OperandKind.PATH }),
-})
+  rest: new Operand({ type: 'path' }) })
 
 async function gwsDocsWriteCommand(
   accessor: GoogleApiAccessor,
@@ -53,5 +52,4 @@ export const GDOCS_GWS_WRITE = command({
   resource: [ResourceName.GDOCS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsDocsWriteCommand,
-  write: true,
-})
+  write: true })

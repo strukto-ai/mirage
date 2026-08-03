@@ -18,19 +18,18 @@ import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--list_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--name', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--desc', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--desc_file', valueKind: OperandKind.PATH }),
-  ],
-})
+    new Option({ long: '--list_id', type: 'str' }),
+    new Option({ long: '--name', type: 'str' }),
+    new Option({ long: '--desc', type: 'str' }),
+    new Option({ long: '--desc_file', type: 'path' }),
+  ] })
 
 async function trelloCardCreateCommand(
   accessor: TrelloAccessor,
@@ -54,14 +53,12 @@ async function trelloCardCreateCommand(
       inlineText: inlineDesc,
       filePath: descFile,
       stdin: opts.stdin,
-      errorMessage: 'desc is required',
-    })
+      errorMessage: 'desc is required' })
   }
   const card = await cardCreate(accessor.transport, {
     listId,
     name,
-    ...(desc !== undefined ? { desc } : {}),
-  })
+    ...(desc !== undefined ? { desc } : {}) })
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]
 }
 
@@ -70,5 +67,4 @@ export const TRELLO_CARD_CREATE = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCreateCommand,
-  write: true,
-})
+  write: true })

@@ -17,19 +17,18 @@ import { appendValues } from '../../../core/gsheets/write.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, Operand, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Operand, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--spreadsheet', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--range', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--values', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--json-values', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--spreadsheet', type: 'str' }),
+    new Option({ long: '--range', type: 'str' }),
+    new Option({ long: '--values', type: 'str' }),
+    new Option({ long: '--json-values', type: 'str' }),
   ],
-  rest: new Operand({ kind: OperandKind.PATH }),
-})
+  rest: new Operand({ type: 'path' }) })
 
 async function gwsSheetsAppendCommand(
   accessor: GoogleApiAccessor,
@@ -53,8 +52,7 @@ async function gwsSheetsAppendCommand(
       null,
       new IOResult({
         exitCode: 2,
-        stderr: ENC.encode('--values or --json-values is required\n'),
-      }),
+        stderr: ENC.encode('--values or --json-values is required\n') }),
     ]
   }
   const result = await appendValues(accessor.tokenManager, sheetId, range, valuesJson)
@@ -67,5 +65,4 @@ export const GSHEETS_GWS_APPEND = command({
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsSheetsAppendCommand,
-  write: true,
-})
+  write: true })

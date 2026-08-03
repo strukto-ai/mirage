@@ -38,13 +38,14 @@ export enum CommandName {
   XXD = 'xxd',
 }
 
-export const OperandKind = Object.freeze({
-  NONE: 'none',
-  PATH: 'path',
-  TEXT: 'text',
-} as const)
-
-export type OperandKind = (typeof OperandKind)[keyof typeof OperandKind]
+// The one type axis for option and operand values (argparse type= as
+// data, extended with the two members mirage's own parsing needs: 'bool'
+// consumes no token, 'path' enters the resolve/route/PathSpec pipeline).
+// 'str' is inert; 'int'/'float' are validated post-scan. Rule for every
+// consumer: never enumerate the textual family; test === 'path' or
+// === 'bool' (or their negations) only, so new validator types never
+// touch classification sites.
+export type ValueType = 'bool' | 'str' | 'int' | 'float' | 'path'
 
 export interface OptionInit {
   /** Short form, e.g. "-e". */
@@ -52,10 +53,15 @@ export interface OptionInit {
   /** Long form, e.g. "--max-depth". */
   long?: string | null
   /**
-   * NONE for boolean flags; TEXT or PATH for value flags. PATH values are
-   * cwd-resolved and routed for mount dispatch.
+   * The flag's one type axis. 'bool' (the default) consumes no token and
+   * clusters; 'path' values are cwd-resolved and routed for mount
+   * dispatch, and reach the command as PathSpec; 'str' values pass
+   * through untouched; 'int'/'float' values are refused at parse time
+   * when they are not numbers (the portable numeric core shared by both
+   * languages). The bag holds the string either way: commands read it
+   * through FlagView.asInt, the established mirage convention.
    */
-  valueKind?: OperandKind
+  type?: ValueType
   /** Treat "-<digits>" as this flag's value (e.g. head -5). */
   numericShorthand?: boolean
   /**
@@ -102,24 +108,13 @@ export interface OptionInit {
    * choices). Presence of a default always satisfies `required`.
    */
   default?: string | null
-  /**
-   * argparse `type=` as data. "int" makes the parser refuse a non-integer
-   * value at parse time (argparse's `invalid int value`; the walk uses
-   * git's `expects a numerical value`), before the command runs. The
-   * accepted shape is an optional sign plus digits, the portable core of
-   * Python int() and argparse. The bag still holds the string: commands
-   * read it through FlagView.asInt, the established mirage convention.
-   * Builtins whose GNU tool words its own numeric refusal (`head: invalid
-   * number of lines`) keep "str" and validate in the command.
-   */
-  type?: 'str' | 'int'
   description?: string
 }
 
 export class Option {
   readonly short: string | null
   readonly long: string | null
-  readonly valueKind: OperandKind
+  readonly type: ValueType
   readonly numericShorthand: boolean
   readonly count: boolean
   readonly multiple: boolean
@@ -128,13 +123,12 @@ export class Option {
   readonly choices: readonly string[]
   readonly required: boolean
   readonly default: string | null
-  readonly type: 'str' | 'int'
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
     this.short = init.short ?? null
     this.long = init.long ?? null
-    this.valueKind = init.valueKind ?? OperandKind.NONE
+    this.type = init.type ?? 'bool'
     this.numericShorthand = init.numericShorthand ?? false
     this.count = init.count ?? false
     this.multiple = init.multiple ?? false
@@ -143,15 +137,15 @@ export class Option {
     this.choices = init.choices ?? []
     this.required = init.required ?? false
     this.default = init.default ?? null
-    this.type = init.type ?? 'str'
     this.description = init.description ?? null
     Object.freeze(this)
   }
 }
 
 export interface OperandInit {
-  /** PATH operands are cwd-resolved and routed; TEXT pass through verbatim. */
-  kind?: OperandKind
+  /** 'path' operands are cwd-resolved and routed; textual operands pass
+   * through verbatim (never 'bool': an operand is a value by definition). */
+  type?: ValueType
   /**
    * Flags that supply this operand's value. When any is present the slot is
    * skipped and remaining args classify as rest (e.g. grep's pattern with
@@ -165,11 +159,11 @@ export interface OperandInit {
 }
 
 export class Operand {
-  readonly kind: OperandKind
+  readonly type: ValueType
   readonly providedBy: readonly string[]
 
   constructor(init: OperandInit = {}) {
-    this.kind = init.kind ?? OperandKind.PATH
+    this.type = init.type ?? 'path'
     this.providedBy = init.providedBy ?? []
     Object.freeze(this)
   }
@@ -214,31 +208,32 @@ export class CommandSpec {
 
 export interface ParsedArgsInit {
   flags: Record<string, string | boolean | number | string[]>
-  args: [string, OperandKind][]
+  args: [string, ValueType][]
   cachePaths?: string[]
   pathFlagValues?: string[]
-  rawOperands?: [string, OperandKind][]
+  rawOperands?: [string, ValueType][]
   textFlagValues?: string[]
   warnings?: string[]
-  wordKinds?: (OperandKind | null)[]
+  wordKinds?: (ValueType | null)[]
   invalidOptions?: string[]
   ambiguousOptions?: [string, readonly string[]][]
   optionErrorKinds?: string[]
   needsValueOptions?: string[]
   invalidValueOptions?: [string, string, readonly string[]][]
   invalidIntOptions?: [string, string][]
+  invalidFloatOptions?: [string, string][]
   missingRequiredOptions?: string[]
 }
 
 export class ParsedArgs {
   readonly flags: Record<string, string | boolean | number | string[]>
-  readonly args: [string, OperandKind][]
+  readonly args: [string, ValueType][]
   readonly cachePaths: string[]
   readonly pathFlagValues: string[]
-  readonly rawOperands: [string, OperandKind][]
+  readonly rawOperands: [string, ValueType][]
   readonly textFlagValues: string[]
   readonly warnings: string[]
-  readonly wordKinds: (OperandKind | null)[]
+  readonly wordKinds: (ValueType | null)[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
   // abbreviated longs matching several options (typed prefix, matched
@@ -258,6 +253,7 @@ export class ParsedArgs {
   readonly needsValueOptions: string[]
   readonly invalidValueOptions: [string, string, readonly string[]][]
   readonly invalidIntOptions: [string, string][]
+  readonly invalidFloatOptions: [string, string][]
   readonly missingRequiredOptions: string[]
 
   constructor(init: ParsedArgsInit) {
@@ -275,11 +271,12 @@ export class ParsedArgs {
     this.needsValueOptions = init.needsValueOptions ?? []
     this.invalidValueOptions = init.invalidValueOptions ?? []
     this.invalidIntOptions = init.invalidIntOptions ?? []
+    this.invalidFloatOptions = init.invalidFloatOptions ?? []
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
   }
 
   paths(): string[] {
-    return this.args.filter(([, k]) => k === OperandKind.PATH).map(([v]) => v)
+    return this.args.filter(([, k]) => k === 'path').map(([v]) => v)
   }
 
   routingPaths(): string[] {
@@ -287,7 +284,7 @@ export class ParsedArgs {
   }
 
   texts(): string[] {
-    return this.args.filter(([, k]) => k === OperandKind.TEXT).map(([v]) => v)
+    return this.args.filter(([, k]) => k !== 'path').map(([v]) => v)
   }
 
   flag(

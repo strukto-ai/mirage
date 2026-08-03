@@ -17,16 +17,15 @@ import { searchMembers } from '../../../core/discord/members.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--guild_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--query', valueKind: OperandKind.TEXT }),
-  ],
-})
+    new Option({ long: '--guild_id', type: 'str' }),
+    new Option({ long: '--query', type: 'str' }),
+  ] })
 
 async function discordListMembersCommand(
   accessor: DiscordAccessor,
@@ -50,5 +49,4 @@ export const DISCORD_LIST_MEMBERS = command({
   name: 'discord-list-members',
   resource: ResourceName.DISCORD,
   spec: SPEC,
-  fn: discordListMembersCommand,
-})
+  fn: discordListMembersCommand })

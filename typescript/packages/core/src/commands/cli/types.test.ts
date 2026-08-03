@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CommandSpec, Operand, OperandKind, Option } from '../spec/types.ts'
+import { CommandSpec, Operand, Option } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
 
 const verb: CLIVerbFn = () => null
@@ -38,23 +38,18 @@ function tree(): CLISpec {
               new Option({
                 short: '-t',
                 long: '--to',
-                valueKind: OperandKind.TEXT,
+                type: 'str',
                 multiple: true,
-                required: true,
-              }),
+                required: true }),
             ],
-            rest: new Operand({ kind: OperandKind.TEXT }),
-          }),
+            rest: new Operand({ type: 'str' }) }),
           new CLISpec({ name: 'list', fn: verb }),
-        ],
-      }),
+        ] }),
       new CLISpec({
         name: 'docs',
         description: 'Google Docs',
-        subcommands: [new CLISpec({ name: 'cat', fn: verb })],
-      }),
-    ],
-  })
+        subcommands: [new CLISpec({ name: 'cat', fn: verb })] }),
+    ] })
 }
 
 describe('CLISpec', () => {
@@ -81,9 +76,8 @@ describe('CLISpec', () => {
   it('allows group-level options', () => {
     const git = new CLISpec({
       name: 'git',
-      options: [new Option({ short: '-C', valueKind: OperandKind.PATH })],
-      subcommands: [new CLISpec({ name: 'status', fn: verb })],
-    })
+      options: [new Option({ short: '-C', type: 'path' })],
+      subcommands: [new CLISpec({ name: 'status', fn: verb })] })
     expect(git.options[0]?.short).toBe('-C')
   })
 
@@ -100,8 +94,7 @@ describe('CLISpec', () => {
         new CLISpec({
           name: 'gws',
           fn: verb,
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
+          subcommands: [new CLISpec({ name: 'send', fn: verb })] }),
     ).toThrow(/not both/)
   })
 
@@ -114,17 +107,15 @@ describe('CLISpec', () => {
       () =>
         new CLISpec({
           name: 'gws',
-          positional: [new Operand({ kind: OperandKind.TEXT })],
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
+          positional: [new Operand({ type: 'str' })],
+          subcommands: [new CLISpec({ name: 'send', fn: verb })] }),
     ).toThrow(/belong on leaves/)
     expect(
       () =>
         new CLISpec({
           name: 'gws',
-          rest: new Operand({ kind: OperandKind.TEXT }),
-          subcommands: [new CLISpec({ name: 'send', fn: verb })],
-        }),
+          rest: new Operand({ type: 'str' }),
+          subcommands: [new CLISpec({ name: 'send', fn: verb })] }),
     ).toThrow(/belong on leaves/)
   })
 
@@ -136,8 +127,7 @@ describe('CLISpec', () => {
           subcommands: [
             new CLISpec({ name: 'send', fn: verb }),
             new CLISpec({ name: 'send', fn: verb }),
-          ],
-        }),
+          ] }),
     ).toThrow(/duplicate subcommand 'send'/)
   })
 
@@ -146,8 +136,7 @@ describe('CLISpec', () => {
       () =>
         new CLISpec({
           name: 'gws',
-          subcommands: [new CLISpec({ name: 'gmail', fn: verb, configModel })],
-        }),
+          subcommands: [new CLISpec({ name: 'gmail', fn: verb, configModel })] }),
     ).toThrow(/only the root of a tree may/)
   })
 
@@ -156,7 +145,7 @@ describe('CLISpec', () => {
       () =>
         new CLISpec({
           name: 'gws',
-          options: [new Option({ short: '-C', long: '--cwd', valueKind: OperandKind.TEXT })],
+          options: [new Option({ short: '-C', long: '--cwd', type: 'str' })],
           subcommands: [
             new CLISpec({
               name: 'gmail',
@@ -164,12 +153,9 @@ describe('CLISpec', () => {
                 new CLISpec({
                   name: 'send',
                   fn: verb,
-                  options: [new Option({ long: '--cwd', valueKind: OperandKind.TEXT })],
-                }),
-              ],
-            }),
-          ],
-        }),
+                  options: [new Option({ long: '--cwd', type: 'str' })] }),
+              ] }),
+          ] }),
     ).toThrow(/option '--cwd' collides with subcommand 'gmail send'/)
   })
 
@@ -180,15 +166,12 @@ describe('CLISpec', () => {
         new CLISpec({
           name: 'send',
           fn: verb,
-          options: [new Option({ long: '--to', valueKind: OperandKind.TEXT })],
-        }),
+          options: [new Option({ long: '--to', type: 'str' })] }),
         new CLISpec({
           name: 'share',
           fn: verb,
-          options: [new Option({ long: '--to', valueKind: OperandKind.TEXT })],
-        }),
-      ],
-    })
+          options: [new Option({ long: '--to', type: 'str' })] }),
+      ] })
     expect(spec.subcommands).toHaveLength(2)
   })
 
@@ -209,8 +192,7 @@ describe('CLISpec aliases', () => {
           subcommands: [
             new CLISpec({ name: 'checkout', aliases: ['co'], fn: verb }),
             new CLISpec({ name: 'co', fn: verb }),
-          ],
-        }),
+          ] }),
     ).toThrow(/duplicate subcommand 'co'/)
   })
 
@@ -219,8 +201,7 @@ describe('CLISpec aliases', () => {
       () =>
         new CLISpec({
           name: 'tool',
-          subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })],
-        }),
+          subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })] }),
     ).toThrow(/alias 'c o'/)
   })
 })

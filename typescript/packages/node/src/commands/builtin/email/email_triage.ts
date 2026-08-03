@@ -15,15 +15,13 @@
 import {
   CommandSpec,
   IOResult,
-  OperandKind,
   Option,
   ResourceName,
   command,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type PathSpec,
-} from '@struktoai/mirage-core'
+  type PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { fetchHeaders } from '../../../core/email/_client.ts'
 import { searchMessages } from '../../../core/email/search.ts'
@@ -32,17 +30,16 @@ const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--folder', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--max', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--folder', type: 'str' }),
+    new Option({ long: '--max', type: 'str' }),
     new Option({ long: '--unseen' }),
-    new Option({ long: '--subject', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--from', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--to', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--body', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--since', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--before', valueKind: OperandKind.TEXT }),
-  ],
-})
+    new Option({ long: '--subject', type: 'str' }),
+    new Option({ long: '--from', type: 'str' }),
+    new Option({ long: '--to', type: 'str' }),
+    new Option({ long: '--body', type: 'str' }),
+    new Option({ long: '--since', type: 'str' }),
+    new Option({ long: '--before', type: 'str' }),
+  ] })
 
 async function emailTriageCommand(
   accessor: EmailAccessor,
@@ -62,8 +59,7 @@ async function emailTriageCommand(
       toAddr: typeof opts.flags.to === 'string' ? opts.flags.to : null,
       since: typeof opts.flags.since === 'string' ? opts.flags.since : null,
       before: typeof opts.flags.before === 'string' ? opts.flags.before : null,
-      unseen: opts.flags.unseen === true,
-    },
+      unseen: opts.flags.unseen === true },
     maxResults,
   )
   if (uids.length === 0) {
@@ -79,5 +75,4 @@ export const EMAIL_TRIAGE = command({
   name: 'himalaya envelope list',
   resource: ResourceName.EMAIL,
   spec: SPEC,
-  fn: emailTriageCommand,
-})
+  fn: emailTriageCommand })

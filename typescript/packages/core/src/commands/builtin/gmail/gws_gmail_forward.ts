@@ -17,7 +17,7 @@ import { forwardMessage } from '../../../core/gmail/send.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -26,16 +26,13 @@ const SPEC = new CommandSpec({
   options: [
     new Option({
       long: '--message-id',
-      valueKind: OperandKind.TEXT,
-      description: 'Gmail message ID to forward (required)',
-    }),
+      type: 'str',
+      description: 'Gmail message ID to forward (required)' }),
     new Option({
       long: '--to',
-      valueKind: OperandKind.TEXT,
-      description: 'Forward recipient email address (required)',
-    }),
-  ],
-})
+      type: 'str',
+      description: 'Forward recipient email address (required)' }),
+  ] })
 
 async function gwsGmailForwardCommand(
   accessor: GmailAccessor,
@@ -66,5 +63,4 @@ export const GMAIL_GWS_FORWARD = command({
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailForwardCommand,
-  write: true,
-})
+  write: true })

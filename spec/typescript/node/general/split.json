@@ -144,7 +144,6 @@
       "short": "-l",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -159,7 +158,6 @@
       "short": "-b",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -174,7 +172,6 @@
       "short": "-n",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -189,7 +186,6 @@
       "short": "-d",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": true
     },
     {
@@ -204,7 +200,6 @@
       "short": "-x",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": true
     },
     {
@@ -219,7 +214,6 @@
       "short": "-a",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -234,7 +228,6 @@
       "short": null,
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     },
     {
@@ -249,18 +242,17 @@
       "short": "-t",
       "short_value": true,
       "type": "str",
-      "value_kind": "text",
       "value_optional": false
     }
   ],
   "positional": [
     {
-      "kind": "path",
-      "provided_by": []
+      "provided_by": [],
+      "type": "path"
     },
     {
-      "kind": "path",
-      "provided_by": []
+      "provided_by": [],
+      "type": "path"
     }
   ],
   "rest": null

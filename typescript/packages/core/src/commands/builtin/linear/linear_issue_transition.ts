@@ -17,25 +17,23 @@ import {
   issueUpdate,
   type LinearTransport,
   listTeams,
-  resolveIssueId,
-} from '../../../core/linear/_client.ts'
+  resolveIssueId } from '../../../core/linear/_client.ts'
 import { normalizeIssue } from '../../../core/linear/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 import { enoent } from '../../../utils/errors.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--issue_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--issue_key', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--state_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--state_name', valueKind: OperandKind.TEXT }),
-  ],
-})
+    new Option({ long: '--issue_id', type: 'str' }),
+    new Option({ long: '--issue_key', type: 'str' }),
+    new Option({ long: '--state_id', type: 'str' }),
+    new Option({ long: '--state_name', type: 'str' }),
+  ] })
 
 async function resolveStateId(
   transport: LinearTransport,
@@ -89,5 +87,4 @@ export const LINEAR_ISSUE_TRANSITION = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueTransitionCommand,
-  write: true,
-})
+  write: true })

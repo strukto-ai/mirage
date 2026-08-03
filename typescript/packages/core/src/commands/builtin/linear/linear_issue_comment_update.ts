@@ -18,18 +18,17 @@ import { normalizeComment } from '../../../core/linear/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--comment_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--body', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--body_file', valueKind: OperandKind.PATH }),
-  ],
-})
+    new Option({ long: '--comment_id', type: 'str' }),
+    new Option({ long: '--body', type: 'str' }),
+    new Option({ long: '--body_file', type: 'path' }),
+  ] })
 
 async function linearIssueCommentUpdateCommand(
   accessor: LinearAccessor,
@@ -47,8 +46,7 @@ async function linearIssueCommentUpdateCommand(
     inlineText: inlineBody,
     filePath: bodyFile,
     stdin: opts.stdin,
-    errorMessage: 'comment body is required',
-  })
+    errorMessage: 'comment body is required' })
   const comment = await commentUpdate(accessor.transport, commentId, body)
   const issueField = comment.issue
   const issueId =
@@ -67,5 +65,4 @@ export const LINEAR_ISSUE_COMMENT_UPDATE = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCommentUpdateCommand,
-  write: true,
-})
+  write: true })

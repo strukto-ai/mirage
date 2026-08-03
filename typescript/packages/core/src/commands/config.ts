@@ -22,7 +22,7 @@ import type { StatOverlay } from '../ops/config.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
-import { CommandSpec, OperandKind, Option } from './spec/types.ts'
+import { CommandSpec, Option } from './spec/types.ts'
 
 /**
  * Options bag passed to command functions. Mirrors Python's keyword arguments
@@ -141,15 +141,13 @@ export interface CommandOptions<A extends Accessor = Accessor> {
 
 export const HELP_OPTION = new Option({
   long: '--help',
-  valueKind: OperandKind.NONE,
-  description: 'Show this help and exit',
-})
+  type: 'bool',
+  description: 'Show this help and exit' })
 
 const VERSION_OPTION = new Option({
   long: '--version',
-  valueKind: OperandKind.NONE,
-  description: 'Show version information and exit',
-})
+  type: 'bool',
+  description: 'Show version information and exit' })
 
 const HELP_ENC = new TextEncoder()
 
@@ -230,8 +228,7 @@ export function command<A extends Accessor = Accessor>(
         provisionFn: (options.provision ?? null) as ProvisionFn | null,
         aggregate: options.aggregate ?? null,
         write: options.write ?? false,
-        safeguard: options.safeguard ?? null,
-      }),
+        safeguard: options.safeguard ?? null }),
   )
 }
 
@@ -251,6 +248,5 @@ export function crossCommand(options: CrossCommandOptions): RegisteredCommand {
     filetype: null,
     fn: options.fn,
     src: options.src,
-    dst: options.dst,
-  })
+    dst: options.dst })
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OperandKind, Option } from '../spec/types.ts'
+import { Option } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
 import { walk } from './walk.ts'
 
@@ -33,9 +33,8 @@ function tree(): CLISpec {
       new Option({
         short: '-C',
         long: '--cwd',
-        valueKind: OperandKind.TEXT,
-        description: 'run as if started there',
-      }),
+        type: 'str',
+        description: 'run as if started there' }),
       new Option({ short: '-v', long: '--verbose', count: true }),
     ],
     subcommands: [
@@ -45,23 +44,19 @@ function tree(): CLISpec {
         options: [
           new Option({
             long: '--account',
-            valueKind: OperandKind.TEXT,
+            type: 'str',
             default: 'primary',
-            choices: ['primary', 'work'],
-          }),
+            choices: ['primary', 'work'] }),
         ],
         subcommands: [
           new CLISpec({ name: 'send', fn: verb, write: true }),
           new CLISpec({ name: 'list', fn: verb }),
-        ],
-      }),
+        ] }),
       new CLISpec({
         name: 'docs',
         description: 'Google Docs',
-        subcommands: [new CLISpec({ name: 'cat', fn: verb })],
-      }),
-    ],
-  })
+        subcommands: [new CLISpec({ name: 'cat', fn: verb })] }),
+    ] })
 }
 
 describe('walk', () => {
@@ -184,8 +179,7 @@ describe('walk', () => {
     expect(clustered.groupFlags).toEqual({
       '--verbose': 2,
       '--cwd': '/tmp',
-      '--account': 'primary',
-    })
+      '--account': 'primary' })
   })
 
   it('ends group options at --', () => {
@@ -214,9 +208,8 @@ describe('walk', () => {
   it('handles an optional-value long at group level', () => {
     const spec = new CLISpec({
       name: 'tool',
-      options: [new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })],
-    })
+      options: [new Option({ long: '--color', type: 'str', valueOptional: true })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
     const attached = walk('tool', spec, ['--color=auto', 'run'])
     expect(attached.leaf).not.toBeNull()
     expect(attached.groupFlags).toEqual({ '--color': 'auto' })
@@ -228,9 +221,8 @@ describe('walk', () => {
   it('handles a multi-char short at group level', () => {
     const spec = new CLISpec({
       name: 'tool',
-      options: [new Option({ short: '-name', valueKind: OperandKind.TEXT })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })],
-    })
+      options: [new Option({ short: '-name', type: 'str' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
     const detached = walk('tool', spec, ['-name', 'foo', 'run'])
     expect(detached.leaf).not.toBeNull()
     expect(detached.groupFlags).toEqual({ '-name': 'foo' })
@@ -245,9 +237,8 @@ describe('walk', () => {
   it('exits 129 for a missing required group option', () => {
     const spec = new CLISpec({
       name: 'tool',
-      options: [new Option({ long: '--token', valueKind: OperandKind.TEXT, required: true })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })],
-    })
+      options: [new Option({ long: '--token', type: 'str', required: true })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
     const result = walk('tool', spec, ['run'])
     expect(result.exitCode).toBe(129)
     expect(text(result.output).startsWith("error: option '--token' is required")).toBe(true)
@@ -266,10 +257,8 @@ describe('walk argparse/git alignment', () => {
           name: 'checkout',
           aliases: ['co'],
           description: 'Switch branches',
-          fn: verb,
-        }),
-      ],
-    })
+          fn: verb }),
+      ] })
     const result = walk('tool', spec, ['co', 'x'])
     expect(result.leaf).not.toBeNull()
     expect(result.path).toEqual(['checkout'])
@@ -284,10 +273,8 @@ describe('walk argparse/git alignment', () => {
           name: 'checkout',
           aliases: ['co', 'cout'],
           description: 'Switch branches',
-          fn: verb,
-        }),
-      ],
-    })
+          fn: verb }),
+      ] })
     const listing = walk('tool', spec, [])
     expect(text(listing.output)).toContain('  checkout (co, cout)  Switch branches')
   })
@@ -302,11 +289,10 @@ describe('walk argparse/git alignment', () => {
     const spec = new CLISpec({
       name: 'tool',
       options: [
-        new Option({ long: '--context', valueKind: OperandKind.TEXT }),
+        new Option({ long: '--context', type: 'str' }),
         new Option({ long: '--count' }),
       ],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })],
-    })
+      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
     const result = walk('tool', spec, ['--co', 'run'])
     expect(result.exitCode).toBe(129)
     expect(
@@ -324,9 +310,8 @@ describe('walk argparse/git alignment', () => {
   it('refuses a non-integer int-typed group value with git wording', () => {
     const spec = new CLISpec({
       name: 'tool',
-      options: [new Option({ long: '--depth', valueKind: OperandKind.TEXT, type: 'int' })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })],
-    })
+      options: [new Option({ long: '--depth', type: 'int' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
     const bad = walk('tool', spec, ['--depth', 'x', 'run'])
     expect(bad.exitCode).toBe(129)
     expect(text(bad.output).startsWith("error: option '--depth' expects a numerical value")).toBe(

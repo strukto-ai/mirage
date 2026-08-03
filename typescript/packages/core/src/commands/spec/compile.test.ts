@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { compileSpec, expandLong } from './compile.ts'
-import { CommandSpec, OperandKind, Option } from './types.ts'
+import { CommandSpec, Option } from './types.ts'
 
 describe('compileSpec — count/choices/required/default tables', () => {
   it('collects the new tables keyed by canonical spelling', () => {
@@ -23,13 +23,11 @@ describe('compileSpec — count/choices/required/default tables', () => {
         new Option({ short: '-v', long: '--verbose', count: true }),
         new Option({
           long: '--mode',
-          valueKind: OperandKind.TEXT,
+          type: 'str',
           choices: ['a', 'b'],
-          default: 'a',
-        }),
-        new Option({ long: '--out', valueKind: OperandKind.TEXT, required: true }),
-      ],
-    })
+          default: 'a' }),
+        new Option({ long: '--out', type: 'str', required: true }),
+      ] })
     const cs = compileSpec(spec)
     expect(cs.countDests).toEqual(new Set(['--verbose']))
     expect(cs.choicesByDest).toEqual(new Map([['--mode', ['a', 'b']]]))
@@ -39,15 +37,13 @@ describe('compileSpec — count/choices/required/default tables', () => {
 
   it('rejects count on a value flag', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--level', valueKind: OperandKind.TEXT, count: true })],
-    })
+      options: [new Option({ long: '--level', type: 'str', count: true })] })
     expect(() => compileSpec(spec)).toThrow(/count requires a boolean flag/)
   })
 
   it('rejects choices or default on a boolean flag', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--quiet', choices: ['a', 'b'] })],
-    })
+      options: [new Option({ long: '--quiet', choices: ['a', 'b'] })] })
     expect(() => compileSpec(spec)).toThrow(/require a value flag/)
   })
 
@@ -56,12 +52,10 @@ describe('compileSpec — count/choices/required/default tables', () => {
       options: [
         new Option({
           long: '--mode',
-          valueKind: OperandKind.TEXT,
+          type: 'str',
           choices: ['a', 'b'],
-          default: 'c',
-        }),
-      ],
-    })
+          default: 'c' }),
+      ] })
     expect(() => compileSpec(spec)).toThrow(/not one of its choices/)
   })
 
@@ -72,10 +66,14 @@ describe('compileSpec — count/choices/required/default tables', () => {
 })
 
 describe('type int validation', () => {
-  it('requires a value flag', () => {
+  it('requires a numeric float default', () => {
     expect(() =>
-      compileSpec(new CommandSpec({ options: [new Option({ long: '--fast', type: 'int' })] })),
-    ).toThrow(/requires a value flag/)
+      compileSpec(
+        new CommandSpec({
+          options: [new Option({ long: '--ratio', type: 'float', default: 'fast' })],
+        }),
+      ),
+    ).toThrow(/is not a number/)
   })
 
   it('requires an integer default', () => {
@@ -85,12 +83,9 @@ describe('type int validation', () => {
           options: [
             new Option({
               long: '--port',
-              valueKind: OperandKind.TEXT,
               type: 'int',
-              default: 'auto',
-            }),
-          ],
-        }),
+              default: 'auto' }),
+          ] }),
       ),
     ).toThrow(/is not an integer/)
   })
@@ -102,10 +97,9 @@ describe('expandLong', () => {
       new CommandSpec({
         options: [
           new Option({ long: '--binary' }),
-          new Option({ long: '--binary-files', valueKind: OperandKind.TEXT }),
+          new Option({ long: '--binary-files', type: 'str' }),
           new Option({ long: '--count' }),
-        ],
-      }),
+        ] }),
     )
     expect(expandLong(cs, '--binary')).toEqual(['--binary'])
     expect(expandLong(cs, '--bin')).toEqual(['--binary', '--binary-files'])

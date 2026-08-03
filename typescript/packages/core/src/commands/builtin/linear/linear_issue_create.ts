@@ -18,19 +18,18 @@ import { normalizeIssue } from '../../../core/linear/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--team_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--title', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--description', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--description_file', valueKind: OperandKind.PATH }),
-  ],
-})
+    new Option({ long: '--team_id', type: 'str' }),
+    new Option({ long: '--title', type: 'str' }),
+    new Option({ long: '--description', type: 'str' }),
+    new Option({ long: '--description_file', type: 'path' }),
+  ] })
 
 async function linearIssueCreateCommand(
   accessor: LinearAccessor,
@@ -55,14 +54,12 @@ async function linearIssueCreateCommand(
       inlineText: inlineDesc,
       filePath: descFile,
       stdin: opts.stdin,
-      errorMessage: 'description is required',
-    })
+      errorMessage: 'description is required' })
   }
   const issue = await issueCreate(accessor.transport, {
     teamId,
     title,
-    ...(description !== undefined ? { description } : {}),
-  })
+    ...(description !== undefined ? { description } : {}) })
   return [ENC.encode(JSON.stringify(normalizeIssue(issue))), new IOResult()]
 }
 
@@ -71,5 +68,4 @@ export const LINEAR_ISSUE_CREATE = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCreateCommand,
-  write: true,
-})
+  write: true })

@@ -83,6 +83,21 @@ export function invalidIntError(
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
 }
 
+/**
+ * Refusal for a non-number value on a float-typed option. Mirrors
+ * argparse's `invalid float value: '5x'` the same way invalidIntError
+ * mirrors the int wording.
+ */
+export function invalidFloatError(
+  cmdName: string,
+  option: string,
+  value: string,
+): [Uint8Array, number] {
+  const line = `${cmdName}: invalid float value: '${value}' for '${option}'\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
 /** GNU-shaped error for a declared value flag with no argument left. */
 export function missingValueError(cmdName: string, token: string): [Uint8Array, number] {
   const line = token.startsWith('--')

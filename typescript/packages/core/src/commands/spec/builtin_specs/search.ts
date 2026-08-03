@@ -12,18 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandSpec, Operand, OperandKind, Option } from '../types.ts'
+import { CommandSpec, Operand, Option } from '../types.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   awk: new CommandSpec({
     options: [
-      new Option({ short: '-F', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-v', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
+      new Option({ short: '-F', type: 'str' }),
+      new Option({ short: '-v', type: 'str', multiple: true }),
+      new Option({ short: '-f', type: 'path', multiple: true }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-f'] })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    positional: [new Operand({ type: 'str', providedBy: ['-f'] })],
+    rest: new Operand({ type: 'path' }) }),
   grep: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -41,30 +40,28 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-q' }),
       new Option({ short: '-H' }),
       new Option({ short: '-h' }),
-      new Option({ short: '-m', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-A', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-B', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-C', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
+      new Option({ short: '-m', type: 'str' }),
+      new Option({ short: '-A', type: 'str' }),
+      new Option({ short: '-B', type: 'str' }),
+      new Option({ short: '-C', type: 'str' }),
+      new Option({ short: '-e', type: 'str', multiple: true }),
+      new Option({ short: '-f', type: 'path', multiple: true }),
       // Accepted no-ops: output is never a tty, so plain output is
       // exactly what GNU produces with --color=auto (#471).
-      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
-      new Option({ long: '--colour', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--color', type: 'str', valueOptional: true }),
+      new Option({ long: '--colour', type: 'str', valueOptional: true }),
       new Option({ long: '--line-buffered' }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
+    rest: new Operand({ type: 'path' }) }),
   jq: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
       new Option({ short: '-c' }),
       new Option({ short: '-s' }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    positional: [new Operand({ type: 'str' })],
+    rest: new Operand({ type: 'path' }) }),
   rg: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -77,38 +74,36 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-o' }),
       new Option({ short: '-H' }),
       new Option({ short: '-I' }),
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
-      new Option({ short: '-m', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-A', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-B', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-C', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-e', type: 'str', multiple: true }),
+      new Option({ short: '-f', type: 'path', multiple: true }),
+      new Option({ short: '-m', type: 'str' }),
+      new Option({ short: '-A', type: 'str' }),
+      new Option({ short: '-B', type: 'str' }),
+      new Option({ short: '-C', type: 'str' }),
       new Option({ long: '--hidden' }),
-      new Option({ long: '--type', valueKind: OperandKind.TEXT }),
-      new Option({ long: '--glob', valueKind: OperandKind.TEXT }),
+      new Option({ long: '--type', type: 'str' }),
+      new Option({ long: '--glob', type: 'str' }),
       // Accepted no-op like grep --color (#471).
-      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--color', type: 'str', valueOptional: true }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
+    rest: new Operand({ type: 'path' }) }),
   search: new CommandSpec({
     options: [
-      new Option({ long: '--method', valueKind: OperandKind.TEXT }),
-      new Option({ long: '--top-k', valueKind: OperandKind.TEXT }),
-      new Option({ long: '--threshold', valueKind: OperandKind.TEXT }),
+      new Option({ long: '--method', type: 'str' }),
+      new Option({ long: '--top-k', type: 'str' }),
+      new Option({ long: '--threshold', type: 'str' }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    positional: [new Operand({ type: 'str' })],
+    rest: new Operand({ type: 'path' }) }),
   sed: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
       // -e takes a script and may repeat; multiple -e are joined with newlines.
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
+      new Option({ short: '-e', type: 'str', multiple: true }),
       // -f reads the script from a file and may repeat (like grep -f); its value
       // is a PATH so it routes and is read from the mount.
-      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
+      new Option({ short: '-f', type: 'path', multiple: true }),
       new Option({ short: '-n' }),
       new Option({ short: '-E' }),
       new Option({ short: '-r' }),
@@ -118,13 +113,11 @@ export const SPECS: Record<string, CommandSpec> = {
     // mis-grabbed. For sed the first operand is the script (TEXT) only when
     // neither -e nor -f gave one (GNU). With -e/-f the slot is skipped and the
     // first operand reflows to a file path in rest.
-    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
+    rest: new Operand({ type: 'path' }) }),
   strings: new CommandSpec({
-    options: [new Option({ short: '-n', valueKind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
+    options: [new Option({ short: '-n', type: 'str' })],
+    rest: new Operand({ type: 'path' }) }),
   zgrep: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -132,18 +125,16 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-l' }),
       new Option({ short: '-n' }),
       new Option({ short: '-v' }),
-      new Option({ short: '-e', valueKind: OperandKind.TEXT, multiple: true }),
-      new Option({ short: '-f', valueKind: OperandKind.PATH, multiple: true }),
+      new Option({ short: '-e', type: 'str', multiple: true }),
+      new Option({ short: '-f', type: 'path', multiple: true }),
       new Option({ short: '-E' }),
       new Option({ short: '-F' }),
       new Option({ short: '-H' }),
       new Option({ short: '-h' }),
-      new Option({ short: '-m', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-m', type: 'str' }),
       new Option({ short: '-o' }),
       new Option({ short: '-q' }),
       new Option({ short: '-w' }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
-    rest: new Operand({ kind: OperandKind.PATH }),
-  }),
-}
+    positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
+    rest: new Operand({ type: 'path' }) }) }

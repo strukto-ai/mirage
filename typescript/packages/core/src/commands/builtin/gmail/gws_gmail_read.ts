@@ -17,7 +17,7 @@ import { getMessageProcessed } from '../../../core/gmail/messages.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -27,11 +27,9 @@ const SPEC = new CommandSpec({
   options: [
     new Option({
       long: '--id',
-      valueKind: OperandKind.TEXT,
-      description: 'Gmail message ID (required)',
-    }),
-  ],
-})
+      type: 'str',
+      description: 'Gmail message ID (required)' }),
+  ] })
 
 async function gwsGmailReadCommand(
   accessor: GmailAccessor,
@@ -52,5 +50,4 @@ export const GMAIL_GWS_READ = command({
   name: 'gws gmail +read',
   resource: ResourceName.GMAIL,
   spec: SPEC,
-  fn: gwsGmailReadCommand,
-})
+  fn: gwsGmailReadCommand })

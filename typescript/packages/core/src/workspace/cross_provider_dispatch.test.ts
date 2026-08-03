@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RegisteredCommand } from '../commands/config.ts'
-import { CommandSpec, Operand, OperandKind } from '../commands/spec/types.ts'
+import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { ProvisionResult } from '../provision/types.ts'
@@ -25,7 +25,7 @@ import type { ExecuteResult } from './workspace.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
-const SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) })
+const SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([ENC.encode('ok'), new IOResult()])
@@ -36,8 +36,7 @@ const noopProvision = (): Promise<ProvisionResult> =>
       command: 'noop',
       networkReadLow: 10,
       networkReadHigh: 10,
-      readOps: 1,
-    }),
+      readOps: 1 }),
   )
 
 async function makeWs(mounts: Record<string, RAMResource>): Promise<Workspace> {
@@ -70,8 +69,7 @@ describe('cross-resource dispatch (port of test_cross_provider_dispatch.py)', ()
       name: 'nocross',
       spec: SPEC,
       resource: ResourceName.RAM,
-      fn: noopFn,
-    })
+      fn: noopFn })
     registerOnAll(ws, ['/m1', '/m2'], rc)
     const io = await ws.execute('nocross /m1/a.txt /m2/b.txt')
     expect(io.exitCode).toBe(1)
@@ -89,8 +87,7 @@ describe('cross-resource dispatch (port of test_cross_provider_dispatch.py)', ()
       name: 'nocross',
       spec: SPEC,
       resource: ResourceName.RAM,
-      fn: noopFn,
-    })
+      fn: noopFn })
     registerOnAll(ws, ['/m1', '/m2'], rc)
     const io = await ws.execute('nocross /m1/a.txt /m2/b.txt')
     const err = stderrStr(io)
@@ -120,8 +117,7 @@ describe('cross-resource dispatch (port of test_cross_provider_dispatch.py)', ()
       name: 'nocross',
       spec: SPEC,
       resource: ResourceName.RAM,
-      fn: noopFn,
-    })
+      fn: noopFn })
     registerOnAll(ws, ['/m1', '/m2'], rc)
     const io = await ws.execute('nocross /m1/a.txt')
     expect(io.exitCode).toBe(0)
@@ -140,8 +136,7 @@ describe('cross-resource dispatch (port of test_cross_provider_dispatch.py)', ()
       name: 'nocross',
       spec: SPEC,
       resource: ResourceName.RAM,
-      fn: noopFn,
-    })
+      fn: noopFn })
     registerOnAll(ws, ['/m1', '/m2', '/m3'], rc)
     const io = await ws.execute('nocross /m1/a.txt /m2/b.txt /m3/c.txt')
     expect(io.exitCode).toBe(1)
@@ -161,8 +156,7 @@ describe('cross-resource dispatch (port of test_cross_provider_dispatch.py)', ()
       spec: SPEC,
       resource: ResourceName.RAM,
       fn: noopFn,
-      provisionFn: noopProvision,
-    })
+      provisionFn: noopProvision })
     registerOnAll(ws, ['/m1', '/m2'], rc)
     const result = await ws.execute('nocross /m1/a.txt', { provision: true })
     expect(result).toBeInstanceOf(ProvisionResult)

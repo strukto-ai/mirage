@@ -14,7 +14,7 @@
 
 import { HELP_OPTION } from '../config.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
-import { INT_VALUE } from '../spec/constants.ts'
+import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { renderHelp } from '../spec/help.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
@@ -176,14 +176,20 @@ function finishNode(
       flags[dest] = cs.multipleDests.has(dest) ? [value] : value
     }
   }
-  // Int-typed values before choices, argparse's order; wording is git's
-  // parse-options refusal (`--depth` on a non-integer).
-  for (const dest of cs.intDests) {
-    const value = flags[dest]
-    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
-    for (const part of candidates) {
-      if (!INT_VALUE.test(part)) {
-        return usageError(name, node, `error: option '${dest}' expects a numerical value`)
+  // Numeric-typed values before choices, argparse's order; wording is
+  // git's parse-options refusal (`--depth` on a non-integer), one phrase
+  // for int and float alike.
+  for (const [dests, pattern] of [
+    [cs.intDests, INT_VALUE],
+    [cs.floatDests, FLOAT_VALUE],
+  ] as const) {
+    for (const dest of dests) {
+      const value = flags[dest]
+      const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+      for (const part of candidates) {
+        if (!pattern.test(part)) {
+          return usageError(name, node, `error: option '${dest}' expects a numerical value`)
+        }
       }
     }
   }

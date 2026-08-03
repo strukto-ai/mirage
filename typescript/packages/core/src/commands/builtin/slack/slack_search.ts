@@ -17,27 +17,23 @@ import { searchMessages } from '../../../core/slack/search.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const SPEC = new CommandSpec({
   options: [
     new Option({
       long: '--query',
-      valueKind: OperandKind.TEXT,
-      description: "Slack search query (supports operators like 'from:@user', 'in:#channel')",
-    }),
+      type: 'str',
+      description: "Slack search query (supports operators like 'from:@user', 'in:#channel')" }),
     new Option({
       long: '--count',
-      valueKind: OperandKind.TEXT,
-      description: 'Results per page (1-100, default 20)',
-    }),
+      type: 'str',
+      description: 'Results per page (1-100, default 20)' }),
     new Option({
       long: '--page',
-      valueKind: OperandKind.TEXT,
-      description: '1-based page number (default 1)',
-    }),
-  ],
-})
+      type: 'str',
+      description: '1-based page number (default 1)' }),
+  ] })
 
 function parseIntFlag(
   raw: string | boolean | number | string[] | undefined,
@@ -74,5 +70,4 @@ export const SLACK_SEARCH = command({
   name: 'slack-search',
   resource: ResourceName.SLACK,
   spec: SPEC,
-  fn: slackSearchCommand,
-})
+  fn: slackSearchCommand })

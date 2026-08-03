@@ -18,16 +18,15 @@ import { searchPages } from '../../../core/notion/pages.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, Option } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--query', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--limit', valueKind: OperandKind.TEXT }),
-  ],
-})
+    new Option({ long: '--query', type: 'str' }),
+    new Option({ long: '--limit', type: 'str' }),
+  ] })
 
 function strOf(record: Record<string, unknown>, key: string): string {
   const value = record[key]
@@ -66,8 +65,7 @@ async function notionSearchCommand(
       page_id: strOf(page, 'id'),
       url: strOf(page, 'url'),
       last_edited: strOf(page, 'last_edited_time'),
-      parent_type: strOf(parentObj, 'type'),
-    })
+      parent_type: strOf(parentObj, 'type') })
   }
   return [ENC.encode(JSON.stringify(results, null, 2)), new IOResult()]
 }
@@ -76,5 +74,4 @@ export const NOTION_SEARCH = command({
   name: 'notion-search',
   resource: ResourceName.NOTION,
   spec: SPEC,
-  fn: notionSearchCommand,
-})
+  fn: notionSearchCommand })

@@ -281,8 +281,8 @@
   "options": [],
   "positional": [
     {
-      "kind": "path",
-      "provided_by": []
+      "provided_by": [],
+      "type": "path"
     }
   ],
   "rest": null

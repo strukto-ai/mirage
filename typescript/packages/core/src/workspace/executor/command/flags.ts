@@ -16,12 +16,11 @@ import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import {
   ambiguousOptionError,
   invalidArgumentError,
+  invalidFloatError,
   invalidIntError,
   missingRequiredError,
   missingValueError,
-  unknownOptionError,
-} from '../../../commands/spec/usage.ts'
-import { OperandKind } from '../../../commands/spec/types.ts'
+  unknownOptionError } from '../../../commands/spec/usage.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -47,8 +46,7 @@ function synthesizePathSpec(value: string): PathSpec {
     resourcePath: '',
     virtual: value,
     directory: slash >= 0 ? value.slice(0, slash + 1) : '/',
-    resolved: true,
-  })
+    resolved: true })
 }
 
 export function parseFlags(
@@ -66,6 +64,7 @@ export function parseFlags(
   string[],
   string[],
   [string, string, readonly string[]][],
+  [string, string][],
   [string, string][],
   string[],
 ] {
@@ -95,7 +94,7 @@ export function parseFlags(
     const paths: PathSpec[] = []
     const texts: string[] = []
     for (const [value, kind] of parsed.args) {
-      if (kind === OperandKind.PATH) {
+      if (kind === 'path') {
         const existing = scopeMap.get(value)
         paths.push(existing ?? synthesizePathSpec(value))
       } else {
@@ -113,6 +112,7 @@ export function parseFlags(
       parsed.needsValueOptions,
       parsed.invalidValueOptions,
       parsed.invalidIntOptions,
+      parsed.invalidFloatOptions,
       parsed.missingRequiredOptions,
     ]
   }
@@ -123,7 +123,7 @@ export function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], [], [], [], [], [], []]
+  return [paths, texts, {}, [], [], [], [], [], [], [], [], []]
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is
@@ -137,6 +137,7 @@ export function optionError(
   needsValue: readonly string[],
   invalidValue: readonly [string, string, readonly string[]][],
   invalidInt: readonly [string, string][],
+  invalidFloat: readonly [string, string][],
   missingRequired: readonly string[],
 ): [Uint8Array, number] | null {
   if (cmdName === 'find') return null
@@ -154,6 +155,8 @@ export function optionError(
   if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
   const badInt = invalidInt[0]
   if (badInt !== undefined) return invalidIntError(cmdName, ...badInt)
+  const badFloat = invalidFloat[0]
+  if (badFloat !== undefined) return invalidFloatError(cmdName, ...badFloat)
   if (missingRequired.length > 0) return missingRequiredError(cmdName, missingRequired[0] ?? '')
   return null
 }

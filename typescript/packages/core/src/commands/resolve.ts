@@ -14,7 +14,6 @@
 
 import { materialize as ioMaterialize } from '../io/types.ts'
 import type { ByteSource } from '../io/types.ts'
-import { OperandKind } from './spec/types.ts'
 import type { CommandSpec } from './spec/types.ts'
 import { lstripSlash } from '../utils/slash.ts'
 
@@ -48,7 +47,7 @@ export function stripPrefixFromPathKwargs(
   if (prefix === '') return kwargs
   const result: Record<string, string | boolean | number | string[]> = { ...kwargs }
   for (const opt of spec.options) {
-    if (opt.valueKind !== OperandKind.PATH) continue
+    if (opt.type !== 'path') continue
     for (const flagName of [opt.short, opt.long]) {
       if (flagName === null) continue
       const clean = flagName.replace(/^-+/, '')

@@ -14,8 +14,8 @@
 
 import { resolvePath } from '../../utils/path.ts'
 import { type CompiledSpec, compileSpec, expandLong } from './compile.ts'
-import { flagKwargName, INT_VALUE, NUMERIC_SHORT } from './constants.ts'
-import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
+import { FLOAT_VALUE, flagKwargName, INT_VALUE, NUMERIC_SHORT } from './constants.ts'
+import { type CommandSpec, type ValueType, ParsedArgs } from './types.ts'
 
 // Record a value flag occurrence under its canonical dest. Both spellings
 // of one option land on the same key, so the last occurrence wins
@@ -127,7 +127,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // argv slots (filteredArgv drops --cache tokens, rawArgs keeps only
   // operands); kinds must be written at the original positions or one
   // dropped token shifts every later kind onto the wrong word.
-  const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
+  const wordKinds: (ValueType | null)[] = new Array<ValueType | null>(argv.length).fill(null)
   const warnings: string[] = []
   const invalidOptions: string[] = []
   const ambiguousOptions: [string, readonly string[]][] = []
@@ -136,7 +136,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
   // flag never corrupts pattern/path classification.
-  const lenientDashOperands = cs.restKind === OperandKind.TEXT
+  const lenientDashOperands = cs.restKind !== null && cs.restKind !== 'path'
   i = 0
   let endOfFlags = false
 
@@ -332,6 +332,14 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       if (!INT_VALUE.test(part)) invalidIntOptions.push([destName, part])
     }
   }
+  const invalidFloatOptions: [string, string][] = []
+  for (const destName of cs.floatDests) {
+    const value = flags[destName]
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!FLOAT_VALUE.test(part)) invalidFloatOptions.push([destName, part])
+    }
+  }
 
   const invalidValueOptions: [string, string, readonly string[]][] = []
   for (const [destName, allowed] of cs.choicesByDest) {
@@ -345,35 +353,35 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const missingRequiredOptions = cs.requiredDests.filter((destName) => !(destName in flags))
 
-  const positional: OperandKind[] = spec.positional
+  const positional: ValueType[] = spec.positional
     .filter((op) => !op.providedBy.some((name) => cs.destOf(name) in flags))
-    .map((op) => op.kind)
+    .map((op) => op.type)
 
   // Overflow operands past the declared positional slots pass through
   // classified like the last slot (TEXT when there is none), so a
   // fixed-arity command receives them and raises its own extra-operand
   // UsageError (#452). The parser classifies, it never drops or raises.
-  const overflowKind: OperandKind = positional.at(-1) ?? OperandKind.TEXT
+  const overflowKind: ValueType = positional.at(-1) ?? 'str'
 
-  const classified: [string, OperandKind][] = []
-  const rawOperands: [string, OperandKind][] = []
+  const classified: [string, ValueType][] = []
+  const rawOperands: [string, ValueType][] = []
   for (let j = 0; j < rawArgs.length; j++) {
     const arg = rawArgs[j]
     if (arg === undefined) continue
-    let kind: OperandKind
+    let kind: ValueType
     if (j < positional.length) {
-      kind = positional[j] ?? OperandKind.TEXT
+      kind = positional[j] ?? 'str'
     } else if (cs.restKind !== null) {
       kind = cs.restKind
     } else {
       kind = overflowKind
     }
-    if (kind === OperandKind.PATH) {
-      classified.push([resolvePath(arg, cwd), OperandKind.PATH])
-      rawOperands.push([arg, OperandKind.PATH])
+    if (kind === 'path') {
+      classified.push([resolvePath(arg, cwd), 'path'])
+      rawOperands.push([arg, 'path'])
     } else {
-      classified.push([arg, OperandKind.TEXT])
-      rawOperands.push([arg, OperandKind.TEXT])
+      classified.push([arg, kind])
+      rawOperands.push([arg, kind])
     }
     const origIdx = rawIndices[j]
     if (origIdx !== undefined && origIdx >= 0) wordKinds[origIdx] = kind
@@ -381,7 +389,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const pathFlagValues: string[] = []
   for (const [flagName, kind] of cs.kindByDest) {
-    if (kind !== OperandKind.PATH || !(flagName in flags)) continue
+    if (kind !== 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
     if (Array.isArray(val)) {
       const resolvedList = val.map((part) => resolvePath(part, cwd))
@@ -396,7 +404,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const textFlagValues: string[] = []
   for (const [flagName, kind] of cs.kindByDest) {
-    if (kind !== OperandKind.TEXT || !(flagName in flags)) continue
+    if (kind === 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
     if (Array.isArray(val)) {
       textFlagValues.push(...val)
@@ -419,6 +427,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     needsValueOptions,
     invalidValueOptions,
     invalidIntOptions,
+    invalidFloatOptions,
     missingRequiredOptions,
     wordKinds,
   })

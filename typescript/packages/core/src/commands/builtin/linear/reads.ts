@@ -26,8 +26,7 @@ import {
   resolveIssueId,
   resolveTeam,
   searchIssues,
-  type LinearTransport,
-} from '../../../core/linear/_client.ts'
+  type LinearTransport } from '../../../core/linear/_client.ts'
 import {
   buildProjectIssue,
   normalizeComment,
@@ -39,8 +38,7 @@ import {
   normalizeTeam,
   normalizeUser,
   toJsonBytes,
-  type NormalizedProjectIssue,
-} from '../../../core/linear/normalize.ts'
+  type NormalizedProjectIssue } from '../../../core/linear/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
@@ -48,9 +46,8 @@ import {
   command,
   type CommandFnResult,
   type CommandOpts,
-  type RegisteredCommand,
-} from '../../config.ts'
-import { CommandSpec, OperandKind, Operand, Option } from '../../spec/types.ts'
+  type RegisteredCommand } from '../../config.ts'
+import { CommandSpec, Operand, Option } from '../../spec/types.ts'
 
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/
 
@@ -63,18 +60,15 @@ interface LinearRead {
 }
 
 const SPEC_NONE = new CommandSpec({})
-const SPEC_ARG = new CommandSpec({ rest: new Operand({ kind: OperandKind.TEXT }) })
+const SPEC_ARG = new CommandSpec({ rest: new Operand({ type: 'str' }) })
 const SPEC_TEAM = new CommandSpec({
-  options: [new Option({ long: '--team', valueKind: OperandKind.TEXT })],
-})
+  options: [new Option({ long: '--team', type: 'str' })] })
 const SPEC_TEAM_ARG = new CommandSpec({
-  options: [new Option({ long: '--team', valueKind: OperandKind.TEXT })],
-  rest: new Operand({ kind: OperandKind.TEXT }),
-})
+  options: [new Option({ long: '--team', type: 'str' })],
+  rest: new Operand({ type: 'str' }) })
 const SEARCH_SPEC = new CommandSpec({
-  options: [new Option({ long: '--query', valueKind: OperandKind.TEXT })],
-  rest: new Operand({ kind: OperandKind.TEXT }),
-})
+  options: [new Option({ long: '--query', type: 'str' })],
+  rest: new Operand({ type: 'str' }) })
 
 function first(texts: string[], label: string): string {
   const value = texts[0]
@@ -182,8 +176,7 @@ async function runProjectList(
         teamId,
         teamKey: teamStr(team, 'key'),
         teamName: teamStr(team, 'name'),
-        issues: rows,
-      }),
+        issues: rows }),
     )
   }
   return toJsonBytes(payload)
@@ -206,8 +199,7 @@ async function runProjectGet(
           teamId,
           teamKey: teamStr(team, 'key'),
           teamName: teamStr(team, 'name'),
-          issues: rows,
-        }),
+          issues: rows }),
       )
     }
   }
@@ -351,8 +343,7 @@ const LINEAR_READS: readonly LinearRead[] = [
   {
     name: 'linear document get',
     runner: (a, t, o) => runDocumentGet(a, t, o),
-    spec: SPEC_TEAM_ARG,
-  },
+    spec: SPEC_TEAM_ARG },
   { name: 'linear search', runner: (a, t, o) => runSearch(a, t, o), spec: SEARCH_SPEC },
 ]
 
@@ -372,8 +363,7 @@ export function makeLinearReadCommands(): RegisteredCommand[] {
         ): Promise<CommandFnResult> => {
           const data = await entry.runner(accessor as LinearAccessor, texts, opts)
           return [data, new IOResult()]
-        },
-      }),
+        } }),
     )
   }
   return commands
