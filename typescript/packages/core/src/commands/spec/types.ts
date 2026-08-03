@@ -59,7 +59,7 @@ export interface OptionInit {
    * through untouched; 'int'/'float' values are refused at parse time
    * when they are not numbers (the portable numeric core shared by both
    * languages). The bag holds the string either way: commands read it
-   * through FlagView.asInt, the established mirage convention.
+   * through FlagView.asInt / asFloat.
    */
   type?: ValueType
   /** Treat "-<digits>" as this flag's value (e.g. head -5). */
@@ -367,6 +367,24 @@ export class FlagView {
       throw new Error(`flag '${name}' expects an integer, got '${value}'`)
     }
     return Number.parseInt(text.replaceAll('_', ''), 10)
+  }
+
+  asFloat(name: string): number | undefined {
+    const value = this.flags[this.key(name)]
+    if (typeof value === 'number') return value
+    if (typeof value !== 'string') return undefined
+    // All-or-nothing like Python's float(), mirroring asInt: parseFloat
+    // would take the numeric prefix of '2.5x' and hand back NaN for
+    // 'abc', and NaN still satisfies `number`.
+    const text = value.trim()
+    if (
+      !/^[+-]?(?:\d+(?:_\d+)*(?:\.(?:\d+(?:_\d+)*)?)?|\.\d+(?:_\d+)*)(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(
+        text,
+      )
+    ) {
+      throw new Error(`flag '${name}' expects a number, got '${value}'`)
+    }
+    return Number.parseFloat(text.replaceAll('_', ''))
   }
 
   asStr(name: string): string | undefined {

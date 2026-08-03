@@ -74,7 +74,7 @@ class Option:
             shapes are the portable core shared by both languages (sign
             plus digits; no underscores, inf, or nan). The bag holds the
             string either way: commands read it through
-            ``FlagView.as_int``, the established mirage convention, and
+            ``FlagView.as_int`` / ``as_float``, and
             builtins whose GNU tool words its own numeric refusal
             (``head: invalid number of lines``) keep ``"str"``.
         numeric_shorthand (bool): treat "-<digits>" as this flag's value
@@ -195,6 +195,14 @@ class FlagView:
         if isinstance(value, int):
             return value
         return int(value) if isinstance(value, str) else None
+
+    def as_float(self, name: str) -> float | None:
+        value = self._flags.get(self._key(name))
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        return float(value) if isinstance(value, str) else None
 
     def as_str(self, name: str) -> str | None:
         value = self._flags.get(self._key(name))

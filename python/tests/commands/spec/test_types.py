@@ -77,3 +77,12 @@ def test_flag_view_bool_never_reads_as_int():
     fl = FlagView({"append": True})
     assert fl.as_int("append") is None
     assert fl.as_bool("append") is True
+
+
+def test_flag_view_float_reads():
+    fl = FlagView({"ratio": "2.5", "rate": "1e3", "verbose": 3})
+    assert fl.as_float("ratio") == 2.5
+    assert fl.as_float("rate") == 1000.0
+    assert fl.as_float("verbose") == 3.0
+    assert fl.as_float("missing") is None
+    assert FlagView({"append": True}).as_float("append") is None

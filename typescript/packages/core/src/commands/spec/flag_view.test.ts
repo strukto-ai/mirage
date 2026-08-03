@@ -49,6 +49,22 @@ describe('FlagView', () => {
     expect(new FlagView({ m: '1_0' }).asInt('m')).toBe(10)
   })
 
+  it('rejects a value that is not wholly a number', () => {
+    expect(() => new FlagView({ r: '5x' }).asFloat('r')).toThrow(/expects a number/)
+    expect(() => new FlagView({ r: 'abc' }).asFloat('r')).toThrow(/expects a number/)
+    expect(() => new FlagView({ r: '' }).asFloat('r')).toThrow(/expects a number/)
+  })
+
+  it('accepts the forms Python float() accepts', () => {
+    expect(new FlagView({ r: '2.5' }).asFloat('r')).toBe(2.5)
+    expect(new FlagView({ r: ' 1e3 ' }).asFloat('r')).toBe(1000)
+    expect(new FlagView({ r: '-.5' }).asFloat('r')).toBe(-0.5)
+    expect(new FlagView({ r: '1_000.5' }).asFloat('r')).toBe(1000.5)
+    expect(new FlagView({ r: 3 }).asFloat('r')).toBe(3)
+    expect(new FlagView({ append: true }).asFloat('append')).toBeUndefined()
+    expect(new FlagView({}).asFloat('r')).toBeUndefined()
+  })
+
   it('coerces a single string to a one-element list', () => {
     expect(new FlagView({ e: 'solo' }).asList('e')).toEqual(['solo'])
   })

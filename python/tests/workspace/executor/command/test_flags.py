@@ -57,3 +57,16 @@ def test_option_error_reports_the_first_scan_error_like_gnu():
     refusal = option_error("grep", invalid_first)
     assert refusal is not None
     assert refusal[0].startswith(b"grep: unrecognized option '--bogus'")
+
+
+def test_option_error_reports_numeric_conversion_before_choices():
+    # Numeric-typed values before choices, argparse's order, matching
+    # the walk's _finish_node: a non-numeric value on a float option
+    # that also declares choices refuses the conversion, not the list.
+    spec = CommandSpec(
+        options=(Option(long="--ratio", type="float", choices=("0.5",
+                                                               "1.0")), ))
+    parsed = parse_flags(["--ratio", "5x", "p"], spec, "cmd", "/")
+    refusal = option_error("cmd", parsed)
+    assert refusal is not None
+    assert b"invalid float value: '5x'" in refusal[0]

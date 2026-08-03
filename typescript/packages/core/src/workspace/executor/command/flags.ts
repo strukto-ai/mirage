@@ -153,12 +153,16 @@ export function optionError(
   if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
   if (ambiguousFirst !== undefined) return ambiguousOptionError(cmdName, ...ambiguousFirst)
   if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
-  const badValue = invalidValue[0]
-  if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
+  // Numeric-typed values before choices, argparse's order (choices are
+  // checked against the converted value), matching the walk's finishNode:
+  // a non-numeric value on an int/float option that also declares choices
+  // reports the conversion failure, not the choice list.
   const badInt = invalidInt[0]
   if (badInt !== undefined) return invalidIntError(cmdName, ...badInt)
   const badFloat = invalidFloat[0]
   if (badFloat !== undefined) return invalidFloatError(cmdName, ...badFloat)
+  const badValue = invalidValue[0]
+  if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
   if (missingRequired.length > 0) return missingRequiredError(cmdName, missingRequired[0] ?? '')
   return null
 }

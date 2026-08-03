@@ -170,15 +170,19 @@ def option_error(cmd_name: str,
         return ambiguous_option_error(cmd_name, token, candidates)
     if parsed.needs_value_options:
         return missing_value_error(cmd_name, parsed.needs_value_options[0])
-    if parsed.invalid_value_options:
-        option, value, choices = parsed.invalid_value_options[0]
-        return invalid_argument_error(cmd_name, option, value, choices)
+    # Numeric-typed values before choices, argparse's order (choices are
+    # checked against the converted value), matching the walk's
+    # _finish_node: a non-numeric value on an int/float option that also
+    # declares choices reports the conversion failure, not the choice list.
     if parsed.invalid_int_options:
         option, value = parsed.invalid_int_options[0]
         return invalid_int_error(cmd_name, option, value)
     if parsed.invalid_float_options:
         option, value = parsed.invalid_float_options[0]
         return invalid_float_error(cmd_name, option, value)
+    if parsed.invalid_value_options:
+        option, value, choices = parsed.invalid_value_options[0]
+        return invalid_argument_error(cmd_name, option, value, choices)
     if parsed.missing_required_options:
         return missing_required_error(cmd_name,
                                       parsed.missing_required_options[0])
