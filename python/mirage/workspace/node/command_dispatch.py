@@ -18,6 +18,7 @@ from typing import Any
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.policy import CommandContext
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.types import NodeType as NT
@@ -26,6 +27,7 @@ from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
+from mirage.workspace.executor.command.routing import path_flag_scopes
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
@@ -261,6 +263,31 @@ async def _run_argv(
     name = argv.name
     args = list(argv.args)
     operands = list(argv.operands)
+
+    # ── admission policies ──────────────────────
+    # The one chokepoint every command class passes through: shell
+    # builtins, namespace-routed commands (touch/chmod/ln -s), job
+    # builtins, shell functions, and mount commands all route below, so
+    # the hook must fire here, not in handle_command. Paths are the
+    # operands as typed plus path-valued flags (shuf -o DEST); refusals
+    # win over flag parsing, routing, and runtime placement.
+    if name:
+        scopes = [p for p in operands if isinstance(p, PathSpec)]
+        scopes.extend(path_flag_scopes(name, args, session.cwd))
+        deny = await registry.policies.pre_command(
+            CommandContext(command=name,
+                           paths=tuple(scopes),
+                           argv=tuple(args),
+                           cwd=session.cwd,
+                           registry=registry))
+        if deny is not None:
+            err = deny.message.encode()
+            cmd_str = " ".join([name, *args])
+            return None, IOResult(exit_code=deny.exit_code,
+                                  stderr=err), ExecutionNode(
+                                      command=cmd_str,
+                                      exit_code=deny.exit_code,
+                                      stderr=err)
 
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.

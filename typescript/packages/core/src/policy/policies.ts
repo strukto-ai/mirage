@@ -39,9 +39,20 @@ export class Policies {
     this.policies = [...(policies ?? [])]
   }
 
-  /** Register a policy (or a declarative spec) after the existing ones. */
+  /**
+   * Register a policy (or a declarative spec) after the existing ones.
+   * The discriminator is the hook surface, not the `reason` field: an
+   * entry defining any hook is a Policy even if it also carries a
+   * `reason` property (Python distinguishes with isinstance; this is
+   * the structural equivalent).
+   */
   add(entry: Policy | GuardSpec): void {
-    this.policies.push('reason' in entry ? new SpecPolicy(entry) : entry)
+    const hooked = typeof (entry as Policy).preCommand === 'function'
+    if (!hooked && 'reason' in entry) {
+      this.policies.push(new SpecPolicy(entry))
+      return
+    }
+    this.policies.push(entry as Policy)
   }
 
   /** Fire preCommand across the policies; the first Deny wins. */

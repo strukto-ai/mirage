@@ -198,6 +198,13 @@ function parseGuards(entries: unknown): GuardSpec[] {
       throw new Error('each guard must be a mapping with a `reason`')
     }
     const block = entry as Record<string, unknown>
+    // Mirror Python's extra="forbid": a typo like `path:` silently
+    // widening the guard into an unconditional denial must fail loud.
+    for (const key of Object.keys(block)) {
+      if (key !== 'reason' && key !== 'commands' && key !== 'paths') {
+        throw new Error(`unknown guard key \`${key}\` (allowed: reason, commands, paths)`)
+      }
+    }
     const reason = block.reason
     if (typeof reason !== 'string' || reason === '') {
       throw new Error('each guard needs a non-empty string `reason`')

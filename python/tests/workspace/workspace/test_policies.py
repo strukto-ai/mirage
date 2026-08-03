@@ -77,3 +77,51 @@ async def test_policies_constructor_param_accepts_instances():
         assert result.stderr == b"python3: interpreters are off\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_guards_cover_shell_builtins_and_namespace_routes():
+    # source is a dispatch-level shell builtin and touch is
+    # namespace-routed; neither reaches handle_command, so this pins
+    # the hook at the dispatch chokepoint.
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   guards=[
+                       GuardSpec(reason="disabled", commands=("source", )),
+                       GuardSpec(reason="frozen",
+                                 commands=("touch", ),
+                                 paths=("/data/prod/*", )),
+                   ])
+    try:
+        result = await ws.execute("source /data/setup.sh")
+        assert result.exit_code == 1
+        assert result.stderr == b"source: disabled\n"
+        result = await ws.execute("touch /data/prod/x")
+        assert result.exit_code == 1
+        assert b"frozen" in result.stderr
+        ok = await ws.execute("touch /data/dev-x && echo done")
+        assert b"done" in ok.stdout
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_guards_cover_path_valued_flags():
+    # shuf discovers its output path from -o, not a positional operand;
+    # the policy context must include flag-valued paths.
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   guards=[
+                       GuardSpec(reason="prod is protected",
+                                 commands=("shuf", ),
+                                 paths=("/data/prod/*", ))
+                   ])
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        result = await ws.execute("shuf -e a -o /data/prod/out")
+        assert result.exit_code == 1
+        assert b"prod is protected" in result.stderr
+        listing = await ws.execute("ls /data/prod")
+        assert b"out" not in listing.stdout
+    finally:
+        await ws.close()

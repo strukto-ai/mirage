@@ -149,6 +149,19 @@ describe('Policies', () => {
     policies.add(new IllegalReturn())
     await expect(policies.preCommand(ctx('ls'))).rejects.toThrow(/IllegalReturn/)
   })
+
+  it('an entry with a hook is a policy even if it carries reason', async () => {
+    const policies = new Policies()
+    const entry: Policy & { reason: string } = {
+      reason: 'looks like a spec',
+      preCommand: (c: CommandContext) =>
+        c.command === 'weird' ? { kind: 'deny', message: 'nope\n', exitCode: 1 } : null,
+    }
+    policies.add(entry)
+    // Misread as a GuardSpec this would deny EVERY command.
+    expect(await policies.preCommand(ctx('ls'))).toBeNull()
+    expect((await policies.preCommand(ctx('weird')))?.message).toBe('nope\n')
+  })
 })
 
 describe('workspace policies', () => {
@@ -194,6 +207,46 @@ describe('workspace policies', () => {
       const refused = await ws.execute("python3 -c 'print(1)'")
       expect(refused.exitCode).toBe(1)
       expect(new TextDecoder().decode(refused.stderr)).toBe('python3: interpreters are off\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('guards cover shell builtins and namespace routes', async () => {
+    // source is a dispatch-level shell builtin and touch is
+    // namespace-routed; neither reaches handleCommand, so this pins
+    // the hook at the dispatch chokepoint.
+    const ws = executableWorkspace([
+      { reason: 'disabled', commands: ['source'] },
+      { reason: 'frozen', commands: ['touch'], paths: ['/data/prod/*'] },
+    ])
+    try {
+      const refused = await ws.execute('source /data/setup.sh')
+      expect(refused.exitCode).toBe(1)
+      expect(new TextDecoder().decode(refused.stderr)).toBe('source: disabled\n')
+      const frozen = await ws.execute('touch /data/prod/x')
+      expect(frozen.exitCode).toBe(1)
+      expect(new TextDecoder().decode(frozen.stderr)).toContain('frozen')
+      const ok = await ws.execute('touch /data/dev-x && echo done')
+      expect(new TextDecoder().decode(ok.stdout)).toContain('done')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('guards cover path-valued flags', async () => {
+    // shuf discovers its output path from -o, not a positional
+    // operand; the policy context must include flag-valued paths.
+    const ws = executableWorkspace([
+      { reason: 'prod is protected', commands: ['shuf'], paths: ['/data/prod/*'] },
+    ])
+    try {
+      await ws.execute('mkdir -p /data/prod')
+      const refused = await ws.execute('shuf -e a -o /data/prod/out')
+      expect(refused.exitCode).toBe(1)
+      expect(new TextDecoder().decode(refused.stderr)).toContain('prod is protected')
+      const listing = await ws.execute('ls /data/prod')
+      expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
     } finally {
       await ws.close()
     }

@@ -138,29 +138,10 @@ export async function handleCommand(
     if (p instanceof PathSpec) pathScopes.push(p)
   }
   const rawArgv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
-  const deny = await registry.policies.preCommand({
-    command: cmdName,
-    paths: pathScopes,
-    argv: rawArgv,
-    cwd: session.cwd,
-    registry,
-  })
-  if (deny !== null) {
-    const errBytes = new TextEncoder().encode(deny.message)
-    const exitCode = deny.exitCode ?? 1
-    return [
-      null,
-      new IOResult({ exitCode, stderr: errBytes }),
-      new ExecutionNode({
-        command: cmdStr,
-        stderr: errBytes,
-        exitCode,
-      }),
-    ]
-  }
 
   // Unknown name: nobody registers it; fail like bash before any
-  // backend work. The admission policies stay ahead of this so
+  // backend work. The admission policies (fired upstream at the
+  // dispatch chokepoint) stay ahead of this so
   // protective refusals keep their specific messages.
   if (route(cmdName, session, registry) === Consumer.UNKNOWN) {
     const errBytes = new TextEncoder().encode(`${cmdName}: command not found\n`)

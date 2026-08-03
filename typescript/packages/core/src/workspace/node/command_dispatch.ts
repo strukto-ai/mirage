@@ -36,6 +36,7 @@ import { expandArgv } from '../expand/argv.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { handleCommand } from '../executor/command.ts'
+import { pathFlagScopes } from '../executor/command/routing.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from '../executor/policy/safeguard.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
@@ -390,6 +391,41 @@ async function runArgv(
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
+
+  // Admission policies. The one chokepoint every command class passes
+  // through: shell builtins, namespace-routed commands (touch/chmod/
+  // ln -s), job builtins, shell functions, and mount commands all
+  // route below, so the hook must fire here, not in handleCommand.
+  // Paths are the operands as typed plus path-valued flags (shuf -o
+  // DEST); refusals win over flag parsing, routing, and runtime
+  // placement.
+  if (name !== '') {
+    const scopes: PathSpec[] = []
+    for (const p of operands) {
+      if (p instanceof PathSpec) scopes.push(p)
+    }
+    scopes.push(...pathFlagScopes(name, args, session.cwd))
+    const deny = await registry.policies.preCommand({
+      command: name,
+      paths: scopes,
+      argv: args,
+      cwd: session.cwd,
+      registry,
+    })
+    if (deny !== null) {
+      const err = new TextEncoder().encode(deny.message)
+      const exitCode = deny.exitCode ?? 1
+      return [
+        null,
+        new IOResult({ exitCode, stderr: err }),
+        new ExecutionNode({
+          command: [name, ...args].join(' '),
+          stderr: err,
+          exitCode,
+        }),
+      ]
+    }
+  }
 
   // Unsupported bash builtins. Constructs the parser accepts but the
   // executor cannot honor. Returning a clear error lets LLMs detect a

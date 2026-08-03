@@ -427,4 +427,14 @@ describe('configToWorkspaceArgs', () => {
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reason/)
   })
+
+  it('a guard with an unknown key fails loud', async () => {
+    // A typo like `path:` would otherwise widen the guard into an
+    // unconditional denial (mirrors Python's extra="forbid").
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      guards: [{ reason: 'x', path: ['/data/prod/*'] }],
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown guard key/)
+  })
 })
