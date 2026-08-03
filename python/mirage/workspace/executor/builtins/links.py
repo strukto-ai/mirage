@@ -114,6 +114,12 @@ async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
     stat goes through dispatch rather than one backend because a link
     may point into another mount.
 
+    Only the two ways a link can legitimately have no target are mapped
+    to None: a loop (ELOOP) and a missing target, the latter by
+    ``_stat_or_none``. Every other backend failure propagates, because a
+    permission or connection error is not a dangling link and reporting
+    it as one would print the link as ``-type l`` and exit 0.
+
     Args:
         namespace (Namespace): addressing authority holding the links.
         dispatch (Callable): op dispatcher.
@@ -126,10 +132,7 @@ async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
     spec = PathSpec(virtual=target,
                     directory=target[:target.rfind("/") + 1] or "/",
                     resource_path="")
-    try:
-        return await _stat_or_none(dispatch, spec)
-    except (OSError, ValueError):
-        return None
+    return await _stat_or_none(dispatch, spec)
 
 
 async def handle_readlink(

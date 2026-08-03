@@ -294,14 +294,14 @@ export async function linkTargetStat(
   try {
     target = namespace.follow(virtual)
   } catch {
+    // A loop (ELOOP) is one of the two ways a link legitimately has no
+    // target; statOrNull maps the other (missing). Every other backend
+    // failure propagates, because a permission or connection error is
+    // not a dangling link and reporting it as one would print the link
+    // as -type l and exit 0.
     return null
   }
-  let stat: FileStat | null
-  try {
-    stat = await statOrNull(dispatch, PathSpec.fromStrPath(target, ''))
-  } catch {
-    return null
-  }
+  const stat = await statOrNull(dispatch, PathSpec.fromStrPath(target, ''))
   if (stat === null || overlay === null) return stat
   return overlay(target, stat)
 }
