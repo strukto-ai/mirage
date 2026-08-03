@@ -15,6 +15,8 @@
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { JOB_BUILTINS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../route/constants.ts'
+import { z } from 'zod'
+
 import type { CLIInstall } from './types.ts'
 
 /**
@@ -68,7 +70,17 @@ export class CLIRegistry {
       }
       return null
     }
-    return spec.configModel(config ?? {})
+    const model = spec.configModel
+    if (model instanceof z.ZodObject) {
+      // Unknown keys fail loud (a typo'd YAML key must not be silently
+      // ignored), mirroring the Python pydantic arm.
+      const unknown = Object.keys(config ?? {}).filter((k) => !(k in model.shape))
+      if (unknown.length > 0) {
+        throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
+      }
+      return model.parse(config ?? {})
+    }
+    return model(config ?? {})
   }
 
   /** Remove an installed CLI; its head word stops resolving (127). */
@@ -87,5 +99,10 @@ export class CLIRegistry {
   /** Snapshot of the installed CLIs keyed by head word. */
   items(): Map<string, CLIInstall> {
     return new Map(this.installs)
+  }
+
+  /** The installed head words. */
+  names(): ReadonlySet<string> {
+    return new Set(this.installs.keys())
   }
 }

@@ -25,8 +25,15 @@ const WORD_TYPES: ReadonlySet<string> = new Set([
   'concatenation',
 ])
 
-/** Distill a parsed line into one ParsedCommand per command. */
-export function parsedCommands(root: TSNodeLike): ParsedCommand[] {
+/**
+ * Distill a parsed line into one ParsedCommand per command. `clis`
+ * holds the installed CLI head words; a command whose name is one of
+ * them carries it as `cli`.
+ */
+export function parsedCommands(
+  root: TSNodeLike,
+  clis: ReadonlySet<string> = new Set(),
+): ParsedCommand[] {
   const commands: ParsedCommand[] = []
   const stack: TSNodeLike[] = [root]
   while (stack.length > 0) {
@@ -43,6 +50,7 @@ export function parsedCommands(root: TSNodeLike): ParsedCommand[] {
           // key (`toString`) must not report as a builtin.
           builtin: Object.hasOwn(SPECS, command),
           paths: words.slice(1).filter((w) => w.startsWith('/')),
+          cli: clis.has(command) ? command : null,
         })
       }
     }

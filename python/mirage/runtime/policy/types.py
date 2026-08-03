@@ -29,12 +29,17 @@ class ParsedCommand:
         words (tuple[str, ...]): every word of the command, name first.
         builtin (bool): whether the command has a builtin spec.
         paths (tuple[str, ...]): absolute-path operands.
+        cli (str | None): the installed CLI whose head word ``command``
+            is, None otherwise. Lets a policy steer an installed name
+            between the virtual CLI and a runtime capturing the same
+            word.
     """
 
     command: str
     words: tuple[str, ...]
     builtin: bool
     paths: tuple[str, ...]
+    cli: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +122,7 @@ class PolicyContext:
         identical in both languages, so a script in any evaluator's
         language (and any transport, in-process or remote) receives
         the same structure. Keys: line, commands (command/words/
-        builtin/paths per stage), command, builtin, cwd, env,
+        builtin/paths/cli per stage), command, builtin, cwd, env,
         session_id, agent_id, mounts, plus runtime (name/captures)
         for per-runtime scripts. from_dict is the inverse, so a
         payload can be stored as JSON and replayed.
@@ -134,6 +139,7 @@ class PolicyContext:
                 "words": list(c.words),
                 "builtin": c.builtin,
                 "paths": list(c.paths),
+                "cli": c.cli,
             } for c in self.commands],
             "command":
             self.command,
@@ -172,10 +178,12 @@ class PolicyContext:
         return cls(
             line=str(payload["line"]),
             commands=tuple(
-                ParsedCommand(command=str(c["command"]),
-                              words=tuple(c["words"]),
-                              builtin=bool(c["builtin"]),
-                              paths=tuple(c["paths"]))
+                ParsedCommand(
+                    command=str(c["command"]),
+                    words=tuple(c["words"]),
+                    builtin=bool(c["builtin"]),
+                    paths=tuple(c["paths"]),
+                    cli=(str(c["cli"]) if c.get("cli") is not None else None))
                 for c in payload["commands"]),
             command=str(payload["command"]),
             builtin=bool(payload["builtin"]),

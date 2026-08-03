@@ -18,11 +18,16 @@ import json
 import tarfile
 
 import pytest
+from pydantic import BaseModel, SecretStr
 
+from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
+from mirage.commands.cli.types import CLISpec
+from mirage.io import IOResult
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import MountMode
+from mirage.resource.secrets import REDACTED_SECRET
+from mirage.types import CLIKey, MountMode, StateKey
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
@@ -453,3 +458,70 @@ def test_redis_round_trip_filenames_with_spaces(tmp_path):
             for key in sc.scan_iter(f"{prefix}*"):
                 sc.delete(key)
         sc.close()
+
+
+class _CliCfg(BaseModel):
+    token: SecretStr
+    channel: str = "general"
+
+
+async def _cli_echo(config, paths, *texts, **flags):
+    return f"tok={config.token.get_secret_value()}\n".encode(), IOResult()
+
+
+_CLI_SPEC = CLISpec(name="snapcli",
+                    config_model=_CliCfg,
+                    subcommands=(CLISpec(name="run", fn=_cli_echo), ))
+
+
+@pytest.mark.asyncio
+async def test_cli_registry_snapshots_with_redacted_config():
+    register_cli_spec(_CLI_SPEC)
+    try:
+        ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+        ws.register_cli("snapcli",
+                        _CLI_SPEC,
+                        config={
+                            "token": "sek",
+                            "channel": "eng"
+                        })
+        state = await to_state_dict(ws)
+        entry = state[StateKey.CLIS][0]
+        assert entry[CLIKey.NAME] == "snapcli"
+        assert entry[CLIKey.SPEC] == "snapcli"
+        assert entry[CLIKey.CONFIG] == {
+            "token": REDACTED_SECRET,
+            "channel": "eng"
+        }
+
+        with pytest.raises(ValueError, match="clis= must include"):
+            await Workspace.from_state(state)
+
+        ws2 = await Workspace.from_state(
+            state, clis={"snapcli": {
+                "token": "sek2",
+                "channel": "eng"
+            }})
+        io = await ws2.execute("snapcli run")
+        assert io.exit_code == 0
+        assert io.stdout == b"tok=sek2\n"
+        await ws.close()
+        await ws2.close()
+    finally:
+        unregister_cli_spec("snapcli")
+
+
+@pytest.mark.asyncio
+async def test_copy_shares_live_cli_secrets():
+    register_cli_spec(_CLI_SPEC)
+    try:
+        ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+        ws.register_cli("snapcli", _CLI_SPEC, config={"token": "sek"})
+        clone = await ws.copy()
+        io = await clone.execute("snapcli run")
+        assert io.exit_code == 0
+        assert io.stdout == b"tok=sek\n"
+        await ws.close()
+        await clone.close()
+    finally:
+        unregister_cli_spec("snapcli")

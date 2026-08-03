@@ -101,7 +101,7 @@ class PolicyRouter:
         has_scripts = any(entry.script is not None for entry in entries)
         if policy is None and not has_scripts:
             return None
-        commands = parsed_commands(ast)
+        commands = parsed_commands(ast, self._registry.clis.names())
         ctx = PolicyContext(
             line=command,
             commands=commands,

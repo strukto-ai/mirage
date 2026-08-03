@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Container
+
 import tree_sitter
 
 from mirage.commands.spec import SPECS
@@ -22,11 +24,15 @@ _WORD_TYPES = (NodeType.COMMAND_NAME, NodeType.WORD, NodeType.STRING,
                NodeType.RAW_STRING, NodeType.NUMBER, NodeType.CONCATENATION)
 
 
-def parsed_commands(ast: tree_sitter.Node) -> tuple[ParsedCommand, ...]:
+def parsed_commands(
+    ast: tree_sitter.Node, clis: Container[str] = frozenset()
+) -> tuple[ParsedCommand, ...]:
     """Distill a parsed line into one ParsedCommand per command.
 
     Args:
         ast (tree_sitter.Node): the parsed tree-sitter root node.
+        clis (Container[str]): installed CLI head words; a command whose
+            name is one of them carries it as ``cli``.
     """
     commands: list[ParsedCommand] = []
     stack = [ast]
@@ -43,6 +49,7 @@ def parsed_commands(ast: tree_sitter.Node) -> tuple[ParsedCommand, ...]:
                         words=words,
                         builtin=words[0] in SPECS,
                         paths=tuple(w for w in words[1:] if w.startswith("/")),
+                        cli=words[0] if words[0] in clis else None,
                     ))
         stack.extend(reversed(node.children))
     return tuple(commands)

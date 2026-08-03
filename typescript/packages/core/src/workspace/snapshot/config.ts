@@ -16,6 +16,7 @@ import type { ConsistencyPolicy, MountMode } from '../../types.ts'
 import type { Resource } from '../../resource/base.ts'
 
 export interface MountArgs {
+  clis?: Record<string, [string, Record<string, unknown> | null]>
   mountArgs: Record<string, [Resource, MountMode]>
   consistency: ConsistencyPolicy
   defaultSessionId: string | undefined

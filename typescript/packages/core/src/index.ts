@@ -632,6 +632,7 @@ export {
   CLISpec,
   type CLISpecInit,
   type CLIVerbFn,
+  type CLIConfigModel,
   type CLIVerbOpts,
   type WalkFlagBag,
   WalkResult,

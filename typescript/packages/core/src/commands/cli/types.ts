@@ -16,6 +16,8 @@ import type { ByteSource } from '../../io/types.ts'
 import type { CommandSafeguard, PathSpec } from '../../types.ts'
 import type { CommandFnResult } from '../config.ts'
 import { compileSpec } from '../spec/compile.ts'
+import type { ZodObject, ZodRawShape } from 'zod'
+
 import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
 
 /**
@@ -49,8 +51,15 @@ export interface CLISpecInit extends CommandSpecInit {
   subcommands?: readonly CLISpec[]
   write?: boolean
   safeguard?: CommandSafeguard | null
-  configModel?: ((input: Record<string, unknown>) => unknown) | null
+  configModel?: CLIConfigModel | null
 }
+
+/**
+ * The root config contract: a zod object schema (which doubles as the
+ * snapshot redaction schema, mirroring pydantic SecretStr fields) or a
+ * plain normalizer function (opaque: snapshots store its output as-is).
+ */
+export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 
 /**
  * One node of a program tree: argparse's parser/subparser as data.
@@ -76,7 +85,7 @@ export class CLISpec extends CommandSpec {
   readonly subcommands: readonly CLISpec[]
   readonly write: boolean
   readonly safeguard: CommandSafeguard | null
-  readonly configModel: ((input: Record<string, unknown>) => unknown) | null
+  readonly configModel: CLIConfigModel | null
 
   constructor(init: CLISpecInit) {
     super(init)

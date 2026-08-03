@@ -26,6 +26,7 @@ export const StateKey = Object.freeze({
   FINGERPRINTS: 'fingerprints',
   LIVE_ONLY_MOUNTS: 'live_only_mounts',
   NODES: 'nodes',
+  CLIS: 'clis',
 } as const)
 
 export const MountKey = Object.freeze({

@@ -152,3 +152,34 @@ describe('CLI dispatch e2e', () => {
     expect([res.exitCode, dec.decode(res.stdout)]).toEqual([0, 'sent[opt] to=x: hi\n'])
   })
 })
+
+describe('policy cli fact', () => {
+  it('the policy sees the installed head on ctx.commands', async () => {
+    const seen: (string | null)[] = []
+    const ram = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.WRITE,
+        ops,
+        shellParser: parser,
+        policy: (ctx) => {
+          seen.push(ctx.commands[0]?.cli ?? null)
+          if (ctx.commands[0]?.cli === 'slack-eng') return { deny: 'cli lines are frozen' }
+          return null
+        },
+      },
+    )
+    ws.registerCli('slack-eng', makeTree(), { token: 'tok' })
+    const r = await ws.execute('slack-eng message send -t x hi')
+    expect(r.exitCode).toBe(126)
+    expect(r.stderrText).toContain('policy denied')
+    expect(seen.at(-1)).toBe('slack-eng')
+    const ok = await ws.execute('echo unaffected')
+    expect(ok.exitCode).toBe(0)
+    expect(seen.at(-1)).toBeNull()
+    await ws.close()
+  })
+})

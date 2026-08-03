@@ -142,5 +142,5 @@ class Runtimes:
         bindings: Mapping[str, Runtime
                           | None] = (decision.bindings if decision is not None
                                      else self._registry.runtime_bindings)
-        commands = parsed_commands(ast)
+        commands = parsed_commands(ast, self._registry.clis.names())
         return whole_line_runtime(bindings, [c.command for c in commands])

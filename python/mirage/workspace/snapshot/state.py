@@ -19,10 +19,11 @@ from typing import Any
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.registry import REGISTRY, resolve_class
-from mirage.resource.secrets import has_redacted_secret
+from mirage.resource.secrets import (has_redacted_secret, redacted_config_dump,
+                                     revealed_config_dump)
 from mirage.shell.job_table import Job, JobStatus
-from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
-                          MountMode, ResourceName, ResourceStateKey,
+from mirage.types import (CacheKey, CLIKey, ConsistencyPolicy, JobKey,
+                          MountKey, MountMode, ResourceName, ResourceStateKey,
                           SessionKey, StateKey)
 from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
@@ -64,6 +65,15 @@ async def to_state_dict(ws) -> dict[str, Any]:
         if e.get("type") in (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE)
     ]
 
+    clis_state = [{
+        CLIKey.NAME:
+        name,
+        CLIKey.SPEC:
+        install.spec.name,
+        CLIKey.CONFIG: (redacted_config_dump(install.config)
+                        if install.config is not None else None),
+    } for name, install in ws._registry.clis.items().items()]
+
     finished_jobs = [
         _job_to_dict(j) for j in ws.job_table.list_jobs()
         if j.status != JobStatus.RUNNING
@@ -86,6 +96,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
             CacheKey.ENTRIES: cache_entries,
         },
         StateKey.HISTORY: history_events,
+        StateKey.CLIS: clis_state,
         StateKey.JOBS: finished_jobs,
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
@@ -96,16 +107,19 @@ async def to_state_dict(ws) -> dict[str, Any]:
     }
 
 
-def build_mount_args(state: dict[str, Any],
-                     resources: dict[str, Any] | None = None) -> MountArgs:
+def build_mount_args(
+        state: dict[str, Any],
+        resources: dict[str, Any] | None = None,
+        clis: dict[str, dict[str, Any]] | None = None) -> MountArgs:
     """Translate a state dict into Workspace constructor inputs.
 
     Validates that every mount with redacted secrets has a resource
-    override.
+    override, and every CLI installed with a redacted config has a
+    fresh config override.
     Does NOT construct a Workspace — that's the caller's job.
 
     Raises:
-        ValueError: if any redacted mount lacks an override, or
+        ValueError: if any redacted mount or CLI lacks an override, or
             if the snapshot is from an unsupported format version.
     """
     saved_version = state.get(StateKey.VERSION)
@@ -127,6 +141,19 @@ def build_mount_args(state: dict[str, Any],
             f"{missing}. These mounts were saved with redacted creds "
             "or transient connection state and need fresh resources.")
 
+    cli_overrides = clis or {}
+    cli_entries = state.get(StateKey.CLIS) or []
+    missing_clis = [
+        e[CLIKey.NAME] for e in cli_entries
+        if has_redacted_secret(e[CLIKey.CONFIG])
+        and e[CLIKey.NAME] not in cli_overrides
+    ]
+    if missing_clis:
+        raise ValueError(
+            "Workspace.load: clis= must include fresh configs for: "
+            f"{missing_clis}. These CLIs were saved with redacted "
+            "config secrets.")
+
     mount_args: dict[str, tuple[Any, ...]] = {}
     for m in state[StateKey.MOUNTS]:
         prefix = norm_mount_prefix(m[MountKey.PREFIX])
@@ -134,11 +161,18 @@ def build_mount_args(state: dict[str, Any],
                 if prefix in overrides else _construct_resource(m))
         mount_args[m[MountKey.PREFIX]] = (prov, MountMode(m[MountKey.MODE]))
 
+    cli_args = {
+        e[CLIKey.NAME]:
+        (e[CLIKey.SPEC], cli_overrides.get(e[CLIKey.NAME], e[CLIKey.CONFIG]))
+        for e in cli_entries
+    }
+
     return MountArgs(
         mount_args=mount_args,
         consistency=ConsistencyPolicy.LAZY,
         default_session_id=state[StateKey.DEFAULT_SESSION_ID],
         default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID),
+        clis=cli_args or None,
     )
 
 
@@ -311,6 +345,29 @@ def requires_resource_override(mount_state: dict[str, Any]) -> bool:
     config = resource_state.get(ResourceStateKey.CONFIG)
     config_cls = _config_class_for(_resource_class_for(mount_state))
     return has_redacted_secret(config, config_cls)
+
+
+def reusable_clis(ws, state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Fresh-config overrides a copy needs for secret-bearing CLIs.
+
+    A CLI saved with a redacted config cannot reinstall from the state
+    dict alone; a same-process copy still holds the live validated
+    config, so its secrets are revealed back into an override the way
+    remote mounts share their live resources.
+
+    Args:
+        ws: the origin workspace.
+        state (dict[str, Any]): the origin's state dict.
+    """
+    live = ws._registry.clis.items()
+    overrides: dict[str, dict[str, Any]] = {}
+    for e in state.get(StateKey.CLIS) or []:
+        name = e[CLIKey.NAME]
+        install = live.get(name)
+        if (has_redacted_secret(e[CLIKey.CONFIG]) and install is not None
+                and install.config is not None):
+            overrides[name] = revealed_config_dump(install.config)
+    return overrides
 
 
 def reusable_resources(mounts: list[Any], state: dict[str,

@@ -54,7 +54,7 @@ from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
                                        read_tar)
 from mirage.workspace.snapshot import snapshot as _write_snapshot
 from mirage.workspace.snapshot import to_state_dict
-from mirage.workspace.snapshot.state import reusable_resources
+from mirage.workspace.snapshot.state import reusable_clis, reusable_resources
 from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.workspace.build import (resolve_control_stores,
                                               wire_runtime_world)
@@ -167,7 +167,6 @@ class Workspace:
         self._registry.mount(HISTORY_PREFIX,
                              HistoryViewResource(self.observer),
                              MountMode.READ)
-
         self._ops = Ops(self._registry.ops_mounts(),
                         on_write=self._invalidate_after_write_by_path,
                         observer=self.observer,
@@ -501,6 +500,7 @@ class Workspace:
             source,
             *,
             resources: dict[str, Any] | None = None,
+            clis: dict[str, dict[str, Any]] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -525,12 +525,15 @@ class Workspace:
             source: filesystem path OR a readable file-like object.
             resources: {prefix: Resource} overrides for mounts saved
                 with redacted creds.
+            clis: {name: config} overrides for CLIs saved with
+                redacted config secrets.
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
         """
         return await cls.from_state(read_tar(source),
                                     resources=resources,
+                                    clis=clis,
                                     drift_policy=drift_policy)
 
     @classmethod
@@ -539,6 +542,7 @@ class Workspace:
             state: dict[str, Any],
             *,
             resources: dict[str, Any] | None = None,
+            clis: dict[str, dict[str, Any]] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -552,11 +556,13 @@ class Workspace:
             state: a state dict from ``to_state_dict`` or a version.
             resources: {prefix: Resource} overrides for mounts saved
                 with redacted creds.
+            clis: {name: config} overrides for CLIs saved with
+                redacted config secrets.
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
         """
-        ws = await cls._from_state(state, resources=resources)
+        ws = await cls._from_state(state, resources=resources, clis=clis)
         install_fingerprints(ws,
                              state.get(StateKey.FINGERPRINTS) or [],
                              drift_policy)
@@ -576,19 +582,23 @@ class Workspace:
         """
         state = await to_state_dict(self)
         resources = reusable_resources(self._registry.mounts(), state)
-        return await type(self)._from_state(state, resources=resources)
+        return await type(self)._from_state(state,
+                                            resources=resources,
+                                            clis=reusable_clis(self, state))
 
     @classmethod
     async def _from_state(
             cls,
             state: dict[str, Any],
             *,
-            resources: dict[str, Any] | None = None) -> "Workspace":
-        args = build_mount_args(state, resources)
+            resources: dict[str, Any] | None = None,
+            clis: dict[str, dict[str, Any]] | None = None) -> "Workspace":
+        args = build_mount_args(state, resources, clis)
         ws = cls(args.mount_args,
                  consistency=args.consistency,
                  session_id=args.default_session_id,
-                 agent_id=args.default_agent_id)
+                 agent_id=args.default_agent_id,
+                 clis=args.clis)
         if resources:
             ws._shared_resources = {id(r) for r in resources.values()}
         await apply_state_dict(ws, state)

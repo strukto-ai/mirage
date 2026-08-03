@@ -109,6 +109,12 @@ export interface FingerprintEntrySnapshot {
   revision?: string | null
 }
 
+export interface CLISnapshot {
+  name: string
+  spec: string
+  config: Record<string, unknown> | null
+}
+
 export interface WorkspaceStateDict {
   version: number
   mirage_version: string
@@ -139,4 +145,9 @@ export interface WorkspaceStateDict {
    * backwards compatibility with snapshots that predate the table.
    */
   nodes?: Record<string, NodeMetaSnapshot>
+  /**
+   * Installed CLIs (name, spec registry key, config with schema-declared
+   * secrets redacted). Optional for snapshots that predate the registry.
+   */
+  clis?: CLISnapshot[]
 }

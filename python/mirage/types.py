@@ -482,6 +482,7 @@ class StateKey(StrEnum):
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
     NODES = "nodes"
+    CLIS = "clis"
 
 
 class FileChangeKind(StrEnum):
@@ -636,6 +637,12 @@ class MountKey(StrEnum):
     CONSISTENCY = "consistency"
     RESOURCE_CLASS = "resource_class"
     RESOURCE_STATE = "resource_state"
+
+
+class CLIKey(StrEnum):
+    NAME = "name"
+    SPEC = "spec"
+    CONFIG = "config"
 
 
 class CacheKey(StrEnum):

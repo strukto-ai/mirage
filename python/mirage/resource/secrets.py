@@ -35,6 +35,16 @@ def redacted_config_dump(config: BaseModel) -> dict[str, Any]:
     return data
 
 
+def revealed_config_dump(config: BaseModel) -> dict[str, Any]:
+    data = config.model_dump(mode="json")
+    for name in secret_field_names(config):
+        value = getattr(config, name)
+        if value is None:
+            continue
+        data[name] = reveal_secret(value)
+    return data
+
+
 def secret_field_names(config: type[BaseModel] | BaseModel) -> list[str]:
     model = config if isinstance(config, type) else type(config)
     fields = model.model_fields

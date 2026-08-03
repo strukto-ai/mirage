@@ -18,7 +18,12 @@ import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+
+import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
+import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { secretStr } from '../resource/secrets.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { type JobTaskResult } from '../shell/job_table.ts'
@@ -352,5 +357,73 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(err?.message).toContain('/a/')
     expect(err?.message).toContain('/b/')
     await ws.close()
+  })
+})
+
+describe('cli registry snapshot', () => {
+  const cliEcho = (config: unknown) =>
+    [new TextEncoder().encode(`tok=${(config as { token: string }).token}\n`), new IOResult()] as [
+      Uint8Array,
+      IOResult,
+    ]
+
+  function makeCliSpec(): CLISpec {
+    return new CLISpec({
+      name: 'snapcli',
+      configModel: z.object({ token: secretStr(), channel: z.string().default('general') }),
+      subcommands: [new CLISpec({ name: 'run', fn: cliEcho })],
+    })
+  }
+
+  it('captures with schema-declared secrets redacted and restores via override', async () => {
+    const spec = makeCliSpec()
+    registerCliSpec(spec)
+    try {
+      const ws = buildWorkspace()
+      ws.registerCli('snapcli', spec, { token: 'sek', channel: 'eng' })
+      const state = await toStateDict(ws)
+      expect(state.clis).toEqual([
+        {
+          name: 'snapcli',
+          spec: 'snapcli',
+          config: { token: '<REDACTED>', channel: 'eng' },
+        },
+      ])
+
+      await expect(Workspace.fromState(state, { shellParser: parser })).rejects.toThrow(
+        /clis= must include/,
+      )
+
+      const ws2 = await Workspace.fromState(
+        state,
+        { shellParser: parser },
+        {},
+        { snapcli: { token: 'sek2', channel: 'eng' } },
+      )
+      const r = await ws2.execute('snapcli run')
+      expect(r.exitCode).toBe(0)
+      expect(r.stdoutText).toBe('tok=sek2\n')
+      await ws.close()
+      await ws2.close()
+    } finally {
+      unregisterCliSpec('snapcli')
+    }
+  })
+
+  it('copy shares live cli secrets', async () => {
+    const spec = makeCliSpec()
+    registerCliSpec(spec)
+    try {
+      const ws = buildWorkspace()
+      ws.registerCli('snapcli', spec, { token: 'sek' })
+      const clone = await ws.copy()
+      const r = await clone.execute('snapcli run')
+      expect(r.exitCode).toBe(0)
+      expect(r.stdoutText).toBe('tok=sek\n')
+      await ws.close()
+      await clone.close()
+    } finally {
+      unregisterCliSpec('snapcli')
+    }
   })
 })

@@ -24,6 +24,15 @@ def test_parsed_commands_parse_pipes_and_lists():
     assert commands[1].words == ("python3", "/r/x.py", "1")
     assert commands[0].builtin and commands[1].builtin
     assert not commands[2].builtin
+    assert all(c.cli is None for c in commands)
+
+
+def test_parsed_commands_tag_installed_cli_heads():
+    commands = parsed_commands(parse("slack send hi | cat /x/slack"),
+                               clis={"slack"})
+    assert commands[0].cli == "slack"
+    # Only the head word tags: `slack` as an operand stays untagged.
+    assert commands[1].cli is None
 
 
 def test_parsed_commands_empty_on_unparsable():

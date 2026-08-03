@@ -56,11 +56,13 @@ export interface RuntimesInit {
 export class Runtimes {
   readonly entries: Runtime[] = []
   bindings: Record<string, Runtime>
+  private readonly registry: MountRegistry
   private readonly bridge: () => BridgeDispatchFn
   private readonly visibleMounts: () => string[]
   private readonly registerCloser: (fn: () => Promise<void>) => void
 
   constructor(init: RuntimesInit) {
+    this.registry = init.registry
     this.bridge = init.bridge
     this.visibleMounts = init.visibleMounts
     this.registerCloser = init.registerCloser
@@ -126,7 +128,7 @@ export class Runtimes {
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =
       decision !== null ? decision.bindings : this.bindings
-    const commands = parsedCommands(rootNode)
+    const commands = parsedCommands(rootNode, this.registry.clis.names())
     return wholeLineRuntime(
       bindings,
       commands.map((parsed) => parsed.command),
