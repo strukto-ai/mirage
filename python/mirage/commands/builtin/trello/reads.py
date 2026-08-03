@@ -18,8 +18,7 @@ from dataclasses import dataclass
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, Operand,
-                                        ValueType)
+from mirage.commands.spec.types import CommandSpec, FlagView, Operand
 from mirage.core.trello._client import (get_board, get_card, list_board_labels,
                                         list_board_lists, list_board_members,
                                         list_card_comments, list_list_cards,

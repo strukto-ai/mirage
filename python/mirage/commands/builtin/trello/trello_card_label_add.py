@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.trello._client import card_add_label
 from mirage.core.trello.normalize import normalize_card
 from mirage.io.stream import yield_bytes

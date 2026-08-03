@@ -24,7 +24,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--params', type: 'str' }),
     new Option({ long: '--json', type: 'str' }),
-  ] })
+  ],
+})
 
 async function notionBlockAppendCommand(
   accessor: NotionAccessor,
@@ -57,4 +58,5 @@ export const NOTION_BLOCK_APPEND = command({
   resource: ResourceName.NOTION,
   spec: SPEC,
   fn: notionBlockAppendCommand,
-  write: true })
+  write: true,
+})

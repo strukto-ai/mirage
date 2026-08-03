@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.gmail.messages import get_message_processed
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult

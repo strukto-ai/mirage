@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--channel_id', type: 'str' }),
     new Option({ long: '--ts', type: 'str' }),
     new Option({ long: '--reaction', type: 'str' }),
-  ] })
+  ],
+})
 
 async function slackAddReactionCommand(
   accessor: SlackAccessor,
@@ -54,4 +55,5 @@ export const SLACK_ADD_REACTION = command({
   name: 'slack-add-reaction',
   resource: ResourceName.SLACK,
   spec: SPEC,
-  fn: slackAddReactionCommand })
+  fn: slackAddReactionCommand,
+})

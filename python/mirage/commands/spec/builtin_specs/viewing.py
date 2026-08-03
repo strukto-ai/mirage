@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'cat':
@@ -50,9 +49,7 @@ SPECS: dict[str, CommandSpec] = {
     'tail':
     CommandSpec(
         options=(
-            Option(short="-n",
-                   type="str",
-                   numeric_shorthand=True),
+            Option(short="-n", type="str", numeric_shorthand=True),
             Option(short="-c", type="str"),
             Option(short="-q"),
             Option(short="-v"),
@@ -63,37 +60,17 @@ SPECS: dict[str, CommandSpec] = {
     'nl':
     CommandSpec(
         options=(
-            Option(short="-b",
-                   long="--body-numbering",
-                   type="str"),
-            Option(short="-d",
-                   long="--section-delimiter",
-                   type="str"),
-            Option(short="-f",
-                   long="--footer-numbering",
-                   type="str"),
-            Option(short="-h",
-                   long="--header-numbering",
-                   type="str"),
-            Option(short="-l",
-                   long="--join-blank-lines",
-                   type="str"),
-            Option(short="-n",
-                   long="--number-format",
-                   type="str"),
+            Option(short="-b", long="--body-numbering", type="str"),
+            Option(short="-d", long="--section-delimiter", type="str"),
+            Option(short="-f", long="--footer-numbering", type="str"),
+            Option(short="-h", long="--header-numbering", type="str"),
+            Option(short="-l", long="--join-blank-lines", type="str"),
+            Option(short="-n", long="--number-format", type="str"),
             Option(short="-p", long="--no-renumber"),
-            Option(short="-v",
-                   long="--starting-line-number",
-                   type="str"),
-            Option(short="-i",
-                   long="--line-increment",
-                   type="str"),
-            Option(short="-w",
-                   long="--number-width",
-                   type="str"),
-            Option(short="-s",
-                   long="--number-separator",
-                   type="str"),
+            Option(short="-v", long="--starting-line-number", type="str"),
+            Option(short="-i", long="--line-increment", type="str"),
+            Option(short="-w", long="--number-width", type="str"),
+            Option(short="-s", long="--number-separator", type="str"),
         ),
         rest=Operand(type="path"),
     ),
@@ -102,8 +79,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-b", long="--before"),
             Option(short="-r", long="--regex"),
-            Option(short="-s", long="--separator",
-                   type="str"),
+            Option(short="-s", long="--separator", type="str"),
         ),
         rest=Operand(type="path"),
     ),
@@ -169,19 +145,10 @@ SPECS: dict[str, CommandSpec] = {
     'od':
     CommandSpec(
         options=(
-            Option(short="-A",
-                   long="--address-radix",
-                   type="str"),
-            Option(short="-j",
-                   long="--skip-bytes",
-                   type="str"),
-            Option(short="-N",
-                   long="--read-bytes",
-                   type="str"),
-            Option(short="-t",
-                   long="--format",
-                   type="str",
-                   multiple=True),
+            Option(short="-A", long="--address-radix", type="str"),
+            Option(short="-j", long="--skip-bytes", type="str"),
+            Option(short="-N", long="--read-bytes", type="str"),
+            Option(short="-t", long="--format", type="str", multiple=True),
         ),
         rest=Operand(type="path"),
     ),

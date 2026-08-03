@@ -14,7 +14,7 @@
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.slack.search import search_messages
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec

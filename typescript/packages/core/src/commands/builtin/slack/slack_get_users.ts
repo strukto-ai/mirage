@@ -22,7 +22,8 @@ import { CommandSpec, Option } from '../../spec/types.ts'
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
-  options: [new Option({ long: '--query', type: 'str' })] })
+  options: [new Option({ long: '--query', type: 'str' })],
+})
 
 async function slackGetUsersCommand(
   accessor: SlackAccessor,
@@ -42,4 +43,5 @@ export const SLACK_GET_USERS = command({
   name: 'slack-get-users',
   resource: ResourceName.SLACK,
   spec: SPEC,
-  fn: slackGetUsersCommand })
+  fn: slackGetUsersCommand,
+})

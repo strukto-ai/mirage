@@ -22,7 +22,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-w', long: '--wrap', type: 'str' }),
       new Option({ short: '-i', long: '--ignore-garbage' }),
     ],
-    positional: [new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' })],
+  }),
   cmp: new CommandSpec({
     options: [
       new Option({ short: '-l' }),
@@ -31,7 +32,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-b' }),
       new Option({ short: '-i', type: 'str' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   diff: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -42,7 +44,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-q' }),
       new Option({ short: '-r' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   iconv: new CommandSpec({
     options: [
       new Option({ short: '-f', type: 'str' }),
@@ -50,7 +53,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-c' }),
       new Option({ short: '-o', type: 'path' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   md5: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
   md5sum: new CommandSpec({
     options: [
@@ -65,7 +69,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   patch: new CommandSpec({
     options: [
       new Option({ short: '-p', type: 'str' }),
@@ -73,7 +78,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-i', type: 'path' }),
       new Option({ short: '-N' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   sha1sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -87,7 +93,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   sha256sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -101,7 +108,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   sha384sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -115,7 +123,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   sha512sum: new CommandSpec({
     options: [
       new Option({ short: '-c', long: '--check' }),
@@ -129,7 +138,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--status' }),
       new Option({ long: '--quiet' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   xxd: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -140,4 +150,6 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-g', type: 'str' }),
       new Option({ short: '-u' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }) }
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
+}

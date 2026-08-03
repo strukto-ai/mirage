@@ -1,7 +1,7 @@
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, extra_operand_error, invalid_argument_error,
-    invalid_int_error, missing_required_error, missing_value_error,
-    unknown_option_error, usage_exit_code)
+    invalid_float_error, invalid_int_error, missing_required_error,
+    missing_value_error, unknown_option_error, usage_exit_code)
 
 
 def test_exit_codes_match_gnu():
@@ -92,5 +92,12 @@ def test_ambiguous_option_matches_gnu_shape():
 def test_invalid_int_mirrors_argparse_wording():
     out, code = invalid_int_error("mycli", "--port", "abc")
     assert out == (b"mycli: invalid int value: 'abc' for '--port'\n"
+                   b"Try 'mycli --help' for more information.\n")
+    assert code == 1
+
+
+def test_invalid_float_mirrors_argparse_wording():
+    out, code = invalid_float_error("mycli", "--ratio", "5x")
+    assert out == (b"mycli: invalid float value: '5x' for '--ratio'\n"
                    b"Try 'mycli --help' for more information.\n")
     assert code == 1

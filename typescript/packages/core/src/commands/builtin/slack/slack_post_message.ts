@@ -25,7 +25,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--channel_id', type: 'str' }),
     new Option({ long: '--text', type: 'str' }),
-  ] })
+  ],
+})
 
 async function slackPostMessageCommand(
   accessor: SlackAccessor,
@@ -50,4 +51,5 @@ export const SLACK_POST_MESSAGE = command({
   resource: ResourceName.SLACK,
   spec: SPEC,
   fn: slackPostMessageCommand,
-  write: true })
+  write: true,
+})

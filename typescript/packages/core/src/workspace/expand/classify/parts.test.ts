@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { type ValueType } from '../../../commands/spec/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { MountRegistry } from '../../mount/registry.ts'
@@ -55,10 +54,7 @@ describe('classifyParts', () => {
 
   it('duplicate word classifies per slot', () => {
     const reg = setup()
-    const out = classifyParts(['grep', '*.txt', '*.txt'], reg, '/ram', [
-      'str',
-      'path',
-    ])
+    const out = classifyParts(['grep', '*.txt', '*.txt'], reg, '/ram', ['str', 'path'])
     expect(out[1]).toBe('*.txt')
     expect(out[2]).toBeInstanceOf(PathSpec)
   })

@@ -21,47 +21,59 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({
         short: '-H',
         type: 'str',
-        description: 'Add a custom header to the request.' }),
+        description: 'Add a custom header to the request.',
+      }),
       new Option({
         short: '-A',
         type: 'str',
-        description: 'Set the User-Agent header.' }),
+        description: 'Set the User-Agent header.',
+      }),
       new Option({
         short: '-X',
         type: 'str',
-        description: 'Specify the HTTP request method.' }),
+        description: 'Specify the HTTP request method.',
+      }),
       new Option({
         short: '-d',
         type: 'str',
-        description: 'Send the given data as the request body.' }),
+        description: 'Send the given data as the request body.',
+      }),
       new Option({
         short: '-F',
         type: 'str',
-        description: 'Submit a multipart/form-data field.' }),
+        description: 'Submit a multipart/form-data field.',
+      }),
       new Option({
         short: '-o',
         type: 'path',
-        description: 'Write response body to the given file.' }),
+        description: 'Write response body to the given file.',
+      }),
       new Option({ short: '-L', description: 'Follow HTTP redirects.' }),
       new Option({
         short: '-f',
         long: '--fail',
-        description: 'Fail with exit 22 on an HTTP error status.' }),
+        description: 'Fail with exit 22 on an HTTP error status.',
+      }),
       new Option({ short: '-s', description: 'Run silently with no progress or messages.' }),
       new Option({ short: '-S', description: 'Show errors even when silent.' }),
     ],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   wget: new CommandSpec({
     description: 'Retrieve files from the web.',
     options: [
       new Option({
         short: '-O',
         type: 'path',
-        description: 'Write the downloaded content to the given file.' }),
+        description: 'Write the downloaded content to the given file.',
+      }),
       new Option({ short: '-q', description: 'Run quietly with no output.' }),
       new Option({
         long: '--spider',
-        description: 'Check that the URL exists without downloading it.' }),
+        description: 'Check that the URL exists without downloading it.',
+      }),
     ],
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+}

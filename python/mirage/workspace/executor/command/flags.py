@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec import (CommandSpec, ValueType, flag_kwarg_name,
-                                  parse_command, parse_to_kwargs)
+from mirage.commands.spec import (CommandSpec, flag_kwarg_name, parse_command,
+                                  parse_to_kwargs)
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, invalid_argument_error, invalid_float_error,
     invalid_int_error, missing_required_error, missing_value_error,
@@ -98,14 +98,12 @@ def parse_flags(
         # gets the mount prefix stripped.
         repeat_path_keys = {
             flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and opt.multiple
+            for opt in spec.options if opt.type == "path" and opt.multiple
             for name in (opt.short, opt.long) if name
         }
         single_path_keys = {
             flag_kwarg_name(name)
-            for opt in spec.options
-            if opt.type == "path" and not opt.multiple
+            for opt in spec.options if opt.type == "path" and not opt.multiple
             for name in (opt.short, opt.long) if name
         }
         if not str_flag_paths:
@@ -142,8 +140,7 @@ def parse_flags(
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return ParsedCommand(paths, texts, {}, [], [], [], [], [], [], [], [],
-                         [])
+    return ParsedCommand(paths, texts, {}, [], [], [], [], [], [], [], [], [])
 
 
 def option_error(cmd_name: str,

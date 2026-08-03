@@ -21,7 +21,8 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { CommandSpec, Option } from '../../spec/types.ts'
 
 const SPEC = new CommandSpec({
-  options: [new Option({ long: '--json', type: 'str' })] })
+  options: [new Option({ long: '--json', type: 'str' })],
+})
 
 async function notionCommentAddCommand(
   accessor: NotionAccessor,
@@ -49,4 +50,5 @@ export const NOTION_COMMENT_ADD = command({
   resource: ResourceName.NOTION,
   spec: SPEC,
   fn: notionCommentAddCommand,
-  write: true })
+  write: true,
+})

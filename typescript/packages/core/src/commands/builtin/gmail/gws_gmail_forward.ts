@@ -27,12 +27,15 @@ const SPEC = new CommandSpec({
     new Option({
       long: '--message-id',
       type: 'str',
-      description: 'Gmail message ID to forward (required)' }),
+      description: 'Gmail message ID to forward (required)',
+    }),
     new Option({
       long: '--to',
       type: 'str',
-      description: 'Forward recipient email address (required)' }),
-  ] })
+      description: 'Forward recipient email address (required)',
+    }),
+  ],
+})
 
 async function gwsGmailForwardCommand(
   accessor: GmailAccessor,
@@ -63,4 +66,5 @@ export const GMAIL_GWS_FORWARD = command({
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailForwardCommand,
-  write: true })
+  write: true,
+})

@@ -21,7 +21,8 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type PathSpec } from '@struktoai/mirage-core'
+  type PathSpec,
+} from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { fetchMessage } from '../../../core/email/_client.ts'
 
@@ -31,7 +32,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--uid', type: 'str' }),
     new Option({ long: '--folder', type: 'str' }),
-  ] })
+  ],
+})
 
 async function emailReadCommand(
   accessor: EmailAccessor,
@@ -56,4 +58,5 @@ export const EMAIL_READ = command({
   name: 'himalaya message read',
   resource: ResourceName.EMAIL,
   spec: SPEC,
-  fn: emailReadCommand })
+  fn: emailReadCommand,
+})

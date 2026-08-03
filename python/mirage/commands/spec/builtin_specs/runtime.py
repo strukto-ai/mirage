@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'python':
@@ -61,9 +60,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-d", long="--directory"),
             Option(short="-p", type="path"),
-            Option(long="--tmpdir",
-                   type="path",
-                   value_optional=True),
+            Option(long="--tmpdir", type="path", value_optional=True),
             Option(short="-t"),
             Option(short="-u", long="--dry-run"),
             Option(short="-q", long="--quiet"),

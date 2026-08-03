@@ -24,16 +24,20 @@ const SPEC = new CommandSpec({
     new Option({
       long: '--query',
       type: 'str',
-      description: "Slack search query (supports operators like 'from:@user', 'in:#channel')" }),
+      description: "Slack search query (supports operators like 'from:@user', 'in:#channel')",
+    }),
     new Option({
       long: '--count',
       type: 'str',
-      description: 'Results per page (1-100, default 20)' }),
+      description: 'Results per page (1-100, default 20)',
+    }),
     new Option({
       long: '--page',
       type: 'str',
-      description: '1-based page number (default 1)' }),
-  ] })
+      description: '1-based page number (default 1)',
+    }),
+  ],
+})
 
 function parseIntFlag(
   raw: string | boolean | number | string[] | undefined,
@@ -70,4 +74,5 @@ export const SLACK_SEARCH = command({
   name: 'slack-search',
   resource: ResourceName.SLACK,
   spec: SPEC,
-  fn: slackSearchCommand })
+  fn: slackSearchCommand,
+})

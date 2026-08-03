@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'grep':
@@ -42,16 +41,11 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-f", type="path", multiple=True),
             # Accepted no-ops: output is never a tty, so plain output is
             # exactly what GNU produces with --color=auto (#471).
-            Option(long="--color",
-                   type="str",
-                   value_optional=True),
-            Option(long="--colour",
-                   type="str",
-                   value_optional=True),
+            Option(long="--color", type="str", value_optional=True),
+            Option(long="--colour", type="str", value_optional=True),
             Option(long="--line-buffered"),
         ),
-        positional=(Operand(type="str",
-                            provided_by=("-e", "-f")), ),
+        positional=(Operand(type="str", provided_by=("-e", "-f")), ),
         rest=Operand(type="path"),
     ),
     'search':
@@ -87,12 +81,9 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--type", type="str"),
             Option(long="--glob", type="str"),
             # Accepted no-op like grep --color (#471).
-            Option(long="--color",
-                   type="str",
-                   value_optional=True),
+            Option(long="--color", type="str", value_optional=True),
         ),
-        positional=(Operand(type="str",
-                            provided_by=("-e", "-f")), ),
+        positional=(Operand(type="str", provided_by=("-e", "-f")), ),
         rest=Operand(type="path"),
     ),
     'sed':
@@ -119,8 +110,7 @@ SPECS: dict[str, CommandSpec] = {
         #   sed -f prog.sed f.txt     -> prog.sed is the script; f.txt a file
         # Without provided_by, the -e/-f forms would mislabel f.txt as the
         # script (TEXT) and never read it as a file.
-        positional=(Operand(type="str",
-                            provided_by=("-e", "-f")), ),
+        positional=(Operand(type="str", provided_by=("-e", "-f")), ),
         rest=Operand(type="path"),
     ),
     'jq':
@@ -167,8 +157,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-q"),
             Option(short="-w"),
         ),
-        positional=(Operand(type="str",
-                            provided_by=("-e", "-f")), ),
+        positional=(Operand(type="str", provided_by=("-e", "-f")), ),
         rest=Operand(type="path"),
     ),
 }

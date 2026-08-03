@@ -40,16 +40,21 @@ function tree(): CLISpec {
                 long: '--to',
                 type: 'str',
                 multiple: true,
-                required: true }),
+                required: true,
+              }),
             ],
-            rest: new Operand({ type: 'str' }) }),
+            rest: new Operand({ type: 'str' }),
+          }),
           new CLISpec({ name: 'list', fn: verb }),
-        ] }),
+        ],
+      }),
       new CLISpec({
         name: 'docs',
         description: 'Google Docs',
-        subcommands: [new CLISpec({ name: 'cat', fn: verb })] }),
-    ] })
+        subcommands: [new CLISpec({ name: 'cat', fn: verb })],
+      }),
+    ],
+  })
 }
 
 describe('CLISpec', () => {
@@ -77,7 +82,8 @@ describe('CLISpec', () => {
     const git = new CLISpec({
       name: 'git',
       options: [new Option({ short: '-C', type: 'path' })],
-      subcommands: [new CLISpec({ name: 'status', fn: verb })] })
+      subcommands: [new CLISpec({ name: 'status', fn: verb })],
+    })
     expect(git.options[0]?.short).toBe('-C')
   })
 
@@ -94,7 +100,8 @@ describe('CLISpec', () => {
         new CLISpec({
           name: 'gws',
           fn: verb,
-          subcommands: [new CLISpec({ name: 'send', fn: verb })] }),
+          subcommands: [new CLISpec({ name: 'send', fn: verb })],
+        }),
     ).toThrow(/not both/)
   })
 
@@ -108,14 +115,16 @@ describe('CLISpec', () => {
         new CLISpec({
           name: 'gws',
           positional: [new Operand({ type: 'str' })],
-          subcommands: [new CLISpec({ name: 'send', fn: verb })] }),
+          subcommands: [new CLISpec({ name: 'send', fn: verb })],
+        }),
     ).toThrow(/belong on leaves/)
     expect(
       () =>
         new CLISpec({
           name: 'gws',
           rest: new Operand({ type: 'str' }),
-          subcommands: [new CLISpec({ name: 'send', fn: verb })] }),
+          subcommands: [new CLISpec({ name: 'send', fn: verb })],
+        }),
     ).toThrow(/belong on leaves/)
   })
 
@@ -127,7 +136,8 @@ describe('CLISpec', () => {
           subcommands: [
             new CLISpec({ name: 'send', fn: verb }),
             new CLISpec({ name: 'send', fn: verb }),
-          ] }),
+          ],
+        }),
     ).toThrow(/duplicate subcommand 'send'/)
   })
 
@@ -136,7 +146,8 @@ describe('CLISpec', () => {
       () =>
         new CLISpec({
           name: 'gws',
-          subcommands: [new CLISpec({ name: 'gmail', fn: verb, configModel })] }),
+          subcommands: [new CLISpec({ name: 'gmail', fn: verb, configModel })],
+        }),
     ).toThrow(/only the root of a tree may/)
   })
 
@@ -153,9 +164,12 @@ describe('CLISpec', () => {
                 new CLISpec({
                   name: 'send',
                   fn: verb,
-                  options: [new Option({ long: '--cwd', type: 'str' })] }),
-              ] }),
-          ] }),
+                  options: [new Option({ long: '--cwd', type: 'str' })],
+                }),
+              ],
+            }),
+          ],
+        }),
     ).toThrow(/option '--cwd' collides with subcommand 'gmail send'/)
   })
 
@@ -166,12 +180,15 @@ describe('CLISpec', () => {
         new CLISpec({
           name: 'send',
           fn: verb,
-          options: [new Option({ long: '--to', type: 'str' })] }),
+          options: [new Option({ long: '--to', type: 'str' })],
+        }),
         new CLISpec({
           name: 'share',
           fn: verb,
-          options: [new Option({ long: '--to', type: 'str' })] }),
-      ] })
+          options: [new Option({ long: '--to', type: 'str' })],
+        }),
+      ],
+    })
     expect(spec.subcommands).toHaveLength(2)
   })
 
@@ -192,7 +209,8 @@ describe('CLISpec aliases', () => {
           subcommands: [
             new CLISpec({ name: 'checkout', aliases: ['co'], fn: verb }),
             new CLISpec({ name: 'co', fn: verb }),
-          ] }),
+          ],
+        }),
     ).toThrow(/duplicate subcommand 'co'/)
   })
 
@@ -201,7 +219,8 @@ describe('CLISpec aliases', () => {
       () =>
         new CLISpec({
           name: 'tool',
-          subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })] }),
+          subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })],
+        }),
     ).toThrow(/alias 'c o'/)
   })
 })

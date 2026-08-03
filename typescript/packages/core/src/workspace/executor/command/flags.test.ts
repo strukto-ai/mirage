@@ -51,10 +51,8 @@ describe('parseFlags', () => {
 describe('optionError scan order', () => {
   it('reports the first scan error like GNU', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ long: '--context', type: 'str' }),
-        new Option({ long: '--count' }),
-      ] })
+      options: [new Option({ long: '--context', type: 'str' }), new Option({ long: '--count' })],
+    })
     const dec = new TextDecoder()
     const ambiguousFirst = parseFlags(['--c', '--bogus', 'x'], spec, 'grep', '/')
     const refusal = optionError(

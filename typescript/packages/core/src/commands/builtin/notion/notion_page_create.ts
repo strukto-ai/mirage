@@ -27,7 +27,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--parent', type: 'path' }),
     new Option({ long: '--title', type: 'str' }),
-  ] })
+  ],
+})
 
 function resolveParent(rawParent: string, mountPrefix: string): CreatePageInput['parent'] {
   let path = rawParent
@@ -74,4 +75,5 @@ export const NOTION_PAGE_CREATE = command({
   resource: ResourceName.NOTION,
   spec: SPEC,
   fn: notionPageCreateCommand,
-  write: true })
+  write: true,
+})

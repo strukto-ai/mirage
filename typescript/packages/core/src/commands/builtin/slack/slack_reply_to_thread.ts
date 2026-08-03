@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--channel_id', type: 'str' }),
     new Option({ long: '--ts', type: 'str' }),
     new Option({ long: '--text', type: 'str' }),
-  ] })
+  ],
+})
 
 async function slackReplyToThreadCommand(
   accessor: SlackAccessor,
@@ -55,4 +56,5 @@ export const SLACK_REPLY_TO_THREAD = command({
   resource: ResourceName.SLACK,
   spec: SPEC,
   fn: slackReplyToThreadCommand,
-  write: true })
+  write: true,
+})

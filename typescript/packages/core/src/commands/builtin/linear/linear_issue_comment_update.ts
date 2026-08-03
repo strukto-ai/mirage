@@ -28,7 +28,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--comment_id', type: 'str' }),
     new Option({ long: '--body', type: 'str' }),
     new Option({ long: '--body_file', type: 'path' }),
-  ] })
+  ],
+})
 
 async function linearIssueCommentUpdateCommand(
   accessor: LinearAccessor,
@@ -46,7 +47,8 @@ async function linearIssueCommentUpdateCommand(
     inlineText: inlineBody,
     filePath: bodyFile,
     stdin: opts.stdin,
-    errorMessage: 'comment body is required' })
+    errorMessage: 'comment body is required',
+  })
   const comment = await commentUpdate(accessor.transport, commentId, body)
   const issueField = comment.issue
   const issueId =
@@ -65,4 +67,5 @@ export const LINEAR_ISSUE_COMMENT_UPDATE = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCommentUpdateCommand,
-  write: true })
+  write: true,
+})

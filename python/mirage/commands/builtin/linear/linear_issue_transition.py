@@ -16,8 +16,7 @@ import json
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, FlagView, Option
 from mirage.core.linear._client import (issue_update, list_teams,
                                         resolve_issue_id)
 from mirage.core.linear.normalize import normalize_issue

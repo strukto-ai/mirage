@@ -27,16 +27,20 @@ const SPEC = new CommandSpec({
     new Option({
       long: '--to',
       type: 'str',
-      description: 'Recipient email address (required)' }),
+      description: 'Recipient email address (required)',
+    }),
     new Option({
       long: '--subject',
       type: 'str',
-      description: 'Email subject line (required)' }),
+      description: 'Email subject line (required)',
+    }),
     new Option({
       long: '--body',
       type: 'str',
-      description: "Email body text; use $'\\n' or printf for real newlines (required)" }),
-  ] })
+      description: "Email body text; use $'\\n' or printf for real newlines (required)",
+    }),
+  ],
+})
 
 async function gwsGmailSendCommand(
   accessor: GmailAccessor,
@@ -66,4 +70,5 @@ export const GMAIL_GWS_SEND = command({
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailSendCommand,
-  write: true })
+  write: true,
+})

@@ -25,7 +25,8 @@ describe('RegisteredCommand', () => {
       name: 'cat',
       spec: STUB_SPEC,
       resource: 'ram',
-      fn: STUB_FN })
+      fn: STUB_FN,
+    })
     expect(rc.filetype).toBeNull()
     expect(rc.write).toBe(false)
     expect(rc.provisionFn).toBeNull()
@@ -60,7 +61,8 @@ describe('command()', () => {
       filetype: '.json',
       provision: prov,
       aggregate: agg,
-      write: true })
+      write: true,
+    })
     expect(out[0]?.filetype).toBe('.json')
     expect(out[0]?.provisionFn).toBe(prov)
     expect(out[0]?.aggregate).toBe(agg)
@@ -77,7 +79,8 @@ describe('command()', () => {
       name: 'gws',
       resource: 'gdrive',
       spec: new CommandSpec({ epilog: 'Services:\n  drive' }),
-      fn: STUB_FN })
+      fn: STUB_FN,
+    })
     const rc = out[0]
     if (rc === undefined) throw new Error('expected a registered command')
     expect(rc.spec.epilog).toBe('Services:\n  drive')
@@ -86,7 +89,8 @@ describe('command()', () => {
       flags: { help: true },
       filetypeFns: null,
       cwd: '/',
-      resource: {} as never })
+      resource: {} as never,
+    })
     if (result === null) throw new Error('expected result')
     expect(new TextDecoder().decode(result[0] as Uint8Array)).toContain('Services:\n  drive\n')
   })

@@ -28,7 +28,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--values', type: 'str' }),
     new Option({ long: '--json-values', type: 'str' }),
   ],
-  rest: new Operand({ type: 'path' }) })
+  rest: new Operand({ type: 'path' }),
+})
 
 async function gwsSheetsWriteCommand(
   accessor: GoogleApiAccessor,
@@ -55,7 +56,8 @@ async function gwsSheetsWriteCommand(
       null,
       new IOResult({
         exitCode: 2,
-        stderr: ENC.encode('--values or --json-values is required\n') }),
+        stderr: ENC.encode('--values or --json-values is required\n'),
+      }),
     ]
   }
   const result = await updateValues(accessor.tokenManager, sheetId, range, valuesJson)
@@ -68,4 +70,5 @@ export const GSHEETS_GWS_WRITE = command({
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsSheetsWriteCommand,
-  write: true })
+  write: true,
+})

@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'wc':
@@ -35,22 +34,15 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-n", long="--numeric-sort"),
             Option(short="-u", long="--unique"),
             Option(short="-f", long="--ignore-case"),
-            Option(short="-k",
-                   long="--key",
-                   type="str",
-                   multiple=True),
-            Option(short="-t",
-                   long="--field-separator",
-                   type="str"),
+            Option(short="-k", long="--key", type="str", multiple=True),
+            Option(short="-t", long="--field-separator", type="str"),
             Option(short="-h", long="--human-numeric-sort"),
             Option(short="-V", long="--version-sort"),
             Option(short="-s", long="--stable"),
             Option(short="-M", long="--month-sort"),
             Option(short="-b", long="--ignore-leading-blanks"),
             Option(short="-c"),
-            Option(long="--check",
-                   type="str",
-                   value_optional=True),
+            Option(long="--check", type="str", value_optional=True),
             Option(short="-d", long="--dictionary-order"),
             Option(short="-g", long="--general-numeric-sort"),
             Option(short="-i", long="--ignore-nonprinting"),
@@ -66,23 +58,13 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c", long="--count"),
             Option(short="-d", long="--repeated"),
             Option(short="-D"),
-            Option(long="--all-repeated",
-                   type="str",
-                   value_optional=True),
-            Option(long="--group",
-                   type="str",
-                   value_optional=True),
+            Option(long="--all-repeated", type="str", value_optional=True),
+            Option(long="--group", type="str", value_optional=True),
             Option(short="-u", long="--unique"),
-            Option(short="-f",
-                   long="--skip-fields",
-                   type="str"),
-            Option(short="-s",
-                   long="--skip-chars",
-                   type="str"),
+            Option(short="-f", long="--skip-fields", type="str"),
+            Option(short="-s", long="--skip-chars", type="str"),
             Option(short="-i", long="--ignore-case"),
-            Option(short="-w",
-                   long="--check-chars",
-                   type="str"),
+            Option(short="-w", long="--check-chars", type="str"),
             Option(short="-z", long="--zero-terminated"),
         ),
         positional=(
@@ -95,11 +77,8 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-f", long="--fields", type="str"),
             Option(short="-F", type="str"),
-            Option(short="-d", long="--delimiter",
-                   type="str"),
-            Option(short="-c",
-                   long="--characters",
-                   type="str"),
+            Option(short="-d", long="--delimiter", type="str"),
+            Option(short="-c", long="--characters", type="str"),
             Option(short="-b", long="--bytes", type="str"),
             Option(short="-n", long="--no-partial"),
             Option(long="--complement"),
@@ -149,9 +128,7 @@ SPECS: dict[str, CommandSpec] = {
     'paste':
     CommandSpec(
         options=(
-            Option(short="-d",
-                   long="--delimiters",
-                   type="str"),
+            Option(short="-d", long="--delimiters", type="str"),
             Option(short="-s", long="--serial"),
             Option(short="-z", long="--zero-terminated"),
         ),
@@ -201,12 +178,9 @@ SPECS: dict[str, CommandSpec] = {
                    long="--hex-suffixes",
                    type="str",
                    value_optional=True),
-            Option(short="-a",
-                   long="--suffix-length",
-                   type="str"),
+            Option(short="-a", long="--suffix-length", type="str"),
             Option(long="--additional-suffix", type="str"),
-            Option(short="-t", long="--separator",
-                   type="str"),
+            Option(short="-t", long="--separator", type="str"),
         ),
         positional=(
             Operand(type="path"),
@@ -216,15 +190,11 @@ SPECS: dict[str, CommandSpec] = {
     'shuf':
     CommandSpec(
         options=(
-            Option(short="-n",
-                   long="--head-count",
-                   type="str"),
+            Option(short="-n", long="--head-count", type="str"),
             Option(short="-e", long="--echo"),
             Option(short="-z", long="--zero-terminated"),
             Option(short="-r", long="--repeat"),
-            Option(short="-i",
-                   long="--input-range",
-                   type="str"),
+            Option(short="-i", long="--input-range", type="str"),
             Option(short="-o", long="--output", type="path"),
         ),
         rest=Operand(type="path"),
@@ -251,9 +221,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-f", long="--prefix", type="path"),
             Option(short="-n", long="--digits", type="str"),
-            Option(short="-b",
-                   long="--suffix-format",
-                   type="str"),
+            Option(short="-b", long="--suffix-format", type="str"),
             Option(short="-k", long="--keep-files"),
             Option(short="-s", long="--quiet"),
             Option(long="--silent"),

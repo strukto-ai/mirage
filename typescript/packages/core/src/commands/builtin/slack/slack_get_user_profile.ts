@@ -22,7 +22,8 @@ import { CommandSpec, Option } from '../../spec/types.ts'
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
-  options: [new Option({ long: '--user_id', type: 'str' })] })
+  options: [new Option({ long: '--user_id', type: 'str' })],
+})
 
 async function slackGetUserProfileCommand(
   accessor: SlackAccessor,
@@ -42,4 +43,5 @@ export const SLACK_GET_USER_PROFILE = command({
   name: 'slack-get-user-profile',
   resource: ResourceName.SLACK,
   spec: SPEC,
-  fn: slackGetUserProfileCommand })
+  fn: slackGetUserProfileCommand,
+})

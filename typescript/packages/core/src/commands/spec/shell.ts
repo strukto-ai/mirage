@@ -26,31 +26,38 @@ export const SHELL_SPECS = Object.freeze({
         short: '-n',
         long: '--max-args',
         type: 'str',
-        description: 'Use at most N arguments per command line.' }),
+        description: 'Use at most N arguments per command line.',
+      }),
       new Option({
         short: '-d',
         long: '--delimiter',
         type: 'str',
-        description: 'Input items are separated by this character.' }),
+        description: 'Input items are separated by this character.',
+      }),
       new Option({
         short: '-0',
         long: '--null',
-        description: 'Input items are terminated by NUL.' }),
+        description: 'Input items are terminated by NUL.',
+      }),
       new Option({
         short: '-r',
         long: '--no-run-if-empty',
-        description: 'Do not run the command on empty input.' }),
+        description: 'Do not run the command on empty input.',
+      }),
       new Option({
         short: '-I',
         type: 'str',
-        description: 'Replace occurrences of the token (not supported).' }),
+        description: 'Replace occurrences of the token (not supported).',
+      }),
       new Option({
         short: '-P',
         long: '--max-procs',
         type: 'str',
-        description: 'Run up to N processes (not supported).' }),
+        description: 'Run up to N processes (not supported).',
+      }),
     ],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   timeout: new CommandSpec({
     description: 'Run a command with a time limit.',
     options: [
@@ -58,23 +65,29 @@ export const SHELL_SPECS = Object.freeze({
         short: '-s',
         long: '--signal',
         type: 'str',
-        description: 'Signal to send on timeout (not supported).' }),
+        description: 'Signal to send on timeout (not supported).',
+      }),
       new Option({
         short: '-k',
         long: '--kill-after',
         type: 'str',
-        description: 'Also send KILL after this long (not supported).' }),
+        description: 'Also send KILL after this long (not supported).',
+      }),
       new Option({
         long: '--preserve-status',
-        description: "Exit with the command's status on timeout (not supported)." }),
+        description: "Exit with the command's status on timeout (not supported).",
+      }),
     ],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   read: new CommandSpec({
     description: 'Read a line from standard input into variables.',
     options: [
       new Option({ short: '-r', description: 'Raw mode: backslash is not an escape character.' }),
     ],
-    rest: new Operand({ type: 'str' }) }) })
+    rest: new Operand({ type: 'str' }),
+  }),
+})
 
 /**
  * Result of a strict leading-option scan for a shell builtin.

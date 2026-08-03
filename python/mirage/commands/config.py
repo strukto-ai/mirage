@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import ValueType, Option
+from mirage.commands.spec.types import Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
 from mirage.types import CommandSafeguard

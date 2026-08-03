@@ -15,8 +15,8 @@
 import pytest
 
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
-                                        Option, spec_flag_names)
+from mirage.commands.spec.types import (CommandSpec, FlagView, Option,
+                                        spec_flag_names)
 
 
 def test_flag_view_typed_reads():

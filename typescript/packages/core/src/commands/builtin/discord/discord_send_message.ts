@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--channel_id', type: 'str' }),
     new Option({ long: '--text', type: 'str' }),
     new Option({ long: '--message_id', type: 'str' }),
-  ] })
+  ],
+})
 
 async function discordSendMessageCommand(
   accessor: DiscordAccessor,
@@ -53,4 +54,5 @@ export const DISCORD_SEND_MESSAGE = command({
   resource: ResourceName.DISCORD,
   spec: SPEC,
   fn: discordSendMessageCommand,
-  write: true })
+  write: true,
+})

@@ -19,8 +19,7 @@ from dataclasses import dataclass
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, Operand,
-                                        ValueType, Option)
+from mirage.commands.spec.types import CommandSpec, FlagView, Operand, Option
 from mirage.core.linear._client import (get_issue, list_issue_comments,
                                         list_team_cycles, list_team_documents,
                                         list_team_issues, list_team_labels,
@@ -51,8 +50,7 @@ class LinearRead:
 
 SPEC_NONE = CommandSpec()
 SPEC_ARG = CommandSpec(rest=Operand(type="str"))
-SPEC_TEAM = CommandSpec(options=(Option(long="--team",
-                                        type="str"), ), )
+SPEC_TEAM = CommandSpec(options=(Option(long="--team", type="str"), ), )
 SPEC_TEAM_ARG = CommandSpec(
     options=(Option(long="--team", type="str"), ),
     rest=Operand(type="str"),

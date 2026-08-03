@@ -15,9 +15,8 @@
 from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
 from mirage.commands.spec.constants import (FLOAT_VALUE, INT_VALUE,
-                                            NUMERIC_SHORT,
-                                            flag_kwarg_name)
-from mirage.commands.spec.types import CommandSpec, ValueType, ParsedArgs
+                                            NUMERIC_SHORT, flag_kwarg_name)
+from mirage.commands.spec.types import CommandSpec, ParsedArgs, ValueType
 from mirage.utils.path import resolve_path
 
 

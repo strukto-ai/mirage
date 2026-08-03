@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.commands.registry import RegisteredCommand
-from mirage.commands.spec import CommandSpec, Operand, ValueType
+from mirage.commands.spec import CommandSpec, Operand
 from mirage.io.types import IOResult
 from mirage.provision import ProvisionResult
 from mirage.resource.ram import RAMResource

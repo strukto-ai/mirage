@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_SPECS } from './builtins.ts'
-import { type ValueType } from './types.ts'
 
 describe('BUILTIN_SPECS', () => {
   it('is frozen', () => {

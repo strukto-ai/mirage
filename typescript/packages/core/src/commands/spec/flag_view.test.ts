@@ -82,7 +82,8 @@ describe('specFlagNames', () => {
         new Option({ short: 'l' }),
         new Option({ short: 'm', long: '--max-count', type: 'str' }),
         new Option({ long: '--hidden' }),
-      ] })
+      ],
+    })
     // One name per option: the long spelling wins when both exist, so a
     // stale short-name read throws instead of silently reading false.
     expect([...specFlagNames(spec)].sort()).toEqual(['args_l', 'hidden', 'max_count'])

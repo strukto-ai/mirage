@@ -30,7 +30,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--title', type: 'str' }),
     new Option({ long: '--description', type: 'str' }),
     new Option({ long: '--description_file', type: 'path' }),
-  ] })
+  ],
+})
 
 async function linearIssueUpdateCommand(
   accessor: LinearAccessor,
@@ -53,12 +54,14 @@ async function linearIssueUpdateCommand(
       inlineText: inlineDesc,
       filePath: descFile,
       stdin: opts.stdin,
-      errorMessage: 'description is required' })
+      errorMessage: 'description is required',
+    })
   }
   const issue = await issueUpdate(accessor.transport, {
     issueId,
     ...(title !== null ? { title } : {}),
-    ...(description !== undefined ? { description } : {}) })
+    ...(description !== undefined ? { description } : {}),
+  })
   return [ENC.encode(JSON.stringify(normalizeIssue(issue))), new IOResult()]
 }
 
@@ -67,4 +70,5 @@ export const LINEAR_ISSUE_UPDATE = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueUpdateCommand,
-  write: true })
+  write: true,
+})

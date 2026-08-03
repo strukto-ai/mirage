@@ -29,7 +29,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--name', type: 'str' }),
     new Option({ long: '--desc', type: 'str' }),
     new Option({ long: '--desc_file', type: 'path' }),
-  ] })
+  ],
+})
 
 async function trelloCardCreateCommand(
   accessor: TrelloAccessor,
@@ -53,12 +54,14 @@ async function trelloCardCreateCommand(
       inlineText: inlineDesc,
       filePath: descFile,
       stdin: opts.stdin,
-      errorMessage: 'desc is required' })
+      errorMessage: 'desc is required',
+    })
   }
   const card = await cardCreate(accessor.transport, {
     listId,
     name,
-    ...(desc !== undefined ? { desc } : {}) })
+    ...(desc !== undefined ? { desc } : {}),
+  })
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]
 }
 
@@ -67,4 +70,5 @@ export const TRELLO_CARD_CREATE = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCreateCommand,
-  write: true })
+  write: true,
+})

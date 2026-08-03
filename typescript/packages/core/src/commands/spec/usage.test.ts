@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ambiguousOptionError,
   extraOperandError,
+  invalidFloatError,
   invalidIntError,
   invalidArgumentError,
   missingRequiredError,
@@ -137,6 +138,17 @@ describe('invalidIntError', () => {
     const [msg, code] = invalidIntError('mycli', '--port', 'abc')
     expect(new TextDecoder().decode(msg)).toBe(
       "mycli: invalid int value: 'abc' for '--port'\n" +
+        "Try 'mycli --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+  })
+})
+
+describe('invalidFloatError', () => {
+  it('mirrors argparse wording', () => {
+    const [msg, code] = invalidFloatError('mycli', '--ratio', '5x')
+    expect(new TextDecoder().decode(msg)).toBe(
+      "mycli: invalid float value: '5x' for '--ratio'\n" +
         "Try 'mycli --help' for more information.\n",
     )
     expect(code).toBe(1)

@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.commands.config import (RegisteredCommand, command, cross_command,
                                     version_request)
-from mirage.commands.spec import CommandSpec, Operand, ValueType, Option
+from mirage.commands.spec import CommandSpec, Operand, Option
 from mirage.version import __version__
 
 _HANDLER_CALLS: list[str] = []

@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--card_id', type: 'str' }),
     new Option({ long: '--member_id', type: 'str' }),
-  ] })
+  ],
+})
 
 async function trelloCardAssignCommand(
   accessor: TrelloAccessor,
@@ -47,4 +48,5 @@ export const TRELLO_CARD_ASSIGN = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardAssignCommand,
-  write: true })
+  write: true,
+})

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli import CLISpec, walk
-from mirage.commands.spec.types import ValueType, Option
+from mirage.commands.spec.types import Option
 
 
 async def _verb(config, paths, *texts, **flags):
@@ -184,9 +184,7 @@ def test_leaf_root_passes_argv_through():
 def test_required_group_option_missing_exits_129():
     tree = CLISpec(
         name="tool",
-        options=(Option(long="--token",
-                        type="str",
-                        required=True), ),
+        options=(Option(long="--token", type="str", required=True), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
     result = walk("tool", tree, ["run"])
@@ -206,9 +204,7 @@ def test_group_help_lists_the_injected_help_flag():
 def test_optional_value_long_at_group_level():
     tree = CLISpec(
         name="tool",
-        options=(Option(long="--color",
-                        type="str",
-                        value_optional=True), ),
+        options=(Option(long="--color", type="str", value_optional=True), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
     attached = walk("tool", tree, ["--color=auto", "run"])
@@ -271,8 +267,7 @@ def test_group_long_prefix_expands_like_git():
 def test_group_ambiguous_prefix_uses_git_wording():
     tree = CLISpec(
         name="tool",
-        options=(Option(long="--context",
-                        type="str"), Option(long="--count")),
+        options=(Option(long="--context", type="str"), Option(long="--count")),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
     result = walk("tool", tree, ["--co", "run"])
@@ -291,8 +286,7 @@ def test_help_prefix_reaches_the_injected_help():
 def test_int_typed_group_option_uses_git_wording():
     tree = CLISpec(
         name="tool",
-        options=(Option(long="--depth",
-                        type="int"), ),
+        options=(Option(long="--depth", type="int"), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
     bad = walk("tool", tree, ["--depth", "x", "run"])
@@ -302,3 +296,18 @@ def test_int_typed_group_option_uses_git_wording():
     ok = walk("tool", tree, ["--depth", "-3", "run"])
     assert ok.leaf is not None
     assert ok.group_flags == {"--depth": "-3"}
+
+
+def test_float_typed_group_option_uses_git_wording():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(long="--ratio", type="float"), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    bad = walk("tool", tree, ["--ratio", "5x", "run"])
+    assert bad.exit_code == 129
+    assert bad.output.startswith(
+        b"error: option '--ratio' expects a numerical value")
+    ok = walk("tool", tree, ["--ratio", "2.5", "run"])
+    assert ok.leaf is not None
+    assert ok.group_flags == {"--ratio": "2.5"}

@@ -28,7 +28,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--card_id', type: 'str' }),
     new Option({ long: '--text', type: 'str' }),
     new Option({ long: '--text_file', type: 'path' }),
-  ] })
+  ],
+})
 
 async function trelloCardCommentAddCommand(
   accessor: TrelloAccessor,
@@ -44,7 +45,8 @@ async function trelloCardCommentAddCommand(
     inlineText,
     filePath: textFile,
     stdin: opts.stdin,
-    errorMessage: 'comment text is required' })
+    errorMessage: 'comment text is required',
+  })
   const comment = await commentCreate(accessor.transport, cardId, text)
   return [ENC.encode(JSON.stringify(normalizeComment(comment, cardId))), new IOResult()]
 }
@@ -54,4 +56,5 @@ export const TRELLO_CARD_COMMENT_ADD = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardCommentAddCommand,
-  write: true })
+  write: true,
+})

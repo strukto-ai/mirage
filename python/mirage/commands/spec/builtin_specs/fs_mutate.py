@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'mkdir':
@@ -88,9 +87,7 @@ SPECS: dict[str, CommandSpec] = {
                    value_optional=True,
                    short_value=False),
             Option(short="-S", long="--suffix", type="str"),
-            Option(short="-t",
-                   long="--target-directory",
-                   type="path"),
+            Option(short="-t", long="--target-directory", type="path"),
             Option(short="-T", long="--no-target-directory"),
             # PathSpec normalizes trailing slashes everywhere, so the GNU
             # spelling is an accepted no-op.
@@ -121,9 +118,7 @@ SPECS: dict[str, CommandSpec] = {
                    value_optional=True,
                    short_value=False),
             Option(short="-S", long="--suffix", type="str"),
-            Option(short="-t",
-                   long="--target-directory",
-                   type="path"),
+            Option(short="-t", long="--target-directory", type="path"),
             Option(short="-T", long="--no-target-directory"),
             Option(long="--exchange"),
             # Cross-mount moves are copy+remove; --no-copy turns them into
@@ -167,8 +162,7 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(rest=Operand(type="path")),
     'truncate':
     CommandSpec(
-        options=(Option(short="-s", long="--size",
-                        type="str"), ),
+        options=(Option(short="-s", long="--size", type="str"), ),
         rest=Operand(type="path"),
     ),
     'basename':

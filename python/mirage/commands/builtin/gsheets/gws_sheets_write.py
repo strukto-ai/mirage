@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.gsheets.write import update_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult

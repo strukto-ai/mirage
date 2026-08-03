@@ -28,8 +28,10 @@ const SPEC = new CommandSpec({
     new Option({
       long: '--id',
       type: 'str',
-      description: 'Gmail message ID (required)' }),
-  ] })
+      description: 'Gmail message ID (required)',
+    }),
+  ],
+})
 
 async function gwsGmailReadCommand(
   accessor: GmailAccessor,
@@ -50,4 +52,5 @@ export const GMAIL_GWS_READ = command({
   name: 'gws gmail +read',
   resource: ResourceName.GMAIL,
   spec: SPEC,
-  fn: gwsGmailReadCommand })
+  fn: gwsGmailReadCommand,
+})

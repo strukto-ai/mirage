@@ -21,7 +21,8 @@ import { CommandSpec, Option } from '../../spec/types.ts'
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
-  options: [new Option({ long: '--guild_id', type: 'str' })] })
+  options: [new Option({ long: '--guild_id', type: 'str' })],
+})
 
 async function discordGetServerInfoCommand(
   accessor: DiscordAccessor,
@@ -41,4 +42,5 @@ export const DISCORD_GET_SERVER_INFO = command({
   name: 'discord-get-server-info',
   resource: ResourceName.DISCORD,
   spec: SPEC,
-  fn: discordGetServerInfoCommand })
+  fn: discordGetServerInfoCommand,
+})

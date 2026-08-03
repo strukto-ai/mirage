@@ -76,7 +76,8 @@ describe('Mount.resolveCommand fallback chain', () => {
       resource: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
-      filetype: '.json' })
+      filetype: '.json',
+    })
     if (generic === undefined || json === undefined) throw new Error('missing')
     m.register(generic)
     m.register(json)
@@ -121,7 +122,8 @@ describe('Mount.filetypeHandlers', () => {
       resource: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
-      filetype: '.json' })
+      filetype: '.json',
+    })
     if (generic === undefined || json === undefined) throw new Error('missing')
     m.register(generic)
     m.register(json)
@@ -139,7 +141,8 @@ describe('Mount.unregister', () => {
       resource: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
-      filetype: '.json' })
+      filetype: '.json',
+    })
     if (generic === undefined || json === undefined) throw new Error('missing')
     m.register(generic)
     m.register(json)
@@ -164,7 +167,8 @@ describe('Mount.executeCmd', () => {
       name: 'cat',
       resource: 'ram',
       spec: BASIC_SPEC,
-      fn: OK_CMD_STDOUT })
+      fn: OK_CMD_STDOUT,
+    })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     const [stdout, io] = await m.executeCmd('cat', [PathSpec.fromStrPath('/x.txt')], [], {})
@@ -179,7 +183,8 @@ describe('Mount.executeCmd', () => {
       resource: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
-      write: true })
+      write: true,
+    })
     if (wcmd === undefined) throw new Error('missing')
     m.register(wcmd)
     const [, io] = await m.executeCmd('rm', [PathSpec.fromStrPath('/x')], [], {})
@@ -230,7 +235,8 @@ describe('Mount.executeOp', () => {
       filetype: null,
       write: false,
       fn: (_accessor: Accessor, path: PathSpec) =>
-        Promise.resolve(new TextEncoder().encode(path.virtual)) }
+        Promise.resolve(new TextEncoder().encode(path.virtual)),
+    }
     m.registerOp(op)
     const result = await m.executeOp('read', '/x.txt')
     expect(result).toBeInstanceOf(Uint8Array)
@@ -248,7 +254,8 @@ describe('Mount.executeOp', () => {
       resource: 'ram',
       filetype: null,
       write: true,
-      fn: () => Promise.resolve() }
+      fn: () => Promise.resolve(),
+    }
     m.registerOp(op)
     await expect(m.executeOp('write', '/x')).rejects.toThrow(/read-only/)
   })
@@ -272,7 +279,8 @@ describe('Mount.revisions', () => {
       fn: (_accessor: Accessor, path: PathSpec) => {
         observed = revisionFor(path.virtual)
         return Promise.resolve(new Uint8Array())
-      } }
+      },
+    }
     m.registerOp(op)
     await m.executeOp('read', '/ram/x.txt')
     expect(observed).toBe('rev-1')
@@ -286,7 +294,8 @@ describe('Mount.revisions', () => {
       resource: 'ram',
       filetype: null,
       write: false,
-      fn: () => Promise.resolve(new Uint8Array()) }
+      fn: () => Promise.resolve(new Uint8Array()),
+    }
     m.registerOp(op)
     await m.executeOp('read', '/ram/x.txt')
     expect(revisionFor('/ram/x.txt')).toBeNull()
@@ -324,7 +333,8 @@ describe('Mount.registerCross / resolveCross', () => {
       resource: 'ram->disk',
       fn: OK_CMD,
       src: 'ram',
-      dst: 'disk' })
+      dst: 'disk',
+    })
     m.registerCross(rc, 'disk')
     expect(m.resolveCross('cp', 'disk')).toBe(rc)
     expect(m.resolveCross('cp', 'gdrive')).toBeNull()

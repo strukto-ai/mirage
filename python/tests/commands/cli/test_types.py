@@ -15,8 +15,7 @@
 from pydantic import BaseModel
 
 from mirage.commands.cli import CLISpec
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 
 class _Config(BaseModel):

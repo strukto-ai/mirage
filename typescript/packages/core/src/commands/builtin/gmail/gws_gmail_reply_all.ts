@@ -27,12 +27,15 @@ const SPEC = new CommandSpec({
     new Option({
       long: '--message-id',
       type: 'str',
-      description: 'Gmail message ID to reply to (required)' }),
+      description: 'Gmail message ID to reply to (required)',
+    }),
     new Option({
       long: '--body',
       type: 'str',
-      description: "Reply body; use $'\\n' or printf for real newlines (required)" }),
-  ] })
+      description: "Reply body; use $'\\n' or printf for real newlines (required)",
+    }),
+  ],
+})
 
 async function gwsGmailReplyAllCommand(
   accessor: GmailAccessor,
@@ -63,4 +66,5 @@ export const GMAIL_GWS_REPLY_ALL = command({
   resource: ResourceName.GMAIL,
   spec: SPEC,
   fn: gwsGmailReplyAllCommand,
-  write: true })
+  write: true,
+})

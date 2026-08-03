@@ -21,7 +21,8 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type PathSpec } from '@struktoai/mirage-core'
+  type PathSpec,
+} from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { fetchMessage } from '../../../core/email/_client.ts'
 import { replyAllMessage, replyMessage } from '../../../core/email/send.ts'
@@ -34,7 +35,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--folder', type: 'str' }),
     new Option({ long: '--body', type: 'str' }),
     new Option({ long: '--all' }),
-  ] })
+  ],
+})
 
 async function emailReplyCommand(
   accessor: EmailAccessor,
@@ -68,4 +70,5 @@ export const EMAIL_REPLY = command({
   resource: ResourceName.EMAIL,
   spec: SPEC,
   fn: emailReplyCommand,
-  write: true })
+  write: true,
+})

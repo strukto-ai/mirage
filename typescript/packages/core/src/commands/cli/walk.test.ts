@@ -34,7 +34,8 @@ function tree(): CLISpec {
         short: '-C',
         long: '--cwd',
         type: 'str',
-        description: 'run as if started there' }),
+        description: 'run as if started there',
+      }),
       new Option({ short: '-v', long: '--verbose', count: true }),
     ],
     subcommands: [
@@ -46,17 +47,21 @@ function tree(): CLISpec {
             long: '--account',
             type: 'str',
             default: 'primary',
-            choices: ['primary', 'work'] }),
+            choices: ['primary', 'work'],
+          }),
         ],
         subcommands: [
           new CLISpec({ name: 'send', fn: verb, write: true }),
           new CLISpec({ name: 'list', fn: verb }),
-        ] }),
+        ],
+      }),
       new CLISpec({
         name: 'docs',
         description: 'Google Docs',
-        subcommands: [new CLISpec({ name: 'cat', fn: verb })] }),
-    ] })
+        subcommands: [new CLISpec({ name: 'cat', fn: verb })],
+      }),
+    ],
+  })
 }
 
 describe('walk', () => {
@@ -179,7 +184,8 @@ describe('walk', () => {
     expect(clustered.groupFlags).toEqual({
       '--verbose': 2,
       '--cwd': '/tmp',
-      '--account': 'primary' })
+      '--account': 'primary',
+    })
   })
 
   it('ends group options at --', () => {
@@ -209,7 +215,8 @@ describe('walk', () => {
     const spec = new CLISpec({
       name: 'tool',
       options: [new Option({ long: '--color', type: 'str', valueOptional: true })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
     const attached = walk('tool', spec, ['--color=auto', 'run'])
     expect(attached.leaf).not.toBeNull()
     expect(attached.groupFlags).toEqual({ '--color': 'auto' })
@@ -222,7 +229,8 @@ describe('walk', () => {
     const spec = new CLISpec({
       name: 'tool',
       options: [new Option({ short: '-name', type: 'str' })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
     const detached = walk('tool', spec, ['-name', 'foo', 'run'])
     expect(detached.leaf).not.toBeNull()
     expect(detached.groupFlags).toEqual({ '-name': 'foo' })
@@ -238,7 +246,8 @@ describe('walk', () => {
     const spec = new CLISpec({
       name: 'tool',
       options: [new Option({ long: '--token', type: 'str', required: true })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
     const result = walk('tool', spec, ['run'])
     expect(result.exitCode).toBe(129)
     expect(text(result.output).startsWith("error: option '--token' is required")).toBe(true)
@@ -257,8 +266,10 @@ describe('walk argparse/git alignment', () => {
           name: 'checkout',
           aliases: ['co'],
           description: 'Switch branches',
-          fn: verb }),
-      ] })
+          fn: verb,
+        }),
+      ],
+    })
     const result = walk('tool', spec, ['co', 'x'])
     expect(result.leaf).not.toBeNull()
     expect(result.path).toEqual(['checkout'])
@@ -273,8 +284,10 @@ describe('walk argparse/git alignment', () => {
           name: 'checkout',
           aliases: ['co', 'cout'],
           description: 'Switch branches',
-          fn: verb }),
-      ] })
+          fn: verb,
+        }),
+      ],
+    })
     const listing = walk('tool', spec, [])
     expect(text(listing.output)).toContain('  checkout (co, cout)  Switch branches')
   })
@@ -288,11 +301,9 @@ describe('walk argparse/git alignment', () => {
   it('refuses an ambiguous group prefix with git wording', () => {
     const spec = new CLISpec({
       name: 'tool',
-      options: [
-        new Option({ long: '--context', type: 'str' }),
-        new Option({ long: '--count' }),
-      ],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
+      options: [new Option({ long: '--context', type: 'str' }), new Option({ long: '--count' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
     const result = walk('tool', spec, ['--co', 'run'])
     expect(result.exitCode).toBe(129)
     expect(
@@ -311,7 +322,8 @@ describe('walk argparse/git alignment', () => {
     const spec = new CLISpec({
       name: 'tool',
       options: [new Option({ long: '--depth', type: 'int' })],
-      subcommands: [new CLISpec({ name: 'run', fn: verb })] })
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
     const bad = walk('tool', spec, ['--depth', 'x', 'run'])
     expect(bad.exitCode).toBe(129)
     expect(text(bad.output).startsWith("error: option '--depth' expects a numerical value")).toBe(
@@ -320,5 +332,23 @@ describe('walk argparse/git alignment', () => {
     const ok = walk('tool', spec, ['--depth', '-3', 'run'])
     expect(ok.leaf).not.toBeNull()
     expect(ok.groupFlags).toEqual({ '--depth': '-3' })
+  })
+})
+
+describe('walk float-typed group options', () => {
+  it('refuses non-numbers with git wording', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ long: '--ratio', type: 'float' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const bad = walk('tool', spec, ['--ratio', '5x', 'run'])
+    expect(bad.exitCode).toBe(129)
+    expect(text(bad.output).startsWith("error: option '--ratio' expects a numerical value")).toBe(
+      true,
+    )
+    const ok = walk('tool', spec, ['--ratio', '2.5', 'run'])
+    expect(ok.leaf).not.toBeNull()
+    expect(ok.groupFlags).toEqual({ '--ratio': '2.5' })
   })
 })

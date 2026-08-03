@@ -15,7 +15,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.google._client import (TokenManager, docs_base, drive_base,
                                         gmail_base, sheets_base, slides_base)
 
@@ -171,12 +171,8 @@ def gws_method_spec(method: GwsMethod) -> CommandSpec:
     """
     return CommandSpec(
         options=(
-            Option(long="--params",
-                   type="str",
-                   description=_PARAMS_HELP),
-            Option(long="--json",
-                   type="str",
-                   description=_JSON_HELP),
+            Option(long="--params", type="str", description=_PARAMS_HELP),
+            Option(long="--json", type="str", description=_JSON_HELP),
             Option(long="--page-all", description=_PAGE_ALL_HELP),
             Option(long="--page-limit",
                    type="str",

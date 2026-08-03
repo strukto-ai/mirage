@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
 import { parseCommand, parseToKwargs } from './parser.ts'
-import { CommandSpec, Operand, type ValueType, Option, ParsedArgs } from './types.ts'
+import { CommandSpec, Operand, Option, ParsedArgs } from './types.ts'
 
 describe('parseCommand — bool short flags', () => {
   const spec = new CommandSpec({
@@ -43,10 +43,7 @@ describe('parseCommand — bool short flags', () => {
 
 describe('parseCommand — value flags', () => {
   const spec = new CommandSpec({
-    options: [
-      new Option({ short: '-n', type: 'str' }),
-      new Option({ short: '-o', type: 'path' }),
-    ],
+    options: [new Option({ short: '-n', type: 'str' }), new Option({ short: '-o', type: 'path' })],
     rest: new Operand({ type: 'path' }),
   })
 
@@ -107,10 +104,7 @@ describe('parseCommand — numericShorthand', () => {
 
 describe('parseCommand — long flags', () => {
   const spec = new CommandSpec({
-    options: [
-      new Option({ long: '--verbose' }),
-      new Option({ long: '--name', type: 'str' }),
-    ],
+    options: [new Option({ long: '--verbose' }), new Option({ long: '--name', type: 'str' })],
     rest: new Operand({ type: 'path' }),
   })
 
@@ -214,10 +208,7 @@ describe('parseCommand — providedBy frees the positional slot', () => {
   // providedBy, the pattern positional still consumed the first raw arg, so
   // the file path was classified as TEXT and paths() came back empty.
   const grepLike = new CommandSpec({
-    options: [
-      new Option({ short: '-n' }),
-      new Option({ short: '-e', type: 'str' }),
-    ],
+    options: [new Option({ short: '-n' }), new Option({ short: '-e', type: 'str' })],
     positional: [new Operand({ type: 'str', providedBy: ['-e'] })],
     rest: new Operand({ type: 'path' }),
   })
@@ -514,17 +505,9 @@ describe('parseCommand — awk spec', () => {
 describe('overflow operand pass-through', () => {
   it('classifies overflow like the last positional slot', () => {
     const uniq = parseCommand(specOf('uniq'), ['a.txt', 'b.txt', 'c.txt'], '/data')
-    expect(uniq.args.map(([, k]) => k)).toEqual([
-      'path',
-      'path',
-      'path',
-    ])
+    expect(uniq.args.map(([, k]) => k)).toEqual(['path', 'path', 'path'])
     const tr = parseCommand(specOf('tr'), ['a', 'b', 'extra.txt'], '/data')
-    expect(tr.args.map(([, k]) => k)).toEqual([
-      'str',
-      'str',
-      'str',
-    ])
+    expect(tr.args.map(([, k]) => k)).toEqual(['str', 'str', 'str'])
   })
 })
 
@@ -770,9 +753,7 @@ describe('int-typed values', () => {
 
   it('checks every value of a multiple flag', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ long: '--id', type: 'int', multiple: true }),
-      ],
+      options: [new Option({ long: '--id', type: 'int', multiple: true })],
     })
     const parsed = parseCommand(spec, ['--id', '1', '--id', 'x'], '/')
     expect(parsed.invalidIntOptions).toEqual([['--id', 'x']])
@@ -806,10 +787,7 @@ describe('synonym long spellings', () => {
 
   it('keeps scan order in optionErrorKinds', () => {
     const spec = new CommandSpec({
-      options: [
-        new Option({ long: '--context', type: 'str' }),
-        new Option({ long: '--count' }),
-      ],
+      options: [new Option({ long: '--context', type: 'str' }), new Option({ long: '--count' })],
     })
     expect(parseCommand(spec, ['--c', '--bogus'], '/').optionErrorKinds).toEqual([
       'ambiguous',
@@ -819,5 +797,24 @@ describe('synonym long spellings', () => {
       'invalid',
       'ambiguous',
     ])
+  })
+})
+
+describe('float-typed values', () => {
+  it('reports non-numbers and accepts the portable core', () => {
+    const spec = new CommandSpec({ options: [new Option({ long: '--ratio', type: 'float' })] })
+    expect(parseCommand(spec, ['--ratio', '5x'], '/').invalidFloatOptions).toEqual([
+      ['--ratio', '5x'],
+    ])
+    for (const good of ['2.5', '-3', '.5', '1e3', '+0.25']) {
+      const ok = parseCommand(spec, ['--ratio', good], '/')
+      expect(ok.invalidFloatOptions).toEqual([])
+      expect(ok.flags['--ratio']).toBe(good)
+    }
+    for (const bad of ['inf', 'nan', '1_000', '.']) {
+      expect(parseCommand(spec, ['--ratio', bad], '/').invalidFloatOptions).toEqual([
+        ['--ratio', bad],
+      ])
+    }
   })
 })

@@ -16,8 +16,7 @@ import json
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, FlagView, Option
 from mirage.core.email._client import fetch_headers
 from mirage.core.email.search import search_messages
 from mirage.io.stream import yield_bytes

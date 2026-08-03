@@ -16,7 +16,7 @@ import asyncio
 from unittest.mock import MagicMock
 
 from mirage.commands.config import RegisteredCommand
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.workspace.executor.builtins import (_collect_man_hits,
                                                 _render_man_entry,
                                                 _render_man_index, handle_man)
@@ -112,9 +112,7 @@ def test_render_man_entry_with_options():
     spec = CommandSpec(
         description="Print a sequence.",
         options=(
-            Option(short="-s",
-                   type="str",
-                   description="separator"),
+            Option(short="-s", type="str", description="separator"),
             Option(short="-w", description="zero-pad"),
         ),
     )

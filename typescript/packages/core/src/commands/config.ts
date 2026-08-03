@@ -142,12 +142,14 @@ export interface CommandOptions<A extends Accessor = Accessor> {
 export const HELP_OPTION = new Option({
   long: '--help',
   type: 'bool',
-  description: 'Show this help and exit' })
+  description: 'Show this help and exit',
+})
 
 const VERSION_OPTION = new Option({
   long: '--version',
   type: 'bool',
-  description: 'Show version information and exit' })
+  description: 'Show version information and exit',
+})
 
 const HELP_ENC = new TextEncoder()
 
@@ -228,7 +230,8 @@ export function command<A extends Accessor = Accessor>(
         provisionFn: (options.provision ?? null) as ProvisionFn | null,
         aggregate: options.aggregate ?? null,
         write: options.write ?? false,
-        safeguard: options.safeguard ?? null }),
+        safeguard: options.safeguard ?? null,
+      }),
   )
 }
 
@@ -248,5 +251,6 @@ export function crossCommand(options: CrossCommandOptions): RegisteredCommand {
     filetype: null,
     fn: options.fn,
     src: options.src,
-    dst: options.dst })
+    dst: options.dst,
+  })
 }

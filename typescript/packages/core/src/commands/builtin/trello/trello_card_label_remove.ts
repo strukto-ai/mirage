@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--card_id', type: 'str' }),
     new Option({ long: '--label_id', type: 'str' }),
-  ] })
+  ],
+})
 
 async function trelloCardLabelRemoveCommand(
   accessor: TrelloAccessor,
@@ -47,4 +48,5 @@ export const TRELLO_CARD_LABEL_REMOVE = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardLabelRemoveCommand,
-  write: true })
+  write: true,
+})

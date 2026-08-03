@@ -26,7 +26,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-P' }),
       new Option({ short: '-B', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   du: new CommandSpec({
     options: [
       new Option({ short: '-h' }),
@@ -35,10 +36,12 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-d', long: '--max-depth', type: 'str' }),
       new Option({ short: '-c' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   file: new CommandSpec({
     options: [new Option({ short: '-b' }), new Option({ short: '-i' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   find: new CommandSpec({
     options: [
       new Option({ short: '-name', type: 'str', multiple: true }),
@@ -63,7 +66,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-not' }),
     ],
     rest: new Operand({ type: 'path' }),
-    ignoreTokens: ['(', ')'] }),
+    ignoreTokens: ['(', ')'],
+  }),
   ls: new CommandSpec({
     options: [
       new Option({ short: '-l' }),
@@ -80,16 +84,16 @@ export const SPECS: Record<string, CommandSpec> = {
       // Accepted no-op like grep --color (#471).
       new Option({ long: '--color', type: 'str', valueOptional: true }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   pwd: new CommandSpec({
     options: [new Option({ short: '-P' }), new Option({ short: '-L' })],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   stat: new CommandSpec({
-    options: [
-      new Option({ short: '-c', type: 'str' }),
-      new Option({ short: '-f', type: 'str' }),
-    ],
-    rest: new Operand({ type: 'path' }) }),
+    options: [new Option({ short: '-c', type: 'str' }), new Option({ short: '-f', type: 'str' })],
+    rest: new Operand({ type: 'path' }),
+  }),
   tree: new CommandSpec({
     options: [
       new Option({ short: '-a' }),
@@ -98,4 +102,6 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-d' }),
       new Option({ short: '-P', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+}

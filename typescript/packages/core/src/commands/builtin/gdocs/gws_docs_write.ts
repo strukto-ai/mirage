@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--document', type: 'str' }),
     new Option({ long: '--text', type: 'str' }),
   ],
-  rest: new Operand({ type: 'path' }) })
+  rest: new Operand({ type: 'path' }),
+})
 
 async function gwsDocsWriteCommand(
   accessor: GoogleApiAccessor,
@@ -52,4 +53,5 @@ export const GDOCS_GWS_WRITE = command({
   resource: [ResourceName.GDOCS, ResourceName.GDRIVE],
   spec: SPEC,
   fn: gwsDocsWriteCommand,
-  write: true })
+  write: true,
+})

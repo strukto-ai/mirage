@@ -31,7 +31,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--desc_file', type: 'path' }),
     new Option({ long: '--due', type: 'str' }),
     new Option({ long: '--closed', type: 'str' }),
-  ] })
+  ],
+})
 
 function parseBool(value: string): boolean {
   const v = value.toLowerCase()
@@ -57,7 +58,8 @@ async function trelloCardUpdateCommand(
       inlineText: inlineDesc,
       filePath: descFile,
       stdin: opts.stdin,
-      errorMessage: 'desc is required' })
+      errorMessage: 'desc is required',
+    })
   }
   const closed = typeof opts.flags.closed === 'string' ? parseBool(opts.flags.closed) : null
   const due = typeof opts.flags.due === 'string' ? opts.flags.due : null
@@ -66,7 +68,8 @@ async function trelloCardUpdateCommand(
     ...(name !== null ? { name } : {}),
     ...(desc !== undefined ? { desc } : {}),
     ...(closed !== null ? { closed } : {}),
-    ...(due !== null ? { due } : {}) })
+    ...(due !== null ? { due } : {}),
+  })
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]
 }
 
@@ -75,4 +78,5 @@ export const TRELLO_CARD_UPDATE = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardUpdateCommand,
-  write: true })
+  write: true,
+})

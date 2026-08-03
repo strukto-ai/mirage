@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--card_id', type: 'str' }),
     new Option({ long: '--list_id', type: 'str' }),
-  ] })
+  ],
+})
 
 async function trelloCardMoveCommand(
   accessor: TrelloAccessor,
@@ -47,4 +48,5 @@ export const TRELLO_CARD_MOVE = command({
   resource: ResourceName.TRELLO,
   spec: SPEC,
   fn: trelloCardMoveCommand,
-  write: true })
+  write: true,
+})

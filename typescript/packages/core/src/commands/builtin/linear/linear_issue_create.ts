@@ -29,7 +29,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--title', type: 'str' }),
     new Option({ long: '--description', type: 'str' }),
     new Option({ long: '--description_file', type: 'path' }),
-  ] })
+  ],
+})
 
 async function linearIssueCreateCommand(
   accessor: LinearAccessor,
@@ -54,12 +55,14 @@ async function linearIssueCreateCommand(
       inlineText: inlineDesc,
       filePath: descFile,
       stdin: opts.stdin,
-      errorMessage: 'description is required' })
+      errorMessage: 'description is required',
+    })
   }
   const issue = await issueCreate(accessor.transport, {
     teamId,
     title,
-    ...(description !== undefined ? { description } : {}) })
+    ...(description !== undefined ? { description } : {}),
+  })
   return [ENC.encode(JSON.stringify(normalizeIssue(issue))), new IOResult()]
 }
 
@@ -68,4 +71,5 @@ export const LINEAR_ISSUE_CREATE = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCreateCommand,
-  write: true })
+  write: true,
+})

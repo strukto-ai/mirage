@@ -18,7 +18,8 @@ import {
   driveBase,
   gmailBase,
   sheetsBase,
-  slidesBase } from '../../../core/google/_client.ts'
+  slidesBase,
+} from '../../../core/google/_client.ts'
 import { ResourceName } from '../../../types.ts'
 import { CommandSpec, Option } from '../../spec/types.ts'
 
@@ -50,61 +51,70 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     resource: 'documents',
     method: 'get',
     http: 'GET',
-    path: '/documents/{documentId}' },
+    path: '/documents/{documentId}',
+  },
   {
     service: 'docs',
     resource: 'documents',
     method: 'create',
     http: 'POST',
     path: '/documents',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'docs',
     resource: 'documents',
     method: 'batchUpdate',
     http: 'POST',
     path: '/documents/{documentId}:batchUpdate',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'sheets',
     resource: 'spreadsheets',
     method: 'get',
     http: 'GET',
-    path: '/spreadsheets/{spreadsheetId}' },
+    path: '/spreadsheets/{spreadsheetId}',
+  },
   {
     service: 'sheets',
     resource: 'spreadsheets',
     method: 'create',
     http: 'POST',
     path: '/spreadsheets',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'sheets',
     resource: 'spreadsheets',
     method: 'batchUpdate',
     http: 'POST',
     path: '/spreadsheets/{spreadsheetId}:batchUpdate',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'slides',
     resource: 'presentations',
     method: 'get',
     http: 'GET',
-    path: '/presentations/{presentationId}' },
+    path: '/presentations/{presentationId}',
+  },
   {
     service: 'slides',
     resource: 'presentations',
     method: 'create',
     http: 'POST',
     path: '/presentations',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'slides',
     resource: 'presentations',
     method: 'batchUpdate',
     http: 'POST',
     path: '/presentations/{presentationId}:batchUpdate',
-    needsBody: true },
+    needsBody: true,
+  },
   { service: 'drive', resource: 'files', method: 'list', http: 'GET', path: '/files' },
   { service: 'drive', resource: 'files', method: 'get', http: 'GET', path: '/files/{fileId}' },
   {
@@ -113,89 +123,103 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     method: 'create',
     http: 'POST',
     path: '/files',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'drive',
     resource: 'files',
     method: 'update',
     http: 'PATCH',
     path: '/files/{fileId}',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'drive',
     resource: 'files',
     method: 'copy',
     http: 'POST',
-    path: '/files/{fileId}/copy' },
+    path: '/files/{fileId}/copy',
+  },
   {
     service: 'drive',
     resource: 'files',
     method: 'delete',
     http: 'DELETE',
-    path: '/files/{fileId}' },
+    path: '/files/{fileId}',
+  },
   {
     service: 'drive',
     resource: 'files',
     method: 'export',
     http: 'GET',
     path: '/files/{fileId}/export',
-    rawBytes: true },
+    rawBytes: true,
+  },
   {
     service: 'drive',
     resource: 'permissions',
     method: 'create',
     http: 'POST',
     path: '/files/{fileId}/permissions',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'drive',
     resource: 'permissions',
     method: 'list',
     http: 'GET',
-    path: '/files/{fileId}/permissions' },
+    path: '/files/{fileId}/permissions',
+  },
   {
     service: 'drive',
     resource: 'permissions',
     method: 'delete',
     http: 'DELETE',
-    path: '/files/{fileId}/permissions/{permissionId}' },
+    path: '/files/{fileId}/permissions/{permissionId}',
+  },
   {
     service: 'gmail',
     resource: 'users labels',
     method: 'list',
     http: 'GET',
-    path: '/users/{userId}/labels' },
+    path: '/users/{userId}/labels',
+  },
   {
     service: 'gmail',
     resource: 'users messages',
     method: 'list',
     http: 'GET',
-    path: '/users/{userId}/messages' },
+    path: '/users/{userId}/messages',
+  },
   {
     service: 'gmail',
     resource: 'users messages',
     method: 'get',
     http: 'GET',
-    path: '/users/{userId}/messages/{id}' },
+    path: '/users/{userId}/messages/{id}',
+  },
   {
     service: 'gmail',
     resource: 'users messages',
     method: 'send',
     http: 'POST',
     path: '/users/{userId}/messages/send',
-    needsBody: true },
+    needsBody: true,
+  },
   {
     service: 'gmail',
     resource: 'users messages',
     method: 'trash',
     http: 'POST',
-    path: '/users/{userId}/messages/{id}/trash' },
+    path: '/users/{userId}/messages/{id}/trash',
+  },
   {
     service: 'gmail',
     resource: 'users messages attachments',
     method: 'get',
     http: 'GET',
-    path: '/users/{userId}/messages/{messageId}/attachments/{id}' },
+    path: '/users/{userId}/messages/{messageId}/attachments/{id}',
+  },
 ] as const
 
 const PARAMS_HELP = 'JSON object of path and query parameters, e.g. \'{"fileId":"abc"}\''
@@ -231,9 +255,11 @@ export function gwsMethodSpec(m: GwsMethod): CommandSpec {
       new Option({
         long: '--page-limit',
         type: 'str',
-        description: PAGE_LIMIT_HELP }),
+        description: PAGE_LIMIT_HELP,
+      }),
     ],
-    description: gwsMethodDescription(m) })
+    description: gwsMethodDescription(m),
+  })
 }
 
 export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
@@ -241,11 +267,13 @@ export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
   docs: docsBase,
   sheets: sheetsBase,
   slides: slidesBase,
-  gmail: gmailBase }
+  gmail: gmailBase,
+}
 
 export const SERVICE_RESOURCES: Record<GwsService, string[]> = {
   drive: [ResourceName.GDRIVE],
   docs: [ResourceName.GDOCS, ResourceName.GDRIVE],
   sheets: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   slides: [ResourceName.GSLIDES, ResourceName.GDRIVE],
-  gmail: [ResourceName.GMAIL] }
+  gmail: [ResourceName.GMAIL],
+}

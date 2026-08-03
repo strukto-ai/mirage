@@ -27,7 +27,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--issue_id', type: 'str' }),
     new Option({ long: '--issue_key', type: 'str' }),
     new Option({ long: '--priority', type: 'str' }),
-  ] })
+  ],
+})
 
 async function linearIssueSetPriorityCommand(
   accessor: LinearAccessor,
@@ -55,4 +56,5 @@ export const LINEAR_ISSUE_SET_PRIORITY = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueSetPriorityCommand,
-  write: true })
+  write: true,
+})

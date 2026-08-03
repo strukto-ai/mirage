@@ -21,7 +21,8 @@ import {
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  type PathSpec } from '@struktoai/mirage-core'
+  type PathSpec,
+} from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { fetchHeaders } from '../../../core/email/_client.ts'
 import { searchMessages } from '../../../core/email/search.ts'
@@ -39,7 +40,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--body', type: 'str' }),
     new Option({ long: '--since', type: 'str' }),
     new Option({ long: '--before', type: 'str' }),
-  ] })
+  ],
+})
 
 async function emailTriageCommand(
   accessor: EmailAccessor,
@@ -59,7 +61,8 @@ async function emailTriageCommand(
       toAddr: typeof opts.flags.to === 'string' ? opts.flags.to : null,
       since: typeof opts.flags.since === 'string' ? opts.flags.since : null,
       before: typeof opts.flags.before === 'string' ? opts.flags.before : null,
-      unseen: opts.flags.unseen === true },
+      unseen: opts.flags.unseen === true,
+    },
     maxResults,
   )
   if (uids.length === 0) {
@@ -75,4 +78,5 @@ export const EMAIL_TRIAGE = command({
   name: 'himalaya envelope list',
   resource: ResourceName.EMAIL,
   spec: SPEC,
-  fn: emailTriageCommand })
+  fn: emailTriageCommand,
+})

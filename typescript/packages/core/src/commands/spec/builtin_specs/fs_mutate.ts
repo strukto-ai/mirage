@@ -21,7 +21,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-s', long: '--suffix', type: 'str' }),
       new Option({ short: '-z', long: '--zero' }),
     ],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   chgrp: new CommandSpec({
     options: [
       new Option({ short: '-R' }),
@@ -30,7 +31,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-h' }),
     ],
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   chmod: new CommandSpec({
     options: [
       new Option({ short: '-R' }),
@@ -38,7 +40,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-f' }),
     ],
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   chown: new CommandSpec({
     options: [
       new Option({ short: '-R' }),
@@ -47,7 +50,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-h' }),
     ],
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   cp: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -67,13 +71,15 @@ export const SPECS: Record<string, CommandSpec> = {
         long: '--update',
         type: 'str',
         valueOptional: true,
-        shortValue: false }),
+        shortValue: false,
+      }),
       new Option({
         short: '-b',
         long: '--backup',
         type: 'str',
         valueOptional: true,
-        shortValue: false }),
+        shortValue: false,
+      }),
       new Option({ short: '-S', long: '--suffix', type: 'str' }),
       new Option({ short: '-t', long: '--target-directory', type: 'path' }),
       new Option({ short: '-T', long: '--no-target-directory' }),
@@ -81,10 +87,12 @@ export const SPECS: Record<string, CommandSpec> = {
       // spelling is an accepted no-op.
       new Option({ long: '--strip-trailing-slashes' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   dirname: new CommandSpec({
     options: [new Option({ short: '-z', long: '--zero' })],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   ln: new CommandSpec({
     options: [
       new Option({ short: '-s' }),
@@ -92,7 +100,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-n' }),
       new Option({ short: '-v' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   mkdir: new CommandSpec({
     options: [
       new Option({ short: '-p', long: '--parents' }),
@@ -102,9 +111,11 @@ export const SPECS: Record<string, CommandSpec> = {
         short: '-Z',
         long: '--context',
         type: 'str',
-        valueOptional: true }),
+        valueOptional: true,
+      }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   mv: new CommandSpec({
     options: [
       // Non-interactive control plane (rm precedent): -f/-i are accepted
@@ -121,13 +132,15 @@ export const SPECS: Record<string, CommandSpec> = {
         long: '--update',
         type: 'str',
         valueOptional: true,
-        shortValue: false }),
+        shortValue: false,
+      }),
       new Option({
         short: '-b',
         long: '--backup',
         type: 'str',
         valueOptional: true,
-        shortValue: false }),
+        shortValue: false,
+      }),
       new Option({ short: '-S', long: '--suffix', type: 'str' }),
       new Option({ short: '-t', long: '--target-directory', type: 'path' }),
       new Option({ short: '-T', long: '--no-target-directory' }),
@@ -139,7 +152,8 @@ export const SPECS: Record<string, CommandSpec> = {
       // spelling is an accepted no-op.
       new Option({ long: '--strip-trailing-slashes' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   readlink: new CommandSpec({
     options: [
       new Option({ short: '-f' }),
@@ -147,10 +161,12 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-m' }),
       new Option({ short: '-n' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   realpath: new CommandSpec({
     options: [new Option({ short: '-e' }), new Option({ short: '-m' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   rm: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -170,18 +186,23 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--no-preserve-root' }),
       new Option({ long: '--one-file-system' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   rmdir: new CommandSpec({
     options: [new Option({ short: '-v' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   touch: new CommandSpec({
     options: [
       new Option({ short: '-c' }),
       new Option({ short: '-r', type: 'path' }),
       new Option({ short: '-d', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   truncate: new CommandSpec({
     options: [new Option({ short: '-s', long: '--size', type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
-  unlink: new CommandSpec({ rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+  unlink: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+}

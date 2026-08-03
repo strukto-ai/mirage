@@ -28,20 +28,23 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-s', long: '--squeeze-blank' }),
       new Option({ short: '-u' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   column: new CommandSpec({
     options: [
       new Option({ short: '-t' }),
       new Option({ short: '-s', type: 'str' }),
       new Option({ short: '-o', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   expand: new CommandSpec({
     options: [
       new Option({ short: '-t', long: '--tabs', type: 'str' }),
       new Option({ short: '-i', long: '--initial' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   fmt: new CommandSpec({
     options: [
       new Option({ short: '-w', long: '--width', type: 'str' }),
@@ -52,7 +55,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-t', long: '--tagged-paragraph' }),
       new Option({ short: '-u', long: '--uniform-spacing' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   fold: new CommandSpec({
     options: [
       new Option({ short: '-w', long: '--width', type: 'str' }),
@@ -60,24 +64,28 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-b', long: '--bytes' }),
       new Option({ short: '-c', long: '--characters' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   head: new CommandSpec({
     options: [
       new Option({
         short: '-n',
         long: '--lines',
         type: 'str',
-        numericShorthand: true }),
+        numericShorthand: true,
+      }),
       new Option({ short: '-c', long: '--bytes', type: 'str' }),
       new Option({ short: '-q', long: '--quiet' }),
       new Option({ long: '--silent' }),
       new Option({ short: '-v', long: '--verbose' }),
       new Option({ short: '-z', long: '--zero-terminated' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   look: new CommandSpec({
     options: [new Option({ short: '-f' })],
-    positional: [new Operand({ type: 'str' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'str' }), new Operand({ type: 'path' })],
+  }),
   nl: new CommandSpec({
     options: [
       new Option({ short: '-b', long: '--body-numbering', type: 'str' }),
@@ -92,7 +100,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-w', long: '--number-width', type: 'str' }),
       new Option({ short: '-s', long: '--number-separator', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   od: new CommandSpec({
     options: [
       new Option({ short: '-A', long: '--address-radix', type: 'str' }),
@@ -100,7 +109,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-N', long: '--read-bytes', type: 'str' }),
       new Option({ short: '-t', long: '--format', type: 'str', multiple: true }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   rev: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
   tac: new CommandSpec({
     options: [
@@ -108,7 +118,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-r', long: '--regex' }),
       new Option({ short: '-s', long: '--separator', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   tail: new CommandSpec({
     options: [
       new Option({ short: '-n', type: 'str', numericShorthand: true }),
@@ -117,11 +128,14 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-v' }),
       new Option({ short: '-f', long: '--follow' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   unexpand: new CommandSpec({
     options: [
       new Option({ short: '-t', long: '--tabs', type: 'str' }),
       new Option({ short: '-a', long: '--all' }),
       new Option({ long: '--first-only' }),
     ],
-    rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+}

@@ -26,7 +26,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--total' }),
       new Option({ short: '-z', long: '--zero-terminated' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   csplit: new CommandSpec({
     options: [
       new Option({ short: '-f', long: '--prefix', type: 'path' }),
@@ -39,7 +40,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-z', long: '--elide-empty-files' }),
     ],
     positional: [new Operand({ type: 'path' })],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   cut: new CommandSpec({
     options: [
       new Option({ short: '-f', long: '--fields', type: 'str' }),
@@ -56,13 +58,16 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({
         long: '--whitespace-delimited',
         type: 'str',
-        valueOptional: true }),
+        valueOptional: true,
+      }),
       new Option({ short: '-z', long: '--zero-terminated' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   echo: new CommandSpec({
     options: [new Option({ short: '-n' }), new Option({ short: '-e' })],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   join: new CommandSpec({
     options: [
       new Option({ short: '-t', type: 'str' }),
@@ -79,7 +84,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--nocheck-order' }),
       new Option({ long: '--header' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   numfmt: new CommandSpec({
     options: [
       new Option({ long: '--to', type: 'str' }),
@@ -87,37 +93,44 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--suffix', type: 'str' }),
       new Option({ long: '--grouping' }),
     ],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   paste: new CommandSpec({
     options: [
       new Option({ short: '-d', long: '--delimiters', type: 'str' }),
       new Option({ short: '-s', long: '--serial' }),
       new Option({ short: '-z', long: '--zero-terminated' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   printf: new CommandSpec({
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'str' }) }),
+    rest: new Operand({ type: 'str' }),
+  }),
   seq: new CommandSpec({
     description: 'Print a sequence of numbers.',
     options: [
       new Option({
         short: '-s',
         type: 'str',
-        description: 'Use the given string as separator between numbers.' }),
+        description: 'Use the given string as separator between numbers.',
+      }),
       new Option({
         short: '-w',
-        description: 'Pad numbers with zeros to equal width.' }),
+        description: 'Pad numbers with zeros to equal width.',
+      }),
       new Option({
         short: '-f',
         type: 'str',
-        description: 'Format each number with a printf-style format string.' }),
+        description: 'Format each number with a printf-style format string.',
+      }),
     ],
     positional: [
       new Operand({ type: 'str' }),
       new Operand({ type: 'str' }),
       new Operand({ type: 'str' }),
-    ] }),
+    ],
+  }),
   shuf: new CommandSpec({
     options: [
       new Option({ short: '-n', long: '--head-count', type: 'str' }),
@@ -127,7 +140,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-i', long: '--input-range', type: 'str' }),
       new Option({ short: '-o', long: '--output', type: 'path' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   sort: new CommandSpec({
     options: [
       new Option({ short: '-r', long: '--reverse' }),
@@ -150,7 +164,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-o', long: '--output', type: 'path' }),
       new Option({ short: '-z', long: '--zero-terminated' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   split: new CommandSpec({
     options: [
       new Option({ short: '-l', long: '--lines', type: 'str' }),
@@ -160,17 +175,20 @@ export const SPECS: Record<string, CommandSpec> = {
         short: '-d',
         long: '--numeric-suffixes',
         type: 'str',
-        valueOptional: true }),
+        valueOptional: true,
+      }),
       new Option({
         short: '-x',
         long: '--hex-suffixes',
         type: 'str',
-        valueOptional: true }),
+        valueOptional: true,
+      }),
       new Option({ short: '-a', long: '--suffix-length', type: 'str' }),
       new Option({ long: '--additional-suffix', type: 'str' }),
       new Option({ short: '-t', long: '--separator', type: 'str' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   tee: new CommandSpec({
     options: [
       new Option({ short: '-a', long: '--append' }),
@@ -180,9 +198,11 @@ export const SPECS: Record<string, CommandSpec> = {
         long: '--output-error',
         type: 'str',
         valueOptional: true,
-        choices: ['warn', 'warn-nopipe', 'exit', 'exit-nopipe'] }),
+        choices: ['warn', 'warn-nopipe', 'exit', 'exit-nopipe'],
+      }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   tr: new CommandSpec({
     options: [
       new Option({ short: '-d', long: '--delete' }),
@@ -191,7 +211,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-C' }),
       new Option({ short: '-t', long: '--truncate-set1' }),
     ],
-    positional: [new Operand({ type: 'str' }), new Operand({ type: 'str' })] }),
+    positional: [new Operand({ type: 'str' }), new Operand({ type: 'str' })],
+  }),
   tsort: new CommandSpec({ positional: [new Operand({ type: 'path' })] }),
   uniq: new CommandSpec({
     options: [
@@ -207,7 +228,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-w', long: '--check-chars', type: 'str' }),
       new Option({ short: '-z', long: '--zero-terminated' }),
     ],
-    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })] }),
+    positional: [new Operand({ type: 'path' }), new Operand({ type: 'path' })],
+  }),
   wc: new CommandSpec({
     options: [
       new Option({ short: '-l', long: '--lines' }),
@@ -217,4 +239,6 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-L', long: '--max-line-length' }),
       new Option({ long: '--total', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+}

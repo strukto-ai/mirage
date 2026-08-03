@@ -22,7 +22,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-f', type: 'path', multiple: true }),
     ],
     positional: [new Operand({ type: 'str', providedBy: ['-f'] })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   grep: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -53,7 +54,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--line-buffered' }),
     ],
     positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   jq: new CommandSpec({
     options: [
       new Option({ short: '-r' }),
@@ -61,7 +63,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-s' }),
     ],
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   rg: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -87,7 +90,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--color', type: 'str', valueOptional: true }),
     ],
     positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   search: new CommandSpec({
     options: [
       new Option({ long: '--method', type: 'str' }),
@@ -95,7 +99,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--threshold', type: 'str' }),
     ],
     positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   sed: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -114,10 +119,12 @@ export const SPECS: Record<string, CommandSpec> = {
     // neither -e nor -f gave one (GNU). With -e/-f the slot is skipped and the
     // first operand reflows to a file path in rest.
     positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   strings: new CommandSpec({
     options: [new Option({ short: '-n', type: 'str' })],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   zgrep: new CommandSpec({
     options: [
       new Option({ short: '-i' }),
@@ -137,4 +144,6 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-w' }),
     ],
     positional: [new Operand({ type: 'str', providedBy: ['-e', '-f'] })],
-    rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+}

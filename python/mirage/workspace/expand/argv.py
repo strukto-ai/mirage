@@ -108,8 +108,7 @@ async def expand_argv(
     if policy is WordPolicy.MOUNT:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
-            extra: list[ValueType
-                        | None] = ["str"] * (consumed - 1)
+            extra: list[ValueType | None] = ["str"] * (consumed - 1)
             word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
 
     classified = classify_parts(expanded,

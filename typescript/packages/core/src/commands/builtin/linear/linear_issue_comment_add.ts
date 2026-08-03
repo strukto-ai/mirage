@@ -29,7 +29,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--issue_key', type: 'str' }),
     new Option({ long: '--body', type: 'str' }),
     new Option({ long: '--body_file', type: 'path' }),
-  ] })
+  ],
+})
 
 async function linearIssueCommentAddCommand(
   accessor: LinearAccessor,
@@ -48,7 +49,8 @@ async function linearIssueCommentAddCommand(
     inlineText: inlineBody,
     filePath: bodyFile,
     stdin: opts.stdin,
-    errorMessage: 'comment body is required' })
+    errorMessage: 'comment body is required',
+  })
   const comment = await commentCreate(accessor.transport, issueId, body)
   const issue = await getIssue(accessor.transport, issueId)
   const issueKey = typeof issue.identifier === 'string' ? issue.identifier : null
@@ -60,4 +62,5 @@ export const LINEAR_ISSUE_COMMENT_ADD = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueCommentAddCommand,
-  write: true })
+  write: true,
+})

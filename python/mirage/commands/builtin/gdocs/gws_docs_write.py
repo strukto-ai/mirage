@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.gdocs.write import append_text
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult

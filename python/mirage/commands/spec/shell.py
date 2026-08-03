@@ -15,8 +15,7 @@
 import re
 from dataclasses import dataclass, field
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 # GNU echo is not getopt, so its option surface is a word shape, not a
 # CommandSpec: options are LEADING words matching this pattern only.
@@ -123,12 +122,10 @@ def parse_shell_options(spec: CommandSpec, argv: list[str]) -> ShellParse:
         long = opt.long.lstrip("-") if opt.long else None
         name = short or long or ""
         if short is not None:
-            (short_bool
-             if opt.type == "bool" else short_value).add(short)
+            (short_bool if opt.type == "bool" else short_value).add(short)
             alias[short] = name
         if long is not None:
-            (long_bool
-             if opt.type == "bool" else long_value).add(long)
+            (long_bool if opt.type == "bool" else long_value).add(long)
             alias[long] = name
     flags: dict[str, str | bool] = {}
     i = 0

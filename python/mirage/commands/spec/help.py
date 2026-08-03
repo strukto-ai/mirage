@@ -14,10 +14,11 @@
 
 from collections.abc import Sequence
 
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 
 # (name, one-line help) rows a CLI group passes for its children.
 SubcommandRows = Sequence[tuple[str, str]]
+
 
 def _value_label(value_type: str) -> str:
     if value_type == "bool":
@@ -72,8 +73,7 @@ def render_help(name: str, spec: CommandSpec,
         usage_bits.append("<path>" if op.type == "path" else "<text>")
     if spec.rest is not None:
         kind = spec.rest.type
-        usage_bits.append("[<path>...]" if kind ==
-                          "path" else "[<text>...]")
+        usage_bits.append("[<path>...]" if kind == "path" else "[<text>...]")
     lines.append("Usage: " + " ".join(usage_bits))
 
     if subcommands:

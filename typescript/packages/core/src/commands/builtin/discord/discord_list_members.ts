@@ -25,7 +25,8 @@ const SPEC = new CommandSpec({
   options: [
     new Option({ long: '--guild_id', type: 'str' }),
     new Option({ long: '--query', type: 'str' }),
-  ] })
+  ],
+})
 
 async function discordListMembersCommand(
   accessor: DiscordAccessor,
@@ -49,4 +50,5 @@ export const DISCORD_LIST_MEMBERS = command({
   name: 'discord-list-members',
   resource: ResourceName.DISCORD,
   spec: SPEC,
-  fn: discordListMembersCommand })
+  fn: discordListMembersCommand,
+})

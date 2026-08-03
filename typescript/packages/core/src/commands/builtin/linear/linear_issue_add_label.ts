@@ -27,7 +27,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--issue_id', type: 'str' }),
     new Option({ long: '--issue_key', type: 'str' }),
     new Option({ long: '--label_id', type: 'str' }),
-  ] })
+  ],
+})
 
 async function linearIssueAddLabelCommand(
   accessor: LinearAccessor,
@@ -67,4 +68,5 @@ export const LINEAR_ISSUE_ADD_LABEL = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueAddLabelCommand,
-  write: true })
+  write: true,
+})

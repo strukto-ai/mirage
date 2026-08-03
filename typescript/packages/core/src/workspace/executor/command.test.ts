@@ -76,7 +76,8 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       name: 'cat',
       resource: 'ram',
       spec: BASIC_SPEC,
-      fn: () => [new TextEncoder().encode('hello'), new IOResult()] })
+      fn: () => [new TextEncoder().encode('hello'), new IOResult()],
+    })
     if (cmd === undefined) throw new Error('cmd missing')
     mount.register(cmd)
 
@@ -99,7 +100,8 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     if (mount === null) throw new Error('mount missing')
     const spec = new CommandSpec({
       options: [new Option({ short: '-n', type: 'str' })],
-      rest: new Operand({ type: 'path' }) })
+      rest: new Operand({ type: 'path' }),
+    })
     let seenFlags: Record<string, string | boolean | number | string[]> = {}
     const [cmd] = command({
       name: 'head',
@@ -108,7 +110,8 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       fn: (_accessor, _paths, _texts, opts) => {
         seenFlags = opts.flags
         return [null, new IOResult()]
-      } })
+      },
+    })
     if (cmd === undefined) throw new Error('cmd missing')
     mount.register(cmd)
 
@@ -135,7 +138,8 @@ describe('handleCommand — cross-mount', () => {
       name: 'mycmd',
       resource: 'ram',
       spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
-      fn: () => [null, new IOResult()] })
+      fn: () => [null, new IOResult()],
+    })
     if (cmd === undefined) throw new Error('cmd missing')
     mount.register(cmd)
     const [, io, exec] = await handleCommand(

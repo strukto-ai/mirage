@@ -91,9 +91,7 @@ export async function expandArgv(
   if (policy === WordPolicy.MOUNT) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
-      const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill(
-        'str',
-      )
+      const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
       wordKinds = [...extra, ...specWordKinds(spec, expanded.slice(consumed))]
     }
   }

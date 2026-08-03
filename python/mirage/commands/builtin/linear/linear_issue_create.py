@@ -17,8 +17,7 @@ import json
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.builtin.linear._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, FlagView, Option
 from mirage.core.linear._client import issue_create
 from mirage.core.linear.normalize import normalize_issue
 from mirage.io.stream import yield_bytes

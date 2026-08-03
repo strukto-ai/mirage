@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--channel_id', type: 'str' }),
     new Option({ long: '--message_id', type: 'str' }),
     new Option({ long: '--reaction', type: 'str' }),
-  ] })
+  ],
+})
 
 async function discordAddReactionCommand(
   accessor: DiscordAccessor,
@@ -55,4 +56,5 @@ export const DISCORD_ADD_REACTION = command({
   resource: ResourceName.DISCORD,
   spec: SPEC,
   fn: discordAddReactionCommand,
-  write: true })
+  write: true,
+})

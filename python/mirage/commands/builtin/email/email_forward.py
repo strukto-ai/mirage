@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.email._client import fetch_message
 from mirage.core.email.send import forward_message
 from mirage.io.stream import yield_bytes

@@ -14,7 +14,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any, Literal
 
 from mirage.commands.spec.constants import flag_kwarg_name
@@ -264,8 +264,7 @@ class ParsedArgs:
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = field(
         default_factory=list)
     invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
-    invalid_float_options: list[tuple[str,
-                                      str]] = field(default_factory=list)
+    invalid_float_options: list[tuple[str, str]] = field(default_factory=list)
     missing_required_options: list[str] = field(default_factory=list)
 
     def paths(self) -> list[str]:

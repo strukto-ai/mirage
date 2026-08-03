@@ -12,16 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec import (SPECS, CommandSpec, Operand, ValueType,
-                                  Option, ParsedArgs, parse_command,
-                                  parse_to_kwargs)
+from mirage.commands.spec import (SPECS, CommandSpec, Operand, Option,
+                                  ParsedArgs, parse_command, parse_to_kwargs)
 
 
 def test_parse_simple_path_args():
     spec = CommandSpec(rest=Operand(type="path"))
     parsed = parse_command(spec, ["a.txt", "b.txt"], cwd="/home")
-    assert parsed.args == [("/home/a.txt", "path"),
-                           ("/home/b.txt", "path")]
+    assert parsed.args == [("/home/a.txt", "path"), ("/home/b.txt", "path")]
     assert parsed.flags == {}
 
 
@@ -41,8 +39,7 @@ def test_parse_bool_flags():
 
 
 def test_parse_value_flag_space():
-    spec = CommandSpec(options=(Option(short="-n",
-                                       type="str"), ),
+    spec = CommandSpec(options=(Option(short="-n", type="str"), ),
                        rest=Operand(type="path"))
     parsed = parse_command(spec, ["-n", "10", "file.txt"], cwd="/")
     assert parsed.flags == {"-n": "10"}
@@ -50,8 +47,7 @@ def test_parse_value_flag_space():
 
 
 def test_parse_value_flag_joined():
-    spec = CommandSpec(options=(Option(short="-n",
-                                       type="str"), ),
+    spec = CommandSpec(options=(Option(short="-n", type="str"), ),
                        rest=Operand(type="path"))
     parsed = parse_command(spec, ["-n10", "file.txt"], cwd="/")
     assert parsed.flags == {"-n": "10"}
@@ -67,8 +63,7 @@ def test_parse_long_bool_flag():
 
 
 def test_parse_long_value_flag():
-    spec = CommandSpec(options=(Option(long="--type",
-                                       type="str"), ),
+    spec = CommandSpec(options=(Option(long="--type", type="str"), ),
                        rest=Operand(type="path"))
     parsed = parse_command(spec, ["--type", "py", "src/"], cwd="/")
     assert parsed.flags == {"--type": "py"}
@@ -119,20 +114,17 @@ def test_parse_double_dash_stops_flags():
 def test_parse_text_rest():
     spec = CommandSpec(rest=Operand(type="str"))
     parsed = parse_command(spec, ["hello", "world"], cwd="/")
-    assert parsed.args == [("hello", "str"),
-                           ("world", "str")]
+    assert parsed.args == [("hello", "str"), ("world", "str")]
 
 
 def test_parsed_args_paths():
     p = ParsedArgs(flags={},
-                   args=[("/a", "path"), ("text", "str"),
-                         ("/b", "path")])
+                   args=[("/a", "path"), ("text", "str"), ("/b", "path")])
     assert p.paths() == ["/a", "/b"]
 
 
 def test_parsed_args_texts():
-    p = ParsedArgs(flags={},
-                   args=[("/a", "path"), ("text", "str")])
+    p = ParsedArgs(flags={}, args=[("/a", "path"), ("text", "str")])
     assert p.texts() == ["text"]
 
 
@@ -146,8 +138,7 @@ def test_parsed_args_flag():
 
 def test_parse_combined_bool_and_value():
     spec = CommandSpec(options=(Option(short="-r"), Option(short="-i"),
-                                Option(short="-m",
-                                       type="str")),
+                                Option(short="-m", type="str")),
                        rest=Operand(type="path"))
     parsed = parse_command(spec, ["-ri", "-m", "5", "file.txt"], cwd="/")
     assert parsed.flags == {"-r": True, "-i": True, "-m": "5"}
@@ -605,8 +596,7 @@ def test_parse_new_spec_positional_text_then_path():
 def test_parse_new_spec_no_rest():
     # Overflow past a fixed arity is classified like the last positional
     # slot and passed through; the command owns the refusal (#452).
-    spec = CommandSpec(positional=(Operand(type="str"),
-                                   Operand(type="str")), )
+    spec = CommandSpec(positional=(Operand(type="str"), Operand(type="str")), )
     parsed = parse_command(spec, ["hello", "world", "extra"], cwd="/")
     assert parsed.args == [
         ("hello", "str"),
@@ -627,9 +617,7 @@ def test_parse_new_spec_joined_value_flag():
 
 def test_numeric_shorthand_treats_dash_n_as_flag():
     spec = CommandSpec(
-        options=(Option(short="-n",
-                        type="str",
-                        numeric_shorthand=True), ),
+        options=(Option(short="-n", type="str", numeric_shorthand=True), ),
         rest=Operand(type="path"),
     )
     parsed = parse_command(spec, ["-3", "file.txt"], cwd="/")
@@ -639,9 +627,7 @@ def test_numeric_shorthand_treats_dash_n_as_flag():
 
 def test_numeric_shorthand_keeps_dash_n_value_form():
     spec = CommandSpec(
-        options=(Option(short="-n",
-                        type="str",
-                        numeric_shorthand=True), ),
+        options=(Option(short="-n", type="str", numeric_shorthand=True), ),
         rest=Operand(type="path"),
     )
     parsed = parse_command(spec, ["-n", "3", "file.txt"], cwd="/")

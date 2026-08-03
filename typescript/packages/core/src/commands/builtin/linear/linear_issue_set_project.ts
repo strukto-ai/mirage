@@ -27,7 +27,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--issue_id', type: 'str' }),
     new Option({ long: '--issue_key', type: 'str' }),
     new Option({ long: '--project_id', type: 'str' }),
-  ] })
+  ],
+})
 
 async function linearIssueSetProjectCommand(
   accessor: LinearAccessor,
@@ -53,4 +54,5 @@ export const LINEAR_ISSUE_SET_PROJECT = command({
   resource: ResourceName.LINEAR,
   spec: SPEC,
   fn: linearIssueSetProjectCommand,
-  write: true })
+  write: true,
+})

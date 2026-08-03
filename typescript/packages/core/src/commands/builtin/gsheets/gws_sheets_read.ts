@@ -26,7 +26,8 @@ const SPEC = new CommandSpec({
     new Option({ long: '--spreadsheet', type: 'str' }),
     new Option({ long: '--range', type: 'str' }),
   ],
-  rest: new Operand({ type: 'path' }) })
+  rest: new Operand({ type: 'path' }),
+})
 
 async function gwsSheetsReadCommand(
   accessor: GoogleApiAccessor,
@@ -51,4 +52,5 @@ export const GSHEETS_GWS_READ = command({
   name: 'gws sheets +read',
   resource: [ResourceName.GSHEETS, ResourceName.GDRIVE],
   spec: SPEC,
-  fn: gwsSheetsReadCommand })
+  fn: gwsSheetsReadCommand,
+})

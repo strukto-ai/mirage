@@ -22,7 +22,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-c' }),
       new Option({ short: '-t' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   gzip: new CommandSpec({
     options: [
       new Option({ short: '-d' }),
@@ -39,7 +40,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-8' }),
       new Option({ short: '-9' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   tar: new CommandSpec({
     options: [
       new Option({ short: '-c' }),
@@ -54,7 +56,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--strip-components', type: 'str' }),
       new Option({ long: '--exclude', type: 'str' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   unzip: new CommandSpec({
     options: [
       new Option({ short: '-o' }),
@@ -64,7 +67,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-p' }),
       new Option({ short: '-t' }),
     ],
-    rest: new Operand({ type: 'path' }) }),
+    rest: new Operand({ type: 'path' }),
+  }),
   zcat: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
   zip: new CommandSpec({
     options: [
@@ -72,4 +76,6 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-j' }),
       new Option({ short: '-q' }),
     ],
-    rest: new Operand({ type: 'path' }) }) }
+    rest: new Operand({ type: 'path' }),
+  }),
+}

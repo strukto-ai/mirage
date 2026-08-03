@@ -25,9 +25,11 @@ describe('compileSpec — count/choices/required/default tables', () => {
           long: '--mode',
           type: 'str',
           choices: ['a', 'b'],
-          default: 'a' }),
+          default: 'a',
+        }),
         new Option({ long: '--out', type: 'str', required: true }),
-      ] })
+      ],
+    })
     const cs = compileSpec(spec)
     expect(cs.countDests).toEqual(new Set(['--verbose']))
     expect(cs.choicesByDest).toEqual(new Map([['--mode', ['a', 'b']]]))
@@ -37,13 +39,15 @@ describe('compileSpec — count/choices/required/default tables', () => {
 
   it('rejects count on a value flag', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--level', type: 'str', count: true })] })
+      options: [new Option({ long: '--level', type: 'str', count: true })],
+    })
     expect(() => compileSpec(spec)).toThrow(/count requires a boolean flag/)
   })
 
   it('rejects choices or default on a boolean flag', () => {
     const spec = new CommandSpec({
-      options: [new Option({ long: '--quiet', choices: ['a', 'b'] })] })
+      options: [new Option({ long: '--quiet', choices: ['a', 'b'] })],
+    })
     expect(() => compileSpec(spec)).toThrow(/require a value flag/)
   })
 
@@ -54,8 +58,10 @@ describe('compileSpec — count/choices/required/default tables', () => {
           long: '--mode',
           type: 'str',
           choices: ['a', 'b'],
-          default: 'c' }),
-      ] })
+          default: 'c',
+        }),
+      ],
+    })
     expect(() => compileSpec(spec)).toThrow(/not one of its choices/)
   })
 
@@ -84,8 +90,10 @@ describe('type int validation', () => {
             new Option({
               long: '--port',
               type: 'int',
-              default: 'auto' }),
-          ] }),
+              default: 'auto',
+            }),
+          ],
+        }),
       ),
     ).toThrow(/is not an integer/)
   })
@@ -99,7 +107,8 @@ describe('expandLong', () => {
           new Option({ long: '--binary' }),
           new Option({ long: '--binary-files', type: 'str' }),
           new Option({ long: '--count' }),
-        ] }),
+        ],
+      }),
     )
     expect(expandLong(cs, '--binary')).toEqual(['--binary'])
     expect(expandLong(cs, '--bin')).toEqual(['--binary', '--binary-files'])

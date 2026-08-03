@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'ls':
@@ -31,9 +30,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-d"),
             Option(short="-F"),
             # Accepted no-op like grep --color (#471).
-            Option(long="--color",
-                   type="str",
-                   value_optional=True),
+            Option(long="--color", type="str", value_optional=True),
         ),
         rest=Operand(type="path"),
     ),
@@ -58,16 +55,12 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-name", type="str", multiple=True),
             Option(short="-type", type="str", multiple=True),
-            Option(short="-maxdepth",
-                   type="str",
-                   multiple=True),
+            Option(short="-maxdepth", type="str", multiple=True),
             Option(short="-size", type="str", multiple=True),
             Option(short="-mtime", type="str", multiple=True),
             Option(short="-iname", type="str", multiple=True),
             Option(short="-path", type="str", multiple=True),
-            Option(short="-mindepth",
-                   type="str",
-                   multiple=True),
+            Option(short="-mindepth", type="str", multiple=True),
             Option(short="-print"),
             Option(short="-print0"),
             Option(short="-delete"),
@@ -101,8 +94,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-h"),
             Option(short="-s"),
             Option(short="-a"),
-            Option(short="-d", long="--max-depth",
-                   type="str"),
+            Option(short="-d", long="--max-depth", type="str"),
             Option(short="-c"),
         ),
         rest=Operand(type="path"),

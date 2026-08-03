@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.notion.normalize import normalize_page, to_json_bytes
 from mirage.core.notion.pages import (append_blocks, get_page,
                                       list_block_children)

@@ -20,7 +20,8 @@ import {
   invalidIntError,
   missingRequiredError,
   missingValueError,
-  unknownOptionError } from '../../../commands/spec/usage.ts'
+  unknownOptionError,
+} from '../../../commands/spec/usage.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -46,7 +47,8 @@ function synthesizePathSpec(value: string): PathSpec {
     resourcePath: '',
     virtual: value,
     directory: slash >= 0 ? value.slice(0, slash + 1) : '/',
-    resolved: true })
+    resolved: true,
+  })
 }
 
 export function parseFlags(

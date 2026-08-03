@@ -44,7 +44,8 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
     executeFn,
     agentId: 'test-agent',
     workspaceId: 'test-ws',
-    registerCloser: (): void => undefined }
+    registerCloser: (): void => undefined,
+  }
 }
 
 function plainRegistry(): MountRegistry {
@@ -62,7 +63,8 @@ describe('executeNode dispatcher', () => {
       text: '',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const [stdout, io] = await executeNode(buildDeps(reg), node, new Session({ sessionId: 't' }))
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
@@ -78,25 +80,29 @@ describe('executeNode dispatcher', () => {
       text: 'echo hi',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const body: TSNodeLike = {
       type: NT.COMPOUND_STATEMENT,
       text: '{ echo hi; }',
       children: [stmt],
       namedChildren: [stmt],
-      isNamed: true }
+      isNamed: true,
+    }
     const nameNode: TSNodeLike = {
       type: NT.WORD,
       text: 'greet',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const fnNode: TSNodeLike = {
       type: NT.FUNCTION_DEFINITION,
       text: 'greet() { echo hi; }',
       children: [nameNode, body],
       namedChildren: [nameNode, body],
-      isNamed: true }
+      isNamed: true,
+    }
     const session = new Session({ sessionId: 't' })
     const [stdout, io] = await executeNode(buildDeps(reg), fnNode, session)
     expect(stdout).toBeNull()
@@ -111,7 +117,8 @@ describe('executeNode dispatcher', () => {
       text: 'FOO=bar',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const session = new Session({ sessionId: 't' })
     const [, io] = await executeNode(buildDeps(reg), node, session)
     expect(io.exitCode).toBe(0)
@@ -125,7 +132,8 @@ describe('executeNode dispatcher', () => {
       text: 'JUNK',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const session = new Session({ sessionId: 't' })
     await executeNode(buildDeps(reg), node, session)
     expect(Object.keys(session.env)).toEqual([])
@@ -142,13 +150,15 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'true', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const neg: TSNodeLike = {
       type: NT.NEGATED_COMMAND,
       text: '! true',
       children: [inner],
       namedChildren: [inner],
-      isNamed: true }
+      isNamed: true,
+    }
     const [, io] = await executeNode(buildDeps(reg), neg, new Session({ sessionId: 't' }))
     expect(io.exitCode).toBe(1)
   })
@@ -160,19 +170,22 @@ describe('executeNode dispatcher', () => {
       text: 'false',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const inner: TSNodeLike = {
       type: NT.COMMAND,
       text: 'false',
       children: [innerName],
       namedChildren: [innerName],
-      isNamed: true }
+      isNamed: true,
+    }
     const neg: TSNodeLike = {
       type: NT.NEGATED_COMMAND,
       text: '! false',
       children: [inner],
       namedChildren: [inner],
-      isNamed: true }
+      isNamed: true,
+    }
     const [, io] = await executeNode(buildDeps(reg), neg, new Session({ sessionId: 't' }))
     expect(io.exitCode).toBe(0)
   })
@@ -188,7 +201,8 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'pwd', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const session = new Session({ sessionId: 't', cwd: '/ram/subdir' })
     const [stdout, io] = await executeNode(buildDeps(reg), cmd, session)
     expect(io.exitCode).toBe(0)
@@ -206,7 +220,8 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'true', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const [stdout, io] = await executeNode(buildDeps(reg), cmd, new Session({ sessionId: 't' }))
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -223,7 +238,8 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'false', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const [, io] = await executeNode(buildDeps(reg), cmd, new Session({ sessionId: 't' }))
     expect(io.exitCode).toBe(1)
   })
@@ -239,25 +255,29 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'true', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const errNode: TSNodeLike = {
       type: NT.ERROR,
       text: '??',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const punctNode: TSNodeLike = {
       type: NT.SEMI,
       text: ';',
       children: [],
       namedChildren: [],
-      isNamed: false }
+      isNamed: false,
+    }
     const prog: TSNodeLike = {
       type: NT.PROGRAM,
       text: 'true',
       children: [trueCmd, punctNode, errNode],
       namedChildren: [trueCmd, errNode],
-      isNamed: true }
+      isNamed: true,
+    }
     const session = new Session({ sessionId: 't' })
     const [, io] = await executeNode(buildDeps(reg), prog, session)
     expect(io.exitCode).toBe(0)
@@ -271,7 +291,8 @@ describe('executeNode dispatcher', () => {
       text: '# -l, -a clustered',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const [stdout, io, exec] = await executeNode(
       buildDeps(reg),
       comment,
@@ -296,19 +317,22 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'true', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const comment: TSNodeLike = {
       type: NT.COMMENT,
       text: '# trailing note',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const prog: TSNodeLike = {
       type: NT.PROGRAM,
       text: 'true # trailing note',
       children: [trueCmd, comment],
       namedChildren: [trueCmd, comment],
-      isNamed: true }
+      isNamed: true,
+    }
     const session = new Session({ sessionId: 't' })
     const [, io] = await executeNode(buildDeps(reg), prog, session)
     expect(io.exitCode).toBe(0)
@@ -326,13 +350,15 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'true', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const comment: TSNodeLike = {
       type: NT.COMMENT,
       text: '# mid-block',
       children: [],
       namedChildren: [],
-      isNamed: true }
+      isNamed: true,
+    }
     const falseCmd: TSNodeLike = {
       type: NT.COMMAND,
       text: 'false',
@@ -342,13 +368,15 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'false', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const compound: TSNodeLike = {
       type: NT.COMPOUND_STATEMENT,
       text: '{ true; # mid-block\nfalse; }',
       children: [trueCmd, comment, falseCmd],
       namedChildren: [trueCmd, comment, falseCmd],
-      isNamed: true }
+      isNamed: true,
+    }
     const [, io, exec] = await executeNode(
       buildDeps(reg),
       compound,
@@ -370,7 +398,8 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'true', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const falseCmd: TSNodeLike = {
       type: NT.COMMAND,
       text: 'false',
@@ -380,13 +409,15 @@ describe('executeNode dispatcher', () => {
       namedChildren: [
         { type: NT.COMMAND_NAME, text: 'false', children: [], namedChildren: [], isNamed: true },
       ],
-      isNamed: true }
+      isNamed: true,
+    }
     const compound: TSNodeLike = {
       type: NT.COMPOUND_STATEMENT,
       text: '{ true; false; }',
       children: [trueCmd, falseCmd],
       namedChildren: [trueCmd, falseCmd],
-      isNamed: true }
+      isNamed: true,
+    }
     const [, io, exec] = await executeNode(
       buildDeps(reg),
       compound,
@@ -400,7 +431,8 @@ describe('executeNode dispatcher', () => {
 describe('specWordKinds — numericShorthand', () => {
   const headSpec = new CommandSpec({
     options: [new Option({ short: '-n', type: 'str', numericShorthand: true })],
-    rest: new Operand({ type: 'path' }) })
+    rest: new Operand({ type: 'path' }),
+  })
 
   it('treats -3 as a flag value, not a path (head/tail GNU shorthand)', () => {
     expect(specWordKinds(headSpec, ['-3', '/ram/file'])).toEqual([null, 'path'])
@@ -409,10 +441,8 @@ describe('specWordKinds — numericShorthand', () => {
   it('falls back to treating -3 as a positional when spec lacks numericShorthand', () => {
     const noShortcut = new CommandSpec({
       options: [new Option({ short: '-n', type: 'str' })],
-      rest: new Operand({ type: 'path' }) })
-    expect(specWordKinds(noShortcut, ['-3', '/ram/file'])).toEqual([
-      'path',
-      'path',
-    ])
+      rest: new Operand({ type: 'path' }),
+    })
+    expect(specWordKinds(noShortcut, ['-3', '/ram/file'])).toEqual(['path', 'path'])
   })
 })

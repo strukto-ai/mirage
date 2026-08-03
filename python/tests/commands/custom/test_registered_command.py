@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.commands.registry import RegisteredCommand, command
-from mirage.commands.spec import SPECS, CommandSpec, Operand, ValueType
+from mirage.commands.spec import SPECS, CommandSpec, Operand
 from mirage.io.types import IOResult
 
 

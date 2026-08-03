@@ -28,12 +28,15 @@ const SPEC = new CommandSpec({
     new Option({
       long: '--query',
       type: 'str',
-      description: 'Gmail search query, e.g. "is:unread" (default: is:unread)' }),
+      description: 'Gmail search query, e.g. "is:unread" (default: is:unread)',
+    }),
     new Option({
       long: '--max',
       type: 'str',
-      description: 'Max results to return (default: 20)' }),
-  ] })
+      description: 'Max results to return (default: 20)',
+    }),
+  ],
+})
 
 async function gwsGmailTriageCommand(
   accessor: GmailAccessor,
@@ -61,7 +64,8 @@ async function gwsGmailTriageCommand(
       from: extractHeader(headers, 'From'),
       subject: extractHeader(headers, 'Subject'),
       date: extractHeader(headers, 'Date'),
-      snippet: raw.snippet ?? '' })
+      snippet: raw.snippet ?? '',
+    })
   }
   const out: ByteSource = ENC.encode(JSON.stringify(summaries))
   return [out, new IOResult()]
@@ -71,4 +75,5 @@ export const GMAIL_GWS_TRIAGE = command({
   name: 'gws gmail +triage',
   resource: ResourceName.GMAIL,
   spec: SPEC,
-  fn: gwsGmailTriageCommand })
+  fn: gwsGmailTriageCommand,
+})

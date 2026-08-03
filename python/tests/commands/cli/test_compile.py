@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli import CLISpec
-from mirage.commands.spec.types import Operand, ValueType, Option
+from mirage.commands.spec.types import Operand, Option
 
 
 class _Config(BaseModel):
@@ -79,18 +79,14 @@ def test_config_model_is_root_only():
 
 def test_ancestor_descendant_option_collision_raises():
     with pytest.raises(ValueError, match="collides with subcommand"):
-        CLISpec(
-            name="gws",
-            options=(Option(short="-C",
-                            long="--cwd",
-                            type="str"), ),
-            subcommands=(CLISpec(
-                name="gmail",
+        CLISpec(name="gws",
+                options=(Option(short="-C", long="--cwd", type="str"), ),
                 subcommands=(CLISpec(
-                    name="send",
-                    fn=_verb,
-                    options=(Option(long="--cwd",
-                                    type="str"), )), )), ))
+                    name="gmail",
+                    subcommands=(CLISpec(
+                        name="send",
+                        fn=_verb,
+                        options=(Option(long="--cwd", type="str"), )), )), ))
 
 
 def test_sibling_leaves_may_share_option_spellings():
@@ -99,12 +95,10 @@ def test_sibling_leaves_may_share_option_spellings():
         subcommands=(
             CLISpec(name="send",
                     fn=_verb,
-                    options=(Option(long="--to",
-                                    type="str"), )),
+                    options=(Option(long="--to", type="str"), )),
             CLISpec(name="share",
                     fn=_verb,
-                    options=(Option(long="--to",
-                                    type="str"), )),
+                    options=(Option(long="--to", type="str"), )),
         ),
     )
     assert len(tree.subcommands) == 2

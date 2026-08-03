@@ -22,7 +22,8 @@ import {
   listCardComments,
   listListCards,
   listWorkspaceBoards,
-  listWorkspaces } from '../../../core/trello/_client.ts'
+  listWorkspaces,
+} from '../../../core/trello/_client.ts'
 import {
   normalizeBoard,
   normalizeCard,
@@ -30,14 +31,16 @@ import {
   normalizeLabel,
   normalizeList,
   normalizeMember,
-  toJsonBytes } from '../../../core/trello/normalize.ts'
+  toJsonBytes,
+} from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import {
   command,
   type CommandFnResult,
   type CommandOpts,
-  type RegisteredCommand } from '../../config.ts'
+  type RegisteredCommand,
+} from '../../config.ts'
 import { CommandSpec, Operand } from '../../spec/types.ts'
 
 type Runner = (accessor: TrelloAccessor, texts: string[]) => Promise<Uint8Array>
@@ -131,7 +134,8 @@ export function makeTrelloReadCommands(): RegisteredCommand[] {
         ): Promise<CommandFnResult> => {
           const data = await entry.runner(accessor as TrelloAccessor, texts)
           return [data, new IOResult()]
-        } }),
+        },
+      }),
     )
   }
   return commands

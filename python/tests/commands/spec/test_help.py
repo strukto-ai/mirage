@@ -13,19 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 
 
 def test_renders_name_description_usage_and_flags():
     spec = CommandSpec(
         description="Send a thing.",
         options=(
-            Option(long="--to",
-                   type="str",
-                   description="Recipient"),
-            Option(long="--help",
-                   type="bool",
-                   description="Show help"),
+            Option(long="--to", type="str", description="Recipient"),
+            Option(long="--help", type="bool", description="Show help"),
         ),
     )
     out = render_help("gws thing send", spec)
@@ -44,8 +40,7 @@ def test_falls_back_to_bare_name_without_description():
 
 def test_epilog_trails_the_flag_table_after_a_blank_line():
     spec = CommandSpec(
-        options=(Option(long="--help",
-                        type="bool",
+        options=(Option(long="--help", type="bool",
                         description="Show help"), ),
         epilog="Services:\n  drive\n",
     )

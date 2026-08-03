@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, ValueType, Option
+from mirage.commands.spec.types import CommandSpec, Option
 from mirage.core.discord.members import search_members
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
