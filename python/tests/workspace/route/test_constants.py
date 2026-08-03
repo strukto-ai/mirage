@@ -100,8 +100,8 @@ def test_find_link_options_are_last_wins():
     # `find -P -L x` does.
     assert dereferences("find", ["find", "-L", "-P", "/data/link"]) is False
     assert dereferences("find", ["find", "-P", "-L", "/data/link"]) is True
-    assert dereferences("find", ["find", "-L", "-P", "-L",
-                                 "/data/link"]) is True
+    assert dereferences("find",
+                        ["find", "-L", "-P", "-L", "/data/link"]) is True
     assert dereferences("find", ["find", "-H", "/data/link"]) is True
     assert dereferences("find", ["find", "/data/link"]) is False
 

@@ -339,7 +339,6 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [ws] = await makeWs()
     expect((await run(ws, 'chgrp staff'))[0]).toBe(2)
     expect((await run(ws, "chgrp '' /data/f.txt"))[0]).toBe(1)
-    expect((await run(ws, 'chgrp -R staff /data'))[0]).toBe(2)
     const [code, , err] = await run(ws, 'chgrp staff /data/nope.txt')
     expect(code).toBe(1)
     expect(err).toContain('nope.txt')
@@ -370,6 +369,117 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
     expect(code).toBe(1)
     expect(err).toContain('read-only mount')
+    await ws.close()
+  })
+})
+
+describe('recursive metadata flags (-R)', () => {
+  it('chmod -R covers the whole subtree', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'mkdir -p /data/tree/sub')
+    await run(ws, 'echo aaa > /data/tree/a.txt')
+    await run(ws, 'echo bbb > /data/tree/sub/b.txt')
+    const [code, , err] = await run(ws, 'chmod -R 700 /data/tree')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+    const [, out] = await run(
+      ws,
+      "stat -c '%A %n' /data/tree /data/tree/a.txt /data/tree/sub /data/tree/sub/b.txt",
+    )
+    expect(out.trimEnd().split('\n')).toEqual([
+      'drwx------ /data/tree',
+      '-rwx------ /data/tree/a.txt',
+      'drwx------ /data/tree/sub',
+      '-rwx------ /data/tree/sub/b.txt',
+    ])
+    await ws.close()
+  })
+
+  it('chmod -R changes neither a traversed link nor its referent', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'mkdir -p /data/tree')
+    await run(ws, 'echo aaa > /data/outside.txt')
+    await run(ws, 'chmod 600 /data/outside.txt')
+    await run(ws, 'ln -s /data/outside.txt /data/tree/link.txt')
+    const [code] = await run(ws, 'chmod -R 777 /data/tree')
+    expect(code).toBe(0)
+    const [, out] = await run(ws, "stat -c '%A %n' /data/outside.txt /data/tree/link.txt")
+    expect(out.trimEnd().split('\n')).toEqual([
+      '-rw------- /data/outside.txt',
+      'lrwxrwxrwx /data/tree/link.txt',
+    ])
+    await ws.close()
+  })
+
+  it('chmod -R follows a command-line link to a directory', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'mkdir -p /data/tree/sub')
+    await run(ws, 'echo bbb > /data/tree/sub/b.txt')
+    await run(ws, 'ln -s /data/tree/sub /data/dirlink')
+    const [code] = await run(ws, 'chmod -R 700 /data/dirlink')
+    expect(code).toBe(0)
+    const [, out] = await run(ws, "stat -c '%A %n' /data/tree/sub/b.txt")
+    expect(out).toBe('-rwx------ /data/tree/sub/b.txt\n')
+    await ws.close()
+  })
+
+  it('chown -R changes a traversed link itself', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'mkdir -p /data/tree')
+    await run(ws, 'echo aaa > /data/tree/a.txt')
+    await run(ws, 'ln -s /data/tree/a.txt /data/tree/link.txt')
+    const [code] = await run(ws, 'chown -R alice /data/tree')
+    expect(code).toBe(0)
+    const [, out] = await run(ws, "stat -c '%U %n' /data/tree /data/tree/a.txt /data/tree/link.txt")
+    expect(out.trimEnd().split('\n')).toEqual([
+      'alice /data/tree',
+      'alice /data/tree/a.txt',
+      'alice /data/tree/link.txt',
+    ])
+    await ws.close()
+  })
+
+  it('chown -R does not follow a link operand (implicit -P)', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'mkdir -p /data/tree/sub')
+    await run(ws, 'echo bbb > /data/tree/sub/b.txt')
+    await run(ws, 'ln -s /data/tree/sub /data/dirlink')
+    const [code] = await run(ws, 'chown -R bob /data/dirlink')
+    expect(code).toBe(0)
+    const [, out] = await run(ws, "stat -c '%U %n' /data/dirlink /data/tree/sub/b.txt")
+    expect(out.trimEnd().split('\n')).toEqual(['bob /data/dirlink', 'user /data/tree/sub/b.txt'])
+    await ws.close()
+  })
+
+  it('chgrp -R reaches links and files alike', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'mkdir -p /data/tree')
+    await run(ws, 'echo aaa > /data/tree/a.txt')
+    await run(ws, 'ln -s /data/tree/a.txt /data/tree/link.txt')
+    const [code] = await run(ws, 'chgrp -R dev /data/tree')
+    expect(code).toBe(0)
+    const [, out] = await run(ws, "stat -c '%G %n' /data/tree/a.txt /data/tree/link.txt")
+    expect(out.trimEnd().split('\n')).toEqual(['dev /data/tree/a.txt', 'dev /data/tree/link.txt'])
+    await ws.close()
+  })
+
+  it('chown -h ownership reaches ls and stat', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'ln -s /data/f.txt /data/link')
+    const [code] = await run(ws, 'chown -h alice /data/link')
+    expect(code).toBe(0)
+    const [, statOut] = await run(ws, "stat -c '%U' /data/link")
+    expect(statOut).toBe('alice\n')
+    const [, lsOut] = await run(ws, 'ls -l /data/link')
+    expect(lsOut).toContain(' alice ')
+    await ws.close()
+  })
+
+  it('chmod -R reports a missing operand', async () => {
+    const [ws] = await makeWs()
+    const [code, , err] = await run(ws, 'chmod -R 700 /data/nope')
+    expect(code).toBe(1)
+    expect(err).toBe("chmod: cannot access '/data/nope': No such file or directory\n")
     await ws.close()
   })
 })

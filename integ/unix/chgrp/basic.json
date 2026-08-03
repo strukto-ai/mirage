@@ -101,6 +101,40 @@
         "stdout": "-rw-r--r-- 1 alice ops 6 Jan  2 15:30 f.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "chgrp_recursive",
+      "seq": 611006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "chgrp -R staff /data/cg && stat -c '%G' /data/cg/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "staff\n",
+        "stderr": ""
+      }
     }
   ]
 }

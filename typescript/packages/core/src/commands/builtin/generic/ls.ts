@@ -154,23 +154,11 @@ async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
 }
 
 // GNU ls prints a file operand as given (`ls sub/x.txt` shows sub/x.txt,
-// not x.txt); the row carries the operand spelling. Every other field
-// (mode/uid/gid/atime overlay attrs included) is preserved, mirroring the
-// Python `s.model_copy(update={"name": ...})`.
+// not x.txt); the row carries the operand spelling. `with` preserves
+// every other field (mode/uid/gid/atime overlay attrs included), the
+// mirror of Python `s.model_copy(update={"name": ...})`.
 function asOperand(s: FileStat, path: PathSpec): FileStat {
-  return new FileStat({
-    name: path.rawPath,
-    size: s.size,
-    modified: s.modified,
-    fingerprint: s.fingerprint,
-    revision: s.revision,
-    type: s.type,
-    mode: s.mode,
-    uid: s.uid,
-    gid: s.gid,
-    atime: s.atime,
-    extra: s.extra,
-  })
+  return s.with({ name: path.rawPath })
 }
 
 // An entry that cannot be stat'd is skipped with its own diagnostic rather
@@ -238,32 +226,19 @@ async function derefEntry(
   const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.resourcePath))
   try {
     const s = await stat(spec)
-    return new FileStat({
-      name: link.name,
-      size: s.size,
-      modified: s.modified,
-      type: s.type,
-      mode: s.mode,
-      uid: s.uid,
-      gid: s.gid,
-      extra: s.extra,
-    })
+    return s.with({ name: link.name })
   } catch {
     return null
   }
 }
 
+// Renaming a link row copies every field, not a hand-picked few: a link
+// carries real ownership (chown -h writes it), and listing the fields by
+// hand silently drops whatever the node grows next.
 function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
   const row = links?.statAt(path.virtual) ?? null
   if (row === null) return null
-  return new FileStat({
-    name: path.rawPath,
-    size: row.size,
-    modified: row.modified,
-    type: row.type,
-    mode: row.mode,
-    extra: row.extra,
-  })
+  return row.with({ name: path.rawPath })
 }
 
 // List one operand and report whether it turned out to be a directory.

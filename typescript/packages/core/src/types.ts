@@ -292,6 +292,30 @@ export class FileStat {
     this.extra = init.extra ?? {}
     Object.freeze(this)
   }
+
+  // Copy with some fields replaced, the mirror of Python's
+  // `model_copy(update=...)`. Callers that rename a row (ls printing an
+  // operand as typed, a link row taking the link's name) must use this
+  // rather than re-listing fields at the call site: a hand-written list
+  // silently drops whatever it forgot, which is how link ownership went
+  // missing. This is the one place the field list is repeated, and it
+  // sits next to the declarations so an added field is hard to miss.
+  with(update: Partial<FileStatInit>): FileStat {
+    return new FileStat({
+      name: this.name,
+      size: this.size,
+      modified: this.modified,
+      fingerprint: this.fingerprint,
+      revision: this.revision,
+      type: this.type,
+      mode: this.mode,
+      uid: this.uid,
+      gid: this.gid,
+      atime: this.atime,
+      extra: this.extra,
+      ...update,
+    })
+  }
 }
 
 export const FileChangeKind = Object.freeze({

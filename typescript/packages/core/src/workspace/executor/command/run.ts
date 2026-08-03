@@ -17,7 +17,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../../context/session_context.ts'
 import type { PathSpec } from '../../../types.ts'
-import { FileStat } from '../../../types.ts'
+import type { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -111,19 +111,7 @@ function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileS
   const merged = mergeOverlayStat(namespace.metaFor(virtual), stat)
   const user = namespace.user
   if (user === null || (merged.uid !== null && merged.gid !== null)) return merged
-  return new FileStat({
-    name: merged.name,
-    size: merged.size,
-    modified: merged.modified,
-    fingerprint: merged.fingerprint,
-    revision: merged.revision,
-    type: merged.type,
-    mode: merged.mode,
-    uid: merged.uid ?? user,
-    gid: merged.gid ?? user,
-    atime: merged.atime,
-    extra: merged.extra,
-  })
+  return merged.with({ uid: merged.uid ?? user, gid: merged.gid ?? user })
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared

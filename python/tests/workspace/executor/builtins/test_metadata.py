@@ -176,7 +176,6 @@ async def test_chgrp_error_shapes():
     ws = _make_ws()
     assert (await _run(ws, "chgrp staff"))[0] == 2
     assert (await _run(ws, "chgrp '' /data/f.txt"))[0] == 1
-    assert (await _run(ws, "chgrp -R staff /data"))[0] == 2
     code, _, err = await _run(ws, "chgrp staff /data/nope.txt")
     assert code == 1
     assert "nope.txt" in err
@@ -452,3 +451,123 @@ async def test_disk_mv_carries_clamped_mode(tmp_path):
     _, out, _ = await _run(ws, "ls -l /data")
     assert "----------" in out
     assert os.stat(os.path.join(tmp_path, "g.txt")).st_mode & 0o777 == 0o600
+
+
+@pytest.mark.asyncio
+async def test_chmod_recursive_covers_the_whole_subtree():
+    ws = _make_ws()
+    await _run(ws, "mkdir -p /data/tree/sub")
+    await _run(ws, "echo aaa > /data/tree/a.txt")
+    await _run(ws, "echo bbb > /data/tree/sub/b.txt")
+    code, _, err = await _run(ws, "chmod -R 700 /data/tree")
+    assert code == 0, err
+    _, out, _ = await _run(
+        ws, "stat -c '%A %n' /data/tree /data/tree/a.txt "
+        "/data/tree/sub /data/tree/sub/b.txt")
+    assert out.splitlines() == [
+        "drwx------ /data/tree",
+        "-rwx------ /data/tree/a.txt",
+        "drwx------ /data/tree/sub",
+        "-rwx------ /data/tree/sub/b.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chmod_recursive_skips_a_traversed_link():
+    ws = _make_ws()
+    await _run(ws, "mkdir -p /data/tree")
+    await _run(ws, "echo aaa > /data/outside.txt")
+    await _run(ws, "chmod 600 /data/outside.txt")
+    await _run(ws, "ln -s /data/outside.txt /data/tree/link.txt")
+    code, _, err = await _run(ws, "chmod -R 777 /data/tree")
+    assert code == 0, err
+    # GNU changes neither the traversed link nor its referent.
+    _, out, _ = await _run(
+        ws, "stat -c '%A %n' /data/outside.txt /data/tree/link.txt")
+    assert out.splitlines() == [
+        "-rw------- /data/outside.txt",
+        "lrwxrwxrwx /data/tree/link.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chmod_recursive_follows_a_command_line_dir_link():
+    ws = _make_ws()
+    await _run(ws, "mkdir -p /data/tree/sub")
+    await _run(ws, "echo bbb > /data/tree/sub/b.txt")
+    await _run(ws, "ln -s /data/tree/sub /data/dirlink")
+    code, _, err = await _run(ws, "chmod -R 700 /data/dirlink")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "stat -c '%A %n' /data/tree/sub/b.txt")
+    assert out == "-rwx------ /data/tree/sub/b.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_chown_recursive_changes_a_traversed_link_itself():
+    ws = _make_ws()
+    await _run(ws, "mkdir -p /data/tree")
+    await _run(ws, "echo aaa > /data/tree/a.txt")
+    await _run(ws, "ln -s /data/tree/a.txt /data/tree/link.txt")
+    code, _, err = await _run(ws, "chown -R alice /data/tree")
+    assert code == 0, err
+    _, out, _ = await _run(
+        ws, "stat -c '%U %n' /data/tree /data/tree/a.txt /data/tree/link.txt")
+    assert out.splitlines() == [
+        "alice /data/tree",
+        "alice /data/tree/a.txt",
+        "alice /data/tree/link.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chown_recursive_does_not_follow_a_link_operand():
+    ws = _make_ws()
+    await _run(ws, "mkdir -p /data/tree/sub")
+    await _run(ws, "echo bbb > /data/tree/sub/b.txt")
+    await _run(ws, "ln -s /data/tree/sub /data/dirlink")
+    code, _, err = await _run(ws, "chown -R bob /data/dirlink")
+    assert code == 0, err
+    # POSIX gives -R an implicit -P: the link changes, its target does not.
+    _, out, _ = await _run(
+        ws, "stat -c '%U %n' /data/dirlink /data/tree/sub/b.txt")
+    assert out.splitlines() == [
+        "bob /data/dirlink",
+        "user /data/tree/sub/b.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chgrp_recursive_reaches_links_and_files():
+    ws = _make_ws()
+    await _run(ws, "mkdir -p /data/tree")
+    await _run(ws, "echo aaa > /data/tree/a.txt")
+    await _run(ws, "ln -s /data/tree/a.txt /data/tree/link.txt")
+    code, _, err = await _run(ws, "chgrp -R dev /data/tree")
+    assert code == 0, err
+    _, out, _ = await _run(
+        ws, "stat -c '%G %n' /data/tree/a.txt /data/tree/link.txt")
+    assert out.splitlines() == [
+        "dev /data/tree/a.txt",
+        "dev /data/tree/link.txt",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chown_h_ownership_reaches_ls_and_stat():
+    ws = _make_ws()
+    await _run(ws, "ln -s /data/f.txt /data/link")
+    code, _, err = await _run(ws, "chown -h alice /data/link")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "stat -c '%U' /data/link")
+    assert out == "alice\n"
+    _, out, _ = await _run(ws, "ls -l /data/link")
+    assert " alice " in out
+
+
+@pytest.mark.asyncio
+async def test_chmod_recursive_reports_a_missing_operand():
+    ws = _make_ws()
+    code, _, err = await _run(ws, "chmod -R 700 /data/nope")
+    assert code == 1
+    assert err == ("chmod: cannot access '/data/nope': "
+                   "No such file or directory\n")
