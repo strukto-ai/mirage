@@ -146,10 +146,15 @@ export class MirageFS {
         buf.set(slice, 0)
         cb(slice.byteLength)
       },
-      () => {
-        // A failed read reports 0 bytes (EOF) rather than an errno: the
+      (err: unknown) => {
+        // A policy refusal must surface as EACCES, never read as an
+        // empty file. Any other failed read reports 0 bytes (EOF): the
         // kernel has already accepted the open, and short-reading is how
         // FUSE signals "nothing more here".
+        if ((err as { code?: string }).code === 'EACCES') {
+          cb(classifyError(err))
+          return
+        }
         cb(0)
       },
     )
@@ -168,7 +173,13 @@ export class MirageFS {
       () => {
         cb(len)
       },
-      () => {
+      (err: unknown) => {
+        // Same EACCES rule as read: a policy refusal is an errno, any
+        // other failure reports 0 bytes written.
+        if ((err as { code?: string }).code === 'EACCES') {
+          cb(classifyError(err))
+          return
+        }
         cb(0)
       },
     )

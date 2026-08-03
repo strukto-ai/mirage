@@ -7,10 +7,11 @@
 # blocks, per-entry scripts (policy), the global route, per-mount
 # command_limits, and the per-line --runtime argument.
 #
-# Cases whose steps need the SDK surface (add_runtime, rename, s3_put)
-# or a runner-local test runtime (echobox) or non-ram mounts are
-# skipped as sdk-only. Expect semantics: exit and stdout are exact,
-# stderr is a containment check (the CLI owns its stderr framing).
+# Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
+# read_op) or a runner-local test runtime (echobox) or runner-local
+# code policies (world.policies) or non-ram mounts are skipped as
+# sdk-only. Expect semantics: exit and stdout are exact, stderr is a
+# containment check (the CLI owns its stderr framing).
 #
 # A yaml file is any JSON document here: YAML is a superset of JSON,
 # so the driver emits the case world as JSON with jq and both loaders
@@ -41,14 +42,17 @@ requirement_met() {
   esac
 }
 
-# Whether this case can run over the CLI at all.
+# Whether this case can run over the CLI at all. Worlds carrying code
+# policies (runner-local Policy classes) cannot cross the yaml/daemon
+# boundary, and read_op steps need the SDK op door.
 cli_expressible() {
   local case_json="$1"
   jq -e '
     ((.world.mounts // {"/ram": {"resource": "ram"}})
       | to_entries | all(.value.resource == "ram"))
+    and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select(type == "object" and .name == "echobox")) | length) == 0)
-    and (((.steps // []) | map(select(has("add_runtime") or has("rename") or has("s3_put"))) | length) == 0)
+    and (((.steps // []) | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 

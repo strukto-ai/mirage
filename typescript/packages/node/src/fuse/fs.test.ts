@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType, MountMode, RAMResource } from '@struktoai/mirage-core'
+import {
+  FileStat,
+  FileType,
+  MountMode,
+  RAMResource,
+  type Action,
+  type OpsResultContext,
+  type Policy,
+} from '@struktoai/mirage-core'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MirageFS, type FuseAttr } from './fs.ts'
@@ -538,5 +546,36 @@ describe('MirageFS — session binding', () => {
 
     const [createCode] = await callOp<[number]>(bound, 'create', '/data/new.txt', 0o644)
     expect(createCode).toBeLessThan(0)
+  })
+})
+
+describe('MirageFS — a policy deny on read surfaces EACCES', () => {
+  it('postOps deny reports EACCES instead of an empty read', async () => {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/')
+    resource.store.files.set('/secret.txt', new TextEncoder().encode('TOPSECRET plans\n'))
+    resource.store.files.set('/clean.txt', new TextEncoder().encode('hello\n'))
+    const redact: Policy = {
+      postOps(ctx: OpsResultContext): Action | null {
+        const data = ctx.result instanceof Uint8Array ? new TextDecoder().decode(ctx.result) : null
+        if (ctx.op === 'read' && data?.includes('TOPSECRET') === true) {
+          return { kind: 'deny', message: 'redacted\n' }
+        }
+        return null
+      },
+    }
+    const ws = new Workspace({ '/data/': resource }, { mode: MountMode.READ, policies: [redact] })
+    const mfs = new MirageFS(ws)
+
+    const [openCode, fd] = await callOp<[number, number]>(mfs, 'open', '/data/secret.txt', 0)
+    expect(openCode).toBe(0)
+    const buf = Buffer.alloc(64)
+    const [code] = await callOp<[number]>(mfs, 'read', '/data/secret.txt', fd, buf, 64, 0)
+    expect(code).toBe(EACCES)
+
+    const [cleanOpen, cleanFd] = await callOp<[number, number]>(mfs, 'open', '/data/clean.txt', 0)
+    expect(cleanOpen).toBe(0)
+    const [cleanLen] = await callOp<[number]>(mfs, 'read', '/data/clean.txt', cleanFd, buf, 64, 0)
+    expect(buf.subarray(0, cleanLen).toString()).toBe('hello\n')
   })
 })
