@@ -21,7 +21,7 @@ import type { Action, CommandContext, Deny } from './types.ts'
  * the refusal by link kind ("failed to create symbolic link" vs
  * "failed to create link").
  */
-export function hasSymlinkFlag(argv: readonly string[]): boolean {
+function hasSymlinkFlag(argv: readonly string[]): boolean {
   for (const tok of argv) {
     if (tok === '--symbolic') return true
     if (tok.startsWith('-') && !tok.startsWith('--') && tok.includes('s')) return true
