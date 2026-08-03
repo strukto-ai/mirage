@@ -83,6 +83,20 @@ describe('MountRootPolicy', () => {
     expect(deny && 'message' in deny ? deny.message : '').toContain('Device or resource busy')
   })
 
+  it('ln wording follows the link kind', () => {
+    // GNU words the refusal by link kind: ln -s says "symbolic link",
+    // plain ln says "link" (pinned by integ guard_root_ln_is_eexist).
+    const policy = new MountRootPolicy()
+    const symbolic = policy.preCommand(ctx('ln', [path('/data/k.txt'), path('/data')], ['-s']))
+    expect(symbolic && 'message' in symbolic ? symbolic.message : '').toBe(
+      "ln: failed to create symbolic link '/data': File exists\n",
+    )
+    const hard = policy.preCommand(ctx('ln', [path('/data/k.txt'), path('/data')]))
+    expect(hard && 'message' in hard ? hard.message : '').toBe(
+      "ln: failed to create link '/data': File exists\n",
+    )
+  })
+
   it('hasParentsFlag spots the shorthand cluster', () => {
     expect(hasParentsFlag(['-p'])).toBe(true)
     expect(hasParentsFlag(['--parents'])).toBe(true)

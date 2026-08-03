@@ -92,6 +92,22 @@ async def test_rm_r_on_a_mount_root_is_refused_never_an_unmount():
     assert "Device or resource busy" in deny.message
 
 
+@pytest.mark.asyncio
+async def test_ln_wording_follows_the_link_kind():
+    # GNU words the refusal by link kind: ln -s says "symbolic link",
+    # plain ln says "link" (pinned by integ guard_root_ln_is_eexist).
+    policy = MountRootPolicy()
+    deny = await policy.pre_command(
+        _ctx("ln", [_path("/data/k.txt"), _path("/data")], ["-s"]))
+    assert deny is not None
+    assert deny.message == ("ln: failed to create symbolic link "
+                            "'/data': File exists\n")
+    deny = await policy.pre_command(
+        _ctx("ln", [_path("/data/k.txt"), _path("/data")]))
+    assert deny is not None
+    assert deny.message == "ln: failed to create link '/data': File exists\n"
+
+
 def test_has_parents_flag_spots_the_shorthand_cluster():
     assert has_parents_flag(("-p", ))
     assert has_parents_flag(("--parents", ))

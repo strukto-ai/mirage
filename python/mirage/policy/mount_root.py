@@ -16,6 +16,24 @@ from mirage.policy.base import Policy
 from mirage.policy.types import Action, CommandContext, Deny
 
 
+def has_symlink_flag(argv: tuple[str, ...]) -> bool:
+    """Spot ln's -s/--symbolic by raw token scan.
+
+    Same reason as :func:`has_parents_flag`: the policy fires before
+    flag parsing, and GNU words the refusal by link kind ("failed to
+    create symbolic link" vs "failed to create link").
+
+    Args:
+        argv (tuple[str, ...]): raw argv after the command name.
+    """
+    for tok in argv:
+        if isinstance(tok, str) and (tok == "--symbolic" or
+                                     (tok.startswith("-") and "s" in tok[1:]
+                                      and not tok.startswith("--"))):
+            return True
+    return False
+
+
 def has_parents_flag(argv: tuple[str, ...]) -> bool:
     """Spot mkdir's -p/--parents by raw token scan.
 
@@ -83,6 +101,8 @@ class MountRootPolicy(Policy):
                         f"touch: cannot touch '{p.virtual}': Is a directory\n")
         elif cmd == "ln":
             if ctx.registry.is_mount_root(ctx.paths[-1].virtual):
-                return Deny(f"ln: failed to create link "
+                kind = ("symbolic link"
+                        if has_symlink_flag(ctx.argv) else "link")
+                return Deny(f"ln: failed to create {kind} "
                             f"'{ctx.paths[-1].virtual}': File exists\n")
         return None

@@ -16,6 +16,20 @@ import type { Policy } from './base.ts'
 import type { Action, CommandContext, Deny } from './types.ts'
 
 /**
+ * Spot ln's -s/--symbolic by raw token scan. Same reason as
+ * hasParentsFlag: the policy fires before flag parsing, and GNU words
+ * the refusal by link kind ("failed to create symbolic link" vs
+ * "failed to create link").
+ */
+export function hasSymlinkFlag(argv: readonly string[]): boolean {
+  for (const tok of argv) {
+    if (tok === '--symbolic') return true
+    if (tok.startsWith('-') && !tok.startsWith('--') && tok.includes('s')) return true
+  }
+  return false
+}
+
+/**
  * Spot mkdir's -p/--parents by raw token scan. The policy fires before
  * flag parsing (its refusals must win over parse errors and stay
  * consistent across the single-mount and cross-mount paths), so the
@@ -97,7 +111,8 @@ export class MountRootPolicy implements Policy {
     if (cmd === 'ln') {
       const last = ctx.paths[ctx.paths.length - 1]
       if (last !== undefined && isRoot(last.virtual)) {
-        return deny(`ln: failed to create link '${last.virtual}': File exists\n`)
+        const kind = hasSymlinkFlag(ctx.argv) ? 'symbolic link' : 'link'
+        return deny(`ln: failed to create ${kind} '${last.virtual}': File exists\n`)
       }
       return null
     }
