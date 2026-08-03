@@ -75,7 +75,11 @@ class CLISpec(CommandSpec):
     fn: Callable[..., Any] | None = None
     subcommands: tuple["CLISpec", ...] = ()
     write: bool = False
-    safeguard: CommandSafeguard | None = None
+    # hash=False: CommandSafeguard is a mutable dataclass, and the
+    # frozen CLISpec must stay hashable for compile_spec's per-spec
+    # cache. Equality still compares the field; only the hash skips it
+    # (a collision is legal, a TypeError is not).
+    safeguard: CommandSafeguard | None = field(default=None, hash=False)
     config_model: type[BaseModel] | None = None
 
     def __post_init__(self) -> None:

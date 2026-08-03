@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.commands.cli.types import CLISpec
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.types import IOResult
@@ -97,6 +98,22 @@ def test_match_command_prefix_partial_name_is_not_a_command(registry):
     _register_cmd(registry.mount_for("/data"), "gws docs documents get")
     # "gws docs" alone is not registered; only the bare first token counts.
     assert registry.match_command_prefix(["gws", "docs"]) == 1
+
+
+async def _noop_cli(config, paths, *texts, **flags):
+    return None, IOResult()
+
+
+def test_installed_cli_head_wins_over_multiword_mount_command(registry):
+    # Dispatch is by name: the head alone is the command, the
+    # subcommand words belong to the tree walk, so an installed CLI
+    # must not be swallowed by a same-head multiword mount command.
+    _register_cmd(registry.mount_for("/data"), "gws docs documents get")
+    registry.clis.install(
+        "gws",
+        CLISpec(name="gws", subcommands=(CLISpec(name="run", fn=_noop_cli), )))
+    assert registry.match_command_prefix(["gws", "docs", "documents",
+                                          "get"]) == 1
 
 
 def test_match_command_prefix_unknown_and_empty(registry):

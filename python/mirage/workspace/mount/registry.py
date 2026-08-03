@@ -302,6 +302,12 @@ class MountRegistry:
         """
         if not words:
             return 0
+        # An installed CLI head wins over any multiword mount command
+        # under the same first word (`himalaya message send`): dispatch
+        # is by name and the subcommand words belong to the tree walk,
+        # so the head alone is the command name.
+        if self.clis.get(words[0]) is not None:
+            return 1
         best = 1
         candidates = list(self._mounts)
         if self._root is not None:

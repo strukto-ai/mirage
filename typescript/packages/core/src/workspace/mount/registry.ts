@@ -366,6 +366,11 @@ export class MountRegistry {
    */
   matchCommandPrefix(words: string[]): number {
     if (words.length === 0) return 0
+    // An installed CLI head wins over any multiword mount command
+    // under the same first word (`himalaya message send`): dispatch is
+    // by name and the subcommand words belong to the tree walk, so the
+    // head alone is the command name.
+    if (words[0] !== undefined && this.clis.get(words[0]) !== null) return 1
     let best = 1
     const candidates = [...this.mountList]
     if (this.rootRef !== null) candidates.push(this.rootRef)

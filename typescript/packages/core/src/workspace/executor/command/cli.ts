@@ -20,10 +20,20 @@ import { renderHelp } from '../../../commands/spec/help.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { concatBytes } from '../../../core/jq/format.ts'
+import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/safeguard.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
+import { resolveSafeguard } from '../policy/safeguard.ts'
 import { optionError, parseFlags } from './flags.ts'
+
+// argparse add_help: a leaf answers --help with its own help unless it
+// declares the flag itself. CLISpec init accepts instance fields, so
+// the spread is a plain init bag (the withHelpSupport pattern).
+function withInjectedHelp(leaf: CLISpec): CLISpec {
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread
+  return new CLISpec({ ...leaf, options: [...leaf.options, HELP_OPTION] })
+}
 
 /**
  * Execute a line whose head word is an installed CLI.
@@ -57,16 +67,10 @@ export async function handleCli(
 
   const prog = [install.name, ...result.path].join(' ')
   const leaf = result.leaf
-  // argparse add_help: every leaf answers --help with its own help
-  // unless it declares the flag itself. No injected --version: that is
-  // a GNU coreutils convention, not an argparse one.
+  // No injected --version: that is a GNU coreutils convention, not an
+  // argparse one.
   const hasHelp = leaf.options.some((option) => option.long === '--help')
-  // CLISpec init accepts instance fields, so the spread is a plain init
-  // bag (the withHelpSupport pattern).
-  const helpSpec = (): CLISpec =>
-    // eslint-disable-next-line @typescript-eslint/no-misused-spread
-    new CLISpec({ ...leaf, options: [...leaf.options, HELP_OPTION] })
-  const parseSpec = hasHelp ? leaf : helpSpec()
+  const parseSpec = hasHelp ? leaf : withInjectedHelp(leaf)
 
   const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd)
   const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
@@ -114,18 +118,32 @@ export async function handleCli(
     // fn-bearing nodes as leaf; reaching this is a bug.
     throw new Error(`walk returned a leaf without fn for '${prog}'`)
   }
-  const out = await fn(install.config, paths, texts, { stdin, flags })
+  // The leaf's declared safeguard bounds the handler body and its
+  // streams, exactly like mount dispatch: without the wrap a blocking
+  // leaf hangs forever and an unbounded-output leaf ignores its own
+  // limits.
+  const safeguard = resolveSafeguard(prog, [], leaf.safeguard)
+  const timeout = safeguard?.timeoutSeconds ?? null
+  const out = await runWithTimeout(
+    Promise.resolve(fn(install.config, paths, texts, { stdin, flags })),
+    timeout,
+    prog,
+  )
   let stdout: ByteSource | null = null
   let io = new IOResult()
   if (out !== null) {
     ;[stdout, io] = out
   }
+  io.safeguard = safeguard
 
   if (warnings.length > 0) {
     const warn = new TextEncoder().encode(warnings.map((w) => `${prog}: ${w}\n`).join(''))
     const existing = await materialize(io.stderr)
     io.stderr = concatBytes([warn, existing])
   }
+
+  stdout = maybeWithTimeout(stdout, io.safeguard, prog)
+  io.stderr = maybeWithTimeout(io.stderr, io.safeguard, prog)
 
   const stderrBytes = await materialize(io.stderr)
   return [

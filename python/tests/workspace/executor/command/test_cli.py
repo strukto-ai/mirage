@@ -12,13 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 from pydantic import BaseModel
 
+from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Operand, Option
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.types import CommandSafeguard
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import handle_cli
 from mirage.workspace.session import Session
@@ -116,6 +120,25 @@ async def test_leaf_usage_error_exits_2_with_prog_attribution():
     assert io.exit_code == 2
     assert io.stderr.startswith(b"prog message send: option '--to' is "
                                 b"required")
+
+
+async def slow_send(config, paths, *texts, **flags):
+    await asyncio.sleep(0.5)
+    return None, IOResult()
+
+
+@pytest.mark.asyncio
+async def test_leaf_safeguard_bounds_the_handler():
+    # The declared safeguard wraps the handler body like mount
+    # dispatch: a blocking leaf times out instead of hanging.
+    spec = CLISpec(name="prog",
+                   subcommands=(CLISpec(
+                       name="run",
+                       fn=slow_send,
+                       safeguard=CommandSafeguard(timeout_seconds=0.05)), ))
+    install = CLIInstall(name="prog", spec=spec, config=None)
+    with pytest.raises(CommandTimeoutError, match="prog run"):
+        await handle_cli(install, ["prog", "run"], Session("t"))
 
 
 @pytest.mark.asyncio

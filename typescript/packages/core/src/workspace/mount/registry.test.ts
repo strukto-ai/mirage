@@ -14,6 +14,7 @@
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
+import { CLISpec } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -378,6 +379,21 @@ describe('MountRegistry.matchCommandPrefix', () => {
 
   it('does not match a partial (unregistered) prefix', () => {
     expect(regWith(['gws docs documents get']).matchCommandPrefix(['gws', 'docs'])).toBe(1)
+  })
+
+  it('an installed CLI head wins over a multiword mount command', () => {
+    // Dispatch is by name: the head alone is the command, the
+    // subcommand words belong to the tree walk, so an installed CLI
+    // must not be swallowed by a same-head multiword mount command.
+    const reg = regWith(['gws docs documents get'])
+    reg.clis.install(
+      'gws',
+      new CLISpec({
+        name: 'gws',
+        subcommands: [new CLISpec({ name: 'run', fn: () => [null, new IOResult()] })],
+      }),
+    )
+    expect(reg.matchCommandPrefix(['gws', 'docs', 'documents', 'get'])).toBe(1)
   })
 
   it('falls back to 1 for unknown and 0 for empty', () => {

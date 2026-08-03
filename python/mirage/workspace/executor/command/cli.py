@@ -14,6 +14,8 @@
 
 from dataclasses import replace
 
+from mirage.commands.builtin.utils.safeguard import (maybe_with_timeout,
+                                                     run_with_timeout)
 from mirage.commands.cli.walk import walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.spec import flag_kwarg_name
@@ -21,6 +23,7 @@ from mirage.commands.spec.help import render_help
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.types import PathSpec
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -58,6 +61,7 @@ async def handle_cli(
     cmd_str = " ".join(p.virtual if isinstance(p, PathSpec) else p
                        for p in parts)
     argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
+    stdout: ByteSource | None
 
     result = walk(install.name, install.spec, argv)
     if result.leaf is None:
@@ -110,15 +114,26 @@ async def handle_cli(
         # validate_cli guarantees fn XOR subcommands and walk only
         # returns fn-bearing nodes as leaf; reaching this is a bug.
         raise RuntimeError(f"walk returned a leaf without fn for {prog!r}")
-    out = await fn(install.config, parsed.paths, *parsed.texts, **kw)
+    # The leaf's declared safeguard bounds the handler body and its
+    # streams, exactly like mount dispatch: without the wrap a blocking
+    # leaf hangs forever and an unbounded-output leaf ignores its own
+    # limits.
+    safeguard = resolve_safeguard(prog, command_default=leaf.safeguard)
+    timeout = safeguard.timeout_seconds if safeguard is not None else None
+    out = await run_with_timeout(
+        fn(install.config, parsed.paths, *parsed.texts, **kw), timeout, prog)
     if out is None:
         stdout, io = None, IOResult()
     else:
         stdout, io = out
+    io.safeguard = safeguard
 
     if parsed.warnings:
         warn = "".join(f"{prog}: {w}\n" for w in parsed.warnings).encode()
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn + existing
+
+    stdout = maybe_with_timeout(stdout, io.safeguard, prog)
+    io.stderr = maybe_with_timeout(io.stderr, io.safeguard, prog)
 
     return stdout, io, await exec_node(cmd_str, io, parsed.paths)

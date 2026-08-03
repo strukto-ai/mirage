@@ -14,10 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CLISpec, type CLIVerbOpts } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIVerbFn, type CLIVerbOpts } from '../../../commands/cli/types.ts'
 import { Operand, Option } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { CommandSafeguard, type PathSpec } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { Session } from '../../session/session.ts'
 import { handleCli } from './cli.ts'
@@ -134,6 +134,29 @@ describe('handleCli', () => {
     expect(dec.decode(await materialize(io.stderr))).toMatch(
       /^prog message send: option '--to' is required/,
     )
+  })
+
+  it('the leaf safeguard bounds the handler', async () => {
+    // The declared safeguard wraps the handler body like mount
+    // dispatch: a blocking leaf times out instead of hanging.
+    const slow: CLIVerbFn = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      return [null, new IOResult()]
+    }
+    const spec = new CLISpec({
+      name: 'prog',
+      subcommands: [
+        new CLISpec({
+          name: 'run',
+          fn: slow,
+          safeguard: new CommandSafeguard({ timeoutSeconds: 0.05 }),
+        }),
+      ],
+    })
+    const install: CLIInstall = { name: 'prog', spec, config: null }
+    await expect(
+      handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' })),
+    ).rejects.toThrow(/prog run: timed out/)
   })
 
   it('injects stdin into the opts bag', async () => {
