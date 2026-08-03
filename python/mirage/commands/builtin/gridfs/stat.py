@@ -25,7 +25,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gridfs.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatOverlay
+from mirage.ops.types import LinkView, StatOverlay
 from mirage.types import PathSpec
 
 
@@ -40,8 +40,10 @@ async def stat(
     stdin: bytes | None = None,
     c: str | None = None,
     f: str | None = None,
+    L: bool = False,
     index: IndexCacheStore,
     stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
@@ -53,4 +55,9 @@ async def stat(
                           partial(stat_core, accessor),
                           stat_overlay,
                           index=index)
-    return await generic_stat(paths, stat_fn=stat_fn, c=c, f=f)
+    return await generic_stat(paths,
+                              stat_fn=stat_fn,
+                              c=c,
+                              f=f,
+                              L=L,
+                              links=links)

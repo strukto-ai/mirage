@@ -56,10 +56,16 @@ const DEREFERENCE_FLAGS: Record<string, [string, string[]]> = {
   file: ['L', ['dereference']],
   du: ['L', ['dereference']],
   ls: ['L', ['dereference']],
-  // find's -P (no follow) is the default; -H dereferences the start
-  // point only and -L dereferences everything, so both follow the
-  // operand.
-  find: ['LH', []],
+}
+
+// find states its link policy as a leading option rather than a flag,
+// and the last one wins: `find -L -P x` does not follow, `find -P -L x`
+// does. -P (no follow) is the default; -H dereferences the start point
+// only and -L dereferences everything, so both follow the operand. Only
+// the run of options before the first operand counts, which is where GNU
+// accepts them.
+const LAST_WINS_LINK_OPTIONS: Record<string, Record<string, boolean>> = {
+  find: { '-P': false, '-H': true, '-L': true },
 }
 
 // The mirror: flags that make a following command report the link
@@ -98,7 +104,22 @@ function hasOption(
 }
 
 // Whether a no-follow command was asked to dereference after all.
+// Resolve a leading run of link options to its last one's mode.
+function lastLinkOption(
+  words: readonly (string | PathSpec)[],
+  policy: Record<string, boolean>,
+): boolean {
+  let follows = false
+  for (const word of words.slice(1)) {
+    if (typeof word !== 'string' || !(word in policy)) break
+    follows = policy[word] as boolean
+  }
+  return follows
+}
+
 export function dereferences(name: string, words: readonly (string | PathSpec)[]): boolean {
+  const policy = LAST_WINS_LINK_OPTIONS[name]
+  if (policy !== undefined) return lastLinkOption(words, policy)
   const spec = DEREFERENCE_FLAGS[name]
   return spec !== undefined && hasOption(words, spec[0], spec[1])
 }

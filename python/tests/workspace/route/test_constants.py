@@ -93,3 +93,19 @@ def test_file_lstats_like_stat():
 def test_du_does_not_follow_a_link_operand():
     assert "du" in NO_FOLLOW_COMMANDS
     assert dereferences("du", ["du", "-L", "/data/link"]) is True
+
+
+def test_find_link_options_are_last_wins():
+    # GNU takes the last of -P/-H/-L: `find -L -P x` does not follow,
+    # `find -P -L x` does.
+    assert dereferences("find", ["find", "-L", "-P", "/data/link"]) is False
+    assert dereferences("find", ["find", "-P", "-L", "/data/link"]) is True
+    assert dereferences("find", ["find", "-L", "-P", "-L",
+                                 "/data/link"]) is True
+    assert dereferences("find", ["find", "-H", "/data/link"]) is True
+    assert dereferences("find", ["find", "/data/link"]) is False
+
+
+def test_find_link_options_only_count_before_the_operand():
+    # -L after the start point is a predicate position, not a policy one.
+    assert dereferences("find", ["find", "/data/link", "-L"]) is False

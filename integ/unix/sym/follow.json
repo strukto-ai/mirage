@@ -205,6 +205,40 @@
       }
     },
     {
+      "id": "symx_find_last_wins_p",
+      "seq": 836,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find -L -P /data/symx/dlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/symx/dlink\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "symx_du_deref",
       "seq": 837,
       "targets": [
@@ -239,8 +273,42 @@
       }
     },
     {
+      "id": "symx_find_last_wins_l",
+      "seq": 839,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find -P -L /data/symx/dlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/symx/dlink\n/data/symx/dlink/inner.txt\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "symy_cleanup",
-      "seq": 838,
+      "seq": 840,
       "targets": [
         "ram",
         "disk",

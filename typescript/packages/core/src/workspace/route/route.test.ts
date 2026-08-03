@@ -18,7 +18,7 @@ import { IOResult } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { Consumer, SHELL_CONSUMERS, route } from './index.ts'
+import { Consumer, SHELL_CONSUMERS, dereferences, route } from './index.ts'
 import { Session } from '../session/session.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -115,5 +115,20 @@ describe('route', () => {
     expect(SHELL_CONSUMERS.has(Consumer.CLI)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.MOUNT)).toBe(false)
     expect(SHELL_CONSUMERS.has(Consumer.UNKNOWN)).toBe(false)
+  })
+})
+
+describe('find link-policy options', () => {
+  it('takes the last of -P/-H/-L', () => {
+    // GNU: `find -L -P x` does not follow, `find -P -L x` does.
+    expect(dereferences('find', ['find', '-L', '-P', '/data/link'])).toBe(false)
+    expect(dereferences('find', ['find', '-P', '-L', '/data/link'])).toBe(true)
+    expect(dereferences('find', ['find', '-L', '-P', '-L', '/data/link'])).toBe(true)
+    expect(dereferences('find', ['find', '-H', '/data/link'])).toBe(true)
+    expect(dereferences('find', ['find', '/data/link'])).toBe(false)
+  })
+
+  it('only counts options before the operand', () => {
+    expect(dereferences('find', ['find', '/data/link', '-L'])).toBe(false)
   })
 })
