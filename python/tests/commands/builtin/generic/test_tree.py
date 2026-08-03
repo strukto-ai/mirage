@@ -240,3 +240,76 @@ async def test_tree_not_a_directory_matches_the_missing_path_shape():
         "/a.txt/x  [error opening dir]", "", "0 directories, 0 files"
     ]
     assert io.exit_code == 2
+
+
+def _stat_path(stat: FileStat | None):
+
+    async def fn(_virtual: str) -> FileStat | None:
+        return stat
+
+    return fn
+
+
+async def _unreached_readdir(*_a, **_kw) -> list[str]:
+    raise AssertionError("a non-directory operand must not be listed")
+
+
+async def _unreached_stat(*_a, **_kw) -> FileStat:
+    raise AssertionError("a non-directory operand must not be listed")
+
+
+# GNU tree 2.2.1, pinned on debian:stable-slim. A file operand gets the
+# same inline marker an unopenable one does, but it exists, so it is
+# counted and the exit status stays 0:
+#   tree <file>     -> "<file>  [error opening dir]", 0 directories, 1 file, 0
+#   tree -d <file>  -> same marker, "0 directories", exit 0
+#   tree <missing>  -> same marker, 0 directories, 0 files, exit 2
+
+
+@pytest.mark.asyncio
+async def test_tree_file_operand_is_counted_and_exits_zero():
+    output, io = await tree(
+        _spec("/r/a.txt"),
+        readdir=_unreached_readdir,
+        stat=_unreached_stat,
+        stat_path=_stat_path(_file("a.txt", 6)),
+    )
+    assert io.exit_code == 0
+    assert output == (b"/r/a.txt  [error opening dir]\n\n"
+                      b"0 directories, 1 file\n")
+
+
+@pytest.mark.asyncio
+async def test_tree_file_operand_dirs_only_omits_the_file_count():
+    output, io = await tree(
+        _spec("/r/a.txt"),
+        readdir=_unreached_readdir,
+        stat=_unreached_stat,
+        dirs_only=True,
+        stat_path=_stat_path(_file("a.txt", 6)),
+    )
+    assert io.exit_code == 0
+    assert output == b"/r/a.txt  [error opening dir]\n\n0 directories\n"
+
+
+@pytest.mark.asyncio
+async def test_tree_unstattable_operand_still_walks():
+    """A stat that sees nothing is not proof of absence.
+
+    A backend with implicit directories has no inode for a key prefix, so
+    the walk decides: it already renders an unopenable root as the inline
+    marker with exit 2.
+    """
+
+    async def readdir(_p: PathSpec, _index=None) -> list[str]:
+        raise FileNotFoundError("/r/nope")
+
+    output, io = await tree(
+        _spec("/r/nope"),
+        readdir=readdir,
+        stat=_unreached_stat,
+        stat_path=_stat_path(None),
+    )
+    assert io.exit_code == 2
+    assert output == (b"/r/nope  [error opening dir]\n\n"
+                      b"0 directories, 0 files\n")

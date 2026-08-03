@@ -38,18 +38,30 @@ def _link_flags(name: str) -> set[str]:
     return shorts | leading
 
 
-def _link_aware() -> dict[str, set[str]]:
-    """Command name to the link parameters its generic builder takes.
+# Facts the dispatcher offers that a command only receives by naming the
+# parameter (the `offered` dict in mount.execute_cmd). `stat_overlay` is
+# offered the same way and has the same gaps, but closing those is not a
+# symlink or traversal change; see #688.
+INJECTED_FACTS = ("links", "stat_path")
 
-    ``links`` is the namespace facts themselves; the rest are the link
-    options. A wrapper that names neither still runs and still exits 0,
-    it just cannot see a link, so both sides are required here.
+
+def _fact_aware() -> dict[str, set[str]]:
+    """Command name to the injected parameters its generic builder takes.
+
+    Two shapes are required: the dispatcher facts a generic reads
+    (``links`` for namespace symlinks, ``stat_path`` for the start point
+    a traversal command cannot stat through one backend), and the link
+    options. A wrapper that names none of them still runs and still
+    exits 0, it just answers as though no link existed and no start
+    point could be resolved, so every side is required here.
     """
     return {
-        b.name:
-        {"links"} | {f
-                     for f in _link_flags(b.name) if accepts_kwarg(b.fn, f)}
-        for b in _BUILDERS if accepts_kwarg(b.fn, "links")
+        b.name: ({f
+                  for f in INJECTED_FACTS if accepts_kwarg(b.fn, f)}
+                 | {f
+                    for f in _link_flags(b.name) if accepts_kwarg(b.fn, f)})
+        for b in _BUILDERS if any(
+            accepts_kwarg(b.fn, f) for f in INJECTED_FACTS)
     }
 
 
@@ -93,8 +105,8 @@ def test_every_link_aware_command_accepts_links():
     Both failures are invisible until someone makes a link on that
     backend, so they are asserted here instead.
     """
-    link_aware = _link_aware()
-    assert link_aware, "no link-aware builders found: the derivation broke"
+    fact_aware = _fact_aware()
+    assert fact_aware, "no fact-aware builders found: the derivation broke"
     commands, failed = _registered()
     assert not failed, f"builtin modules would not import: {failed}"
     missing = sorted({
@@ -102,10 +114,11 @@ def test_every_link_aware_command_accepts_links():
         for cmd in commands
         for gap in [{
             p
-            for p in link_aware.get(cmd.name, ())
+            for p in fact_aware.get(cmd.name, ())
             if not accepts_kwarg(cmd.fn, p)
         }] if gap
     })
     assert not missing, (
-        "these commands shadow a link-aware generic without accepting its "
-        f"link parameters, so symlinks are invisible to them: {missing}")
+        "these commands shadow a generic without accepting the dispatcher "
+        "facts it reads, so symlinks are invisible to them and a start "
+        f"point cannot be resolved: {missing}")

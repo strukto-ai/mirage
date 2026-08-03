@@ -31,7 +31,7 @@ from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
 from mirage.ops.registry import RegisteredOp
-from mirage.ops.types import LinkView, StatOverlay
+from mirage.ops.types import LinkView, StatOverlay, StatPath
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy.safeguard import CommandSafeguard, resolve_safeguard
@@ -444,6 +444,7 @@ class MountEntry:
         runtime_unavailable: str | None = None,
         stat_overlay: StatOverlay | None = None,
         links: LinkView | None = None,
+        stat_path: StatPath | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -461,7 +462,9 @@ class MountEntry:
             stat_overlay (StatOverlay | None): namespace attr merge for
                 stat-rendering commands (ls).
             links (LinkView | None): the namespace's symlink facts.
-                Both reach only the handlers that name them as a
+            stat_path (StatPath | None): dispatcher-backed stat of one
+                path, for a traversal command's start point.
+                All three reach only the handlers that name them as a
                 parameter, so no list of command names is kept here.
         """
         extension = get_extension(paths[0].virtual) if paths else None
@@ -524,7 +527,11 @@ class MountEntry:
         kw["exec_allowed"] = exec_allowed
         # Facts the dispatcher can offer but not every command wants.
         # A command opts in by naming the parameter; see accepts_kwarg.
-        offered = {"stat_overlay": stat_overlay, "links": links}
+        offered = {
+            "stat_overlay": stat_overlay,
+            "links": links,
+            "stat_path": stat_path,
+        }
         offered = {k: v for k, v in offered.items() if v is not None}
         if runtime is not None:
             kw["runtime"] = runtime

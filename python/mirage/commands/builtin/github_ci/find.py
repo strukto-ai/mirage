@@ -16,7 +16,8 @@ from functools import partial
 
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
+from mirage.commands.builtin.generic.find import (is_link, parse_find_args,
+                                                  resolve_start, walk_find)
 from mirage.commands.builtin.github_ci._provision import metadata_provision
 from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
@@ -26,7 +27,7 @@ from mirage.core.github_ci.readdir import is_cross_run_root, is_dir_name
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -63,6 +64,7 @@ async def find(
     index: IndexCacheStore,
     L: bool = False,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     # The wrapper only exists for the cross-run guard: walking every run
@@ -83,6 +85,15 @@ async def find(
                            empty=empty)
     results: list[str] = []
     for search in searches:
+        # Same start-point rule as every other find path: only a
+        # directory has a subtree to walk.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if not start.walk:
+            results.extend(start.results)
+            continue
         if is_cross_run_root(search):
             raise ValueError("find: recursive search across runs is disabled;"
                              " target a specific run (e.g. /ci/runs/<run>)")

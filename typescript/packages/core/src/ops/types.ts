@@ -16,6 +16,12 @@ import type { FileStat } from '../types.ts'
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
 
+// Stat one virtual path through the workspace rather than one backend, so
+// a path under another mount still answers; null when nothing is there.
+// What a traversal command asks about its own start point, which decides
+// whether a walk is possible at all.
+export type StatPath = (path: string) => Promise<FileStat | null>
+
 // The symlink facts a command may consult, as one injected object.
 //
 // Symlinks live in the workspace namespace and no backend can see them,

@@ -98,3 +98,65 @@ describe('treeGeneric with trailing-slash folder entries', () => {
     )
   })
 })
+
+// GNU tree 2.2.1, pinned on debian:stable-slim. A file operand gets the
+// same inline marker an unopenable one does, but it exists, so it is
+// counted and the exit status stays 0:
+//   tree <file>     -> "<file>  [error opening dir]", 0 directories, 1 file, 0
+//   tree -d <file>  -> same marker, "0 directories", exit 0
+//   tree <missing>  -> same marker, 0 directories, 0 files, exit 2
+describe('treeGeneric operand that is not a directory', () => {
+  function optsWith(
+    start: FileStat | null,
+    flags: Record<string, string | boolean> = {},
+  ): CommandOpts {
+    return {
+      stdin: null,
+      flags,
+      filetypeFns: null,
+      cwd: '/',
+      resource: null,
+      statPath: () => Promise.resolve(start),
+    } as unknown as CommandOpts
+  }
+
+  const unreached = (): Promise<never> => {
+    throw new Error('a non-directory operand must not be listed')
+  }
+
+  const fileStat = new FileStat({ name: 'a.txt', size: 6, type: FileType.TEXT })
+
+  it('counts a file operand and exits 0', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/a.txt')],
+      optsWith(fileStat),
+      unreached,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe('/a.txt  [error opening dir]\n\n0 directories, 1 file\n')
+  })
+
+  it('omits the file count under -d', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/a.txt')],
+      optsWith(fileStat, { d: true }),
+      unreached,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe('/a.txt  [error opening dir]\n\n0 directories\n')
+  })
+
+  // A stat that sees nothing is not proof of absence, so the walk decides;
+  // it already renders an unopenable root as the marker with exit 2.
+  it('still walks an operand it cannot stat', async () => {
+    const failing = (): Promise<string[]> => Promise.reject(new Error('ENOENT'))
+    const [out, io] = (await treeGeneric([spec('/nope')], optsWith(null), failing, unreached)) as [
+      Uint8Array,
+      { exitCode: number },
+    ]
+    expect(io.exitCode).toBe(2)
+    expect(DEC.decode(out)).toBe('/nope  [error opening dir]\n\n0 directories, 0 files\n')
+  })
+})

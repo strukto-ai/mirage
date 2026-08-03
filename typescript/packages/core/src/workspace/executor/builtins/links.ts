@@ -265,11 +265,29 @@ export async function prepareMv(
   return { items: rewritten, postUnlink: targetDst, postRename, early: null }
 }
 
+// Stat one virtual path through the workspace, null when absent.
+//
+// Resolves through the op dispatcher rather than one backend, so a path
+// under another mount answers correctly. This is what a traversal command
+// asks about its own start point: a directory can be walked, a file is
+// reported as itself, and null is GNU's missing-operand error. The
+// overlay is applied on the way out for the reason linkTargetStat states:
+// Python's dispatcher applies it itself, this one does not.
+export async function pathStat(
+  dispatch: DispatchFn,
+  virtual: string,
+  overlay: StatOverlay | null = null,
+): Promise<FileStat | null> {
+  const spec = PathSpec.fromStrPath(virtual, '')
+  const stat = await statOrNull(dispatch, spec)
+  if (stat === null) return null
+  return overlay !== null ? overlay(virtual, stat) : stat
+}
+
 // Whether a resolved virtual path names something that exists.
 export async function pathExists(dispatch: DispatchFn, virtual: string): Promise<boolean> {
-  const spec = PathSpec.fromStrPath(virtual, '')
   try {
-    return (await statOrNull(dispatch, spec)) !== null
+    return (await pathStat(dispatch, virtual)) !== null
   } catch {
     return false
   }

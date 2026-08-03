@@ -89,8 +89,14 @@ async def handle_ln(
     return ok("ln", out)
 
 
-async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
-    """Whether a resolved virtual path names something that exists.
+async def path_stat(dispatch: Callable[..., Any],
+                    virtual: str) -> FileStat | None:
+    """Stat one virtual path through the workspace, None when absent.
+
+    Resolves through the op dispatcher rather than one backend, so a path
+    under another mount answers correctly. This is what a traversal
+    command asks about its own start point: a directory can be walked, a
+    file is reported as itself, and None is GNU's missing-operand error.
 
     Args:
         dispatch (Callable): op dispatcher.
@@ -99,8 +105,18 @@ async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
     spec = PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1] or "/",
                     resource_path="")
+    return await _stat_or_none(dispatch, spec)
+
+
+async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
+    """Whether a resolved virtual path names something that exists.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path.
+    """
     try:
-        return await _stat_or_none(dispatch, spec) is not None
+        return await path_stat(dispatch, virtual) is not None
     except (OSError, ValueError):
         return False
 

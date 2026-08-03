@@ -23,7 +23,15 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { keep, optionsTree, prefixPathNodes, type FindEntry, type PredNode } from '../findEval.ts'
+import {
+  emitStartPath,
+  keep,
+  optionsTree,
+  prefixPathNodes,
+  startBasename,
+  type FindEntry,
+  type PredNode,
+} from '../findEval.ts'
 import type { LinkView } from '../../../ops/types.ts'
 
 const ENC = new TextEncoder()
@@ -201,6 +209,47 @@ export async function linkResults(
   return out
 }
 
+// Results for a start point that is not a directory.
+//
+// GNU reports a non-directory start point when it matches the expression
+// and walks nothing, because there is no subtree to descend. The entry
+// sits at depth 0 and tests as `f`, offering its own size and mtime to
+// -size, -mtime and -empty.
+//
+// Asking a backend to walk one instead is what this replaces, and every
+// backend answered differently: an object store listed the key as a
+// prefix and returned nothing, Graph 404'd on the children of a file, and
+// Box raised ENOTDIR.
+function startPointResults(
+  root: PathSpec,
+  start: FileStat,
+  options: FindOptions,
+  tree: PredNode,
+  usesEmpty: boolean,
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+): string[] {
+  const results: string[] = []
+  if (mtimeMin !== null || mtimeMax !== null) {
+    const ts = modifiedTs(start.modified ?? null)
+    if (ts === null || Number.isNaN(ts)) return results
+    if (mtimeMin !== null && ts < mtimeMin) return results
+    if (mtimeMax !== null && ts > mtimeMax) return results
+  }
+  emitStartPath(results, rstripSlash(root.mountPath) || '/', startBasename(root.virtual), {
+    kind: 'f',
+    isEmpty: usesEmpty ? (start.size ?? 0) === 0 : null,
+    exists: true,
+    tree,
+    maxDepth: options.maxDepth ?? null,
+    minDepth: options.minDepth ?? null,
+    size: start.size ?? null,
+    minSize: options.minSize ?? null,
+    maxSize: options.maxSize ?? null,
+  })
+  return results
+}
+
 export async function findGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -290,6 +339,39 @@ export async function findGeneric(
       tree: prefixPathNodes(optionsTree(options), prefix),
     }
     const rootIsLink = (opts.links ?? null)?.statAt(root.virtual) != null
+    // What the start point is decides which walk is even possible, so it
+    // is resolved once, ahead of all of them: a symlink has no backend
+    // inode (linkResults reports it), a non-directory has no subtree, and
+    // nothing at all is GNU's diagnostic. Statted through the dispatcher,
+    // so a start point the router already resolved into another mount
+    // answers there rather than on this command's mount.
+    // Only a positive non-directory answer short-circuits. A stat that
+    // sees nothing is not proof of absence: on a backend with implicit
+    // directories (an object store's key prefix) a directory exists only
+    // as its children, so stat misses what readdir would list. Those fall
+    // through to the walk, which is the only thing that can tell.
+    const startStat = opts.statPath
+    if (startStat !== undefined && !rootIsLink) {
+      const start = await startStat(root.virtual)
+      if (start !== null && start.type !== FileType.DIRECTORY) {
+        const rows = startPointResults(
+          root,
+          start,
+          rootOptions,
+          optionsTree(rootOptions),
+          expr !== null ? expr.usesEmpty : emptyFlag,
+          effMtimeMin,
+          effMtimeMax,
+        )
+        // The only row possible is the start point itself, so its display
+        // path is the operand, not a key that needs rebasing.
+        if (rows.length > 0) {
+          const display = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
+          matches.push(...respellRaw([display], root.virtual, root.rawPath))
+        }
+        continue
+      }
+    }
     let keys: string[]
     try {
       keys = rootIsLink ? [] : await find(root, rootOptions)

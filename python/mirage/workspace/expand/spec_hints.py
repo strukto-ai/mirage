@@ -63,9 +63,7 @@ def spec_word_kinds(
         spec (CommandSpec): command specification with flags/positional/rest.
         argv (list[str]): command arguments (without command name).
     """
-    parsed = parse_command(spec, argv, cwd="/")
-    kinds: list[ValueType | None] = list(parsed.word_kinds)
-    for i, word in enumerate(argv):
-        if word in spec.ignore_tokens:
-            kinds[i] = None
-    return kinds
+    # parse_command classifies ignore_tokens as TEXT itself, so there is
+    # nothing to override here: leaving them None sent `find \( ... \)`
+    # back to the shape heuristic, which read "(" as the bare path "/(".
+    return list(parse_command(spec, argv, cwd="/").word_kinds)

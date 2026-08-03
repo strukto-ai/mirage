@@ -18,6 +18,11 @@ from dataclasses import dataclass
 from mirage.types import FileStat
 
 StatOverlay = Callable[[str, FileStat], FileStat]
+# Stat one virtual path through the workspace rather than one backend, so
+# a path under another mount still answers; None when nothing is there.
+# What a traversal command asks about its own start point, which decides
+# whether a walk is possible at all.
+StatPath = Callable[[str], Awaitable["FileStat | None"]]
 # lstat for one path: the link's own stat, None when not a link.
 LinkStat = Callable[[str], "FileStat | None"]
 # Stat rows for the links directly under a directory, for listings.

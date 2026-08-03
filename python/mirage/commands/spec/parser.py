@@ -363,7 +363,14 @@ def parse_command(
     classified: list[tuple[str, ValueType]] = []
     raw_operands: list[tuple[str, ValueType]] = []
     for j, arg in enumerate(raw_args):
-        if j < len(positional):
+        kind: ValueType
+        if arg in spec.ignore_tokens:
+            # Expression syntax, never an operand of the declared kind:
+            # `find /d \( -name x \)` would otherwise classify "(" and
+            # ")" as PATH operands, giving find two phantom start points
+            # (`/(`, `/)`) on top of the real one.
+            kind = "str"
+        elif j < len(positional):
             kind = positional[j]
         elif cs.rest_kind is not None:
             kind = cs.rest_kind

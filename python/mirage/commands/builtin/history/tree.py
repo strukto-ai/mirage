@@ -23,6 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import StatPath
 from mirage.types import PathSpec
 
 
@@ -41,12 +42,14 @@ async def tree(
     d: bool = False,
     P: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
+    stat_path: StatPath | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_tree(
         paths[0],
         readdir=partial(readdir, accessor),
         stat=partial(stat, accessor),
+        stat_path=stat_path,
         max_depth=int(L) if L is not None else None,
         show_hidden=a,
         ignore_pattern=args_I,

@@ -7,7 +7,7 @@ import pytest
 
 from mirage.commands.builtin.find_eval import Name, Not, Or
 from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
-                                                  apply_mtime_filter,
+                                                  apply_mtime_filter, find,
                                                   parse_find_args, walk_find)
 from mirage.commands.errors import FindParseError
 from mirage.resource.ram import RAMResource
@@ -260,7 +260,9 @@ async def test_walk_find_emits_start_path_at_depth_zero():
 @pytest.mark.asyncio
 async def test_walk_find_propagates_non_not_found_readdir_errors():
     readdir = AsyncMock(side_effect=ValueError("bad page token"))
-    stat = AsyncMock()
+    # The root has to stat as a directory to be walked at all: a start
+    # point that is not one has no children to read.
+    stat = AsyncMock(return_value=FileStat(name="/", type=FileType.DIRECTORY))
     with pytest.raises(ValueError, match="bad page token"):
         await walk_find(_root_spec(),
                         readdir=readdir,
@@ -450,3 +452,185 @@ def test_parse_find_args_not_negation():
 def test_parse_find_args_bogus_predicate_raises():
     with pytest.raises(FindParseError, match="unknown predicate"):
         parse_find_args(("-boguspredicate", ))
+
+
+def _file_spec(virtual: str = "/mnt/a.txt", key: str = "a.txt") -> PathSpec:
+    return PathSpec(virtual=virtual,
+                    directory=virtual[:virtual.rfind("/") + 1],
+                    resource_path=key)
+
+
+def _stat_path(stat: FileStat | None):
+
+    async def fn(_virtual: str) -> FileStat | None:
+        return stat
+
+    return fn
+
+
+async def _unreached_core(*_a, **_kw) -> list[str]:
+    raise AssertionError("find_core must not be called for a file start point")
+
+
+# GNU findutils 4.10.0, pinned on debian:stable-slim:
+#   find <file>             -> <file>   find <file> -type d -> (empty)
+#   find <file> -type f     -> <file>   find <file> -type l -> (empty)
+#   find <file> -maxdepth 0 -> <file>   find <file> -mindepth 1 -> (empty)
+#   find <missing>          -> exit 1, and the GNU diagnostic below
+
+
+@pytest.mark.asyncio
+async def test_find_file_start_point_is_reported_not_walked():
+    """A start point that is not a directory never reaches the backend.
+
+    Every backend answered a walk of one differently: an object store
+    listed the key as a prefix and returned nothing, Graph 404'd on the
+    children of a file, and Box raised ENOTDIR.
+    """
+    stdout, io = await find(
+        [_file_spec()],
+        (),
+        find_core=_unreached_core,
+        stat_path=_stat_path(FileStat(name="a.txt", size=6,
+                                      type=FileType.TEXT)),
+    )
+    assert io.exit_code == 0
+    assert stdout == b"/mnt/a.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_file_start_point_type_filters():
+    start = FileStat(name="a.txt", size=6, type=FileType.TEXT)
+    for ftype, expected in (("f", b"/mnt/a.txt\n"), ("d", b""), ("l", b"")):
+        stdout, io = await find([_file_spec()], ("-type", ftype),
+                                find_core=_unreached_core,
+                                stat_path=_stat_path(start))
+        assert io.exit_code == 0
+        assert stdout == expected, f"-type {ftype}"
+
+
+@pytest.mark.asyncio
+async def test_find_file_start_point_depth_and_size():
+    start = FileStat(name="a.txt", size=6, type=FileType.TEXT)
+    cases = [
+        ({
+            "maxdepth": "0"
+        }, b"/mnt/a.txt\n"),
+        ({
+            "mindepth": "1"
+        }, b""),
+        ({
+            "size": "+1c"
+        }, b"/mnt/a.txt\n"),
+        ({
+            "size": "+99c"
+        }, b""),
+        ({
+            "name": "a.txt"
+        }, b"/mnt/a.txt\n"),
+        ({
+            "name": "nope"
+        }, b""),
+    ]
+    for flags, expected in cases:
+        stdout, io = await find([_file_spec()], (),
+                                find_core=_unreached_core,
+                                stat_path=_stat_path(start),
+                                **flags)
+        assert io.exit_code == 0
+        assert stdout == expected, f"{flags}"
+
+
+@pytest.mark.asyncio
+async def test_find_file_start_point_respells_the_operand():
+    """The row is printed as the operand was typed.
+
+    That is what makes `find -L <link>` name the link rather than the
+    target the router resolved it to.
+    """
+    spec = PathSpec(virtual="/mnt/a.txt",
+                    directory="/mnt/",
+                    resource_path="a.txt",
+                    raw_path="/other/link.txt")
+    stdout, _ = await find(
+        [spec],
+        (),
+        find_core=_unreached_core,
+        stat_path=_stat_path(FileStat(name="a.txt", size=6,
+                                      type=FileType.TEXT)),
+    )
+    assert stdout == b"/other/link.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_unstattable_start_point_falls_through_to_the_walk():
+    """A stat that sees nothing is not proof of absence.
+
+    On a backend with implicit directories (an object store's key prefix)
+    a directory exists only as its children, so stat misses what readdir
+    would list. Short-circuiting there would make `find <dir>` report
+    nothing on every such backend.
+    """
+
+    async def core(*_a, **_kw) -> list[str]:
+        return ["/nope/child.txt"]
+
+    stdout, io = await find([_file_spec(virtual="/mnt/nope", key="nope")], (),
+                            find_core=core,
+                            stat_path=_stat_path(None))
+    assert io.exit_code == 0
+    assert stdout == b"/mnt/nope/child.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_missing_start_point_is_gnu_error_when_stat_is_wired():
+    """GNU names a start point it cannot stat and exits 1.
+
+    Reached through the backend's own stat, which is wired for backends
+    whose stat is cheap; `find: '<path>': <errno text>` used to print the
+    path twice instead of the message.
+    """
+
+    async def stat(_spec: PathSpec) -> FileStat:
+        raise FileNotFoundError("/mnt/nope")
+
+    stdout, io = await find([_file_spec(virtual="/mnt/nope", key="nope")], (),
+                            find_core=_unreached_core,
+                            stat=stat)
+    assert io.exit_code == 1
+    assert stdout == b""
+    assert io.stderr == b"find: '/mnt/nope': No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_find_directory_start_point_still_walks():
+
+    async def core(*_a, **_kw) -> list[str]:
+        return ["/", "/a.txt"]
+
+    stdout, io = await find(
+        [
+            PathSpec(virtual="/mnt",
+                     directory="/",
+                     resource_path="",
+                     resolved=False)
+        ],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+    )
+    assert io.exit_code == 0
+    assert stdout == b"/mnt\n/mnt/a.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_without_stat_path_walks_as_before():
+    """No fact wired (a command constructed outside a workspace) keeps
+    the old path, so the walk still decides."""
+
+    async def core(*_a, **_kw) -> list[str]:
+        return ["/a.txt"]
+
+    stdout, io = await find([_file_spec()], (), find_core=core)
+    assert io.exit_code == 0
+    assert stdout == b"/mnt/a.txt\n"

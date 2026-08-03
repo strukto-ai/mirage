@@ -16,7 +16,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { IOResult } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { findGeneric } from './find.ts'
 
@@ -47,6 +47,109 @@ describe('generic command find', () => {
     const result = await findGeneric([spec('/missing'), spec('/')], [], makeOpts(), fakeFind)
     expect(result).not.toBeNull()
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/found.txt\n')
+  })
+
+  // GNU findutils 4.10.0, pinned on debian:stable-slim:
+  //   find <file>             -> <file>   find <file> -type d -> (empty)
+  //   find <file> -type f     -> <file>   find <file> -type l -> (empty)
+  //   find <file> -maxdepth 0 -> <file>   find <file> -mindepth 1 -> (empty)
+  //   find <missing>          -> exit 1, find: '<path>': No such file or directory
+  describe('start point that is not a directory', () => {
+    const fileStat = { name: 'a.txt', size: 6, type: FileType.TEXT } as FileStat
+
+    function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): CommandOpts {
+      return {
+        stdin: null,
+        flags,
+        filetypeFns: null,
+        cwd: '/',
+        statPath: () => Promise.resolve(stat),
+      } as unknown as CommandOpts
+    }
+
+    function unreachedFind(): Promise<string[]> {
+      throw new Error('find op must not be called for a file start point')
+    }
+
+    it('reports the file and never asks the backend to walk it', async () => {
+      const result = await findGeneric([spec('/mnt/a.txt')], [], optsWith(fileStat), unreachedFind)
+      expect(result?.[1].exitCode).toBe(0)
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/a.txt\n')
+    })
+
+    it.each([
+      ['f', '/mnt/a.txt\n'],
+      ['d', ''],
+      ['l', ''],
+    ])('honors -type %s', async (kind, expected) => {
+      const result = await findGeneric(
+        [spec('/mnt/a.txt')],
+        ['-type', kind],
+        optsWith(fileStat),
+        unreachedFind,
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe(expected)
+    })
+
+    it.each([
+      [{ maxdepth: '0' }, '/mnt/a.txt\n'],
+      [{ mindepth: '1' }, ''],
+      [{ size: '+1c' }, '/mnt/a.txt\n'],
+      [{ size: '+99c' }, ''],
+      [{ name: 'a.txt' }, '/mnt/a.txt\n'],
+      [{ name: 'nope' }, ''],
+    ])('honors %o', async (flags, expected) => {
+      const result = await findGeneric(
+        [spec('/mnt/a.txt')],
+        [],
+        optsWith(fileStat, flags),
+        unreachedFind,
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe(expected)
+    })
+
+    it('prints the operand as typed, not the path it resolved to', async () => {
+      const linked = new PathSpec({
+        resourcePath: 'a.txt',
+        virtual: '/mnt/a.txt',
+        directory: '/mnt/',
+        resolved: true,
+        rawPath: '/other/link.txt',
+      })
+      const result = await findGeneric([linked], [], optsWith(fileStat), unreachedFind)
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/other/link.txt\n')
+    })
+
+    // A stat that sees nothing is not proof of absence: on a backend with
+    // implicit directories (an object store's key prefix) a directory
+    // exists only as its children, so stat misses what readdir would list.
+    it('falls through to the walk when the start point cannot be statted', async () => {
+      const root = new PathSpec({
+        resourcePath: 'nope',
+        virtual: '/mnt/nope',
+        directory: '/mnt/',
+        resolved: false,
+      })
+      const result = await findGeneric([root], [], optsWith(null), () =>
+        Promise.resolve(['/nope/child.txt']),
+      )
+      expect(result?.[1].exitCode).toBe(0)
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/nope/child.txt\n')
+    })
+
+    it('still walks a directory start point', async () => {
+      const dirStat = { name: 'mnt', type: FileType.DIRECTORY } as FileStat
+      const root = new PathSpec({
+        resourcePath: '',
+        virtual: '/mnt',
+        directory: '/',
+        resolved: false,
+      })
+      const result = await findGeneric([root], [], optsWith(dirStat), () =>
+        Promise.resolve(['/a.txt']),
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/a.txt\n')
+    })
   })
 
   it('propagates non-ENOENT errors', async () => {

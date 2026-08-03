@@ -1,0 +1,100 @@
+{
+ "cases": [
+  {
+   "id": "tree_start_file",
+   "seq": 386,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "tree /data/a.txt",
+   "expect": {
+    "exit": 0,
+    "stdout": "/data/a.txt  [error opening dir]\n\n0 directories, 1 file\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tree_start_file_dirs_only",
+   "seq": 387,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "tree -d /data/a.txt",
+   "expect": {
+    "exit": 0,
+    "stdout": "/data/a.txt  [error opening dir]\n\n0 directories\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "tree_start_missing",
+   "seq": 388,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "databricks",
+    "databricks-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "tree /data/nope",
+   "expect": {
+    "exit": 2,
+    "stdout": "/data/nope  [error opening dir]\n\n0 directories, 0 files\n",
+    "stderr": ""
+   }
+  }
+ ]
+}
