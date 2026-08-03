@@ -17,7 +17,7 @@ import errno
 import pytest
 
 from mirage import Action, CommandContext, Deny, GuardSpec, Policy, Workspace
-from mirage.policy import OpsContext
+from mirage.policy import OpsContext, OpsResultContext
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 
@@ -157,6 +157,46 @@ async def test_path_guards_hold_at_the_programmatic_door():
         assert "prod is protected" in str(excinfo.value)
         with pytest.raises(PermissionError):
             await ws.ops.read("/data/prod/x.txt")
+    finally:
+        await ws.close()
+
+
+class SuppressProdWrites(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.write and ctx.path.virtual.startswith("/data/prod/"):
+            return Deny("write suppressed\n")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_touch_on_an_existing_file_is_a_write_at_the_op_door():
+    # touch on an existing file mutates via setattr, not create; the
+    # write classification must cover that op too.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"keep\n")
+        ws.policies.add(ReadOnlyProd())
+        result = await ws.execute("touch /data/prod/x.txt")
+        assert result.exit_code != 0
+        assert b"Permission denied" in result.stderr
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_post_ops_deny_still_records_the_completed_write():
+    # A post deny suppresses the result, not the effect: the backend
+    # already mutated, so observation and caches must reflect the op.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        ws.policies.add(SuppressProdWrites())
+        with pytest.raises(PermissionError):
+            await ws.ops.write("/data/prod/x.txt", b"data\n")
+        assert any(r.op == "write" for r in ws.ops.records)
+        assert await ws.ops.read("/data/prod/x.txt") == b"data\n"
     finally:
         await ws.close()
 

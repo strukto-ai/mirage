@@ -30,6 +30,14 @@ class DenyLocked(Policy):
         return None
 
 
+class DenyWrites(Policy):
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        if ctx.write:
+            return Deny("no writes\n")
+        return None
+
+
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
@@ -77,6 +85,20 @@ async def test_warm_cache_read_serves_when_no_policy_objects():
     result, _ = await dispatcher.dispatch("read", _path("/data/open/a.txt"))
     assert result == b"warm"
     cache.get.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_setattr_classifies_as_a_write():
+    # touch on an existing file mutates via setattr, which is absent
+    # from the dispatcher's own invalidation set; the policy write
+    # classification must still cover it.
+    policies = Policies()
+    policies.add(DenyWrites())
+    dispatcher, _ = _dispatcher(policies)
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("setattr", _path("/data/a.txt"))
+    result, _ = await dispatcher.dispatch("stat", _path("/data/a.txt"))
+    assert result == b"cold"
 
 
 @pytest.mark.asyncio

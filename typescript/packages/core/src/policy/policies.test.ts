@@ -354,4 +354,20 @@ describe('workspace policies', () => {
       await ws.close()
     }
   })
+
+  it('touch on an existing file is a write at the op door', async () => {
+    // touch on an existing file mutates via setattr, not create; the
+    // write classification must cover that op too.
+    const ws = executableWorkspace()
+    try {
+      await ws.execute('mkdir -p /data/prod')
+      await ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('keep')])
+      ws.policies.add(new ReadOnlyProd())
+      const refused = await ws.execute('touch /data/prod/x.txt')
+      expect(refused.exitCode).not.toBe(0)
+      expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
+    } finally {
+      await ws.close()
+    }
+  })
 })

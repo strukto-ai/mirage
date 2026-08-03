@@ -234,9 +234,6 @@ class Ops:
                                                **kwargs)
         finally:
             push_mount_prefix(prev_prefix)
-        if self._policies is not None:
-            await post_ops_gate(self._policies, op, scope, write, mount_prefix,
-                                result)
         if isinstance(result, (bytes, bytearray)):
             nbytes = len(result)
         else:
@@ -246,6 +243,12 @@ class Ops:
         if write:
             observed = time.time() if op in STAMP_WRITE_OPS else None
             await self._invalidate(path, observed)
+        # Bookkeeping precedes the post gate: a denied result is still a
+        # completed backend op, so the caches and observation must
+        # reflect it before the deny suppresses it.
+        if self._policies is not None:
+            await post_ops_gate(self._policies, op, scope, write, mount_prefix,
+                                result)
         if (op == "stat" and self._stat_overlay is not None
                 and isinstance(result, FileStat)):
             return self._stat_overlay(path, result)

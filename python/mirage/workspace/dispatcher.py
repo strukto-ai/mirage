@@ -34,6 +34,10 @@ _DISPATCH_WRITE_OPS = frozenset({
     "write", "write_bytes", "append", "unlink", "create", "truncate", "mkdir",
     "rmdir", "rename"
 })
+# setattr mutates the mount but keeps its own overlay bookkeeping in
+# _setattr_via, so it is a write for policy admission without joining
+# the dispatcher's post-write invalidation path.
+_POLICY_WRITE_OPS = _DISPATCH_WRITE_OPS | frozenset({"setattr"})
 
 
 class Dispatcher:
@@ -71,7 +75,7 @@ class Dispatcher:
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.
         policies = self._namespace.registry.policies
-        write = op in _DISPATCH_WRITE_OPS
+        write = op in _POLICY_WRITE_OPS
         await pre_ops_gate(policies, op, path, write, mount.prefix)
         caches_reads = mount.resource.caches_reads
 
