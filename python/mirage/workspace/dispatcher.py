@@ -20,6 +20,7 @@ from mirage.cache.manager import CacheManager
 from mirage.io import IOResult
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
+from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountEntry
@@ -66,12 +67,20 @@ class Dispatcher:
                 path = PathSpec.from_str_path(followed)
         mount = self._namespace.mount_for(path.virtual)
         assert_mount_allowed(mount.prefix)
+        # Admission policies fire at the door, before the warm-cache
+        # early return below: a cached read must be refused exactly
+        # like a cold one, or the cache becomes a policy bypass.
+        policies = self._namespace.registry.policies
+        write = op in _DISPATCH_WRITE_OPS
+        await pre_ops_gate(policies, op, path, write, mount.prefix)
         caches_reads = mount.resource.caches_reads
 
         if caches_reads and op in _DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):
+                await post_ops_gate(policies, op, path, write, mount.prefix,
+                                    cached)
                 return cached, IOResult(reads={path.virtual: cached})
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -97,6 +106,7 @@ class Dispatcher:
             await self.invalidate_after_write(mount, path, observed=observed)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
                 await self.invalidate_after_write(mount, kwargs["dst"])
+        await post_ops_gate(policies, op, path, write, mount.prefix, result)
         return result, IOResult()
 
     async def stat(self, path: str) -> FileStat:

@@ -169,7 +169,8 @@ class Workspace:
                         agent_id=agent_id or "",
                         session_id=session_id,
                         links=self._namespace,
-                        stat_overlay=self._merge_overlay)
+                        stat_overlay=self._merge_overlay,
+                        policies=self._registry.policies)
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
 
         self._runtimes, self._policy_router = wire_runtime_world(

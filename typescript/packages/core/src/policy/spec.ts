@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Policy } from './base.ts'
-import type { Action, CommandContext, GuardSpec } from './types.ts'
+import type { Action, CommandContext, GuardSpec, OpsContext } from './types.ts'
 
 /**
  * Compile a `*`/`?` wildcard into an anchored regex. Deliberately not
@@ -57,6 +57,21 @@ export class SpecPolicy implements Policy {
             exitCode: 1,
           }
         }
+      }
+    }
+    return null
+  }
+
+  preOps(ctx: OpsContext): Action | null {
+    // The op-layer twin: pure path protection (no command scope) also
+    // holds at the op door, so FUSE, programmatic ops, and the warm
+    // cache cannot bypass it. Command-scoped specs stay command-layer:
+    // an op does not know which command issued it.
+    const commands = this.spec.commands ?? []
+    if (commands.length > 0 || this.patterns.length === 0) return null
+    for (const pattern of this.patterns) {
+      if (pattern.test(ctx.path.virtual)) {
+        return { kind: 'deny', message: `${this.spec.reason}\n`, exitCode: 1 }
       }
     }
     return null

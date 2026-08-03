@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.types import Action, CommandContext
+from mirage.policy.types import (Action, CommandContext, OpsContext,
+                                 OpsResultContext)
 
 
 class Policy:
@@ -20,7 +21,7 @@ class Policy:
 
     Subclasses override only the hooks they care about; a hook returns
     an Action to state an opinion or None to stay silent, and a hook
-    that raises fails closed (the command is refused, naming the
+    that raises fails closed (the command or op is refused, naming the
     policy). Hooks left un-overridden are detected at the seam and
     never called.
     """
@@ -30,5 +31,25 @@ class Policy:
 
         Args:
             ctx (CommandContext): the classified command.
+        """
+        return None
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        """Admit or refuse one VFS op, whatever door it entered.
+
+        The hot path: fires per op (thousands under one recursive
+        command), so keep the hook cheap; expensive decisions belong at
+        pre_command or precomputed into policy state.
+
+        Args:
+            ctx (OpsContext): the op about to run.
+        """
+        return None
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        """Observe one completed VFS op; a Deny suppresses its result.
+
+        Args:
+            ctx (OpsResultContext): the op and its raw result.
         """
         return None

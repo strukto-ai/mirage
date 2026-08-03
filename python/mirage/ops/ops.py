@@ -26,6 +26,7 @@ from mirage.observe.context import push_mount_prefix
 from mirage.ops.config import (NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks,
                                OpsMount, StatOverlay)
 from mirage.ops.registry import OpsRegistry, RegisteredOp
+from mirage.policy import Policies, post_ops_gate, pre_ops_gate
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -40,7 +41,8 @@ class Ops:
                  agent_id: str = "default",
                  session_id: str = "default",
                  links: NamespaceLinks | None = None,
-                 stat_overlay: StatOverlay | None = None) -> None:
+                 stat_overlay: StatOverlay | None = None,
+                 policies: Policies | None = None) -> None:
         self._mounts = sorted(mounts,
                               key=lambda m: len(m.prefix),
                               reverse=True)
@@ -51,6 +53,11 @@ class Ops:
         self._session_id = session_id
         self._links = links
         self._stat_overlay = stat_overlay
+        # Admission policies, shared with the workspace registry. This
+        # facade is the door FUSE and programmatic ws.ops come through,
+        # so the pre/post op hooks must fire here too, not only on the
+        # shell's dispatcher.
+        self._policies = policies
         self._registry = OpsRegistry()
         for m in self._mounts:
             for ro in m.ops:
@@ -214,6 +221,8 @@ class Ops:
             directory=path.rsplit("/", 1)[0] or "/",
             resource_path=mount_key(path, mount_prefix),
         )
+        if self._policies is not None:
+            await pre_ops_gate(self._policies, op, scope, write, mount_prefix)
         try:
             result = await self._registry.call(op,
                                                resource_type,
@@ -225,6 +234,9 @@ class Ops:
                                                **kwargs)
         finally:
             push_mount_prefix(prev_prefix)
+        if self._policies is not None:
+            await post_ops_gate(self._policies, op, scope, write, mount_prefix,
+                                result)
         if isinstance(result, (bytes, bytearray)):
             nbytes = len(result)
         else:

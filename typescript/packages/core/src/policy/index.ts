@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export type { Policy } from './base.ts'
+export { PolicyDenied } from './errors.ts'
 export { MountRootPolicy, hasParentsFlag } from './mount_root.ts'
-export { Policies } from './policies.ts'
+export { Policies, postOpsGate, preOpsGate } from './policies.ts'
 export { SpecPolicy, wildcardRegex } from './spec.ts'
 export {
   VALIDITY,
@@ -23,4 +24,6 @@ export {
   type Deny,
   type GuardSpec,
   type MountRootQuery,
+  type OpsContext,
+  type OpsResultContext,
 } from './types.ts'

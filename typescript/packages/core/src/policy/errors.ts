@@ -24,3 +24,22 @@ export class PolicyError extends Error {
     this.name = 'PolicyError'
   }
 }
+
+/**
+ * An op refused by an admission policy at the op door. Shaped like the
+ * FsError stamps (`code` EACCES plus the virtual path) so every fs
+ * chokepoint renders GNU's "Permission denied" and the FUSE bridge
+ * classifies it to -EACCES; the distinct class lets handlers that
+ * special-case mount-mode refusals (the read-only wording) tell a
+ * policy deny apart.
+ */
+export class PolicyDenied extends Error {
+  readonly code = 'EACCES'
+  readonly virtualPath: string
+
+  constructor(message: string, virtualPath: string) {
+    super(message)
+    this.name = 'PolicyDenied'
+    this.virtualPath = virtualPath
+  }
+}

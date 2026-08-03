@@ -15,7 +15,8 @@
 import re
 
 from mirage.policy.base import Policy
-from mirage.policy.types import Action, CommandContext, Deny, GuardSpec
+from mirage.policy.types import (Action, CommandContext, Deny, GuardSpec,
+                                 OpsContext)
 
 
 def wildcard_regex(pattern: str) -> re.Pattern[str]:
@@ -61,4 +62,17 @@ class SpecPolicy(Policy):
                 if pattern.match(p.virtual):
                     display = p.raw_path or p.virtual
                     return Deny(f"{ctx.command}: {display}: {spec.reason}\n")
+        return None
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        # The op-layer twin: pure path protection (no command scope)
+        # also holds at the op doors, so FUSE, programmatic ops, and
+        # the warm cache cannot bypass it. Command-scoped specs stay
+        # command-layer: an op does not know which command issued it.
+        spec = self.spec
+        if spec.commands or not self._patterns:
+            return None
+        for pattern in self._patterns:
+            if pattern.match(ctx.path.virtual):
+                return Deny(f"{spec.reason}\n")
         return None

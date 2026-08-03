@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 import pytest
 
 from mirage.policy import (Action, CommandContext, Deny, GuardSpec,
-                           MountRootPolicy, Policies, Policy, PolicyError)
+                           MountRootPolicy, OpsContext, OpsResultContext,
+                           Policies, Policy, PolicyError, post_ops_gate,
+                           pre_ops_gate)
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.mount import MountRegistry
@@ -125,3 +129,65 @@ async def test_an_illegal_return_raises_policy_error():
     policies.add(IllegalReturn())
     with pytest.raises(PolicyError, match="IllegalReturn"):
         await policies.pre_command(_ctx("ls"))
+
+
+class DenyReadOps(Policy):
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        if ctx.op == "read":
+            return Deny("no reads\n")
+        return None
+
+
+class DenyBigResults(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if isinstance(ctx.result, bytes) and len(ctx.result) > 8:
+            return Deny("result too large\n")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pre_ops_first_deny_wins_and_wants_gates():
+    policies = Policies()
+    assert not policies.wants("pre_ops")
+    policies.add(DenyReadOps())
+    assert policies.wants("pre_ops")
+    assert not policies.wants("post_ops")
+    ctx = OpsContext(op="read",
+                     path=_path("/data/x"),
+                     write=False,
+                     prefix="/data/")
+    deny = await policies.pre_ops(ctx)
+    assert deny is not None
+    assert deny.message == "no reads\n"
+    write_ctx = OpsContext(op="write",
+                           path=_path("/data/x"),
+                           write=True,
+                           prefix="/data/")
+    assert await policies.pre_ops(write_ctx) is None
+
+
+@pytest.mark.asyncio
+async def test_pre_ops_gate_raises_eacces():
+    policies = Policies()
+    policies.add(DenyReadOps())
+    with pytest.raises(PermissionError) as excinfo:
+        await pre_ops_gate(policies, "read", _path("/data/x"), False, "/data/")
+    assert excinfo.value.errno == errno.EACCES
+    assert excinfo.value.filename == "/data/x"
+    assert "no reads" in str(excinfo.value)
+    # No opinion on writes: the gate passes silently.
+    await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
+
+
+@pytest.mark.asyncio
+async def test_post_ops_gate_suppresses_the_result():
+    policies = Policies()
+    policies.add(DenyBigResults())
+    await post_ops_gate(policies, "read", _path("/data/x"), False, "/data/",
+                        b"tiny")
+    with pytest.raises(PermissionError) as excinfo:
+        await post_ops_gate(policies, "read", _path("/data/x"), False,
+                            "/data/", b"a long secret payload")
+    assert excinfo.value.errno == errno.EACCES

@@ -18,6 +18,7 @@ import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { SpecPolicy, wildcardRegex } from './spec.ts'
+import type { OpsContext } from './types.ts'
 import type { CommandContext } from './types.ts'
 
 function path(virtual: string, raw?: string): PathSpec {
@@ -71,5 +72,31 @@ describe('SpecPolicy', () => {
     const policy = new SpecPolicy({ reason: 'frozen', paths: ['/data/locked/*'] })
     expect(policy.preCommand(ctx('cat', [path('/data/locked/a')]))).not.toBeNull()
     expect(policy.preCommand(ctx('rm', [path('/data/open/a')]))).toBeNull()
+  })
+})
+
+describe('SpecPolicy preOps twin', () => {
+  function opsCtx(virtual: string): OpsContext {
+    return { op: 'read', path: path(virtual), write: false, prefix: '/data/' }
+  }
+
+  it('holds for path-only specs', () => {
+    // Pure path protection also fires at the op door, so FUSE and
+    // programmatic ops cannot bypass it.
+    const policy = new SpecPolicy({ reason: 'frozen', paths: ['/data/locked/*'] })
+    const deny = policy.preOps(opsCtx('/data/locked/a'))
+    expect(deny && 'message' in deny ? deny.message : '').toBe('frozen\n')
+    expect(policy.preOps(opsCtx('/data/open/a'))).toBeNull()
+  })
+
+  it('skips command-scoped specs', () => {
+    // An op does not know which command issued it; command-scoped
+    // specs stay at the command layer.
+    const policy = new SpecPolicy({
+      reason: 'no rm',
+      commands: ['rm'],
+      paths: ['/data/prod/*'],
+    })
+    expect(policy.preOps(opsCtx('/data/prod/x'))).toBeNull()
   })
 })

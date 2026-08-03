@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Action, CommandContext } from './types.ts'
+import type { Action, CommandContext, OpsContext, OpsResultContext } from './types.ts'
 
 /**
  * One concern's answers to the workspace lifecycle.
@@ -25,4 +25,12 @@ import type { Action, CommandContext } from './types.ts'
  */
 export interface Policy {
   preCommand?(ctx: CommandContext): Action | null | Promise<Action | null>
+  /**
+   * Admit or refuse one VFS op, whatever door it entered. The hot
+   * path: fires per op, so keep the hook cheap; expensive decisions
+   * belong at preCommand or precomputed into policy state.
+   */
+  preOps?(ctx: OpsContext): Action | null | Promise<Action | null>
+  /** Observe one completed VFS op; a Deny suppresses its result. */
+  postOps?(ctx: OpsResultContext): Action | null | Promise<Action | null>
 }

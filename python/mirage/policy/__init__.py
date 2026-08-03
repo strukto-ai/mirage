@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy.base import Policy
-from mirage.policy.errors import PolicyError
+from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.mount_root import MountRootPolicy
-from mirage.policy.policies import Policies
+from mirage.policy.policies import Policies, post_ops_gate, pre_ops_gate
 from mirage.policy.spec import SpecPolicy, wildcard_regex
 from mirage.policy.types import (VALIDITY, Action, CommandContext, Deny,
-                                 GuardSpec, MountRootQuery)
+                                 GuardSpec, MountRootQuery, OpsContext,
+                                 OpsResultContext)
 
 __all__ = [
     "Action",
@@ -27,10 +28,15 @@ __all__ = [
     "GuardSpec",
     "MountRootPolicy",
     "MountRootQuery",
+    "OpsContext",
+    "OpsResultContext",
     "Policies",
     "Policy",
+    "PolicyDenied",
     "PolicyError",
     "SpecPolicy",
     "VALIDITY",
+    "post_ops_gate",
+    "pre_ops_gate",
     "wildcard_regex",
 ]

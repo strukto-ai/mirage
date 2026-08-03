@@ -24,8 +24,9 @@ import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import type { Policy } from './base.ts'
 import { MountRootPolicy } from './mount_root.ts'
-import { Policies } from './policies.ts'
-import type { Action, CommandContext, GuardSpec } from './types.ts'
+import { PolicyDenied } from './errors.ts'
+import { Policies, postOpsGate, preOpsGate } from './policies.ts'
+import type { Action, CommandContext, GuardSpec, OpsContext, OpsResultContext } from './types.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -57,6 +58,31 @@ class IllegalReturn implements Policy {
 }
 
 const silent: Policy = {}
+
+class DenyReadOps implements Policy {
+  preOps(ctx: OpsContext): Action | null {
+    if (ctx.op === 'read') return { kind: 'deny', message: 'no reads\n', exitCode: 1 }
+    return null
+  }
+}
+
+class DenyBigResults implements Policy {
+  postOps(ctx: OpsResultContext): Action | null {
+    if (ctx.result instanceof Uint8Array && ctx.result.length > 8) {
+      return { kind: 'deny', message: 'result too large\n', exitCode: 1 }
+    }
+    return null
+  }
+}
+
+class ReadOnlyProd implements Policy {
+  preOps(ctx: OpsContext): Action | null {
+    if (ctx.write && ctx.path.virtual.startsWith('/data/prod/')) {
+      return { kind: 'deny', message: 'prod is frozen\n', exitCode: 1 }
+    }
+    return null
+  }
+}
 
 class NoInterpreters implements Policy {
   async preCommand(ctx: CommandContext): Promise<Action | null> {
@@ -148,6 +174,50 @@ describe('Policies', () => {
     const policies = new Policies()
     policies.add(new IllegalReturn())
     await expect(policies.preCommand(ctx('ls'))).rejects.toThrow(/IllegalReturn/)
+  })
+
+  it('preOps first deny wins and wants() gates', async () => {
+    const policies = new Policies()
+    expect(policies.wants('preOps')).toBe(false)
+    policies.add(new DenyReadOps())
+    expect(policies.wants('preOps')).toBe(true)
+    expect(policies.wants('postOps')).toBe(false)
+    const deny = await policies.preOps({
+      op: 'read',
+      path: path('/data/x'),
+      write: false,
+      prefix: '/data/',
+    })
+    expect(deny?.message).toBe('no reads\n')
+    expect(
+      await policies.preOps({ op: 'write', path: path('/data/x'), write: true, prefix: '/data/' }),
+    ).toBeNull()
+  })
+
+  it('preOpsGate throws PolicyDenied with the EACCES stamp', async () => {
+    const policies = new Policies()
+    policies.add(new DenyReadOps())
+    await expect(preOpsGate(policies, 'read', path('/data/x'), false, '/data/')).rejects.toThrow(
+      PolicyDenied,
+    )
+    try {
+      await preOpsGate(policies, 'read', path('/data/x'), false, '/data/')
+    } catch (err) {
+      expect((err as PolicyDenied).code).toBe('EACCES')
+      expect((err as PolicyDenied).virtualPath).toBe('/data/x')
+      expect((err as PolicyDenied).message).toBe('no reads')
+    }
+    // No opinion on writes: the gate passes silently.
+    await preOpsGate(policies, 'write', path('/data/x'), true, '/data/')
+  })
+
+  it('postOpsGate suppresses the result', async () => {
+    const policies = new Policies()
+    policies.add(new DenyBigResults())
+    await postOpsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(4))
+    await expect(
+      postOpsGate(policies, 'read', path('/data/x'), false, '/data/', new Uint8Array(64)),
+    ).rejects.toThrow(/result too large/)
   })
 
   it('an entry with a hook is a policy even if it carries reason', async () => {
@@ -247,6 +317,39 @@ describe('workspace policies', () => {
       expect(new TextDecoder().decode(refused.stderr)).toContain('prod is protected')
       const listing = await ws.execute('ls /data/prod')
       expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('path guards hold at the programmatic door', async () => {
+    // ws.dispatch is the one TS op door (FUSE routes through it); a
+    // path-only guard must refuse it, not just shell commands (#675).
+    const ws = executableWorkspace([{ reason: 'prod is protected', paths: ['/data/prod/*'] }])
+    try {
+      await ws.execute('mkdir -p /data/other')
+      await ws.dispatch('write', '/data/other/ok.txt', [new TextEncoder().encode('fine')])
+      await expect(
+        ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('nope')]),
+      ).rejects.toThrow(PolicyDenied)
+      await expect(ws.dispatch('read', '/data/prod/x.txt')).rejects.toThrow(/prod is protected/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a preOps policy holds on the shell door', async () => {
+    // touch routes through the dispatcher, not handleCommand; a
+    // preOps-only policy must still refuse it with GNU wording.
+    const ws = executableWorkspace()
+    try {
+      ws.policies.add(new ReadOnlyProd())
+      await ws.execute('mkdir -p /data/prod')
+      const refused = await ws.execute('touch /data/prod/x')
+      expect(refused.exitCode).not.toBe(0)
+      expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
+      const ok = await ws.execute('touch /data/free && echo done')
+      expect(new TextDecoder().decode(ok.stdout)).toContain('done')
     } finally {
       await ws.close()
     }

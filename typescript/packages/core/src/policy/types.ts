@@ -68,6 +68,29 @@ export interface CommandContext {
   registry: MountRootQuery
 }
 
-export const VALIDITY: Readonly<Record<'preCommand', ReadonlySet<string>>> = {
-  preCommand: new Set(['deny']),
+/** Facts about one VFS op, as preOps hooks see it. Fires at the op
+ * door (the dispatcher every access routes through, FUSE included),
+ * before any backend or cache I/O. */
+export interface OpsContext {
+  op: string
+  path: PathSpec
+  write: boolean
+  prefix: string
 }
+
+/** One completed VFS op, as postOps hooks see it; a Deny suppresses
+ * the result. */
+export interface OpsResultContext {
+  op: string
+  path: PathSpec
+  write: boolean
+  prefix: string
+  result: unknown
+}
+
+export const VALIDITY: Readonly<Record<'preCommand' | 'preOps' | 'postOps', ReadonlySet<string>>> =
+  {
+    preCommand: new Set(['deny']),
+    preOps: new Set(['deny']),
+    postOps: new Set(['deny']),
+  }

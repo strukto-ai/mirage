@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import ClassVar, Protocol
+from typing import Any, ClassVar, Protocol
 
 from mirage.types import PathSpec
 
@@ -101,6 +101,49 @@ class CommandContext:
     registry: MountRootQuery
 
 
+@dataclass(frozen=True, slots=True)
+class OpsContext:
+    """Facts about one VFS op, as pre_ops hooks see it.
+
+    Fires at the op doors (the ``ws.ops`` facade, which also serves
+    FUSE, and the shell's internal dispatcher), before any backend or
+    cache I/O, so it holds however the mount is reached.
+
+    Args:
+        op (str): operation name (read, write, unlink, readdir, ...).
+        path (PathSpec): the resolved virtual path.
+        write (bool): whether the op mutates the mount.
+        prefix (str): the owning mount's prefix.
+    """
+
+    op: str
+    path: PathSpec
+    write: bool
+    prefix: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpsResultContext:
+    """One completed VFS op, as post_ops hooks see it.
+
+    Args:
+        op (str): operation name.
+        path (PathSpec): the resolved virtual path.
+        write (bool): whether the op mutated the mount.
+        prefix (str): the owning mount's prefix.
+        result (Any): the op's raw result (bytes, FileStat, listing,
+            ...); a Deny here suppresses it.
+    """
+
+    op: str
+    path: PathSpec
+    write: bool
+    prefix: str
+    result: Any
+
+
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind}),
+    "pre_ops": frozenset({Deny.kind}),
+    "post_ops": frozenset({Deny.kind}),
 }

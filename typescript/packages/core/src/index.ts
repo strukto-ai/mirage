@@ -529,6 +529,7 @@ export {
 export {
   MountRootPolicy,
   Policies,
+  PolicyDenied,
   SpecPolicy,
   VALIDITY,
   hasParentsFlag,
@@ -538,6 +539,8 @@ export {
   type Deny,
   type GuardSpec,
   type MountRootQuery,
+  type OpsContext,
+  type OpsResultContext,
   type Policy,
 } from './policy/index.ts'
 export {

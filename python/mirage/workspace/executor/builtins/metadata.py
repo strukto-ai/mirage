@@ -18,8 +18,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from mirage.io import IOResult
+from mirage.policy import PolicyDenied
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
+from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
 from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_mode
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
@@ -136,6 +137,26 @@ def _read_only_error(cmd: str, namespace: Namespace, path: PathSpec) -> str:
     """
     prefix = namespace.mount_for(path.virtual).prefix
     return f"{cmd}: read-only mount at {prefix}\n"
+
+
+def _permission_error(cmd: str, namespace: Namespace, path: PathSpec,
+                      exc: PermissionError) -> str:
+    """Render a metadata-write PermissionError.
+
+    A mount-mode refusal keeps the mirage read-only wording; an
+    admission-policy deny at the op door renders GNU's
+    ``<cmd>: <path>: Permission denied`` instead of mislabeling the
+    mount as read-only.
+
+    Args:
+        cmd (str): command name.
+        namespace (Namespace): addressing authority (mount lookup).
+        path (PathSpec): the refused path.
+        exc (PermissionError): the raised refusal.
+    """
+    if not isinstance(exc, PolicyDenied):
+        return _read_only_error(cmd, namespace, path)
+    return format_fs_error(cmd, exc, [path]).decode()
 
 
 async def _setattr_via(
@@ -291,8 +312,8 @@ async def _apply_attrs(
                            mode=mode,
                            uid=uid,
                            gid=gid)
-    except PermissionError:
-        errors.append(_read_only_error(cmd, namespace, resolved))
+    except PermissionError as exc:
+        errors.append(_permission_error(cmd, namespace, resolved, exc))
 
 
 async def handle_chmod(
@@ -521,8 +542,8 @@ async def handle_touch(
                                resolved,
                                atime=atime,
                                mtime=mtime)
-        except PermissionError:
-            errors.append(_read_only_error("touch", namespace, resolved))
+        except PermissionError as exc:
+            errors.append(_permission_error("touch", namespace, resolved, exc))
         except FS_ERRORS as exc:
             # A destination whose parent chain is not all directories is one
             # failed operand, not an aborted command: GNU reports it and

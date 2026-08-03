@@ -20,3 +20,15 @@ class PolicyError(Exception):
     Action kind for the hook, or a value that is not an Action at all,
     is a programming error in the policy, not a refusal.
     """
+
+
+class PolicyDenied(PermissionError):
+    """An op refused by an admission policy at an op door.
+
+    A PermissionError subclass so every existing consumer keeps
+    working: FUSE adapters classify it to EACCES, programmatic callers
+    catch PermissionError, and the shell renders the GNU
+    ``<cmd>: <path>: Permission denied`` line. The distinct type lets
+    handlers that special-case mount-mode refusals (the read-only
+    wording) tell a policy deny apart without guessing from errno.
+    """

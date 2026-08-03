@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../io/types.ts'
+import { PolicyDenied } from '../../../policy/index.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError, isMissingOp } from '../../../utils/errors.ts'
@@ -230,6 +231,10 @@ function readOnlyError(cmd: string, namespace: Namespace, path: PathSpec): strin
 }
 
 function isReadOnlyError(err: unknown): boolean {
+  // A policy deny is EACCES too but must render GNU's "Permission
+  // denied", not the mount read-only wording, even when its reason
+  // text happens to contain "read-only".
+  if (err instanceof PolicyDenied) return false
   return err instanceof Error && err.message.includes('read-only')
 }
 

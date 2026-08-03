@@ -14,7 +14,8 @@
 
 import pytest
 
-from mirage.policy import CommandContext, GuardSpec, SpecPolicy, wildcard_regex
+from mirage.policy import (CommandContext, GuardSpec, OpsContext, SpecPolicy,
+                           wildcard_regex)
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.mount import MountRegistry
@@ -81,3 +82,35 @@ async def test_spec_policy_without_commands_covers_every_command():
                                     ) is not None
     assert await policy.pre_command(_ctx("rm",
                                          [_path("/data/open/a")])) is None
+
+
+@pytest.mark.asyncio
+async def test_spec_policy_op_twin_holds_for_path_only_specs():
+    # Pure path protection also fires at the op doors, so FUSE and
+    # programmatic ops cannot bypass it.
+    policy = SpecPolicy(GuardSpec(reason="frozen", paths=("/data/locked/*", )))
+    ctx = OpsContext(op="read",
+                     path=_path("/data/locked/a"),
+                     write=False,
+                     prefix="/data/")
+    deny = await policy.pre_ops(ctx)
+    assert deny is not None
+    assert deny.message == "frozen\n"
+    open_ctx = OpsContext(op="read",
+                          path=_path("/data/open/a"),
+                          write=False,
+                          prefix="/data/")
+    assert await policy.pre_ops(open_ctx) is None
+
+
+@pytest.mark.asyncio
+async def test_spec_policy_op_twin_skips_command_scoped_specs():
+    # An op does not know which command issued it; command-scoped
+    # specs stay at the command layer.
+    policy = SpecPolicy(
+        GuardSpec(reason="no rm", commands=("rm", ), paths=("/data/prod/*", )))
+    ctx = OpsContext(op="unlink",
+                     path=_path("/data/prod/x"),
+                     write=True,
+                     prefix="/data/")
+    assert await policy.pre_ops(ctx) is None
