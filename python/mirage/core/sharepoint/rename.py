@@ -18,7 +18,8 @@ async def rename(accessor: SharePointAccessor, src: PathSpec,
         raise enoent(src.virtual if isinstance(src, PathSpec) else src)
     src_virt = src.mount_path if isinstance(src, PathSpec) else src
     dst_virt = dst.mount_path if isinstance(dst, PathSpec) else dst
-    await rename_replace(accessor.config, drive_loc(src_resolved, src_virt),
-                         drive_loc(dst_resolved, dst_virt))
+    await rename_replace(accessor.config,
+                         drive_loc(accessor.config, src_resolved, src_virt),
+                         drive_loc(accessor.config, dst_resolved, dst_virt))
     await invalidate_after_write(dst)
     await invalidate_after_unlink(src)

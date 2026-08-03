@@ -286,6 +286,43 @@ async def test_readdir_root_shared_drives_best_effort(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_readdir_failed_shared_drives_leaves_root_uncached(
+        accessor, index):
+    """A short root listing must not be cached as the directory.
+
+    Caching it would keep the mount My-Drive-only until the entry expires,
+    long after the cause (a missing scope) is fixed. The entries are real,
+    so they stay cached; only the directory listing is withheld, so the
+    next readdir retries enumeration and picks the Shared Drive up.
+    """
+    files = [{
+        "id": "f1",
+        "name": "readme.txt",
+        "mimeType": "text/plain",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+        "owners": [],
+        "capabilities": {},
+    }]
+    root = PathSpec(resource_path="", virtual="/", directory="/")
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, side_effect=RuntimeError("no scope")):
+        await readdir(accessor, root, index)
+    assert (await index.list_dir("/")).entries is None
+    assert (await index.get("/readme.txt")).entry.id == "f1"
+
+    drives = [{"id": "drive1", "name": "Team"}]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=drives):
+        result = await readdir(accessor, root, index)
+    assert "/Team/" in result
+    assert (await index.list_dir("/")).entries is not None
+
+
+@pytest.mark.asyncio
 async def test_readdir_workspace_files_get_extensions(accessor, index):
     files = [
         {

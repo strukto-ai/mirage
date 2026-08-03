@@ -125,7 +125,6 @@ type FetchInit = Parameters<typeof globalThis.fetch>[1]
 
 let realFetch: typeof globalThis.fetch | null = null
 let fakeGoogleBase = ''
-let fakeGraphBase = ''
 
 function redirectGoogleUrl(input: FetchInput): FetchInput {
   if (typeof input !== 'string' && !(input instanceof URL)) return input
@@ -134,10 +133,6 @@ function redirectGoogleUrl(input: FetchInput): FetchInput {
   const url = new URL(raw)
   if (GOOGLE_API_HOSTS.has(url.hostname)) {
     return `${fakeGoogleBase}${url.pathname}${url.search}`
-  }
-  if (url.hostname === 'graph.microsoft.com' && fakeGraphBase !== '') {
-    const path = url.pathname.startsWith('/v1.0') ? url.pathname.slice(5) || '/' : url.pathname
-    return `${fakeGraphBase}${path}${url.search}`
   }
   return input
 }
@@ -149,13 +144,6 @@ function fakeGoogleFetch(input: FetchInput, init?: FetchInit): Promise<Response>
 
 function useFakeGoogleEndpoints(base: string): void {
   fakeGoogleBase = base
-  if (realFetch !== null) return
-  realFetch = globalThis.fetch
-  globalThis.fetch = fakeGoogleFetch
-}
-
-function useFakeGraphEndpoint(base: string): void {
-  fakeGraphBase = base
   if (realFetch !== null) return
   realFetch = globalThis.fetch
   globalThis.fetch = fakeGoogleFetch
@@ -607,18 +595,17 @@ async function openOneDrive(target: Target): Promise<Open> {
   const server = await startPythonServer('onedrive_server.py', {
     MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
   })
-  useFakeGraphEndpoint(server.endpoint)
   const mounts: Record<string, OneDriveResource> = {}
   for (const mount of target.mounts) {
     mounts[mount.path] = new OneDriveResource({
       accessToken: 'integ-token',
+      graphBaseUrl: server.endpoint,
       ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    fakeGraphBase = ''
     await server.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
@@ -628,11 +615,11 @@ async function openSharePoint(target: Target): Promise<Open> {
   const server = await startPythonServer('onedrive_server.py', {
     MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
   })
-  useFakeGraphEndpoint(server.endpoint)
   const mounts: Record<string, SharePointResource> = {}
   for (const mount of target.mounts) {
     mounts[mount.path] = new SharePointResource({
       accessToken: 'integ-token',
+      graphBaseUrl: server.endpoint,
       site: 'Main',
       drive: mount.drive,
       ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
@@ -641,7 +628,6 @@ async function openSharePoint(target: Target): Promise<Open> {
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    fakeGraphBase = ''
     await server.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
@@ -654,13 +640,13 @@ async function openGraphConsistency(
   const server = await startPythonServer('onedrive_server.py', {
     MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
   })
-  useFakeGraphEndpoint(server.endpoint)
   const readMounts: Record<string, OneDriveResource | SharePointResource> = {}
   const shadowMounts: Record<string, OneDriveResource | SharePointResource> = {}
   for (const mount of target.mounts) {
     if (mount.resource === 'onedrive') {
       const config = {
         accessToken: 'integ-token',
+        graphBaseUrl: server.endpoint,
         ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
       }
       readMounts[mount.path] = new OneDriveResource(config)
@@ -668,6 +654,7 @@ async function openGraphConsistency(
     } else {
       const config = {
         accessToken: 'integ-token',
+        graphBaseUrl: server.endpoint,
         site: 'Main',
         drive: mount.drive,
         ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
@@ -687,7 +674,6 @@ async function openGraphConsistency(
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await shadow.close()
-    fakeGraphBase = ''
     await server.close()
   }
   return { ws: ws as unknown as ExecWorkspace, mutate, cleanup }

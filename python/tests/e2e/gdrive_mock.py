@@ -189,12 +189,12 @@ def _build_fakes(registry):
         mime_type: str | None = None,
         trashed: bool = False,
         page_size: int = 1000,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], bool]:
         del mime_type, trashed, page_size
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
-            return []
-        return fake.all_files()
+            return [], True
+        return fake.all_files(), True
 
     async def fake_list_shared_drives(token_manager) -> list[dict]:
         return []

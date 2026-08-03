@@ -32,6 +32,7 @@ import {
   deleteFile,
   downloadFile,
   downloadFileStream,
+  listAllFiles,
   listFiles,
   listSharedDrives,
 } from './drive.ts'
@@ -61,6 +62,38 @@ describe('listFiles shared drive params', () => {
     const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as Record<string, unknown>
     expect(params.corpora).toBeUndefined()
     expect(params.driveId).toBeUndefined()
+  })
+})
+
+describe('listAllFiles', () => {
+  it('searches every corpus', async () => {
+    // The g* mounts must see Shared Drive files, like gdrive does. Without
+    // the all-drives triple Drive answers from the user corpus only, so the
+    // same account sees a Shared Drive spreadsheet under gdrive and not
+    // under gsheets, with no error to explain the difference.
+    vi.mocked(client.googleGet).mockResolvedValue({ files: [] })
+    await listAllFiles(STUB_TOKEN_MANAGER)
+    const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as Record<string, unknown>
+    expect(params.corpora).toBe('allDrives')
+    expect(params.includeItemsFromAllDrives).toBe('true')
+    expect(params.supportsAllDrives).toBe('true')
+    // allDrives is the union of every corpus, so naming one contradicts it.
+    expect(params.driveId).toBeUndefined()
+    // incompleteSearch is a partial-response field: unasked for, unreturned.
+    expect(String(params.fields).startsWith('incompleteSearch,')).toBe(true)
+  })
+
+  it('reports an incomplete search from any page', async () => {
+    vi.mocked(client.googleGet)
+      .mockResolvedValueOnce({
+        files: [{ id: 'f1', name: 'a.txt' }],
+        incompleteSearch: true,
+        nextPageToken: 'token2',
+      })
+      .mockResolvedValueOnce({ files: [{ id: 'f2', name: 'b.txt' }] })
+    const { files, complete } = await listAllFiles(STUB_TOKEN_MANAGER)
+    expect(files.map((f) => f.id)).toEqual(['f1', 'f2'])
+    expect(complete).toBe(false)
   })
 })
 

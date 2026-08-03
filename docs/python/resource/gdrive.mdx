@@ -115,6 +115,27 @@ a write mount can still hold items you may not edit. A mutation the
 API denies fails with `EACCES` (Permission denied) on that operand,
 like a real filesystem; the rest of the mount keeps working.
 
+### Writing inside a Shared Drive
+
+A Shared Drive is not a read-only corner of the mount. Every Drive call
+mirage makes carries `supportsAllDrives`, so create, write, rename, copy
+and delete work the same inside a Shared Drive as in My Drive, and the
+commands above behave identically there.
+
+What you may actually do is decided by Drive, not by mirage: a Shared
+Drive has its own role model (`viewer`, `commenter`, `contributor`,
+`content manager`, `manager`), and some organizations restrict deletion
+or moving content out of the drive. mirage does not attempt to predict
+those rules. It issues the operation and reports the answer, so a role
+that forbids the change fails with `EACCES` on that operand, exactly like
+an unwritable item in My Drive.
+
+The practical consequence is that a write mount spanning Shared Drives is
+partly writable, and the boundary follows your roles rather than the
+mount. If you want a mount that cannot write at all, use
+`MountMode.READ`; if you want to scope one to a single drive, set
+`folder_id` to the Shared Drive id.
+
 ## Snapshots
 
 The resource supports workspace snapshots. Recorded reads capture the

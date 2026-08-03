@@ -995,13 +995,17 @@ export { readdir as gdriveReaddir } from './core/gdrive/readdir.ts'
 export { stat as gdriveStat } from './core/gdrive/stat.ts'
 export { GDRIVE_PROMPT } from './resource/gdrive/prompt.ts'
 export {
+  GRAPH_CLOUDS,
+  GRAPH_CLOUD_HOSTS,
+  GRAPH_VERSION,
   type AccessTokenProvider,
+  type GraphCloud,
   type MsGraphConfig,
   type MsGraphConfigResolved,
+  graphApi,
   resolveMsGraphConfig,
 } from './core/msgraph/config.ts'
 export {
-  GRAPH_API,
   MAX_BACKOFF as MSGRAPH_MAX_BACKOFF,
   RETRY_STATUSES as MSGRAPH_RETRY_STATUSES,
   GraphError,

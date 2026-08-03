@@ -32,5 +32,6 @@ async def stat(accessor: SharePointAccessor,
         raise enoent(virtual)
 
     virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
-    return await stat_item(accessor.config, drive_loc(resolved, stripped),
+    return await stat_item(accessor.config,
+                           drive_loc(accessor.config, resolved, stripped),
                            virtual, virtual_key, index)

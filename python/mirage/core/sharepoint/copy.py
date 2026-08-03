@@ -1,6 +1,7 @@
 from functools import partial
 
 from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive_ops import DriveLoc, copy_tree
 from mirage.core.sharepoint._client import drive_ref_path, item_url
 from mirage.core.sharepoint._resolver import ResolvedPath, resolve
@@ -8,13 +9,14 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:
+def drive_loc(config: MsGraphConfig, resolved: ResolvedPath,
+              virt: str) -> DriveLoc:
     assert resolved.drive_id is not None
     assert resolved.item_path is not None
     return DriveLoc(drive=resolved.drive_id,
                     path=resolved.item_path,
                     virt=virt.strip("/"),
-                    url=partial(item_url, resolved.drive_id),
+                    url=partial(item_url, config, resolved.drive_id),
                     ref=partial(drive_ref_path, resolved.drive_id))
 
 
@@ -28,5 +30,6 @@ async def copy(accessor: SharePointAccessor, src: PathSpec,
         raise enoent(src.virtual if isinstance(src, PathSpec) else src)
     dst_virt = dst.mount_path if isinstance(dst, PathSpec) else dst
     src_virt = src.mount_path if isinstance(src, PathSpec) else src
-    await copy_tree(accessor.config, drive_loc(src_resolved, src_virt),
-                    drive_loc(dst_resolved, dst_virt))
+    await copy_tree(accessor.config,
+                    drive_loc(accessor.config, src_resolved, src_virt),
+                    drive_loc(accessor.config, dst_resolved, dst_virt))

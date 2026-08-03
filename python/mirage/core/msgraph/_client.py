@@ -22,7 +22,6 @@ from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
-GRAPH_API = "https://graph.microsoft.com/v1.0"
 RETRY_STATUSES = {429, 503, 504}
 MAX_BACKOFF = 30.0
 

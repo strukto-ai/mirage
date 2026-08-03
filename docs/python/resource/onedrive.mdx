@@ -25,8 +25,12 @@ from mirage.resource.onedrive import OneDriveResource, OneDriveConfig
 config = OneDriveConfig(
     access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"],
     # Optional:
+    # Name at most one drive:
     # drive_id="b!...",        # target a specific drive (required for app-only tokens)
-    # site_id="contoso.sharepoint.com,...",  # use a SharePoint site's default drive
+    # site_id="contoso.sharepoint.com,...",  # a SharePoint site's default drive
+    # group_id="...",          # a Teams / Microsoft 365 group's library
+    # user_id="user@contoso.com",  # another user's drive (app-only)
+    # cloud=GraphCloud.US_GOV_HIGH,  # a national cloud (default: global)
     # key_prefix="Documents/",  # mount a sub-folder as the root
     # timeout=30,
 )
@@ -41,16 +45,48 @@ modes are supported.
 
 ### Config Reference
 
-| Field          | Required | Description                                                           |
-| -------------- | -------- | --------------------------------------------------------------------- |
-| `access_token` | Yes      | Microsoft Graph OAuth2 bearer token                                   |
-| `drive_id`     | No       | Target a specific drive. Required for app-only tokens (no `/me/drive`) |
-| `site_id`      | No       | Resolve a SharePoint site's default drive instead of `/me/drive`      |
-| `key_prefix`   | No       | Mount a sub-folder of the drive as the root                           |
-| `timeout`      | No       | Request timeout in seconds (default `30`)                             |
+| Field            | Required | Description                                                            |
+| ---------------- | -------- | ---------------------------------------------------------------------- |
+| `access_token`   | Yes      | Microsoft Graph OAuth2 bearer token                                    |
+| `drive_id`       | No       | Target a specific drive. Required for app-only tokens (no `/me/drive`) |
+| `site_id`        | No       | A SharePoint site's default drive                                      |
+| `group_id`       | No       | A Teams / Microsoft 365 group's document library                       |
+| `user_id`        | No       | Another user's drive, by id or UPN (app-only auth)                     |
+| `cloud`          | No       | National cloud deployment (default `GraphCloud.GLOBAL`)                |
+| `graph_base_url` | No       | Full service root, overriding `cloud`                                  |
+| `key_prefix`     | No       | Mount a sub-folder of the drive as the root                            |
+| `timeout`        | No       | Request timeout in seconds (default `30`)                              |
 
-Drive resolution order: `drive_id`, then the `site_id` site's default drive,
-then `/me/drive`.
+### Naming the drive
+
+`drive_id`, `site_id`, `group_id` and `user_id` are four ways of saying which
+drive the mount is, so set **at most one**. Setting two raises at config time
+rather than silently addressing whichever came first, which otherwise surfaces
+much later as an unexplained 404. Setting none means `/me/drive`, the
+signed-in user's own drive, which is the only form that needs no extra
+identifier and the only one unavailable to an app-only token.
+
+### National clouds
+
+`cloud` selects the Graph deployment. Each is network-isolated with its own
+service root, and a token minted for one is rejected by the others, so this is
+not a performance knob: pointing a GCC High tenant at the global host fails
+outright.
+
+| `GraphCloud` | Service root                             | Microsoft 365 environment |
+| ------------ | ---------------------------------------- | ------------------------- |
+| `GLOBAL`     | `https://graph.microsoft.com`            | Commercial, and GCC       |
+| `US_GOV_HIGH`| `https://graph.microsoft.us`             | GCC High (L4)             |
+| `US_GOV_DOD` | `https://dod-graph.microsoft.us`         | DoD (L5)                  |
+| `CHINA`      | `https://microsoftgraph.chinacloudapi.cn`| 21Vianet                  |
+
+GCC (moderate) is served by the worldwide endpoint, so it uses `GLOBAL`.
+
+`graph_base_url` is the escape hatch for a root this table cannot name (a
+private endpoint, or a test server). It is the full root including the version
+segment, for example `https://graph.microsoft.us/v1.0`, and it wins over
+`cloud`. Because the root is read from the config rather than a module
+constant, two mounts in one process can address different deployments.
 
 ## Filesystem Layout
 

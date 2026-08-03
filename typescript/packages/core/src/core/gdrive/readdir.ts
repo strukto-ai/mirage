@@ -136,6 +136,7 @@ export async function readdir(
     entries.push({ name: filename, entry, isDir })
   }
 
+  let complete = true
   if (key === '' && folderId === 'root') {
     // Shared Drive enumeration is best-effort: if the account can't list
     // them (missing scope, API error), still return My Drive contents.
@@ -146,6 +147,7 @@ export async function readdir(
       sharedDrives = await listSharedDrives(accessor.tokenManager)
     } catch {
       sharedDrives = []
+      complete = false
     }
     const existingNames = new Set(entries.map((e) => e.name))
     for (const d of sharedDrives) {
@@ -168,10 +170,21 @@ export async function readdir(
   // two runners must list identically.
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   if (index !== undefined) {
-    await index.setDir(
-      virtualKey,
-      entries.map((e) => [e.name, e.entry] as [string, IndexEntry]),
-    )
+    if (complete) {
+      await index.setDir(
+        virtualKey,
+        entries.map((e) => [e.name, e.entry] as [string, IndexEntry]),
+      )
+    } else {
+      // Caching a listing we know is short would pin a My-Drive-only root
+      // until the entry expires, so the mount would keep hiding Shared
+      // Drives after the cause clears (a just-granted scope) with no way to
+      // force a refresh. The entries are still real, so cache those and
+      // leave the directory uncached: child lookups stay warm and the next
+      // readdir retries enumeration.
+      const childPrefix = virtualKey === '/' ? '/' : `${virtualKey}/`
+      for (const e of entries) await index.put(childPrefix + e.name, e.entry)
+    }
   }
   const pathPrefix = key !== '' ? `/${key}/` : '/'
   const out: string[] = []

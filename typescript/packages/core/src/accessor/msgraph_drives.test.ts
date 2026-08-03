@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   normalizeOneDriveConfig,
   OneDriveAccessor,
+  oneDriveBase,
   oneDriveItemUrl,
+  oneDriveRefPath,
   redactOneDriveConfig,
 } from './onedrive.ts'
 import {
@@ -34,6 +36,54 @@ describe('OneDrive addressing', () => {
     )
     expect(oneDriveItemUrl(accessor.config, 'a b.txt', '/content')).toBe(
       'https://graph.microsoft.com/v1.0/drives/drive/root:/team%20docs/a%20b.txt:/content',
+    )
+  })
+
+  it('addresses a group drive and a user drive', () => {
+    const group = new OneDriveAccessor({ accessToken: 'token', groupId: 'grp123' })
+    expect(oneDriveBase(group.config)).toBe('https://graph.microsoft.com/v1.0/groups/grp123/drive')
+    const user = new OneDriveAccessor({ accessToken: 'token', userId: 'usr@example.com' })
+    expect(oneDriveBase(user.config)).toBe(
+      'https://graph.microsoft.com/v1.0/users/usr%40example.com/drive',
+    )
+  })
+
+  // Each deployment is network-isolated with its own service root. A token
+  // minted for one is rejected by the others, so addressing the global host
+  // from a GCC High tenant does not degrade, it fails.
+  it.each([
+    ['global', 'https://graph.microsoft.com'],
+    ['usgovhigh', 'https://graph.microsoft.us'],
+    ['usgovdod', 'https://dod-graph.microsoft.us'],
+    ['china', 'https://microsoftgraph.chinacloudapi.cn'],
+  ] as const)('follows the %s national cloud', (cloud, host) => {
+    const accessor = new OneDriveAccessor({ accessToken: 'token', cloud })
+    expect(oneDriveBase(accessor.config)).toBe(`${host}/v1.0/me/drive`)
+  })
+
+  it('lets graphBaseUrl override the cloud', () => {
+    // The escape hatch for a deployment the cloud table cannot name, and
+    // what points a mount at a test server.
+    const accessor = new OneDriveAccessor({
+      accessToken: 'token',
+      cloud: 'china',
+      graphBaseUrl: 'http://127.0.0.1:8080/v1.0/',
+    })
+    expect(oneDriveBase(accessor.config)).toBe('http://127.0.0.1:8080/v1.0/me/drive')
+    // ref paths are Graph-root-relative, so they must be the base stripped
+    // off, never a hardcoded host stripped off.
+    const scoped = new OneDriveAccessor({
+      accessToken: 'token',
+      driveId: 'drive',
+      graphBaseUrl: 'http://127.0.0.1:8080/v1.0',
+    })
+    expect(oneDriveRefPath(scoped.config, 'sub/dir')).toBe('/drives/drive/root:/sub/dir')
+  })
+
+  it('rejects two drive targets', () => {
+    // A fixed precedence would silently address one and ignore the other.
+    expect(() => new OneDriveAccessor({ accessToken: 'token', driveId: 'd', siteId: 's' })).toThrow(
+      /more than one drive/,
     )
   })
 })

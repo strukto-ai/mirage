@@ -716,18 +716,20 @@ class EmailService:
 
 class OneDriveService:
 
-    def __init__(self, runner) -> None:
+    def __init__(self, base: str, runner) -> None:
+        self.base = base
         self.runner = runner
 
     @classmethod
     async def create(cls) -> "OneDriveService":
         module = _load_onedrive_server()
-        _state, _server, runner = await module.start_fake_graph()
-        return cls(runner)
+        state, _server, runner = await module.start_fake_graph()
+        return cls(state.base, runner)
 
     def resource(self, mount: dict) -> OneDriveResource:
         return OneDriveResource(
             OneDriveConfig(access_token="integ-token",
+                           graph_base_url=self.base,
                            key_prefix=mount.get("prefix")))
 
     async def teardown(self) -> None:
@@ -1180,16 +1182,17 @@ class LangfuseService:
 
 class SharePointService:
 
-    def __init__(self, server, runner) -> None:
+    def __init__(self, base: str, server, runner) -> None:
+        self.base = base
         self.server = server
         self.runner = runner
 
     @classmethod
     async def create(cls) -> "SharePointService":
         module = _load_onedrive_server()
-        _state, server, runner = await module.start_fake_graph()
+        state, server, runner = await module.start_fake_graph()
         _clear_sharepoint_caches()
-        return cls(server, runner)
+        return cls(state.base, server, runner)
 
     def resource(self, mount: dict) -> SharePointResource:
         graph = self.server.drives.get(mount["drive"])
@@ -1200,6 +1203,7 @@ class SharePointService:
             graph._ensure_parents(f"{key_prefix}/placeholder")
         return SharePointResource(
             SharePointConfig(access_token="integ-token",
+                             graph_base_url=self.base,
                              site="Main",
                              drive=mount["drive"],
                              key_prefix=key_prefix))

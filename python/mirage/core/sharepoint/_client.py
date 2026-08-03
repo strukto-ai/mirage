@@ -1,20 +1,19 @@
 from urllib.parse import quote
 
 # yapf: disable
-from mirage.core.msgraph._client import (GRAPH_API, MAX_BACKOFF,
-                                         RETRY_STATUSES, GraphError,
-                                         graph_delete, graph_get,
+from mirage.core.msgraph._client import (MAX_BACKOFF, RETRY_STATUSES,
+                                         GraphError, graph_delete, graph_get,
                                          graph_get_bytes, graph_list,
                                          graph_patch, graph_post,
                                          graph_post_monitor, graph_put_bytes,
                                          graph_stream, headers, new_session,
                                          poll_monitor, split_path,
                                          upload_chunk)
-
 # yapf: enable
+from mirage.core.msgraph.config import MsGraphConfig, graph_api
 
 __all__ = [
-    "GRAPH_API",
+    "graph_api",
     "MAX_BACKOFF",
     "RETRY_STATUSES",
     "GraphError",
@@ -37,8 +36,23 @@ __all__ = [
 ]
 
 
-def item_url(drive_id: str, path: str, action: str = "") -> str:
-    base = f"{GRAPH_API}/drives/{drive_id}"
+def item_url(config: MsGraphConfig,
+             drive_id: str,
+             path: str,
+             action: str = "") -> str:
+    """A drive item's Graph URL.
+
+    Takes the config, not just the drive id, because the service root is
+    a per-mount setting (national cloud, private endpoint, test server)
+    rather than a constant.
+
+    Args:
+        config (MsGraphConfig): mount config carrying the service root.
+        drive_id (str): drive holding the item.
+        path (str): drive-relative item path.
+        action (str): optional trailing Graph action, e.g. ``/content``.
+    """
+    base = f"{graph_api(config)}/drives/{drive_id}"
     p = path.strip("/")
     if not p:
         return f"{base}/root{action}"
