@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  commandFacts,
+  parsedCommands,
   decideLine,
   PolicyError,
   type PolicyContext,
@@ -81,14 +81,14 @@ export class PolicyRouter {
     }
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (this.policy === null && !hasScripts) return null
-    const facts = commandFacts(root)
+    const commands = parsedCommands(root)
     const sessionId = options.sessionId ?? this.sessions.defaultId
     const session = this.sessions.get(sessionId)
     const ctx: PolicyContext = {
       line: command,
-      commands: facts,
-      command: facts[0]?.command ?? '',
-      builtin: facts[0]?.builtin ?? false,
+      commands,
+      command: commands[0]?.command ?? '',
+      builtin: commands[0]?.builtin ?? false,
       cwd: options.cwd ?? session.cwd,
       env: { ...session.env, ...(options.env ?? {}) },
       sessionId,

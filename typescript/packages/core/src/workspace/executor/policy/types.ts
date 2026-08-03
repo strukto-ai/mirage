@@ -15,8 +15,8 @@
 import type { Runtime } from '../runtime.ts'
 import type { EvalValue } from '../runtime_types.ts'
 
-/** Parse facts for one command of the line being routed. */
-export interface CommandFacts {
+/** One command of the line being routed, distilled from the parse. */
+export interface ParsedCommand {
   command: string
   words: readonly string[]
   builtin: boolean
@@ -24,7 +24,7 @@ export interface CommandFacts {
 }
 
 /**
- * Facts about the line being routed, parse-before-policy. `command` /
+ * What a policy may consult about the line, parse-before-policy. `command` /
  * `builtin` name the stage addressed to the consulted party: an entry
  * script sees its runtime's first captured stage (see ctxForRuntime),
  * the global policy sees the line's first command.
@@ -53,7 +53,7 @@ export interface CommandFacts {
  */
 export interface PolicyContext {
   line: string
-  commands: readonly CommandFacts[]
+  commands: readonly ParsedCommand[]
   command: string
   builtin: boolean
   cwd: string

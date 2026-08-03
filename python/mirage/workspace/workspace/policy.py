@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyError,
-                                   PolicyFn, command_facts, decide_line)
+                                   PolicyFn, decide_line, parsed_commands)
 from mirage.runtime.table import catch_all, runtime_bindings_for
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -101,12 +101,12 @@ class PolicyRouter:
         has_scripts = any(entry.script is not None for entry in entries)
         if policy is None and not has_scripts:
             return None
-        facts = command_facts(ast)
+        commands = parsed_commands(ast)
         ctx = PolicyContext(
             line=command,
-            commands=facts,
-            command=facts[0].command if facts else "",
-            builtin=facts[0].builtin if facts else False,
+            commands=commands,
+            command=commands[0].command if commands else "",
+            builtin=commands[0].builtin if commands else False,
             cwd=session.cwd,
             env=dict(session.env),
             session_id=session_id,

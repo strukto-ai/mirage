@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandFacts, type PolicyDecision } from '../executor/policy/index.ts'
+import { parsedCommands, type PolicyDecision } from '../executor/policy/index.ts'
 import {
   bindCommands,
   DEFAULT_ENTRIES,
@@ -126,10 +126,10 @@ export class Runtimes {
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =
       decision !== null ? decision.bindings : this.bindings
-    const facts = commandFacts(rootNode)
+    const commands = parsedCommands(rootNode)
     return wholeLineRuntime(
       bindings,
-      facts.map((fact) => fact.command),
+      commands.map((parsed) => parsed.command),
     )
   }
 }

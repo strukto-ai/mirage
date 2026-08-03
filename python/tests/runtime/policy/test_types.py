@@ -15,7 +15,7 @@
 import json
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy.types import CommandFacts, PolicyContext
+from mirage.runtime.policy.types import ParsedCommand, PolicyContext
 from mirage.runtime.types import RunArgs, RunResult
 
 
@@ -30,14 +30,14 @@ class StubRuntime(Runtime):
 def sample_ctx() -> PolicyContext:
     return PolicyContext(
         line="cat /data/x | python3 p.py",
-        commands=(CommandFacts(command="cat",
-                               words=("cat", "/data/x"),
-                               builtin=True,
-                               paths=("/data/x", )),
-                  CommandFacts(command="python3",
-                               words=("python3", "p.py"),
-                               builtin=True,
-                               paths=())),
+        commands=(ParsedCommand(command="cat",
+                                words=("cat", "/data/x"),
+                                builtin=True,
+                                paths=("/data/x", )),
+                  ParsedCommand(command="python3",
+                                words=("python3", "p.py"),
+                                builtin=True,
+                                paths=())),
         command="cat",
         builtin=True,
         cwd="/data",

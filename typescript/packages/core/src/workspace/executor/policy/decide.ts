@@ -109,9 +109,9 @@ async function evalSource(
  * line's first stage.
  */
 function ctxForRuntime(ctx: PolicyContext, runtime: Runtime): PolicyContext {
-  for (const fact of ctx.commands) {
-    if (runtime.captures.includes(fact.command)) {
-      return { ...ctx, command: fact.command, builtin: fact.builtin }
+  for (const parsed of ctx.commands) {
+    if (runtime.captures.includes(parsed.command)) {
+      return { ...ctx, command: parsed.command, builtin: parsed.builtin }
     }
   }
   return ctx

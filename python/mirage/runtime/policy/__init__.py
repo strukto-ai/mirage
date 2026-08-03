@@ -16,15 +16,15 @@ from mirage.runtime.policy.decide import (decide_line, evaluate_policy,
                                           evaluate_script, evaluator_of,
                                           parse_verdict)
 from mirage.runtime.policy.errors import PolicyDeny, PolicyError
-from mirage.runtime.policy.facts import command_facts
-from mirage.runtime.policy.types import (CommandFacts, DenyResult,
+from mirage.runtime.policy.facts import parsed_commands
+from mirage.runtime.policy.types import (DenyResult, ParsedCommand,
                                          PolicyContext, PolicyDecision,
                                          PolicyFn, PolicyResult, PolicyScript,
                                          PolicyVerdict, RouteResult,
                                          ScriptSource)
 
 __all__ = [
-    "CommandFacts",
+    "ParsedCommand",
     "ScriptSource",
     "PolicyDecision",
     "PolicyContext",
@@ -37,7 +37,7 @@ __all__ = [
     "RouteResult",
     "DenyResult",
     "parse_verdict",
-    "command_facts",
+    "parsed_commands",
     "decide_line",
     "evaluate_policy",
     "evaluate_script",

@@ -14,7 +14,7 @@
 
 import { SPECS } from '../../../commands/spec/index.ts'
 import type { TSNodeLike } from '../../expand/variable.ts'
-import type { CommandFacts } from './types.ts'
+import type { ParsedCommand } from './types.ts'
 
 const WORD_TYPES: ReadonlySet<string> = new Set([
   'command_name',
@@ -25,9 +25,9 @@ const WORD_TYPES: ReadonlySet<string> = new Set([
   'concatenation',
 ])
 
-/** Extract per-command parse facts from a parsed line. */
-export function commandFacts(root: TSNodeLike): CommandFacts[] {
-  const facts: CommandFacts[] = []
+/** Distill a parsed line into one ParsedCommand per command. */
+export function parsedCommands(root: TSNodeLike): ParsedCommand[] {
+  const commands: ParsedCommand[] = []
   const stack: TSNodeLike[] = [root]
   while (stack.length > 0) {
     const node = stack.pop()
@@ -36,7 +36,7 @@ export function commandFacts(root: TSNodeLike): CommandFacts[] {
       const words = node.children.filter((c) => WORD_TYPES.has(c.type)).map((c) => c.text)
       const [command] = words
       if (command !== undefined) {
-        facts.push({
+        commands.push({
           command,
           words,
           // hasOwn, not `in`: a command named after an Object.prototype
@@ -51,5 +51,5 @@ export function commandFacts(root: TSNodeLike): CommandFacts[] {
       if (child !== undefined) stack.push(child)
     }
   }
-  return facts
+  return commands
 }

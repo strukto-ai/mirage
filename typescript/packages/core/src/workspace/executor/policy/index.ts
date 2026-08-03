@@ -14,7 +14,7 @@
 
 export { decideLine, evaluatorOf, parseVerdict, POLICY_EVAL_TIMEOUT } from './decide.ts'
 export { PolicyDeny, PolicyError } from './errors.ts'
-export { commandFacts } from './facts.ts'
+export { parsedCommands } from './facts.ts'
 export {
   DenyResult,
   RouteResult,
@@ -23,7 +23,7 @@ export {
   policyContextPayload,
 } from './types.ts'
 export type {
-  CommandFacts,
+  ParsedCommand,
   PolicyDecision,
   PolicyContext,
   PolicyFn,

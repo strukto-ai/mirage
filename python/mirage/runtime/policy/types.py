@@ -21,8 +21,8 @@ from mirage.runtime.types import ScriptSource
 
 
 @dataclass(frozen=True, slots=True)
-class CommandFacts:
-    """Parse facts for one command of the line being routed.
+class ParsedCommand:
+    """One command of the line being routed, distilled from the parse.
 
     Args:
         command (str): the command name (first word).
@@ -39,21 +39,21 @@ class CommandFacts:
 
 @dataclass(frozen=True, slots=True)
 class PolicyContext:
-    """Facts about the line being routed, parse-before-policy.
+    """What a policy may consult about the line, parse-before-policy.
 
     For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``,
     monty's script (monty captures ``python3``) is consulted with::
 
         ctx.line      == "cat /data/logs.txt | python3 process.py"
         ctx.commands  == (
-            CommandFacts(command="cat",
-                         words=("cat", "/data/logs.txt"),
-                         builtin=True,
-                         paths=("/data/logs.txt",)),
-            CommandFacts(command="python3",
-                         words=("python3", "process.py"),
-                         builtin=True,
-                         paths=()),
+            ParsedCommand(command="cat",
+                          words=("cat", "/data/logs.txt"),
+                          builtin=True,
+                          paths=("/data/logs.txt",)),
+            ParsedCommand(command="python3",
+                          words=("python3", "process.py"),
+                          builtin=True,
+                          paths=()),
         )
         ctx.command   == "python3"  # monty's first captured stage
         ctx.builtin   == True
@@ -66,7 +66,7 @@ class PolicyContext:
 
     Args:
         line (str): the raw command line.
-        commands (tuple[CommandFacts, ...]): parsed commands, empty on
+        commands (tuple[ParsedCommand, ...]): parsed commands, empty on
             a syntax error.
         command (str): the stage addressed to the consulted party: an
             entry script sees its runtime's first captured stage (see
@@ -81,7 +81,7 @@ class PolicyContext:
     """
 
     line: str
-    commands: tuple[CommandFacts, ...]
+    commands: tuple[ParsedCommand, ...]
     command: str
     builtin: bool
     cwd: str
@@ -102,11 +102,11 @@ class PolicyContext:
         Args:
             runtime (Runtime): the runtime being consulted.
         """
-        for fact in self.commands:
-            if fact.command in runtime.captures:
+        for parsed in self.commands:
+            if parsed.command in runtime.captures:
                 return replace(self,
-                               command=fact.command,
-                               builtin=fact.builtin)
+                               command=parsed.command,
+                               builtin=parsed.builtin)
         return self
 
     def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
@@ -172,10 +172,10 @@ class PolicyContext:
         return cls(
             line=str(payload["line"]),
             commands=tuple(
-                CommandFacts(command=str(c["command"]),
-                             words=tuple(c["words"]),
-                             builtin=bool(c["builtin"]),
-                             paths=tuple(c["paths"]))
+                ParsedCommand(command=str(c["command"]),
+                              words=tuple(c["words"]),
+                              builtin=bool(c["builtin"]),
+                              paths=tuple(c["paths"]))
                 for c in payload["commands"]),
             command=str(payload["command"]),
             builtin=bool(payload["builtin"]),
