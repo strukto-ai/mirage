@@ -20,7 +20,7 @@ import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { keep, optionsTree, prefixPathNodes, type FindEntry, type PredNode } from '../findEval.ts'
@@ -175,7 +175,7 @@ export async function linkResults(
       }
     }
     const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
-    const rel = key.replace(/^\/+|\/+$/g, '')
+    const rel = stripSlash(key)
     const depth =
       searchKey !== ''
         ? rel === searchKey
@@ -320,7 +320,7 @@ export async function findGeneric(
         opts.links ?? null,
         rootPath,
         prefix,
-        rootKey.replace(/^\/+|\/+$/g, ''),
+        stripSlash(rootKey),
         optionsTree(rootOptions),
         expr !== null ? expr.minDepth : minDepth,
         expr !== null ? expr.maxDepth : maxDepth,

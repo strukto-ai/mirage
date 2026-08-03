@@ -19,23 +19,36 @@ import mirage.commands.builtin as builtin
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.config import RegisteredCommand
 from mirage.utils.params import accepts_kwarg
+from mirage.workspace.route.constants import (DEREFERENCE_FLAGS,
+                                              LAST_WINS_LINK_OPTIONS)
 
-# What a command in a link-aware family has to accept: the namespace
-# facts themselves, and the flag that says to report the target instead
-# of the link. Both are forwarded to the generic and nothing else reads
-# them, so omitting either is invisible at the call site.
-LINK_PARAMS = ("links", "L")
+
+def _link_flags(name: str) -> set[str]:
+    """The link options a command takes, read off the router's own tables.
+
+    Derived rather than listed so that teaching the router a new link
+    option (GNU's ``-H``, say) also starts requiring it here, instead of
+    leaving a flag every bespoke wrapper is free to drop.
+
+    Args:
+        name (str): command name.
+    """
+    shorts = set(DEREFERENCE_FLAGS.get(name, ("", ()))[0])
+    leading = {opt.lstrip("-") for opt in LAST_WINS_LINK_OPTIONS.get(name, {})}
+    return shorts | leading
 
 
 def _link_aware() -> dict[str, set[str]]:
     """Command name to the link parameters its generic builder takes.
 
-    Derived from the builders rather than listed, so a family that gains
-    or loses link awareness moves this on its own.
+    ``links`` is the namespace facts themselves; the rest are the link
+    options. A wrapper that names neither still runs and still exits 0,
+    it just cannot see a link, so both sides are required here.
     """
     return {
-        b.name: {p
-                 for p in LINK_PARAMS if accepts_kwarg(b.fn, p)}
+        b.name:
+        {"links"} | {f
+                     for f in _link_flags(b.name) if accepts_kwarg(b.fn, f)}
         for b in _BUILDERS if accepts_kwarg(b.fn, "links")
     }
 
