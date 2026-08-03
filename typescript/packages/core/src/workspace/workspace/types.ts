@@ -14,6 +14,7 @@
 
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
+import type { CLISpec } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
@@ -98,6 +99,13 @@ export interface WorkspaceOptions {
    * wins and adding a policy can only tighten the workspace.
    */
   policies?: readonly (Policy | GuardSpec)[]
+  /**
+   * Installed CLIs, fully separate from mounts: key = installed head
+   * word, value = a registered CLISpec name (the YAML `cli:` key) or a
+   * CLISpec instance, plus the installation's own config. Every entry
+   * installs through the same fail-loud path as registerCli.
+   */
+  clis?: Record<string, [string | CLISpec, Record<string, unknown> | null]>
 }
 
 export class ExecuteResult {

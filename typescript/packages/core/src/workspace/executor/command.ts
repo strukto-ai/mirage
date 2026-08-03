@@ -49,6 +49,7 @@ import type { ExecuteNodeFn, JobHandlerResult } from './jobs.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { versionRequest } from '../../commands/config.ts'
 
+import { handleCli } from './command/cli.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -116,6 +117,14 @@ export async function handleCommand(
       stdin,
       callStack,
     )
+  }
+
+  // Installed CLIs: dispatch by name, never by operand path. Sits
+  // below functions (a user can wrap an installed CLI, bash-style)
+  // and above every mount branch (a CLI consults no mount).
+  const cliInstall = registry.clis.get(cmdName)
+  if (cliInstall !== null) {
+    return handleCli(cliInstall, parts, session, stdin)
   }
 
   if (cmdName in CWD_DEFAULT_RAW) {

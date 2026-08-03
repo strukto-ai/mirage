@@ -438,3 +438,29 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown guard key/)
   })
 })
+
+describe('clis section', () => {
+  // Mirrors python/tests/config/test_loader.py's clis tests.
+  it('parses and maps to the Workspace clis option', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: {
+        sl: { cli: 'slack', config: { token: 'x' } },
+        bare: { cli: 'gws' },
+      },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.clis).toEqual({
+      sl: ['slack', { token: 'x' }],
+      bare: ['gws', {}],
+    })
+  })
+
+  it('refuses unknown keys in a clis entry', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { sl: { cli: 'slack', mode: 'write' } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown keys: mode/)
+  })
+})

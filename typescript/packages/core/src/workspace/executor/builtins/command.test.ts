@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
+import { CLIRegistry } from '../../cli/registry.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { Session } from '../../session/session.ts'
 import { handleCommandBuiltin, handleType, parseFlags } from './command.ts'
@@ -24,6 +25,7 @@ const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
 function makeRegistry(): MountRegistry {
   return {
     mountForCommand: (name: string): unknown => (MOUNT_COMMANDS.has(name) ? {} : null),
+    clis: new CLIRegistry(),
   } as unknown as MountRegistry
 }
 

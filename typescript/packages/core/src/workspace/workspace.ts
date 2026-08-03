@@ -24,7 +24,10 @@ import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
+import { cliSpecFor } from '../commands/cli/specs.ts'
+import type { CLISpec } from '../commands/cli/types.ts'
 import { runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
+import type { CLIInstall } from './cli/types.ts'
 import { resolveSafeguard } from './executor/policy/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import type { ShellParser } from '../shell/parse.ts'
@@ -172,6 +175,13 @@ export class Workspace {
     // line-level counterpart until it is absorbed as a hook.
     for (const guard of options.guards ?? []) this.registry.policies.add(guard)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
+    // Installed CLIs, fully separate from mounts: a spec name resolves
+    // against the named registry and every entry installs through the
+    // same fail-loud path as registerCli.
+    for (const [cliName, [specOrKey, cliConfig]] of Object.entries(options.clis ?? {})) {
+      const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
+      this.registry.clis.install(cliName, cliSpec, cliConfig)
+    }
     this.policyRouter = new PolicyRouter(
       this.runtimes,
       this.policy,
@@ -265,6 +275,30 @@ export class Workspace {
   /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
   addRuntime(runtime: RuntimeEntry): Runtime {
     return this.runtimes.add(runtime)
+  }
+
+  /**
+   * Install a CLI under a head word, fully separate from mounts. The
+   * name is the dispatch key (two installs of one spec under different
+   * names are two accounts); config validates through the spec's
+   * configModel, fail loud at install time.
+   */
+  registerCli(
+    name: string,
+    spec: CLISpec,
+    config: Record<string, unknown> | null = null,
+  ): CLIInstall {
+    return this.registry.clis.install(name, spec, config)
+  }
+
+  /** Remove an installed CLI; its head word stops resolving (127). */
+  unregisterCli(name: string): void {
+    this.registry.clis.uninstall(name)
+  }
+
+  /** Snapshot of the installed CLIs keyed by head word. */
+  clis(): Map<string, CLIInstall> {
+    return this.registry.clis.items()
   }
 
   /**

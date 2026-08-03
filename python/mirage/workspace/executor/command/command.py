@@ -31,6 +31,7 @@ from mirage.runtime.policy.safeguard import resolve_safeguard
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec
+from mirage.workspace.executor.command.cli import handle_cli
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
 from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
@@ -98,6 +99,13 @@ async def handle_command(
     if cmd_name in session.functions:
         return await run_shell_function(execute_node, cmd_name, parts, session,
                                         stdin, call_stack)
+
+    # Installed CLIs: dispatch by name, never by operand path. Sits
+    # below functions (a user can wrap an installed CLI, bash-style)
+    # and above every mount branch (a CLI consults no mount).
+    cli_install = registry.clis.get(cmd_name)
+    if cli_install is not None:
+        return await handle_cli(cli_install, parts, session, stdin)
 
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(parts, cmd_name, registry, session.cwd,

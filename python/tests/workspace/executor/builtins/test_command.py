@@ -2,6 +2,7 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins.command import (_classify, _describe,
                                                         _parse_flags,
                                                         handle_command_builtin,
@@ -13,6 +14,7 @@ class FakeRegistry:
 
     def __init__(self, commands: set[str]):
         self._commands = commands
+        self.clis = CLIRegistry()
 
     def mount_for_command(self, name: str) -> object | None:
         return object() if name in self._commands else None

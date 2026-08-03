@@ -22,6 +22,7 @@ import { cachesReads, type Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
 import { MountRootPolicy, Policies } from '../../policy/index.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import { CLIRegistry } from '../cli/registry.ts'
 import { MountEntry } from './mount.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
@@ -76,6 +77,11 @@ export class MountRegistry {
   // guards/policies options). Registry-hosted like vfsRuntime so the
   // executor reaches them without new threading.
   readonly policies = new Policies([new MountRootPolicy()])
+  // Installed CLIs. Not mount state: CLIs are fully separate from
+  // mounts (a CLI exists because it was installed, never because
+  // storage was mounted). The registry object is just the vehicle that
+  // already reaches every dispatch site, same as the runtime fields.
+  readonly clis = new CLIRegistry()
 
   setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler

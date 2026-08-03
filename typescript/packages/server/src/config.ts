@@ -331,8 +331,21 @@ interface StoreBlock {
   workspace?: StoreGroupBlock | null
 }
 
+/**
+ * One `clis:` entry: install a named CLISpec with its own config. The
+ * section key is the installed head word; `cli` names the registered
+ * spec tree; `config` validates through that spec's configModel at
+ * install time (fail loud). A CLI never takes a mode and never shares
+ * a mount's credentials: a binary has no mode, the credential does.
+ */
+interface CLIBlock {
+  cli: string
+  config?: Record<string, unknown>
+}
+
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
+  clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
   policy?: string | null
   guards?: unknown[] | null
@@ -424,6 +437,7 @@ export interface WorkspaceArgs {
     runtimes?: RuntimeEntry[]
     policy?: ScriptSource
     guards?: GuardSpec[]
+    clis?: Record<string, [string, Record<string, unknown> | null]>
   }
   kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
@@ -524,7 +538,30 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cfg.guards !== undefined && cfg.guards !== null
         ? { guards: parseGuards(cfg.guards) }
         : {}),
+      ...(cfg.clis !== undefined && cfg.clis !== null ? { clis: buildCliEntries(cfg.clis) } : {}),
     },
     kernelMounts,
   }
+}
+
+function buildCliEntries(
+  clis: Record<string, CLIBlock>,
+): Record<string, [string, Record<string, unknown> | null]> {
+  const out: Record<string, [string, Record<string, unknown> | null]> = {}
+  for (const [name, block] of Object.entries(clis as Record<string, unknown>)) {
+    // The raw config arrives as unvalidated YAML: the CLIBlock type is
+    // a claim, not a guarantee, so validate the shape here.
+    if (!isPlainObject(block) || typeof block.cli !== 'string') {
+      throw new Error(`clis entry '${name}' requires a string \`cli\` key`)
+    }
+    const unknown = Object.keys(block).filter((k) => k !== 'cli' && k !== 'config')
+    if (unknown.length > 0) {
+      throw new Error(`clis entry '${name}': unknown keys: ${unknown.sort().join(', ')}`)
+    }
+    if (block.config !== undefined && !isPlainObject(block.config)) {
+      throw new Error(`clis entry '${name}': config must be a mapping`)
+    }
+    out[name] = [block.cli, block.config ?? {}]
+  }
+  return out
 }

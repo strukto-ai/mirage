@@ -21,13 +21,32 @@ import { Consumer } from './types.ts'
  * Route a command name to the layer that consumes it.
  *
  * Order mirrors dispatch precedence: shell builtins shadow functions,
- * functions shadow mount commands, and a name nobody registers is
- * UNKNOWN (command not found).
+ * functions shadow installed CLIs, CLIs shadow mount commands, and a
+ * name nobody registers is UNKNOWN (command not found). Install-time
+ * collision rules keep the CLI arm honest: a CLI may not take a shell
+ * builtin's or a general command's name, so the only shadowing a CLI
+ * can actually exert is over a mount-specific custom command.
+ *
+ * The full landscape, in precedence order. The column to watch is what
+ * resolves the name: session or workspace state for the named layers,
+ * operand paths for mounts:
+ *
+ *     Consumer   Example              Resolved by          Words
+ *     SESSION    cd, echo, export     name in SHELL_NAMES  shell-expanded
+ *     NAMESPACE  ln -s, readlink      NAMESPACE_COMMANDS   shell-expanded
+ *     FUNCTION   deploy() {..}        session.functions    shell-expanded
+ *     CLI        slack message send   registry.clis        shell-expanded
+ *     MOUNT      grep, cat, du        operand paths        pushdown
+ *     UNKNOWN    bogus                nobody               untouched, 127
+ *
+ * Runtimes are orthogonal, not a seventh row: a capture decides where a
+ * command executes (docker vs vfs), never whether the name exists.
  */
 export function route(name: string, session: Session, registry: MountRegistry): Consumer {
   if (SHELL_NAMES.has(name)) return Consumer.SESSION
   if (NAMESPACE_COMMANDS.has(name)) return Consumer.NAMESPACE
   if (name in session.functions) return Consumer.FUNCTION
+  if (registry.clis.get(name) !== null) return Consumer.CLI
   if (registry.mountForCommand(name) !== null) return Consumer.MOUNT
   return Consumer.UNKNOWN
 }

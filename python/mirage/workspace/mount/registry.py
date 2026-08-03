@@ -23,6 +23,7 @@ from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 
 DEV_PREFIX = "/dev/"
@@ -89,6 +90,13 @@ class MountRegistry:
         # Registry-hosted like runtime_bindings so the executor reaches
         # them without new parameter threading.
         self.policies = Policies([MountRootPolicy()])
+
+        # Installed CLIs. Not mount state: CLIs are fully separate from
+        # mounts (a CLI exists because it was installed, never because
+        # storage was mounted). The registry object is just the vehicle
+        # that already reaches every dispatch site, same as the
+        # runtime fields above.
+        self.clis = CLIRegistry()
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None

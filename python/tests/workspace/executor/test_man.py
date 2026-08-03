@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec.types import CommandSpec, Option
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.executor.builtins import (_collect_man_hits,
                                                 _render_man_entry,
                                                 _render_man_index, handle_man)
@@ -74,6 +75,7 @@ def _mk_mount(prefix, kind, cmds=None, general=None):
 
 def _mk_registry(mounts, cwd_mount=None):
     reg = MagicMock()
+    reg.clis = CLIRegistry()
     reg.mounts = MagicMock(return_value=mounts)
 
     def _mount_for(path):

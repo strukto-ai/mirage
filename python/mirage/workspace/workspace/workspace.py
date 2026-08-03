@@ -22,6 +22,8 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
+from mirage.commands.cli import CLISpec
+from mirage.commands.cli.specs import cli_spec_for
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.observer import Observer
@@ -39,6 +41,7 @@ from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           MountBackend, MountMode, PathSpec, StateKey,
                           parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
+from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -99,6 +102,8 @@ class Workspace:
         policy: PolicyFn | None = None,
         guards: list[GuardSpec] | None = None,
         policies: list[Policy | GuardSpec] | None = None,
+        clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]]
+        | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # Admission policies, consulted in registration order after the
@@ -177,6 +182,16 @@ class Workspace:
             self._execute_line_for_vfs)
         reject_config_script("policy", policy)
         self._policy = policy
+
+        # Installed CLIs, fully separate from mounts: the YAML `clis:`
+        # section arrives as {head: (spec key or tree, config)}; a spec
+        # key resolves against the named registry and every entry
+        # installs through the same fail-loud path as register_cli.
+        if clis:
+            for cli_name, (spec_or_key, cli_config) in clis.items():
+                cli_spec = (spec_or_key if isinstance(spec_or_key, CLISpec)
+                            else cli_spec_for(spec_or_key))
+                self._registry.clis.install(cli_name, cli_spec, cli_config)
 
         for prefix, target_backend, target_point in kernel_targets(specs):
             self.add_fuse_mount(prefix, target_point, backend=target_backend)
@@ -275,6 +290,35 @@ class Workspace:
     @property
     def fuse_mountpoints(self) -> dict[str, str]:
         return self._kernel_mounts.mountpoints
+
+    def register_cli(self,
+                     name: str,
+                     spec: CLISpec,
+                     config: dict[str, object] | None = None) -> CLIInstall:
+        """Install a CLI under a head word, fully separate from mounts.
+
+        Args:
+            name (str): head word to install under (the dispatch key;
+                two installs of one spec under different names are two
+                accounts).
+            spec (CLISpec): the program tree.
+            config (dict[str, object] | None): installation config,
+                validated through the spec's ``config_model`` (fail
+                loud at install time).
+        """
+        return self._registry.clis.install(name, spec, config)
+
+    def unregister_cli(self, name: str) -> None:
+        """Remove an installed CLI; its head word stops resolving (127).
+
+        Args:
+            name (str): installed head word.
+        """
+        self._registry.clis.uninstall(name)
+
+    def clis(self) -> dict[str, CLIInstall]:
+        """Snapshot of the installed CLIs keyed by head word."""
+        return self._registry.clis.items()
 
     def add_runtime(self, runtime: Runtime | str) -> Runtime:
         """Append a runtime entry to the workspace's ordered set.

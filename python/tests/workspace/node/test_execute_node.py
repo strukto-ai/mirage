@@ -21,6 +21,7 @@ from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.types import MountMode, PathSpec
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import Session
@@ -65,6 +66,9 @@ def _mock_registry():
     reg.mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)
     reg.policies.pre_command = AsyncMock(return_value=None)
+    # A bare MagicMock answers clis.get() with a truthy mock, which
+    # would spuriously dispatch every command as an installed CLI.
+    reg.clis = CLIRegistry()
     return reg, mount
 
 

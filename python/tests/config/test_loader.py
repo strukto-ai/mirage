@@ -386,3 +386,48 @@ guards:
                   paths=("/data/prod/*", )),
         GuardSpec(reason="interpreters are off", commands=("python3", )),
     ]
+
+
+def test_clis_section_parses_and_maps_to_kwargs():
+    cfg = load_config({
+        "mounts": {
+            "/data": {
+                "resource": "ram"
+            }
+        },
+        "clis": {
+            "sl": {
+                "cli": "slack",
+                "config": {
+                    "token": "x"
+                }
+            },
+            "bare": {
+                "cli": "gws"
+            },
+        },
+    })
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["clis"] == {
+        "sl": ("slack", {
+            "token": "x"
+        }),
+        "bare": ("gws", {}),
+    }
+
+
+def test_clis_block_refuses_unknown_keys():
+    with pytest.raises(ValueError, match="mode"):
+        load_config({
+            "mounts": {
+                "/data": {
+                    "resource": "ram"
+                }
+            },
+            "clis": {
+                "sl": {
+                    "cli": "slack",
+                    "mode": "write"
+                }
+            },
+        })

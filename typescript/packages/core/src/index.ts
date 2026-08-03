@@ -632,11 +632,15 @@ export {
   CLISpec,
   type CLISpecInit,
   type CLIVerbFn,
+  type CLIVerbOpts,
   type WalkFlagBag,
   WalkResult,
   type WalkResultInit,
 } from './commands/cli/types.ts'
+export { cliSpecFor, registerCliSpec, unregisterCliSpec } from './commands/cli/specs.ts'
 export { nodeHelp, walk } from './commands/cli/walk.ts'
+export { CLIRegistry } from './workspace/cli/registry.ts'
+export type { CLIInstall } from './workspace/cli/types.ts'
 export {
   COMPOUND_EXTENSIONS,
   getExtension,

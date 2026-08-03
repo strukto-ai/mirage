@@ -12,16 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.names import (JOB_BUILTINS, NAMESPACE_COMMANDS,
-                                    NO_FOLLOW_COMMANDS, SHELL_NAMES,
-                                    UNSUPPORTED_BUILTINS)
+from mirage.workspace.cli.registry import CLIRegistry
+from mirage.workspace.cli.types import CLIInstall
 
-# The pools live in workspace/names.py (a leaf shared with the CLI
-# registry's collision rule); this module keeps route's public surface.
 __all__ = [
-    "JOB_BUILTINS",
-    "NAMESPACE_COMMANDS",
-    "NO_FOLLOW_COMMANDS",
-    "SHELL_NAMES",
-    "UNSUPPORTED_BUILTINS",
+    "CLIInstall",
+    "CLIRegistry",
 ]

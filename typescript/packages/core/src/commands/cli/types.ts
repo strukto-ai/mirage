@@ -12,10 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../io/types.ts'
 import type { CommandSafeguard, PathSpec } from '../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../config.ts'
+import type { CommandFnResult } from '../config.ts'
 import { compileSpec } from '../spec/compile.ts'
 import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
+
+/**
+ * The opts bag a CLI leaf receives: the parsed flags (group flags
+ * merged in) and stdin. Narrower than CommandOpts on purpose: a CLI
+ * consults no mount, so there is no resource, no mount prefix, and no
+ * filetype cascade; the config carries whatever the handler needs.
+ */
+export interface CLIVerbOpts {
+  stdin: ByteSource | null
+  flags: Record<string, string | boolean | number | string[]>
+}
 
 /**
  * Leaf handler of a CLISpec node, called with the installation's validated
@@ -27,7 +39,7 @@ export type CLIVerbFn = (
   config: unknown,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  opts: CLIVerbOpts,
 ) => Promise<CommandFnResult> | CommandFnResult
 
 export interface CLISpecInit extends CommandSpecInit {

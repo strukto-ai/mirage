@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CLISpec } from '../../commands/cli/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
@@ -26,6 +28,14 @@ function fixture(): { session: Session; ws: Workspace } {
   registry.registerResource(ram)
   const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops: registry })
   return { session: new Session({ sessionId: 't' }), ws }
+}
+
+function noopVerb(): [null, IOResult] {
+  return [null, new IOResult()]
+}
+
+function cliTree(): CLISpec {
+  return new CLISpec({ name: 'prog', subcommands: [new CLISpec({ name: 'run', fn: noopVerb })] })
 }
 
 describe('route', () => {
@@ -76,10 +86,33 @@ describe('route', () => {
     expect(route('nosuchcmd', session, ws.registry)).toBe(Consumer.UNKNOWN)
   })
 
+  it('routes an installed CLI to CLI', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    expect(route('prog', session, ws.registry)).toBe(Consumer.CLI)
+  })
+
+  it('function shadows an installed CLI', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    session.functions.prog = []
+    expect(route('prog', session, ws.registry)).toBe(Consumer.FUNCTION)
+  })
+
+  it('an unregistered CLI routes UNKNOWN', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    ws.unregisterCli('prog')
+    expect(route('prog', session, ws.registry)).toBe(Consumer.UNKNOWN)
+  })
+
   it('only shell consumers resolve globs', () => {
     expect(SHELL_CONSUMERS.has(Consumer.SESSION)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.NAMESPACE)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.FUNCTION)).toBe(true)
+    // A CLI is a program: bash hands programs glob matches, never
+    // patterns.
+    expect(SHELL_CONSUMERS.has(Consumer.CLI)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.MOUNT)).toBe(false)
     expect(SHELL_CONSUMERS.has(Consumer.UNKNOWN)).toBe(false)
   })

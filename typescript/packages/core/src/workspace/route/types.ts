@@ -26,16 +26,20 @@ export const Consumer = Object.freeze({
   SESSION: 'session',
   NAMESPACE: 'namespace',
   FUNCTION: 'function',
+  CLI: 'cli',
   MOUNT: 'mount',
   UNKNOWN: 'unknown',
 } as const)
 
 export type Consumer = (typeof Consumer)[keyof typeof Consumer]
 
+// CLI rides with the shell consumers for word policy: an installed CLI
+// is a program, and bash hands programs glob matches, never patterns.
 export const SHELL_CONSUMERS: ReadonlySet<Consumer> = new Set([
   Consumer.SESSION,
   Consumer.NAMESPACE,
   Consumer.FUNCTION,
+  Consumer.CLI,
 ])
 
 /**

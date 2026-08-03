@@ -238,6 +238,21 @@ class GuardBlock(BaseModel):
     paths: list[str] = Field(default_factory=list)
 
 
+class CLIBlock(BaseModel):
+    """One ``clis:`` entry: install a named CLISpec with its own config.
+
+    The section key is the installed head word; ``cli`` names the
+    registered spec tree; ``config`` validates through that spec's
+    ``config_model`` at install time (fail loud). A CLI never takes a
+    mode and never shares a mount's credentials: a binary has no mode,
+    the credential does.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    cli: str
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class MountBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -358,6 +373,9 @@ class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mounts: dict[str, MountBlock]
+    # Installed CLIs, fully separate from mounts: key = installed head
+    # word, value names a registered CLISpec plus its own config.
+    clis: dict[str, CLIBlock] | None = None
     # The workspace's ordered runtime world: name strings or maps
     # with a name plus the uniform runtime options ({name: wasi,
     # config: {home: /opt/...}}). Unset = the default world.
@@ -432,6 +450,12 @@ class WorkspaceConfig(BaseModel):
                           commands=tuple(g.commands),
                           paths=tuple(g.paths)) for g in self.guards
             ]
+
+        if self.clis is not None:
+            kwargs["clis"] = {
+                name: (block.cli, dict(block.config))
+                for name, block in self.clis.items()
+            }
         return kwargs
 
     def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:

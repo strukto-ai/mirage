@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.types import CLISpec
+from mirage.io import IOResult
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -22,6 +24,14 @@ from mirage.workspace.session import Session
 def _fixture() -> tuple[Session, Workspace]:
     ws = Workspace(resources={"/ram": (RAMResource(), MountMode.WRITE)})
     return Session(session_id="t"), ws
+
+
+async def _noop(config, paths, *texts, **flags):
+    return None, IOResult()
+
+
+def _cli_tree() -> CLISpec:
+    return CLISpec(name="prog", subcommands=(CLISpec(name="run", fn=_noop), ))
 
 
 def test_builtins_route_session():
@@ -70,9 +80,32 @@ def test_unregistered_name_routes_unknown():
     assert route("nosuchcmd", session, ws._registry) is Consumer.UNKNOWN
 
 
+def test_installed_cli_routes_cli():
+    session, ws = _fixture()
+    ws.register_cli("prog", _cli_tree())
+    assert route("prog", session, ws._registry) is Consumer.CLI
+
+
+def test_function_shadows_installed_cli():
+    session, ws = _fixture()
+    ws.register_cli("prog", _cli_tree())
+    session.functions["prog"] = []
+    assert route("prog", session, ws._registry) is Consumer.FUNCTION
+
+
+def test_unregistered_cli_routes_unknown():
+    session, ws = _fixture()
+    ws.register_cli("prog", _cli_tree())
+    ws.unregister_cli("prog")
+    assert route("prog", session, ws._registry) is Consumer.UNKNOWN
+
+
 def test_shell_consumers_resolve_globs():
     assert Consumer.SESSION in SHELL_CONSUMERS
     assert Consumer.NAMESPACE in SHELL_CONSUMERS
     assert Consumer.FUNCTION in SHELL_CONSUMERS
+    # A CLI is a program: bash hands programs glob matches, never
+    # patterns.
+    assert Consumer.CLI in SHELL_CONSUMERS
     assert Consumer.MOUNT not in SHELL_CONSUMERS
     assert Consumer.UNKNOWN not in SHELL_CONSUMERS
