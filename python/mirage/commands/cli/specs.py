@@ -12,13 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib
+
 from mirage.commands.cli.types import CLISpec
 
 # Named CLISpec trees the YAML ``clis:`` section resolves against
-# (``cli: slack`` looks up "slack" here). Bundled programs register at
-# import time; user programs register through register_cli_spec before
-# the workspace loads.
+# (``cli: slack`` looks up "slack" here). User programs register through
+# register_cli_spec before the workspace loads.
 CLI_SPECS: dict[str, CLISpec] = {}
+
+# Bundled program trees, resolved lazily like the resource registry:
+# the modules pull optional extras (himalaya needs the email stack), so
+# they must not import until the name is actually requested.
+BUILTIN_CLI_SPECS: dict[str, str] = {
+    "gws": "mirage.commands.cli.builtin.gws:GWS",
+    "himalaya": "mirage.commands.cli.builtin.himalaya:HIMALAYA",
+}
+
+
+def _load_builtin(ref: str) -> CLISpec:
+    module_name, _, attr = ref.partition(":")
+    module = importlib.import_module(module_name)
+    spec = getattr(module, attr)
+    if not isinstance(spec, CLISpec):
+        raise TypeError(f"builtin CLI ref {ref!r} is not a CLISpec")
+    return spec
 
 
 def register_cli_spec(spec: CLISpec) -> None:
@@ -27,7 +45,7 @@ def register_cli_spec(spec: CLISpec) -> None:
     Args:
         spec (CLISpec): a program tree; its root ``name`` is the key.
     """
-    if spec.name in CLI_SPECS:
+    if spec.name in CLI_SPECS or spec.name in BUILTIN_CLI_SPECS:
         raise ValueError(f"CLI spec {spec.name!r} is already registered")
     CLI_SPECS[spec.name] = spec
 
@@ -49,7 +67,10 @@ def cli_spec_for(name: str) -> CLISpec:
     Args:
         name (str): the spec's root name.
     """
-    if name not in CLI_SPECS:
-        known = ", ".join(sorted(CLI_SPECS)) or "none registered"
-        raise ValueError(f"unknown cli {name!r} (known: {known})")
-    return CLI_SPECS[name]
+    if name in CLI_SPECS:
+        return CLI_SPECS[name]
+    if name in BUILTIN_CLI_SPECS:
+        return _load_builtin(BUILTIN_CLI_SPECS[name])
+    known = ", ".join(sorted(set(CLI_SPECS) | set(BUILTIN_CLI_SPECS)))
+    raise ValueError(
+        f"unknown cli {name!r} (known: {known or 'none registered'})")

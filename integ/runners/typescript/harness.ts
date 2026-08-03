@@ -56,6 +56,7 @@ export interface Target {
   dataset?: string
   agentId?: string
   facet?: string
+  clis?: string[]
   mounts: Mount[]
   // Sessions a case can name via its `session` field. Grants take either the
   // mapping form ({ '/data': 'read' }) or the list form (['/data'], which

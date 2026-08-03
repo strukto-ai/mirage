@@ -105,7 +105,7 @@
         "gdrive-shared"
       ],
       "clear_cache": true,
-      "command": "D=$(gws drive files create --json '{\"name\": \"Spec\", \"mimeType\": \"application/vnd.google-apps.document\"}' | jq -r .id) && gws docs +write --document $D --text 'shared doc' | jq -c '.replies | length'",
+      "command": "D=$(gws drive files create --json '{\"name\": \"Spec\", \"mimeType\": \"application/vnd.google-apps.document\"}' | jq -r .id) && gws docs write --document $D --text 'shared doc' | jq -c '.replies | length'",
       "expect": {
         "exit": 0,
         "stderr": "",

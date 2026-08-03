@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gslides import GSlidesConfig, GSlidesResource
 from mirage.types import PathSpec
 
@@ -34,6 +35,8 @@ resource = GSlidesResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/gslides": resource}, mode=MountMode.WRITE)
+    # The gws verbs are a CLI install, separate from the mounts.
+    ws.register_cli("gws", GWS, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /gslides/__nf_missing__.txt",

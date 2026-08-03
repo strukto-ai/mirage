@@ -1112,7 +1112,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        facet: [project, email, chat, dify, mem0]
+        facet: [project, email, chat, dify, mem0, cli]
     steps:
       - uses: actions/checkout@v7
 
@@ -1170,8 +1170,11 @@ jobs:
           echo "TRELLO_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
           echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
 
+      # The cli facet drives the builtin CLIs (himalaya, gws) end to end
+      # against the same mocks the email facet uses: GreenMail for IMAP/SMTP
+      # and the fake Google Workspace server for every gws service.
       - name: Start GreenMail and the fake Google Workspace server
-        if: matrix.facet == 'email'
+        if: matrix.facet == 'email' || matrix.facet == 'cli'
         run: |
           docker run -d --name mirage-greenmail \
             -p 3025:3025 -p 3143:3143 -p 8080:8080 \
@@ -1223,7 +1226,7 @@ jobs:
         run: pnpm exec tsx runners/typescript/main.ts --facet ${{ matrix.facet }}
 
       - name: Stop GreenMail
-        if: always() && matrix.facet == 'email'
+        if: always() && (matrix.facet == 'email' || matrix.facet == 'cli')
         run: docker rm -f mirage-greenmail || true
 
   gate:

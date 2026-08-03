@@ -1,0 +1,304 @@
+{
+  "cases": [
+    {
+      "id": "gw_help_root",
+      "seq": 563000,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws --help | grep -c 'API commands'",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_help_files",
+      "seq": 563001,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files --help | grep -c 'passthrough'",
+      "expect": {
+        "exit": 0,
+        "stdout": "7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_help_gmail_group",
+      "seq": 563002,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "gws gmail: Google gmail API commands\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_unknown_verb",
+      "seq": 563003,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gws: 'bogus' is not a gws command. See 'gws --help'.\n"
+      }
+    },
+    {
+      "id": "gw_unknown_nested_verb",
+      "seq": 563004,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gws: 'bogus' is not a gws drive command. See 'gws drive --help'.\n"
+      }
+    },
+    {
+      "id": "gw_missing_required",
+      "seq": 563005,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws sheets read --range A1",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gws sheets read: option '--spreadsheet' is required\nTry 'gws sheets read --help' for more information.\n"
+      }
+    },
+    {
+      "id": "gw_json_required",
+      "seq": 563006,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files create",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "--json is required\n"
+      }
+    },
+    {
+      "id": "gw_json_malformed",
+      "seq": 563007,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files create --json '{not json'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "--json must be valid JSON\n"
+      }
+    },
+    {
+      "id": "gw_params_missing_key",
+      "seq": 563008,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files get --params '{}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "--params must contain fileId\n"
+      }
+    },
+    {
+      "id": "gw_page_limit_bad",
+      "seq": 563009,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files list --page-limit x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "--page-limit must be a whole number, got 'x'\n"
+      }
+    },
+    {
+      "id": "gw_docs_get_seeded",
+      "seq": 563010,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws docs documents get --params '{\"documentId\": \"doc0001\"}' | jq -r .title",
+      "expect": {
+        "exit": 0,
+        "stdout": "Q1 Plan\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_export_seeded",
+      "seq": 563011,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files export --params '{\"fileId\": \"doc0001\", \"mimeType\": \"text/plain\"}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello gdoc",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_read_seeded",
+      "seq": 563012,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws sheets read --spreadsheet sheet0001 --range 'Sheet1!A1:B2'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"range\":\"Sheet1!A1:B2\",\"majorDimension\":\"ROWS\",\"values\":[[\"region\",\"revenue\"],[\"emea\",\"120\"]]}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_append",
+      "seq": 563013,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws sheets append --spreadsheet sheet0001 --range Sheet1 --values 'apac,90' | jq -r '.updates.updatedRange'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Sheet1!A3:B3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_write",
+      "seq": 563014,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws sheets write --spreadsheet sheet0001 --range 'Sheet1!A2:B2' --values 'amer,150' | jq -r .updatedRange",
+      "expect": {
+        "exit": 0,
+        "stdout": "Sheet1!A2:B2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_docs_write",
+      "seq": 563015,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws docs write --document doc0001 --text 'cli facet line' | jq -r .documentId",
+      "expect": {
+        "exit": 0,
+        "stdout": "doc0001\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_roundtrip",
+      "seq": 563016,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "F=$(gws drive files create --json '{\"name\": \"CLI Probe\", \"mimeType\": \"application/vnd.google-apps.document\"}' | jq -r .id) && gws drive files list --params \"{\\\"q\\\": \\\"name = 'CLI Probe'\\\"}\" | jq -r '.files[].name' && gws drive files delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\" && gws drive files list --params \"{\\\"q\\\": \\\"name = 'CLI Probe'\\\"}\" | jq -c .files",
+      "expect": {
+        "exit": 0,
+        "stdout": "CLI Probe\n[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_triage",
+      "seq": 563020,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail triage --query from:billing | jq -r '.[].id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "msg0005\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_read",
+      "seq": 563021,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail read --id msg0005 | jq -r .snippet",
+      "expect": {
+        "exit": 0,
+        "stdout": "invoice 4471 attached, total 240 usd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_send",
+      "seq": 563022,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail send --to lila@example.com --subject 'Ship update' --body 'departing tuesday'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"msg0006\",\"threadId\":\"msg0006\",\"labelIds\":[\"SENT\"]}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_send_visible_via_mount",
+      "seq": 563023,
+      "targets": [
+        "cli-gws"
+      ],
+      "clear_cache": true,
+      "command": "ls /mail/SENT",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-06\n2026-02-01\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_reply",
+      "seq": 563024,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail reply --message-id msg0001 --body 'numbers look good' | jq -r .threadId",
+      "expect": {
+        "exit": 0,
+        "stdout": "msg0001\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_labels_passthrough",
+      "seq": 563025,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail users labels list --params '{\"userId\": \"me\"}' | jq -c '[.labels[].id] | contains([\"INBOX\", \"SENT\", \"TRASH\"])'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

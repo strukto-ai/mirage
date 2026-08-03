@@ -23,12 +23,9 @@ PROMPT = """\
 
   <subject> is sanitized (don't construct it; ls the date dir).
 
-  Read commands:
-    himalaya envelope list --folder INBOX --unseen        # id/from/subject/date
-    himalaya message read --folder INBOX --uid <uid>     # one message as JSON"""
+  To act on mail (list/read/send/reply/forward), use the himalaya CLI
+  if installed: himalaya --help"""
 
 WRITE_PROMPT = """\
-  Write commands:
-    himalaya message send --to "to@email.com" --subject "Hi" --body "..."
-    himalaya message reply --folder INBOX --uid <uid> --body "..." [--all]
-    himalaya message forward --folder INBOX --uid <uid> --to "to@email.com" """
+  Sending mail goes through the himalaya CLI if installed:
+    himalaya message send --to "to@email.com" --subject "Hi" --body "..." """

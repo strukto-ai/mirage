@@ -1,0 +1,187 @@
+{
+  "cases": [
+    {
+      "id": "hm_help_root",
+      "seq": 562000,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya: IMAP/SMTP mail client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_help_group",
+      "seq": 562001,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya message: Manage messages\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_help_leaf",
+      "seq": 562002,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message send --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya message send: Send a new message\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_missing_required",
+      "seq": 562003,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message send --subject Hi --body yo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "himalaya message send: option '--to' is required\nTry 'himalaya message send --help' for more information.\n"
+      }
+    },
+    {
+      "id": "hm_unknown_verb",
+      "seq": 562004,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya: 'bogus' is not a himalaya command. See 'himalaya --help'.\n"
+      }
+    },
+    {
+      "id": "hm_unknown_group_verb",
+      "seq": 562005,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya: 'bogus' is not a himalaya envelope command. See 'himalaya envelope --help'.\n"
+      }
+    },
+    {
+      "id": "hm_list_archive",
+      "seq": 562010,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list --folder Archive | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Invoice 4471\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_list_subject_filter",
+      "seq": 562011,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list --subject Standup | jq -r '.[].uid'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_read",
+      "seq": 562012,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message read --folder Archive --uid 1 | jq -r .snippet",
+      "expect": {
+        "exit": 0,
+        "stdout": "invoice 4471 attached, total 240 usd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_send",
+      "seq": 562013,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message send --to integ@example.com --subject 'CLI probe' --body 'sent from the cli facet'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"CLI probe\"}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_send_visible_via_mount",
+      "seq": 562014,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'sent from the cli facet' /mail/INBOX | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply",
+      "seq": 562015,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply --folder INBOX --uid 1 --body 'numbers look good' | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Re: Q2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_all",
+      "seq": 562016,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply --folder INBOX --uid 1 --all --body 'ack all' | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Re: Q2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_forward",
+      "seq": 562017,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message forward --folder Archive --uid 1 --to integ@example.com | jq -r .status",
+      "expect": {
+        "exit": 0,
+        "stdout": "sent\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -55,3 +55,22 @@ def test_unregister_unknown_raises():
 def test_unknown_key_names_the_known_specs():
     with pytest.raises(ValueError, match="known: "):
         cli_spec_for("spectest4")
+
+
+def test_builtin_himalaya_resolves_lazily():
+    spec = cli_spec_for("himalaya")
+    assert isinstance(spec, CLISpec)
+    assert spec.name == "himalaya"
+    assert spec.config_model is not None
+
+
+def test_builtin_name_cannot_be_shadowed():
+    spec = CLISpec(name="himalaya",
+                   subcommands=(CLISpec(name="run", fn=noop), ))
+    with pytest.raises(ValueError, match="already registered"):
+        register_cli_spec(spec)
+
+
+def test_unknown_key_lists_builtins():
+    with pytest.raises(ValueError, match="himalaya"):
+        cli_spec_for("spectest5")

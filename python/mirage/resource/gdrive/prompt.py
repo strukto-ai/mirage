@@ -27,5 +27,5 @@ PROMPT = """\
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
   Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
 
-  All gws commands from /gdocs, /gsheets, /gslides also work here
-  (the per-service prompts have flag examples)."""
+  To act on Drive items by id (create, update, export, permissions),
+  use the gws CLI if installed: gws drive --help"""

@@ -67,12 +67,9 @@ PROMPT = """\
     .slides[0].objectId"""
 
 WRITE_PROMPT = """\
-  Write commands:
+  Writes go through the gws CLI if installed:
     gws slides presentations create --json '{"title": "My Deck"}'
-
-    gws slides presentations batchUpdate \\
-      --params '{"presentationId": "<id>"}' \\
-      --json   '{"requests": [{"createSlide": {"insertionIndex": 1, "slideLayoutReference": {"predefinedLayout": "BLANK"}}}]}'
+    See gws slides --help for the raw API passthroughs.
 
   Delete:
     rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive

@@ -23,8 +23,7 @@ describe('GMAIL_PROMPT', () => {
     expect(rendered).toContain('after:/before:')
     expect(rendered).toContain('mirage-processed')
     expect(rendered).toContain('.body_text')
-    expect(rendered).toContain('gws gmail +read')
-    expect(rendered).toContain('gws gmail +triage')
+    expect(rendered).toContain('gws gmail --help')
   })
 
   it('documents file-per-message layout with sibling attachments dir', () => {
@@ -44,14 +43,10 @@ describe('GMAIL_PROMPT', () => {
 
 describe('GMAIL_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GMAIL_WRITE_PROMPT).toContain('gws gmail +send')
+    expect(GMAIL_WRITE_PROMPT).toContain('gws gmail send')
     expect(GMAIL_WRITE_PROMPT).toContain('--to')
     expect(GMAIL_WRITE_PROMPT).toContain('--subject')
     expect(GMAIL_WRITE_PROMPT).toContain('--body')
-    expect(GMAIL_WRITE_PROMPT).toContain('gws gmail +reply')
-    expect(GMAIL_WRITE_PROMPT).toContain('gws gmail +reply-all')
-    expect(GMAIL_WRITE_PROMPT).toContain('gws gmail +forward')
-    expect(GMAIL_WRITE_PROMPT).toContain('--message-id')
   })
 
   it('documents rm (trash) and the newline gotcha', () => {

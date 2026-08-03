@@ -33,15 +33,18 @@ export interface EmailConfigRedacted extends Omit<EmailConfig, 'password'> {
   password: '<REDACTED>'
 }
 
-const EmailConfigSchema = z.object({
+// Doubles as the himalaya CLI's configModel: parse applies the same
+// defaults buildEmailConfig fills in, and secretStr marks the password
+// for snapshot redaction.
+export const EmailConfigSchema = z.object({
   imapHost: z.string(),
-  imapPort: z.number(),
+  imapPort: z.number().default(993),
   smtpHost: z.string(),
-  smtpPort: z.number(),
+  smtpPort: z.number().default(587),
   username: z.string(),
   password: secretStr(),
-  useSsl: z.boolean(),
-  maxMessages: z.number(),
+  useSsl: z.boolean().default(true),
+  maxMessages: z.number().default(200),
 })
 
 export function redactEmailConfig(config: EmailConfig): EmailConfigRedacted {

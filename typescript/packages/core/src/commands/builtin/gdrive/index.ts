@@ -15,22 +15,12 @@
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { GDOCS_COMMANDS } from '../gdocs/index.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GSHEETS_COMMANDS } from '../gsheets/index.ts'
-import { GSLIDES_COMMANDS } from '../gslides/index.ts'
-import { GWS_DRIVE_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 import { GDRIVE_IO } from './io.ts'
 
-const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
-  ...GDOCS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
-  ...GSHEETS_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
-  ...GSLIDES_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
-  ...GWS_DRIVE_API_COMMANDS.filter((c) => c.resource === ResourceName.GDRIVE),
-  ...gwsHelpCommands(ResourceName.GDRIVE),
-]
-
+// Drive/docs/sheets/slides verbs and API passthroughs live in the gws
+// CLI (commands/cli/builtin/gws), installed by name; the mount only
+// serves the filesystem surface.
 export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GDriveAccessor>(ResourceName.GDRIVE, GDRIVE_IO, {}),
-  ...GWS_FOR_GDRIVE,
 ]

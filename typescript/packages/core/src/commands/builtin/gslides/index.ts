@@ -19,8 +19,10 @@ import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSLIDES_IO } from './io.ts'
 import { fileReadProvision } from './provision.ts'
 import { GSLIDES_RM } from './rm.ts'
-import { GWS_SLIDES_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 
+// Slides API passthroughs live in the gws CLI
+// (commands/cli/builtin/gws), installed by name; the mount only serves
+// the filesystem surface.
 export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSlidesAccessor>(ResourceName.GSLIDES, GSLIDES_IO, {
     provisionOverrides: {
@@ -29,6 +31,4 @@ export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
     },
   }),
   ...GSLIDES_RM,
-  ...GWS_SLIDES_API_COMMANDS,
-  ...gwsHelpCommands(ResourceName.GSLIDES),
 ]

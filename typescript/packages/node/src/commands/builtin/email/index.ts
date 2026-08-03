@@ -15,17 +15,14 @@
 import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { EMAIL_FIND } from './find.ts'
-import { EMAIL_FORWARD } from './email_forward.ts'
 import { EMAIL_GREP } from './grep.ts'
 import { EMAIL_IO } from './io.ts'
-import { EMAIL_READ } from './email_read.ts'
-import { EMAIL_REPLY } from './email_reply.ts'
 import { EMAIL_RG } from './rg.ts'
-import { EMAIL_SEND } from './email_send.ts'
-import { EMAIL_TRIAGE } from './email_triage.ts'
 
 const EMAIL_OVERRIDES = new Set(['find', 'grep', 'rg'])
 
+// Mail verbs live in the himalaya CLI (commands/cli/builtin/himalaya),
+// installed by name; the mount only serves the filesystem surface.
 export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<EmailAccessor>(ResourceName.EMAIL, EMAIL_IO, {
     overrides: EMAIL_OVERRIDES,
@@ -33,9 +30,4 @@ export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...EMAIL_FIND,
   ...EMAIL_GREP,
   ...EMAIL_RG,
-  ...EMAIL_SEND,
-  ...EMAIL_REPLY,
-  ...EMAIL_FORWARD,
-  ...EMAIL_TRIAGE,
-  ...EMAIL_READ,
 ]

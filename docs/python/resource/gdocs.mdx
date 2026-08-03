@@ -123,7 +123,7 @@ async def main():
 
     # Append text to a document
     r = await ws.execute(
-        'gws docs +write --document 1AbCdEf --text "Appended via MIRAGE."')
+        'gws docs write --document 1AbCdEf --text "Appended via MIRAGE."')
     print(await r.stdout_str())
 
 
@@ -182,12 +182,12 @@ gws docs documents batchUpdate --params '{"documentId":"1AbCdEf"}' --json '{"req
 
 Returns the batch update response JSON.
 
-### `gws docs +write`
+### `gws docs write`
 
 Append text to a document.
 
 ```bash
-gws docs +write --document 1AbCdEf --text "Appended via MIRAGE."
+gws docs write --document 1AbCdEf --text "Appended via MIRAGE."
 ```
 
 | Option       | Required | Description        |

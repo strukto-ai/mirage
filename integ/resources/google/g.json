@@ -21,7 +21,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws docs +write --document doc0001 --text 'hello gdoc'",
+      "command": "gws docs write --document doc0001 --text 'hello gdoc'",
       "expect": {
         "exit": 0,
         "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{}]}",
@@ -105,7 +105,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs +write --document $D --text 'from drive' | jq -c '.replies'",
+      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs write --document $D --text 'from drive' | jq -c '.replies'",
       "expect": {
         "exit": 0,
         "stdout": "[{}]\n",
@@ -147,7 +147,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
+      "command": "gws sheets append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
       "expect": {
         "exit": 0,
         "stdout": "{\"spreadsheetId\":\"sheet0001\",\"updates\":{\"spreadsheetId\":\"sheet0001\",\"updatedRange\":\"Sheet1!A1:C1\",\"updatedRows\":1,\"updatedColumns\":3,\"updatedCells\":3}}",
@@ -161,7 +161,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
+      "command": "gws sheets read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A1:C1\",\"majorDimension\":\"ROWS\",\"values\":[[\"a\",\"b\",\"c\"]]}",
@@ -399,10 +399,10 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws --help | grep -c 'API methods'",
+      "command": "gws --help | grep -c 'API commands'",
       "expect": {
         "exit": 0,
-        "stdout": "5\n",
+        "stdout": "6\n",
         "stderr": ""
       }
     },
@@ -413,10 +413,10 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws drive --help | grep -c '^  gws drive '",
+      "command": "gws drive files --help | grep -c 'passthrough'",
       "expect": {
         "exit": 0,
-        "stdout": "10\n",
+        "stdout": "7\n",
         "stderr": ""
       }
     },
@@ -427,7 +427,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
+      "command": "gws sheets write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
       "expect": {
         "exit": 0,
         "stderr": "",
@@ -455,7 +455,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "S=$(cat /data/Board.gsheet.json | jq -r .spreadsheetId) && gws sheets +append --spreadsheet $S --range Sheet1 --values 'x,y' > /dev/null && gws sheets +read --spreadsheet $S --range 'Sheet1!A1:B1'",
+      "command": "S=$(cat /data/Board.gsheet.json | jq -r .spreadsheetId) && gws sheets append --spreadsheet $S --range Sheet1 --values 'x,y' > /dev/null && gws sheets read --spreadsheet $S --range 'Sheet1!A1:B1'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A1:B1\",\"majorDimension\":\"ROWS\",\"values\":[[\"x\",\"y\"]]}",

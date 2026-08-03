@@ -16,14 +16,13 @@ import type { GSheetsAccessor } from '../../../accessor/gsheets.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GSHEETS_GWS_APPEND } from './gws_sheets_append.ts'
-import { GSHEETS_GWS_READ } from './gws_sheets_read.ts'
-import { GSHEETS_GWS_WRITE } from './gws_sheets_write.ts'
 import { GSHEETS_IO } from './io.ts'
 import { fileReadProvision } from './provision.ts'
 import { GSHEETS_RM } from './rm.ts'
-import { GWS_SHEETS_API_COMMANDS, gwsHelpCommands } from '../gws/index.ts'
 
+// Sheets verbs and API passthroughs live in the gws CLI
+// (commands/cli/builtin/gws), installed by name; the mount only serves
+// the filesystem surface.
 export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSheetsAccessor>(ResourceName.GSHEETS, GSHEETS_IO, {
     provisionOverrides: {
@@ -32,9 +31,4 @@ export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
     },
   }),
   ...GSHEETS_RM,
-  ...GSHEETS_GWS_READ,
-  ...GSHEETS_GWS_WRITE,
-  ...GSHEETS_GWS_APPEND,
-  ...GWS_SHEETS_API_COMMANDS,
-  ...gwsHelpCommands(ResourceName.GSHEETS),
 ]

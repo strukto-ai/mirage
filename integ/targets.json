@@ -1055,6 +1055,9 @@
           "root": "res",
           "fixture": "columnar/v1"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -1109,6 +1112,9 @@
           "drive": "eng",
           "root": "team/data2"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -1141,6 +1147,9 @@
           "resource": "ram",
           "backend": "memory"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -1164,6 +1173,9 @@
           "resource": "ram",
           "backend": "ram"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -1175,11 +1187,66 @@
       "service": "email",
       "facet": "email",
       "mail": "email/v1",
+      "clis": [
+        "himalaya"
+      ],
       "mounts": [
         {
           "path": "/mail",
           "resource": "email",
           "backend": "email"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "cli-himalaya",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "email",
+      "facet": "cli",
+      "mail": "email/v1",
+      "clis": [
+        "himalaya"
+      ],
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "email",
+          "backend": "email"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "cli-gws",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "epoch": "2026-02-01T00:00:00Z",
+      "apps": "google-apps/v1",
+      "mail": "gmail/v1",
+      "clis": [
+        "gws"
+      ],
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "gmail",
+          "backend": "gmail"
         },
         {
           "path": "/scratch",

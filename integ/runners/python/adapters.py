@@ -44,6 +44,8 @@ from qdrant_client import AsyncQdrantClient, models
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
+from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
@@ -652,6 +654,14 @@ class GwsService:
         return GmailResource(
             GmailConfig(client_id="integ", refresh_token="integ"))
 
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "gws": (cli_spec_for("gws"), {
+                "client_id": "integ",
+                "refresh_token": "integ",
+            }),
+        }
+
     async def teardown(self) -> None:
         return None
 
@@ -709,6 +719,19 @@ class EmailService:
                         username=EMAIL_USERNAME,
                         password=EMAIL_PASSWORD,
                         use_ssl=False))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "himalaya": (cli_spec_for("himalaya"), {
+                "imap_host": self.host,
+                "imap_port": EMAIL_IMAP_PORT,
+                "smtp_host": self.host,
+                "smtp_port": EMAIL_SMTP_PORT,
+                "username": EMAIL_USERNAME,
+                "password": EMAIL_PASSWORD,
+                "use_ssl": False,
+            }),
+        }
 
     async def teardown(self) -> None:
         return None
@@ -2090,6 +2113,12 @@ async def open_target(
                        agent_id=agent_id)
     else:
         ws = Workspace(mounts, mode=MountMode.WRITE, agent_id=agent_id)
+    for cli_name in target.get("clis", []):
+        # Only the email and gws services install CLIs today; widen the
+        # assert when another service grows one.
+        assert isinstance(service, (EmailService, GwsService))
+        spec, config = service.cli_installs()[cli_name]
+        ws.register_cli(cli_name, spec, config)
     return ws, functools.partial(teardown_target, [ws], cleanups, service)
 
 

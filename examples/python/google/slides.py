@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gslides import GSlidesConfig, GSlidesResource
 
 load_dotenv(".env.development")
@@ -33,6 +34,8 @@ resource = GSlidesResource(config=config)
 
 async def main():
     ws = Workspace({"/gslides": resource}, mode=MountMode.WRITE)
+    # The gws verbs are a CLI install, separate from the mounts.
+    ws.register_cli("gws", GWS, config.model_dump())
 
     r = await ws.execute("ls /gslides/owned/ | head -n 3")
     print("=== ls (first 3) ===")

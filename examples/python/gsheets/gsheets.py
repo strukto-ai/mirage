@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
 from mirage.types import PathSpec
 
@@ -34,6 +35,8 @@ resource = GSheetsResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/gsheets": resource}, mode=MountMode.WRITE)
+    # The gws verbs are a CLI install, separate from the mounts.
+    ws.register_cli("gws", GWS, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /gsheets/__nf_missing__.txt",
@@ -136,32 +139,32 @@ async def main() -> None:
     sheet_id = sheet["spreadsheetId"]
     print(f"Created: {sheet_id}")
 
-    print("\n=== gws sheets +write ===")
+    print("\n=== gws sheets write ===")
     values = json.dumps([
         ["Name", "Age", "City"],
         ["Alice", "30", "NYC"],
         ["Bob", "25", "SF"],
     ])
-    r = await ws.execute(f"gws sheets +write"
+    r = await ws.execute(f"gws sheets write"
                          f" --spreadsheet {sheet_id}"
                          f' --range "Sheet1!A1:C3"'
                          f" --json-values '{values}'")
     print(f"Written: {(await r.stdout_str())[:80]}")
 
-    print("\n=== gws sheets +read ===")
-    r = await ws.execute(f'gws sheets +read'
+    print("\n=== gws sheets read ===")
+    r = await ws.execute(f'gws sheets read'
                          f' --spreadsheet {sheet_id}'
                          f' --range "Sheet1!A1:C3"')
     print(f"Values: {await r.stdout_str()}")
 
-    print("=== gws sheets +append ===")
-    r = await ws.execute(f"gws sheets +append"
+    print("=== gws sheets append ===")
+    r = await ws.execute(f"gws sheets append"
                          f" --spreadsheet {sheet_id}"
                          f" --values Diana,28,Chicago")
     print(f"Appended: {(await r.stdout_str())[:80]}")
 
-    print("\n=== gws sheets +read (all) ===")
-    r = await ws.execute(f'gws sheets +read'
+    print("\n=== gws sheets read (all) ===")
+    r = await ws.execute(f'gws sheets read'
                          f' --spreadsheet {sheet_id}'
                          f' --range Sheet1')
     print(f"All: {await r.stdout_str()}")

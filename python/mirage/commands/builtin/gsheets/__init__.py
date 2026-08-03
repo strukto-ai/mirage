@@ -13,23 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
-from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
-from mirage.commands.builtin.gsheets.gws_sheets_write import gws_sheets_write
 from mirage.commands.builtin.gsheets.io import IO as _IO
 from mirage.commands.builtin.gsheets.rm import rm
-from mirage.commands.builtin.gws import (GWS_SHEETS_API_COMMANDS,
-                                         gws_help_commands)
 
+# Sheets verbs and API passthroughs live in the gws CLI
+# (mirage.commands.cli.builtin.gws), installed by name; the mount only
+# serves the filesystem surface.
 COMMANDS = [
     *make_generic_commands(
         "gsheets",
         _IO,
     ),
     rm,
-    *gws_help_commands("gsheets"),
-    gws_sheets_append,
-    gws_sheets_read,
-    gws_sheets_write,
-    *GWS_SHEETS_API_COMMANDS,
 ]

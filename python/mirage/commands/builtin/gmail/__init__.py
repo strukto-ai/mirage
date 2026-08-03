@@ -14,18 +14,12 @@
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gmail.grep import grep
-from mirage.commands.builtin.gmail.gws_gmail_forward import gws_gmail_forward
-from mirage.commands.builtin.gmail.gws_gmail_read import gws_gmail_read
-from mirage.commands.builtin.gmail.gws_gmail_reply import gws_gmail_reply
-from mirage.commands.builtin.gmail.gws_gmail_reply_all import \
-    gws_gmail_reply_all
-from mirage.commands.builtin.gmail.gws_gmail_send import gws_gmail_send
-from mirage.commands.builtin.gmail.gws_gmail_triage import gws_gmail_triage
 from mirage.commands.builtin.gmail.io import IO as _IO
 from mirage.commands.builtin.gmail.rg import rg
-from mirage.commands.builtin.gws import (GWS_GMAIL_API_COMMANDS,
-                                         gws_help_commands)
 
+# Gmail verbs and API passthroughs live in the gws CLI
+# (mirage.commands.cli.builtin.gws), installed by name; the mount only
+# serves the filesystem surface.
 COMMANDS = [
     *make_generic_commands(
         "gmail",
@@ -34,12 +28,4 @@ COMMANDS = [
     ),
     grep,
     rg,
-    *gws_help_commands("gmail"),
-    gws_gmail_send,
-    gws_gmail_reply,
-    gws_gmail_reply_all,
-    gws_gmail_forward,
-    gws_gmail_triage,
-    gws_gmail_read,
-    *GWS_GMAIL_API_COMMANDS,
 ]

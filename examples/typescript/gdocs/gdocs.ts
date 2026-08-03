@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GDocsResource, MountMode, Workspace, type FileStat, type GDocsConfig } from '@struktoai/mirage-node'
+import { GDocsResource, GWS, MountMode, Workspace, type FileStat, type GDocsConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -46,8 +46,11 @@ function printOut(label: string, out: string, err: string, max = 500): void {
 }
 
 async function main(): Promise<void> {
-  const resource = new GDocsResource(buildConfig())
+  const config = buildConfig()
+  const resource = new GDocsResource(config)
   const ws = new Workspace({ '/gdocs': resource }, { mode: MountMode.WRITE })
+  // The gws verbs are a CLI install, separate from the mount.
+  ws.registerCli('gws', GWS, { ...config })
   try {
     const root = await run(ws, 'ls /gdocs/')
     printOut('ls /gdocs/', root.out, root.err)
@@ -151,10 +154,10 @@ async function main(): Promise<void> {
     )
     console.log(`Updated: ${update.out.slice(0, 80)}`)
 
-    console.log('\n=== gws docs +write ===')
+    console.log('\n=== gws docs write ===')
     const write = await run(
       ws,
-      `gws docs +write --document ${docId} --text "Appended via gws docs +write."`,
+      `gws docs write --document ${docId} --text "Appended via gws docs write."`,
     )
     console.log(`Written: ${write.out.slice(0, 80)}`)
 

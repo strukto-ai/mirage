@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.himalaya import HIMALAYA
 from mirage.resource.email import EmailConfig, EmailResource
 from mirage.types import PathSpec
 
@@ -35,6 +36,9 @@ resource = EmailResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/email": resource}, mode=MountMode.READ)
+    # The mail verbs are a CLI install, separate from the mount: the
+    # mount serves files, himalaya acts on the account.
+    ws.register_cli("himalaya", HIMALAYA, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /email/__nf_missing__.txt",

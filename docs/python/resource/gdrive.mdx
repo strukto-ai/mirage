@@ -276,27 +276,27 @@ wc-parquet /gdrive/data/sales.parquet
 
 ## Resource-Specific Commands
 
-Google Drive registers the `gws` command family so Google-native
-files can be created and updated from the Drive mount. The syntax
-mirrors the official
+The `gws` CLI acts on Google-native files by id, separate from the
+mount: install it with `ws.register_cli("gws", GWS, config)` (spec at
+`mirage.commands.cli.builtin.gws`). The syntax mirrors the official
 [Google Workspace CLI](https://github.com/googleworkspace/cli):
 
 ```bash
 gws <service> <resource> <method> [--params JSON] [--json JSON]   # API passthrough
-gws <service> +<helper> [flags]                                   # ergonomic helper
+gws <service> <helper> [flags]                                    # ergonomic helper
 ```
 
 Passthrough commands call the corresponding API method directly:
 `--params` fills URL path and query parameters, `--json` is the
 request body, and the output is the compact API response JSON.
-Helpers (`+write`, `+read`, `+append`) wrap the common operations
+Helpers (`write`, `read`, `append`) wrap the common operations
 in plain flags.
 
 The whole surface is discoverable from the shell:
 
 ```bash
 gws --help                  # the services, and how many API methods each has
-gws drive --help            # that service's methods and + helpers
+gws drive --help            # that service's groups and helper verbs
 gws drive files list --help # one command's flags
 ```
 
@@ -361,12 +361,12 @@ gws docs documents batchUpdate \
 
 Returns the batch update response JSON.
 
-### `gws docs +write`
+### `gws docs write`
 
 Append text to a Google Doc.
 
 ```bash
-gws docs +write --document DOC_ID --text "Hello from MIRAGE"
+gws docs write --document DOC_ID --text "Hello from MIRAGE"
 ```
 
 | Option       | Required | Description    |
@@ -376,12 +376,12 @@ gws docs +write --document DOC_ID --text "Hello from MIRAGE"
 
 Returns the update response JSON.
 
-### `gws sheets +read`
+### `gws sheets read`
 
 Read values from a spreadsheet range.
 
 ```bash
-gws sheets +read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
+gws sheets read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
 ```
 
 | Option          | Required | Description       |
@@ -391,12 +391,12 @@ gws sheets +read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
 
 Returns the range values.
 
-### `gws sheets +write`
+### `gws sheets write`
 
 Write values to a spreadsheet range.
 
 ```bash
-gws sheets +write --spreadsheet SHEET_ID --range "Sheet1!A1:C3" --values "a,b,c"
+gws sheets write --spreadsheet SHEET_ID --range "Sheet1!A1:C3" --values "a,b,c"
 ```
 
 | Option          | Required | Description                                    |
@@ -409,12 +409,12 @@ gws sheets +write --spreadsheet SHEET_ID --range "Sheet1!A1:C3" --values "a,b,c"
 One of `--values` or `--json-values` is required. Returns the
 update response JSON.
 
-### `gws sheets +append`
+### `gws sheets append`
 
 Append rows to a spreadsheet.
 
 ```bash
-gws sheets +append --spreadsheet SHEET_ID --range "Sheet1!A1" --values "a,b,c"
+gws sheets append --spreadsheet SHEET_ID --range "Sheet1!A1" --values "a,b,c"
 ```
 
 | Option          | Required | Description                                    |
