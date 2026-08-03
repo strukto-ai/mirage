@@ -21,6 +21,18 @@ import { RAMResource, type RAMResourceState } from '../../resource/ram/ram.ts'
 import { z } from 'zod'
 
 import type { CLIInstall } from '../cli/types.ts'
+import type { CLISpec } from '../../commands/cli/types.ts'
+
+/**
+ * Per-name overrides for restoring installed CLIs: a plain mapping is a
+ * fresh config (the spec resolves from the snapshot's registry key); a
+ * [spec, config] tuple carries a live spec too, which is how copy()
+ * shares directly installed programs.
+ */
+export type CLIOverrides = Record<
+  string,
+  Record<string, unknown> | [CLISpec, Record<string, unknown> | null]
+>
 import { HISTORY_PREFIX } from '../../resource/history/history.ts'
 import {
   hasRedactedSecret,
@@ -158,7 +170,7 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
 export function buildMountArgs(
   state: WorkspaceStateDict,
   overrides: Record<string, Resource> = {},
-  cliOverrides: Record<string, Record<string, unknown>> = {},
+  cliOverrides: CLIOverrides = {},
 ): MountArgs {
   if (state.version < FORMAT_VERSION) {
     throw new Error(
@@ -204,9 +216,17 @@ export function buildMountArgs(
         `These CLIs were saved with redacted config secrets.`,
     )
   }
-  const cliArgs: Record<string, [string, Record<string, unknown> | null]> = {}
+  const cliArgs: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
   for (const e of cliEntries) {
-    cliArgs[e.name] = [e.spec, cliOverrides[e.name] ?? e.config]
+    const override = cliOverrides[e.name]
+    if (Array.isArray(override)) {
+      // copy() shares the live spec alongside the revealed config, so a
+      // directly installed (never registry-named) spec survives the
+      // round trip like a shared live resource.
+      cliArgs[e.name] = override
+    } else {
+      cliArgs[e.name] = [e.spec, override ?? e.config]
+    }
   }
 
   return {

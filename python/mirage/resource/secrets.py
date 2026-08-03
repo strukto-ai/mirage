@@ -27,21 +27,36 @@ def reveal_secret(value: Any) -> Any:
 
 
 def redacted_config_dump(config: BaseModel) -> dict[str, Any]:
-    data = config.model_dump(mode="json")
-    for name in secret_field_names(config):
-        if getattr(config, name) is None:
-            continue
-        data[name] = REDACTED_SECRET
-    return data
+    return _walk_config_dump(config, config.model_dump(mode="json"), True)
 
 
 def revealed_config_dump(config: BaseModel) -> dict[str, Any]:
-    data = config.model_dump(mode="json")
-    for name in secret_field_names(config):
-        value = getattr(config, name)
-        if value is None:
+    return _walk_config_dump(config, config.model_dump(mode="json"), False)
+
+
+def _walk_config_dump(config: BaseModel, data: dict[str, Any],
+                      redact: bool) -> dict[str, Any]:
+    # Nested models carry their own secret annotations, so the walk
+    # recurses instead of trusting the top-level field list: a missed
+    # nested SecretStr would serialize as pydantic's mask, which reads
+    # as a real credential and never demands a fresh override.
+    secrets = set(secret_field_names(config))
+    for name in type(config).model_fields:
+        if name not in data:
             continue
-        data[name] = reveal_secret(value)
+        value = getattr(config, name)
+        if name in secrets:
+            if value is None:
+                continue
+            data[name] = REDACTED_SECRET if redact else reveal_secret(value)
+        elif isinstance(value, BaseModel):
+            data[name] = _walk_config_dump(value, data[name], redact)
+        elif isinstance(value, (list, tuple)):
+            data[name] = [
+                _walk_config_dump(item, dumped, redact) if isinstance(
+                    item, BaseModel) else dumped
+                for item, dumped in zip(value, data[name])
+            ]
     return data
 
 

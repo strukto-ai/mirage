@@ -410,20 +410,17 @@ describe('cli registry snapshot', () => {
     }
   })
 
-  it('copy shares live cli secrets', async () => {
+  it('copy shares live cli secrets and the live spec', async () => {
+    // The spec is deliberately NOT in the global registry: copy() must
+    // carry the live CLISpec like a live resource, not resolve by name.
     const spec = makeCliSpec()
-    registerCliSpec(spec)
-    try {
-      const ws = buildWorkspace()
-      ws.registerCli('snapcli', spec, { token: 'sek' })
-      const clone = await ws.copy()
-      const r = await clone.execute('snapcli run')
-      expect(r.exitCode).toBe(0)
-      expect(r.stdoutText).toBe('tok=sek\n')
-      await ws.close()
-      await clone.close()
-    } finally {
-      unregisterCliSpec('snapcli')
-    }
+    const ws = buildWorkspace()
+    ws.registerCli('snapcli', spec, { token: 'sek' })
+    const clone = await ws.copy()
+    const r = await clone.execute('snapcli run')
+    expect(r.exitCode).toBe(0)
+    expect(r.stdoutText).toBe('tok=sek\n')
+    await ws.close()
+    await clone.close()
   })
 })

@@ -16,6 +16,7 @@ import importlib
 import tempfile
 from typing import Any
 
+from mirage.commands.cli.types import CLISpec
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.registry import REGISTRY, resolve_class
@@ -32,6 +33,13 @@ from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
 from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
+
+# A per-name override for restoring installed CLIs: a plain mapping is a
+# fresh config (the spec resolves from the snapshot's registry key); a
+# (spec, config) tuple carries a live spec too, which is how copy()
+# shares directly installed programs.
+CLIOverrides = dict[str, dict[str, Any]
+                    | tuple[str | CLISpec, dict[str, Any] | None]]
 
 
 async def to_state_dict(ws) -> dict[str, Any]:
@@ -107,10 +115,9 @@ async def to_state_dict(ws) -> dict[str, Any]:
     }
 
 
-def build_mount_args(
-        state: dict[str, Any],
-        resources: dict[str, Any] | None = None,
-        clis: dict[str, dict[str, Any]] | None = None) -> MountArgs:
+def build_mount_args(state: dict[str, Any],
+                     resources: dict[str, Any] | None = None,
+                     clis: CLIOverrides | None = None) -> MountArgs:
     """Translate a state dict into Workspace constructor inputs.
 
     Validates that every mount with redacted secrets has a resource
@@ -161,11 +168,18 @@ def build_mount_args(
                 if prefix in overrides else _construct_resource(m))
         mount_args[m[MountKey.PREFIX]] = (prov, MountMode(m[MountKey.MODE]))
 
-    cli_args = {
-        e[CLIKey.NAME]:
-        (e[CLIKey.SPEC], cli_overrides.get(e[CLIKey.NAME], e[CLIKey.CONFIG]))
-        for e in cli_entries
-    }
+    cli_args: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] = {}
+    for e in cli_entries:
+        override = cli_overrides.get(e[CLIKey.NAME])
+        if isinstance(override, tuple):
+            # copy() shares the live spec alongside the revealed config,
+            # so a directly installed (never registry-named) spec
+            # survives the round trip like a shared live resource.
+            cli_args[e[CLIKey.NAME]] = override
+        elif override is not None:
+            cli_args[e[CLIKey.NAME]] = (e[CLIKey.SPEC], override)
+        else:
+            cli_args[e[CLIKey.NAME]] = (e[CLIKey.SPEC], e[CLIKey.CONFIG])
 
     return MountArgs(
         mount_args=mount_args,
@@ -347,26 +361,22 @@ def requires_resource_override(mount_state: dict[str, Any]) -> bool:
     return has_redacted_secret(config, config_cls)
 
 
-def reusable_clis(ws, state: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Fresh-config overrides a copy needs for secret-bearing CLIs.
+def reusable_clis(ws) -> CLIOverrides:
+    """Live-install overrides a same-process copy reinstalls from.
 
-    A CLI saved with a redacted config cannot reinstall from the state
-    dict alone; a same-process copy still holds the live validated
-    config, so its secrets are revealed back into an override the way
-    remote mounts share their live resources.
+    Each override carries the live CLISpec and the revealed config, the
+    way remote mounts share their live resources: a directly installed
+    spec (never named in the global registry) and a redacted secret
+    both survive without a registry lookup.
 
     Args:
         ws: the origin workspace.
-        state (dict[str, Any]): the origin's state dict.
     """
-    live = ws._registry.clis.items()
-    overrides: dict[str, dict[str, Any]] = {}
-    for e in state.get(StateKey.CLIS) or []:
-        name = e[CLIKey.NAME]
-        install = live.get(name)
-        if (has_redacted_secret(e[CLIKey.CONFIG]) and install is not None
-                and install.config is not None):
-            overrides[name] = revealed_config_dump(install.config)
+    overrides: CLIOverrides = {}
+    for name, install in ws._registry.clis.items().items():
+        config = (revealed_config_dump(install.config)
+                  if install.config is not None else None)
+        overrides[name] = (install.spec, config)
     return overrides
 
 

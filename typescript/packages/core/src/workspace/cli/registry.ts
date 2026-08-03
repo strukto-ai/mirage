@@ -73,14 +73,25 @@ export class CLIRegistry {
     const model = spec.configModel
     if (model instanceof z.ZodObject) {
       // Unknown keys fail loud (a typo'd YAML key must not be silently
-      // ignored), mirroring the Python pydantic arm.
-      const unknown = Object.keys(config ?? {}).filter((k) => !(k in model.shape))
-      if (unknown.length > 0) {
-        throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
+      // ignored), mirroring the Python pydantic arm; a schema that
+      // declares its own extra-key policy (strict/passthrough/catchall)
+      // enforces it through parse instead, like pydantic extra="allow".
+      if (model.def.catchall === undefined) {
+        const unknown = Object.keys(config ?? {}).filter((k) => !(k in model.shape))
+        if (unknown.length > 0) {
+          throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
+        }
       }
       return model.parse(config ?? {})
     }
-    return model(config ?? {})
+    const result = model(config ?? {})
+    // The snapshot stores the normalized config and replays it through
+    // the normalizer, so the output must be a JSON-shaped mapping (or
+    // null), matching the Python side's model-instance contract.
+    if (result !== null && (typeof result !== 'object' || Array.isArray(result))) {
+      throw new Error(`CLI '${name}': configModel must return an object or null`)
+    }
+    return result
   }
 
   /** Remove an installed CLI; its head word stops resolving (127). */

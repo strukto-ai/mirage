@@ -54,7 +54,8 @@ from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
                                        read_tar)
 from mirage.workspace.snapshot import snapshot as _write_snapshot
 from mirage.workspace.snapshot import to_state_dict
-from mirage.workspace.snapshot.state import reusable_clis, reusable_resources
+from mirage.workspace.snapshot.state import (CLIOverrides, reusable_clis,
+                                             reusable_resources)
 from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.workspace.build import (resolve_control_stores,
                                               wire_runtime_world)
@@ -500,7 +501,7 @@ class Workspace:
             source,
             *,
             resources: dict[str, Any] | None = None,
-            clis: dict[str, dict[str, Any]] | None = None,
+            clis: CLIOverrides | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -526,7 +527,9 @@ class Workspace:
             resources: {prefix: Resource} overrides for mounts saved
                 with redacted creds.
             clis: {name: config} overrides for CLIs saved with
-                redacted config secrets.
+                redacted config secrets; a (spec, config) tuple also
+                carries a live spec (how copy() shares directly
+                installed programs).
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
@@ -542,7 +545,7 @@ class Workspace:
             state: dict[str, Any],
             *,
             resources: dict[str, Any] | None = None,
-            clis: dict[str, dict[str, Any]] | None = None,
+            clis: CLIOverrides | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -557,7 +560,9 @@ class Workspace:
             resources: {prefix: Resource} overrides for mounts saved
                 with redacted creds.
             clis: {name: config} overrides for CLIs saved with
-                redacted config secrets.
+                redacted config secrets; a (spec, config) tuple also
+                carries a live spec (how copy() shares directly
+                installed programs).
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
@@ -584,15 +589,14 @@ class Workspace:
         resources = reusable_resources(self._registry.mounts(), state)
         return await type(self)._from_state(state,
                                             resources=resources,
-                                            clis=reusable_clis(self, state))
+                                            clis=reusable_clis(self))
 
     @classmethod
-    async def _from_state(
-            cls,
-            state: dict[str, Any],
-            *,
-            resources: dict[str, Any] | None = None,
-            clis: dict[str, dict[str, Any]] | None = None) -> "Workspace":
+    async def _from_state(cls,
+                          state: dict[str, Any],
+                          *,
+                          resources: dict[str, Any] | None = None,
+                          clis: CLIOverrides | None = None) -> "Workspace":
         args = build_mount_args(state, resources, clis)
         ws = cls(args.mount_args,
                  consistency=args.consistency,

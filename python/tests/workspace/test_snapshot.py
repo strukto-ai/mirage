@@ -525,3 +525,59 @@ async def test_copy_shares_live_cli_secrets():
         await clone.close()
     finally:
         unregister_cli_spec("snapcli")
+
+
+@pytest.mark.asyncio
+async def test_copy_carries_a_directly_installed_spec():
+    # The spec is never named in the global registry: copy() must share
+    # the live spec like a live resource, not resolve it by name.
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws.register_cli("snapcli", _CLI_SPEC, config={"token": "sek"})
+    clone = await ws.copy()
+    io = await clone.execute("snapcli run")
+    assert io.exit_code == 0
+    assert io.stdout == b"tok=sek\n"
+    await ws.close()
+    await clone.close()
+
+
+class _NestedAuth(BaseModel):
+    token: SecretStr
+
+
+class _NestedCfg(BaseModel):
+    auth: _NestedAuth
+
+
+async def _nested_echo(config, paths, *texts, **flags):
+    return f"tok={config.auth.token.get_secret_value()}\n".encode(), IOResult()
+
+
+_NESTED_SPEC = CLISpec(name="nestcli",
+                       config_model=_NestedCfg,
+                       subcommands=(CLISpec(name="run", fn=_nested_echo), ))
+
+
+@pytest.mark.asyncio
+async def test_nested_cli_secrets_redact_and_demand_an_override():
+    register_cli_spec(_NESTED_SPEC)
+    try:
+        ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+        ws.register_cli("nestcli",
+                        _NESTED_SPEC,
+                        config={"auth": {
+                            "token": "sek"
+                        }})
+        state = await to_state_dict(ws)
+        entry = state[StateKey.CLIS][0]
+        assert entry[CLIKey.CONFIG] == {"auth": {"token": REDACTED_SECRET}}
+        with pytest.raises(ValueError, match="clis= must include"):
+            await Workspace.from_state(state)
+        clone = await ws.copy()
+        io = await clone.execute("nestcli run")
+        assert io.exit_code == 0
+        assert io.stdout == b"tok=sek\n"
+        await ws.close()
+        await clone.close()
+    finally:
+        unregister_cli_spec("nestcli")

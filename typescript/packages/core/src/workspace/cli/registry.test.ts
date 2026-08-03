@@ -14,7 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CLISpec } from '../../commands/cli/types.ts'
+import { z } from 'zod'
+
+import { CLISpec, type CLIConfigModel } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CLIRegistry } from './registry.ts'
 
@@ -35,7 +37,7 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-function tree(configModel: ((input: Record<string, unknown>) => unknown) | null = null): CLISpec {
+function tree(configModel: CLIConfigModel | null = null): CLISpec {
   return new CLISpec({
     name: 'prog',
     configModel,
@@ -111,5 +113,41 @@ describe('CLIRegistry', () => {
     expect(() => {
       reg.uninstall('prog')
     }).toThrow(/not installed/)
+  })
+})
+
+describe('CLIRegistry zod config schemas', () => {
+  it('rejects unknown keys on a plain object schema', () => {
+    const reg = new CLIRegistry()
+    expect(() =>
+      reg.install('prog', tree(z.object({ token: z.string() })), { token: 'x', typo: 'y' }),
+    ).toThrow(/unknown config keys: typo/)
+  })
+
+  it('honors a loose schema that allows extra keys', () => {
+    const reg = new CLIRegistry()
+    const install = reg.install('prog', tree(z.looseObject({ token: z.string() })), {
+      token: 'x',
+      extra: 'y',
+    })
+    expect(install.config).toEqual({ token: 'x', extra: 'y' })
+  })
+
+  it('lets a strict schema enforce its own unknown-key error', () => {
+    const reg = new CLIRegistry()
+    expect(() =>
+      reg.install('prog', tree(z.strictObject({ token: z.string() })), { token: 'x', typo: 'y' }),
+    ).toThrow(/Unrecognized key/)
+  })
+
+  it('refuses a normalizer that returns a non-object', () => {
+    const reg = new CLIRegistry()
+    expect(() =>
+      reg.install(
+        'prog',
+        tree(() => 'primitive'),
+        {},
+      ),
+    ).toThrow(/must return an object or null/)
   })
 })
