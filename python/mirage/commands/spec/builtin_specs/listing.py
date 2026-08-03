@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 SPECS: dict[str, CommandSpec] = {
@@ -32,18 +32,18 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-F"),
             # Accepted no-op like grep --color (#471).
             Option(long="--color",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    value_optional=True),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'stat':
     CommandSpec(
         options=(
-            Option(short="-c", value_kind=OperandKind.TEXT),
-            Option(short="-f", value_kind=OperandKind.TEXT),
+            Option(short="-c", type="str"),
+            Option(short="-f", type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'pwd':
     CommandSpec(
@@ -51,22 +51,22 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-P"),
             Option(short="-L"),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'find':
     CommandSpec(
         options=(
-            Option(short="-name", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-type", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-name", type="str", multiple=True),
+            Option(short="-type", type="str", multiple=True),
             Option(short="-maxdepth",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    multiple=True),
-            Option(short="-size", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-mtime", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-iname", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-path", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-size", type="str", multiple=True),
+            Option(short="-mtime", type="str", multiple=True),
+            Option(short="-iname", type="str", multiple=True),
+            Option(short="-path", type="str", multiple=True),
             Option(short="-mindepth",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    multiple=True),
             Option(short="-print"),
             Option(short="-print0"),
@@ -81,19 +81,19 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-and"),
             Option(short="-not"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
         ignore_tokens=frozenset({"(", ")"}),
     ),
     'tree':
     CommandSpec(
         options=(
             Option(short="-a"),
-            Option(short="-L", value_kind=OperandKind.TEXT),
-            Option(short="-I", value_kind=OperandKind.TEXT),
+            Option(short="-L", type="str"),
+            Option(short="-I", type="str"),
             Option(short="-d"),
-            Option(short="-P", value_kind=OperandKind.TEXT),
+            Option(short="-P", type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'du':
     CommandSpec(
@@ -102,10 +102,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-s"),
             Option(short="-a"),
             Option(short="-d", long="--max-depth",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-c"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'df':
     CommandSpec(
@@ -117,9 +117,9 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-a"),
             Option(short="-T"),
             Option(short="-P"),
-            Option(short="-B", value_kind=OperandKind.TEXT),
+            Option(short="-B", type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'file':
     CommandSpec(
@@ -127,6 +127,6 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-b"),
             Option(short="-i"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
 }

@@ -17,7 +17,7 @@ import json
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.builtin.linear._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
                                         Option)
 from mirage.core.linear._client import comment_update
 from mirage.core.linear.normalize import normalize_comment
@@ -26,9 +26,9 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--comment_id", value_kind=OperandKind.TEXT),
-    Option(long="--body", value_kind=OperandKind.TEXT),
-    Option(long="--body_file", value_kind=OperandKind.PATH),
+    Option(long="--comment_id", type="str"),
+    Option(long="--body", type="str"),
+    Option(long="--body_file", type="path"),
 ), )
 
 

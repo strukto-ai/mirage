@@ -12,26 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 SPECS: dict[str, CommandSpec] = {
     'python':
     CommandSpec(
-        options=(Option(short="-c", value_kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.TEXT),
+        options=(Option(short="-c", type="str"), ),
+        rest=Operand(type="str"),
     ),
     'python3':
     CommandSpec(
-        options=(Option(short="-c", value_kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.TEXT),
+        options=(Option(short="-c", type="str"), ),
+        rest=Operand(type="str"),
     ),
     'js':
     CommandSpec(
         description="Run JavaScript on a sandboxed quickjs engine.",
         options=(
             Option(short="-e",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Evaluate the next argument as a script."),
             Option(short="-m",
                    long="--module",
@@ -39,14 +39,14 @@ SPECS: dict[str, CommandSpec] = {
                                 "import/export/await); .mjs files "
                                 "select this automatically.")),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'node':
     CommandSpec(
         description="Run JavaScript on a sandboxed quickjs engine.",
         options=(
             Option(short="-e",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Evaluate the next argument as a script."),
             Option(short="-m",
                    long="--module",
@@ -54,22 +54,22 @@ SPECS: dict[str, CommandSpec] = {
                                 "import/export/await); .mjs files "
                                 "select this automatically.")),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'mktemp':
     CommandSpec(
         options=(
             Option(short="-d", long="--directory"),
-            Option(short="-p", value_kind=OperandKind.PATH),
+            Option(short="-p", type="path"),
             Option(long="--tmpdir",
-                   value_kind=OperandKind.PATH,
+                   type="path",
                    value_optional=True),
             Option(short="-t"),
             Option(short="-u", long="--dry-run"),
             Option(short="-q", long="--quiet"),
-            Option(long="--suffix", value_kind=OperandKind.TEXT),
+            Option(long="--suffix", type="str"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
+        positional=(Operand(type="str"), ),
     ),
     'bc':
     CommandSpec(
@@ -78,12 +78,12 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-l", description="Load the standard math library."),
             Option(short="-q", description="Suppress the welcome banner."),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'expr':
     CommandSpec(
         description="Evaluate expressions.",
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'history':
     CommandSpec(
@@ -91,7 +91,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-c", description="Clear the command history."),
             Option(short="-d",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description=("Delete the entry at the given position; "
                                 "negative counts back from the end.")),
             Option(short="-s",
@@ -112,7 +112,7 @@ SPECS: dict[str, CommandSpec] = {
                    description=("Read-new: no-op (file and store are "
                                 "the same).")),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'date':
     CommandSpec(
@@ -120,7 +120,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(
                 short="-d",
-                value_kind=OperandKind.TEXT,
+                type="str",
                 description=("Display the time described by the given "
                              "date string."),
             ),
@@ -130,12 +130,12 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-R",
                    description="Output date in RFC 5322 email format."),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
+        positional=(Operand(type="str"), ),
     ),
     'sleep':
     CommandSpec(
         description="Delay for a specified amount of time.",
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'bash':
     CommandSpec(
@@ -145,7 +145,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(
                 short="-c",
-                value_kind=OperandKind.TEXT,
+                type="str",
                 description=("Read commands from the next argument "
                              "and execute them."),
             ),
@@ -172,6 +172,6 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--posix",
                    description="(Ignored) POSIX-conformant mode."),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
 }

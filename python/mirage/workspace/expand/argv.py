@@ -19,7 +19,7 @@ from typing import Any
 
 import tree_sitter
 
-from mirage.commands.spec.types import OperandKind
+from mirage.commands.spec.types import ValueType
 from mirage.shell.call_stack import CallStack
 from mirage.types import PathSpec, word_text
 from mirage.workspace.expand.classify import classify_parts
@@ -104,12 +104,12 @@ async def expand_argv(
     name = " ".join(expanded[:consumed])
 
     policy = word_policy(route(name, session, registry))
-    word_kinds: list[OperandKind | None] | None = None
+    word_kinds: list[ValueType | None] | None = None
     if policy is WordPolicy.MOUNT:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
-            extra: list[OperandKind
-                        | None] = [OperandKind.TEXT] * (consumed - 1)
+            extra: list[ValueType
+                        | None] = ["str"] * (consumed - 1)
             word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
 
     classified = classify_parts(expanded,

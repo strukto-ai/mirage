@@ -16,15 +16,15 @@ import json
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.discord.post import send_message
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--channel_id", value_kind=OperandKind.TEXT),
-    Option(long="--text", value_kind=OperandKind.TEXT),
-    Option(long="--message_id", value_kind=OperandKind.TEXT),
+    Option(long="--channel_id", type="str"),
+    Option(long="--text", type="str"),
+    Option(long="--message_id", type="str"),
 ), )
 
 

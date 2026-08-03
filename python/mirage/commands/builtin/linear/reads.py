@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.registry import command
 from mirage.commands.spec.types import (CommandSpec, FlagView, Operand,
-                                        OperandKind, Option)
+                                        ValueType, Option)
 from mirage.core.linear._client import (get_issue, list_issue_comments,
                                         list_team_cycles, list_team_documents,
                                         list_team_issues, list_team_labels,
@@ -50,12 +50,12 @@ class LinearRead:
 
 
 SPEC_NONE = CommandSpec()
-SPEC_ARG = CommandSpec(rest=Operand(kind=OperandKind.TEXT))
+SPEC_ARG = CommandSpec(rest=Operand(type="str"))
 SPEC_TEAM = CommandSpec(options=(Option(long="--team",
-                                        value_kind=OperandKind.TEXT), ), )
+                                        type="str"), ), )
 SPEC_TEAM_ARG = CommandSpec(
-    options=(Option(long="--team", value_kind=OperandKind.TEXT), ),
-    rest=Operand(kind=OperandKind.TEXT),
+    options=(Option(long="--team", type="str"), ),
+    rest=Operand(type="str"),
 )
 
 
@@ -284,8 +284,8 @@ async def _run_search(accessor: LinearAccessor, texts: list[str],
 
 
 SEARCH_SPEC = CommandSpec(
-    options=(Option(long="--query", value_kind=OperandKind.TEXT), ),
-    rest=Operand(kind=OperandKind.TEXT),
+    options=(Option(long="--query", type="str"), ),
+    rest=Operand(type="str"),
 )
 
 LINEAR_READS: tuple[LinearRead, ...] = (

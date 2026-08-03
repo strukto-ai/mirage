@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli import CLISpec
-from mirage.commands.spec.types import Operand, OperandKind, Option
+from mirage.commands.spec.types import Operand, ValueType, Option
 
 
 class _Config(BaseModel):
@@ -53,11 +53,11 @@ def test_node_needs_fn_or_subcommands():
 def test_group_declares_no_positional_or_rest():
     with pytest.raises(ValueError, match="belong on leaves"):
         CLISpec(name="gws",
-                positional=(Operand(kind=OperandKind.TEXT), ),
+                positional=(Operand(type="str"), ),
                 subcommands=(CLISpec(name="send", fn=_verb), ))
     with pytest.raises(ValueError, match="belong on leaves"):
         CLISpec(name="gws",
-                rest=Operand(kind=OperandKind.TEXT),
+                rest=Operand(type="str"),
                 subcommands=(CLISpec(name="send", fn=_verb), ))
 
 
@@ -83,14 +83,14 @@ def test_ancestor_descendant_option_collision_raises():
             name="gws",
             options=(Option(short="-C",
                             long="--cwd",
-                            value_kind=OperandKind.TEXT), ),
+                            type="str"), ),
             subcommands=(CLISpec(
                 name="gmail",
                 subcommands=(CLISpec(
                     name="send",
                     fn=_verb,
                     options=(Option(long="--cwd",
-                                    value_kind=OperandKind.TEXT), )), )), ))
+                                    type="str"), )), )), ))
 
 
 def test_sibling_leaves_may_share_option_spellings():
@@ -100,11 +100,11 @@ def test_sibling_leaves_may_share_option_spellings():
             CLISpec(name="send",
                     fn=_verb,
                     options=(Option(long="--to",
-                                    value_kind=OperandKind.TEXT), )),
+                                    type="str"), )),
             CLISpec(name="share",
                     fn=_verb,
                     options=(Option(long="--to",
-                                    value_kind=OperandKind.TEXT), )),
+                                    type="str"), )),
         ),
     )
     assert len(tree.subcommands) == 2

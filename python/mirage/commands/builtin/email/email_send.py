@@ -16,16 +16,16 @@ import json
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.email.send import send_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--to", value_kind=OperandKind.TEXT),
-    Option(long="--subject", value_kind=OperandKind.TEXT),
-    Option(long="--body", value_kind=OperandKind.TEXT),
+    Option(long="--to", type="str"),
+    Option(long="--subject", type="str"),
+    Option(long="--body", type="str"),
 ), )
 
 

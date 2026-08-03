@@ -47,10 +47,14 @@ class CommandName(StrEnum):
     XXD = "xxd"
 
 
-class OperandKind(str, Enum):
-    NONE = "none"
-    PATH = "path"
-    TEXT = "text"
+# The one type axis for option and operand values (argparse type= as
+# data, extended with the two members mirage's own parsing needs: "bool"
+# consumes no token, "path" enters the resolve/route/PathSpec pipeline).
+# "str" is inert; "int"/"float" are validated post-scan. Rule for every
+# consumer: never enumerate the textual family; test == "path" or
+# == "bool" (or their negations) only, so new validator types never
+# touch classification sites.
+ValueType = Literal["bool", "str", "int", "float", "path"]
 
 
 @dataclass(frozen=True)
@@ -60,18 +64,28 @@ class Option:
     Args:
         short (str | None): short form, e.g. "-e".
         long (str | None): long form, e.g. "--max-depth".
-        value_kind (OperandKind): NONE for boolean flags; TEXT or PATH for
-            value flags. PATH values are cwd-resolved and routed for mount
-            dispatch, and reach the command as PathSpec.
+        type (ValueType): the flag's one type axis. "bool" (the default)
+            consumes no token and clusters; "path" values are
+            cwd-resolved and routed for mount dispatch, and reach the
+            command as PathSpec; "str" values pass through untouched;
+            "int"/"float" values are refused at parse time when they are
+            not numbers (argparse's ``invalid int value``; the walk uses
+            git's ``expects a numerical value``). The accepted numeric
+            shapes are the portable core shared by both languages (sign
+            plus digits; no underscores, inf, or nan). The bag holds the
+            string either way: commands read it through
+            ``FlagView.as_int``, the established mirage convention, and
+            builtins whose GNU tool words its own numeric refusal
+            (``head: invalid number of lines``) keep ``"str"``.
         numeric_shorthand (bool): treat "-<digits>" as this flag's value
             (e.g. head -5).
         count (bool): boolean flag whose occurrences accumulate into an
             int (click count semantics): ``-vvv`` and ``-v -v -v`` both
-            parse as 3. Only meaningful with value_kind NONE.
+            parse as 3. Only meaningful with type "bool".
         multiple (bool): repeated occurrences accumulate into a list
             instead of last-wins (argparse append / click multiple, e.g.
-            grep -e). TEXT values arrive as list[str]; PATH values are
-            each resolved and routed and arrive as list[PathSpec].
+            grep -e). Textual values arrive as list[str]; "path" values
+            are each resolved and routed and arrive as list[PathSpec].
         value_optional (bool): GNU optional-argument long option (e.g.
             ``--color[=WHEN]``): bare ``--color`` parses as True,
             ``--color=auto`` parses as the string, and a detached next
@@ -90,24 +104,14 @@ class Option:
             without it (and without a default) is a usage error. Click
             spelling; GNU tools express this per-command by hand.
         default (str | None): value recorded when the flag is absent, as
-            if it had been typed (a PATH default resolves and routes, a
+            if it had been typed (a "path" default resolves and routes, a
             defaulted value must satisfy choices). Presence of a default
             always satisfies ``required``.
-        type (Literal["str", "int"]): argparse ``type=`` as data. "int"
-            makes the parser refuse a non-integer value at parse time
-            (argparse's ``invalid int value``; the walk uses git's
-            ``expects a numerical value``), before the command runs. The
-            accepted shape is an optional sign plus digits, the portable
-            core of Python ``int()`` and argparse. The bag still holds
-            the string: commands read it through ``FlagView.as_int``,
-            the established mirage convention. Builtins whose GNU tool
-            words its own numeric refusal (``head: invalid number of
-            lines``) keep ``"str"`` and validate in the command.
         description (str | None): help text.
     """
     short: str | None = None
     long: str | None = None
-    value_kind: OperandKind = OperandKind.NONE
+    type: ValueType = "bool"
     numeric_shorthand: bool = False
     count: bool = False
     multiple: bool = False
@@ -116,7 +120,6 @@ class Option:
     choices: tuple[str, ...] = ()
     required: bool = False
     default: str | None = None
-    type: Literal["str", "int"] = "str"
     description: str | None = None
 
 
@@ -125,8 +128,9 @@ class Operand:
     """One positional argument slot.
 
     Args:
-        kind (OperandKind): PATH operands are cwd-resolved and routed for
-            mount dispatch; TEXT operands pass through verbatim.
+        type (ValueType): "path" operands are cwd-resolved and routed for
+            mount dispatch; textual operands pass through verbatim
+            (never "bool": an operand is a value by definition).
         provided_by (tuple[str, ...]): flags that supply this operand's
             value. When any is present the slot is skipped and remaining
             args classify as rest (e.g. grep's pattern with -e/-f). This is
@@ -136,7 +140,7 @@ class Operand:
             alternate usage patterns. It lives in the spec, not in command
             code, because Mirage classifies args before a backend is chosen.
     """
-    kind: OperandKind = OperandKind.PATH
+    type: ValueType = "path"
     provided_by: tuple[str, ...] = ()
 
 
@@ -231,13 +235,13 @@ def spec_flag_names(spec: CommandSpec) -> frozenset[str]:
 @dataclass
 class ParsedArgs:
     flags: dict[str, str | bool | int | list[str]]
-    args: list[tuple[str, OperandKind]]
+    args: list[tuple[str, ValueType]]
     cache_paths: list[str] = field(default_factory=list)
     path_flag_values: list[str] = field(default_factory=list)
-    raw_operands: list[tuple[str, OperandKind]] = field(default_factory=list)
+    raw_operands: list[tuple[str, ValueType]] = field(default_factory=list)
     text_flag_values: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    word_kinds: list[OperandKind | None] = field(default_factory=list)
+    word_kinds: list[ValueType | None] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
     # abbreviated longs matching several options (typed prefix, matched
@@ -260,16 +264,18 @@ class ParsedArgs:
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = field(
         default_factory=list)
     invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
+    invalid_float_options: list[tuple[str,
+                                      str]] = field(default_factory=list)
     missing_required_options: list[str] = field(default_factory=list)
 
     def paths(self) -> list[str]:
-        return [v for v, k in self.args if k == OperandKind.PATH]
+        return [v for v, k in self.args if k == "path"]
 
     def routing_paths(self) -> list[str]:
         return self.paths() + self.path_flag_values
 
     def texts(self) -> list[str]:
-        return [v for v, k in self.args if k == OperandKind.TEXT]
+        return [v for v, k in self.args if k != "path"]
 
     def flag(self, name: str, default: Any = None) -> Any:
         return self.flags.get(name, default)

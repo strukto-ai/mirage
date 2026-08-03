@@ -15,7 +15,7 @@
 import re
 from dataclasses import dataclass, field
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 # GNU echo is not getopt, so its option surface is a word shape, not a
@@ -29,11 +29,11 @@ SHELL_SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-n",
                    long="--max-args",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Use at most N arguments per command line."),
             Option(short="-d",
                    long="--delimiter",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Input items are separated by this character."),
             Option(short="-0",
                    long="--null",
@@ -42,15 +42,15 @@ SHELL_SPECS: dict[str, CommandSpec] = {
                    long="--no-run-if-empty",
                    description="Do not run the command on empty input."),
             Option(short="-I",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Replace occurrences of the token "
                    "(not supported)."),
             Option(short="-P",
                    long="--max-procs",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Run up to N processes (not supported)."),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     "timeout":
     CommandSpec(
@@ -58,18 +58,18 @@ SHELL_SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-s",
                    long="--signal",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Signal to send on timeout (not supported)."),
             Option(short="-k",
                    long="--kill-after",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Also send KILL after this long "
                    "(not supported)."),
             Option(long="--preserve-status",
                    description="Exit with the command's status on timeout "
                    "(not supported)."),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     "read":
     CommandSpec(
@@ -77,7 +77,7 @@ SHELL_SPECS: dict[str, CommandSpec] = {
         options=(Option(
             short="-r",
             description="Raw mode: backslash is not an escape character."), ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
 }
 
@@ -124,11 +124,11 @@ def parse_shell_options(spec: CommandSpec, argv: list[str]) -> ShellParse:
         name = short or long or ""
         if short is not None:
             (short_bool
-             if opt.value_kind == OperandKind.NONE else short_value).add(short)
+             if opt.type == "bool" else short_value).add(short)
             alias[short] = name
         if long is not None:
             (long_bool
-             if opt.value_kind == OperandKind.NONE else long_value).add(long)
+             if opt.type == "bool" else long_value).add(long)
             alias[long] = name
     flags: dict[str, str | bool] = {}
     i = 0

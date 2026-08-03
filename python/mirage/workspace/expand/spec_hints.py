@@ -14,7 +14,7 @@
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command
-from mirage.commands.spec.types import CommandSpec, OperandKind
+from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.workspace.mount import MountRegistry
 
 
@@ -45,7 +45,7 @@ def spec_for_command(
 def spec_word_kinds(
     spec: CommandSpec,
     argv: list[str],
-) -> list[OperandKind | None]:
+) -> list[ValueType | None]:
     """Classify argv words into per-position operand kinds.
 
     Delegates to parse_command so flag syntax (clusters, --flag=value,
@@ -64,7 +64,7 @@ def spec_word_kinds(
         argv (list[str]): command arguments (without command name).
     """
     parsed = parse_command(spec, argv, cwd="/")
-    kinds: list[OperandKind | None] = list(parsed.word_kinds)
+    kinds: list[ValueType | None] = list(parsed.word_kinds)
     for i, word in enumerate(argv):
         if word in spec.ignore_tokens:
             kinds[i] = None

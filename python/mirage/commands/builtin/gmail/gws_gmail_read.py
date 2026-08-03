@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.gmail.messages import get_message_processed
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -26,7 +26,7 @@ SPEC = CommandSpec(
     description=("Fetch one Gmail message as processed JSON "
                  "(same shape as cat <path>.gmail.json)."),
     options=(Option(long="--id",
-                    value_kind=OperandKind.TEXT,
+                    type="str",
                     description="Gmail message ID (required)"), ),
 )
 

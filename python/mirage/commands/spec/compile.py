@@ -15,8 +15,8 @@
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from mirage.commands.spec.constants import INT_VALUE
-from mirage.commands.spec.types import CommandSpec, OperandKind
+from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
+from mirage.commands.spec.types import CommandSpec, ValueType
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,8 +45,8 @@ class CompiledSpec:
             require a value.
         long_optional_spellings (frozenset[str]): long spellings whose
             value only attaches via ``=`` (GNU optional argument).
-        kind_of (dict[str, OperandKind]): value kind per spelling.
-        kind_by_dest (dict[str, OperandKind]): value kind per canonical
+        kind_of (dict[str, ValueType]): value kind per spelling.
+        kind_by_dest (dict[str, ValueType]): value kind per canonical
             spelling, for post-parse PATH/TEXT value collection.
         dest (dict[str, str]): spelling -> canonical spelling.
         multiple_dests (frozenset[str]): canonical spellings that
@@ -64,6 +64,8 @@ class CompiledSpec:
         int_dests (frozenset[str]): canonical spellings of int-typed
             options; the parser refuses a non-integer value at parse
             time (argparse ``type=int``).
+        float_dests (frozenset[str]): canonical spellings of float-typed
+            options, refused the same way (argparse ``type=float``).
         choices_by_dest (dict[str, tuple[str, ...]]): allowed values per
             canonical spelling, in declaration order (the order GNU's
             ARGMATCH refusal lists them).
@@ -74,7 +76,7 @@ class CompiledSpec:
             when the flag is absent from the line.
         numeric_dest (str | None): canonical spelling fed by the
             ``-<digits>`` shorthand, when one option declares it.
-        rest_kind (OperandKind | None): kind of the rest operand.
+        rest_kind (ValueType | None): kind of the rest operand.
     """
 
     bool_spellings: frozenset[str] = frozenset()
@@ -86,8 +88,9 @@ class CompiledSpec:
     long_spellings: tuple[str, ...] = ()
     long_signatures: dict[str, str] = field(default_factory=dict)
     int_dests: frozenset[str] = frozenset()
-    kind_of: dict[str, OperandKind] = field(default_factory=dict)
-    kind_by_dest: dict[str, OperandKind] = field(default_factory=dict)
+    float_dests: frozenset[str] = frozenset()
+    kind_of: dict[str, ValueType] = field(default_factory=dict)
+    kind_by_dest: dict[str, ValueType] = field(default_factory=dict)
     dest: dict[str, str] = field(default_factory=dict)
     multiple_dests: frozenset[str] = frozenset()
     count_dests: frozenset[str] = frozenset()
@@ -95,7 +98,7 @@ class CompiledSpec:
     required_dests: tuple[str, ...] = ()
     defaults: dict[str, str] = field(default_factory=dict)
     numeric_dest: str | None = None
-    rest_kind: OperandKind | None = None
+    rest_kind: ValueType | None = None
 
     def dest_of(self, spelling: str) -> str:
         """Canonical spelling for a typed spelling.
@@ -154,8 +157,9 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     long_spellings: list[str] = []
     long_signatures: dict[str, str] = {}
     int_dests: set[str] = set()
-    kind_of: dict[str, OperandKind] = {}
-    kind_by_dest: dict[str, OperandKind] = {}
+    float_dests: set[str] = set()
+    kind_of: dict[str, ValueType] = {}
+    kind_by_dest: dict[str, ValueType] = {}
     dest: dict[str, str] = {}
     multiple_dests: set[str] = set()
     count_dests: set[str] = set()
@@ -168,11 +172,10 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         canonical = opt.long if opt.long else opt.short
         if canonical is None:
             continue
-        if opt.count and opt.value_kind != OperandKind.NONE:
+        if opt.count and opt.type != "bool":
             raise ValueError(f"option {canonical!r}: count requires a "
-                             "boolean flag (value_kind NONE)")
-        if opt.value_kind == OperandKind.NONE and (opt.choices
-                                                   or opt.default is not None):
+                             "boolean flag (type 'bool')")
+        if opt.type == "bool" and (opt.choices or opt.default is not None):
             raise ValueError(f"option {canonical!r}: choices and default "
                              "require a value flag")
         if (opt.choices and opt.default is not None
@@ -180,19 +183,21 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             raise ValueError(f"option {canonical!r}: default "
                              f"{opt.default!r} is not one of its choices")
         if opt.type == "int":
-            if opt.value_kind == OperandKind.NONE:
-                raise ValueError(f"option {canonical!r}: type 'int' "
-                                 "requires a value flag")
             if opt.default is not None and not INT_VALUE.match(opt.default):
                 raise ValueError(f"option {canonical!r}: default "
                                  f"{opt.default!r} is not an integer")
             int_dests.add(canonical)
+        if opt.type == "float":
+            if opt.default is not None and not FLOAT_VALUE.match(opt.default):
+                raise ValueError(f"option {canonical!r}: default "
+                                 f"{opt.default!r} is not a number")
+            float_dests.add(canonical)
         if opt.short:
             dest[opt.short] = canonical
         if opt.long:
             dest[opt.long] = canonical
-        if opt.value_kind != OperandKind.NONE:
-            kind_by_dest[canonical] = opt.value_kind
+        if opt.type != "bool":
+            kind_by_dest[canonical] = opt.type
         if opt.multiple:
             multiple_dests.add(canonical)
         if opt.count:
@@ -205,7 +210,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             defaults[canonical] = opt.default
 
         if opt.short:
-            if opt.value_kind == OperandKind.NONE:
+            if opt.type == "bool":
                 bool_spellings.add(opt.short)
             elif opt.value_optional:
                 # GNU optional argument: the bare short is boolean and a
@@ -213,10 +218,10 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
                 bool_spellings.add(opt.short)
                 if opt.short_value:
                     attach_spellings.append(opt.short)
-                kind_of[opt.short] = opt.value_kind
+                kind_of[opt.short] = opt.type
             else:
                 value_spellings.append(opt.short)
-                kind_of[opt.short] = opt.value_kind
+                kind_of[opt.short] = opt.type
                 if opt.numeric_shorthand:
                     numeric_dest = canonical
         if opt.long:
@@ -224,20 +229,20 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             # Everything parsing-relevant except the spellings and the
             # help text: two options that agree here are one action.
             long_signatures[opt.long] = "|".join(
-                (opt.value_kind.value, str(opt.value_optional),
-                 str(opt.multiple), str(opt.count), ",".join(opt.choices),
-                 str(opt.required), str(opt.default), opt.type))
-            if opt.value_kind == OperandKind.NONE:
+                (opt.type, str(opt.value_optional), str(opt.multiple),
+                 str(opt.count), ",".join(opt.choices), str(opt.required),
+                 str(opt.default)))
+            if opt.type == "bool":
                 long_bool_spellings.add(opt.long)
             elif opt.value_optional:
                 # GNU optional argument: bare form is boolean, value only
                 # attaches via `=`; a detached next token is an operand.
                 long_bool_spellings.add(opt.long)
                 long_optional_spellings.add(opt.long)
-                kind_of[opt.long] = opt.value_kind
+                kind_of[opt.long] = opt.type
             else:
                 long_value_spellings.add(opt.long)
-                kind_of[opt.long] = opt.value_kind
+                kind_of[opt.long] = opt.type
 
     # Longest first so an attached match can never be stolen by a
     # shorter spelling that happens to prefix it (-name vs -n).
@@ -254,6 +259,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         long_spellings=tuple(long_spellings),
         long_signatures=long_signatures,
         int_dests=frozenset(int_dests),
+        float_dests=frozenset(float_dests),
         kind_of=kind_of,
         kind_by_dest=kind_by_dest,
         dest=dest,
@@ -263,5 +269,5 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         required_dests=tuple(required_dests),
         defaults=defaults,
         numeric_dest=numeric_dest,
-        rest_kind=spec.rest.kind if spec.rest is not None else None,
+        rest_kind=spec.rest.type if spec.rest is not None else None,
     )

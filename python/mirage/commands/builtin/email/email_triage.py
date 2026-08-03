@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
                                         Option)
 from mirage.core.email._client import fetch_headers
 from mirage.core.email.search import search_messages
@@ -25,15 +25,15 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--folder", value_kind=OperandKind.TEXT),
-    Option(long="--max", value_kind=OperandKind.TEXT),
+    Option(long="--folder", type="str"),
+    Option(long="--max", type="str"),
     Option(long="--unseen"),
-    Option(long="--subject", value_kind=OperandKind.TEXT),
-    Option(long="--from", value_kind=OperandKind.TEXT),
-    Option(long="--to", value_kind=OperandKind.TEXT),
-    Option(long="--body", value_kind=OperandKind.TEXT),
-    Option(long="--since", value_kind=OperandKind.TEXT),
-    Option(long="--before", value_kind=OperandKind.TEXT),
+    Option(long="--subject", type="str"),
+    Option(long="--from", type="str"),
+    Option(long="--to", type="str"),
+    Option(long="--body", type="str"),
+    Option(long="--since", type="str"),
+    Option(long="--before", type="str"),
 ))
 
 

@@ -15,7 +15,7 @@
 from pydantic import BaseModel
 
 from mirage.commands.cli import CLISpec
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 
@@ -41,10 +41,10 @@ def _tree() -> CLISpec:
                                 write=True,
                                 options=(Option(short="-t",
                                                 long="--to",
-                                                value_kind=OperandKind.TEXT,
+                                                type="str",
                                                 multiple=True,
                                                 required=True), ),
-                                rest=Operand(kind=OperandKind.TEXT)),
+                                rest=Operand(type="str")),
                         CLISpec(name="list", fn=_verb),
                     )),
             CLISpec(name="docs",
@@ -77,7 +77,7 @@ def test_single_verb_cli_is_a_leaf_root():
 def test_group_may_carry_its_own_options():
     tree = CLISpec(
         name="git",
-        options=(Option(short="-C", value_kind=OperandKind.PATH), ),
+        options=(Option(short="-C", type="path"), ),
         subcommands=(CLISpec(name="status", fn=_verb), ),
     )
     assert tree.options[0].short == "-C"

@@ -14,7 +14,7 @@
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.slack.search import search_messages
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -22,19 +22,19 @@ from mirage.types import PathSpec
 SPEC = CommandSpec(options=(
     Option(
         long="--query",
-        value_kind=OperandKind.TEXT,
+        type="str",
         description=("Slack search query "
                      "(supports operators like 'from:@user', "
                      "'in:#channel')"),
     ),
     Option(
         long="--count",
-        value_kind=OperandKind.TEXT,
+        type="str",
         description="Results per page (1-100, default 20)",
     ),
     Option(
         long="--page",
-        value_kind=OperandKind.TEXT,
+        type="str",
         description="1-based page number (default 1)",
     ),
 ), )

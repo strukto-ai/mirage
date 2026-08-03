@@ -17,7 +17,7 @@ import json
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.builtin.linear._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
                                         Option)
 from mirage.core.linear._client import issue_update, resolve_issue_id
 from mirage.core.linear.normalize import normalize_issue
@@ -26,11 +26,11 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--issue_id", value_kind=OperandKind.TEXT),
-    Option(long="--issue_key", value_kind=OperandKind.TEXT),
-    Option(long="--title", value_kind=OperandKind.TEXT),
-    Option(long="--description", value_kind=OperandKind.TEXT),
-    Option(long="--description_file", value_kind=OperandKind.PATH),
+    Option(long="--issue_id", type="str"),
+    Option(long="--issue_key", type="str"),
+    Option(long="--title", type="str"),
+    Option(long="--description", type="str"),
+    Option(long="--description_file", type="path"),
 ), )
 
 

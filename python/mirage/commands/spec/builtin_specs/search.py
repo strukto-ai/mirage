@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 SPECS: dict[str, CommandSpec] = {
@@ -34,35 +34,35 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-q"),
             Option(short="-H"),
             Option(short="-h"),
-            Option(short="-m", value_kind=OperandKind.TEXT),
-            Option(short="-A", value_kind=OperandKind.TEXT),
-            Option(short="-B", value_kind=OperandKind.TEXT),
-            Option(short="-C", value_kind=OperandKind.TEXT),
-            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
+            Option(short="-m", type="str"),
+            Option(short="-A", type="str"),
+            Option(short="-B", type="str"),
+            Option(short="-C", type="str"),
+            Option(short="-e", type="str", multiple=True),
+            Option(short="-f", type="path", multiple=True),
             # Accepted no-ops: output is never a tty, so plain output is
             # exactly what GNU produces with --color=auto (#471).
             Option(long="--color",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    value_optional=True),
             Option(long="--colour",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    value_optional=True),
             Option(long="--line-buffered"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT,
+        positional=(Operand(type="str",
                             provided_by=("-e", "-f")), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'search':
     CommandSpec(
         options=(
-            Option(long="--method", value_kind=OperandKind.TEXT),
-            Option(long="--top-k", value_kind=OperandKind.TEXT),
-            Option(long="--threshold", value_kind=OperandKind.TEXT),
+            Option(long="--method", type="str"),
+            Option(long="--top-k", type="str"),
+            Option(long="--threshold", type="str"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str"), ),
+        rest=Operand(type="path"),
     ),
     'rg':
     CommandSpec(
@@ -77,33 +77,33 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-o"),
             Option(short="-H"),
             Option(short="-I"),
-            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
-            Option(short="-m", value_kind=OperandKind.TEXT),
-            Option(short="-A", value_kind=OperandKind.TEXT),
-            Option(short="-B", value_kind=OperandKind.TEXT),
-            Option(short="-C", value_kind=OperandKind.TEXT),
+            Option(short="-e", type="str", multiple=True),
+            Option(short="-f", type="path", multiple=True),
+            Option(short="-m", type="str"),
+            Option(short="-A", type="str"),
+            Option(short="-B", type="str"),
+            Option(short="-C", type="str"),
             Option(long="--hidden"),
-            Option(long="--type", value_kind=OperandKind.TEXT),
-            Option(long="--glob", value_kind=OperandKind.TEXT),
+            Option(long="--type", type="str"),
+            Option(long="--glob", type="str"),
             # Accepted no-op like grep --color (#471).
             Option(long="--color",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    value_optional=True),
         ),
-        positional=(Operand(kind=OperandKind.TEXT,
+        positional=(Operand(type="str",
                             provided_by=("-e", "-f")), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'sed':
     CommandSpec(
         options=(
             Option(short="-i"),
             # -e takes a script and may repeat; joined with newlines.
-            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
+            Option(short="-e", type="str", multiple=True),
             # -f reads the script from a file and may repeat (like grep -f);
             # its value is a PATH so it routes and is read from the mount.
-            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
+            Option(short="-f", type="path", multiple=True),
             Option(short="-n"),
             Option(short="-E"),
             Option(short="-r"),
@@ -119,9 +119,9 @@ SPECS: dict[str, CommandSpec] = {
         #   sed -f prog.sed f.txt     -> prog.sed is the script; f.txt a file
         # Without provided_by, the -e/-f forms would mislabel f.txt as the
         # script (TEXT) and never read it as a file.
-        positional=(Operand(kind=OperandKind.TEXT,
+        positional=(Operand(type="str",
                             provided_by=("-e", "-f")), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'jq':
     CommandSpec(
@@ -130,23 +130,23 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c"),
             Option(short="-s"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str"), ),
+        rest=Operand(type="path"),
     ),
     'awk':
     CommandSpec(
         options=(
-            Option(short="-F", value_kind=OperandKind.TEXT),
-            Option(short="-v", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
+            Option(short="-F", type="str"),
+            Option(short="-v", type="str", multiple=True),
+            Option(short="-f", type="path", multiple=True),
         ),
-        positional=(Operand(kind=OperandKind.TEXT, provided_by=("-f", )), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str", provided_by=("-f", )), ),
+        rest=Operand(type="path"),
     ),
     'strings':
     CommandSpec(
-        options=(Option(short="-n", value_kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        options=(Option(short="-n", type="str"), ),
+        rest=Operand(type="path"),
     ),
     'zgrep':
     CommandSpec(
@@ -156,19 +156,19 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-l"),
             Option(short="-n"),
             Option(short="-v"),
-            Option(short="-e", value_kind=OperandKind.TEXT, multiple=True),
-            Option(short="-f", value_kind=OperandKind.PATH, multiple=True),
+            Option(short="-e", type="str", multiple=True),
+            Option(short="-f", type="path", multiple=True),
             Option(short="-E"),
             Option(short="-F"),
             Option(short="-H"),
             Option(short="-h"),
-            Option(short="-m", value_kind=OperandKind.TEXT),
+            Option(short="-m", type="str"),
             Option(short="-o"),
             Option(short="-q"),
             Option(short="-w"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT,
+        positional=(Operand(type="str",
                             provided_by=("-e", "-f")), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
 }

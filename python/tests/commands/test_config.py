@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.commands.config import (RegisteredCommand, command, cross_command,
                                     version_request)
-from mirage.commands.spec import CommandSpec, Operand, OperandKind, Option
+from mirage.commands.spec import CommandSpec, Operand, ValueType, Option
 from mirage.version import __version__
 
 _HANDLER_CALLS: list[str] = []
@@ -45,7 +45,7 @@ class TestRegisteredCommand:
     def test_basic_fields(self):
         rc = RegisteredCommand(
             name="cat",
-            spec=CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+            spec=CommandSpec(rest=Operand(type="path")),
             resource="ram",
             filetype=None,
             fn=lambda: None,
@@ -69,7 +69,7 @@ class TestRegisteredCommand:
 class TestCommandDecorator:
 
     def test_decorator_attaches_registered_commands(self):
-        spec = CommandSpec(rest=Operand(kind=OperandKind.PATH))
+        spec = CommandSpec(rest=Operand(type="path"))
 
         @command("mytest", resource="ram", spec=spec)
         async def my_fn(backend, paths, *texts, **kw):
@@ -97,7 +97,7 @@ class TestCommandDecorator:
     def test_write_defaults_false(self):
         rc = RegisteredCommand(
             name="cat",
-            spec=CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+            spec=CommandSpec(rest=Operand(type="path")),
             resource="ram",
             filetype=None,
             fn=lambda: None,

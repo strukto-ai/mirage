@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 SPECS: dict[str, CommandSpec] = {
@@ -26,12 +26,12 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-j"),
             Option(short="-J"),
             Option(short="-v"),
-            Option(short="-f", value_kind=OperandKind.PATH),
-            Option(short="-C", value_kind=OperandKind.PATH),
-            Option(long="--strip-components", value_kind=OperandKind.TEXT),
-            Option(long="--exclude", value_kind=OperandKind.TEXT),
+            Option(short="-f", type="path"),
+            Option(short="-C", type="path"),
+            Option(long="--strip-components", type="str"),
+            Option(long="--exclude", type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'gzip':
     CommandSpec(
@@ -50,7 +50,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-8"),
             Option(short="-9"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'gunzip':
     CommandSpec(
@@ -60,7 +60,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c"),
             Option(short="-t"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'zip':
     CommandSpec(
@@ -69,20 +69,20 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-j"),
             Option(short="-q"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'unzip':
     CommandSpec(
         options=(
             Option(short="-o"),
             Option(short="-l"),
-            Option(short="-d", value_kind=OperandKind.PATH),
+            Option(short="-d", type="path"),
             Option(short="-q"),
             Option(short="-p"),
             Option(short="-t"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'zcat':
-    CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+    CommandSpec(rest=Operand(type="path")),
 }

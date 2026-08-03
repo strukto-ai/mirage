@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.notion.pages import search_pages
 from mirage.core.notion.pathing import extract_title
 from mirage.io.stream import yield_bytes
@@ -24,8 +24,8 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--query", value_kind=OperandKind.TEXT),
-    Option(long="--limit", value_kind=OperandKind.TEXT),
+    Option(long="--query", type="str"),
+    Option(long="--limit", type="str"),
 ))
 
 

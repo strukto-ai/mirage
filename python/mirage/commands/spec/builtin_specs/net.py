@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 SPECS: dict[str, CommandSpec] = {
@@ -21,22 +21,22 @@ SPECS: dict[str, CommandSpec] = {
         description="Transfer data from or to a server.",
         options=(
             Option(short="-H",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Add a custom header to the request."),
             Option(short="-A",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Set the User-Agent header."),
             Option(short="-X",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Specify the HTTP request method."),
             Option(short="-d",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Send the given data as the request body."),
             Option(short="-F",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Submit a multipart/form-data field."),
             Option(short="-o",
-                   value_kind=OperandKind.PATH,
+                   type="path",
                    description="Write response body to the given file."),
             Option(short="-L", description="Follow HTTP redirects."),
             Option(short="-f",
@@ -46,7 +46,7 @@ SPECS: dict[str, CommandSpec] = {
                    description="Run silently with no progress or messages."),
             Option(short="-S", description="Show errors even when silent."),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'wget':
     CommandSpec(
@@ -54,7 +54,7 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(
                 short="-O",
-                value_kind=OperandKind.PATH,
+                type="path",
                 description="Write the downloaded content to the given file."),
             Option(short="-q", description="Run quietly with no output."),
             Option(
@@ -62,7 +62,7 @@ SPECS: dict[str, CommandSpec] = {
                 description="Check that the URL exists without downloading it."
             ),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str"), ),
+        rest=Operand(type="path"),
     ),
 }

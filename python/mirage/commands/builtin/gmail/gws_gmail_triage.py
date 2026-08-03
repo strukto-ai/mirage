@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.gmail.messages import (_extract_header, get_message_raw,
                                         list_messages)
 from mirage.io.stream import yield_bytes
@@ -28,10 +28,10 @@ SPEC = CommandSpec(
                  "for a Gmail search query."),
     options=(
         Option(long="--query",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description='Gmail search query (default: "is:unread")'),
         Option(long="--max",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Max results to return (default: 20)"),
     ),
 )

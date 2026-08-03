@@ -20,7 +20,7 @@ from mirage.commands.cli.types import CLISpec, FlagBag, WalkResult
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
-from mirage.commands.spec.constants import INT_VALUE
+from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
 from mirage.commands.spec.help import render_help
 
 
@@ -211,17 +211,20 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
                 flags[dest] = [default]
             else:
                 flags[dest] = default
-    # Int-typed values before choices, argparse's order; wording is
-    # git's parse-options refusal (`--depth` on a non-integer).
-    for dest in cs.int_dests:
-        value = flags.get(dest)
-        candidates = value if isinstance(
-            value, list) else ([value] if isinstance(value, str) else [])
-        for part in candidates:
-            if not INT_VALUE.match(part):
-                return _usage_error(
-                    name, node,
-                    f"error: option '{dest}' expects a numerical value")
+    # Numeric-typed values before choices, argparse's order; wording is
+    # git's parse-options refusal (`--depth` on a non-integer), one
+    # phrase for int and float alike.
+    for dests, pattern in ((cs.int_dests, INT_VALUE), (cs.float_dests,
+                                                       FLOAT_VALUE)):
+        for dest in dests:
+            value = flags.get(dest)
+            candidates = value if isinstance(
+                value, list) else ([value] if isinstance(value, str) else [])
+            for part in candidates:
+                if not pattern.match(part):
+                    return _usage_error(
+                        name, node,
+                        f"error: option '{dest}' expects a numerical value")
     for dest, allowed in cs.choices_by_dest.items():
         value = flags.get(dest)
         candidates = value if isinstance(

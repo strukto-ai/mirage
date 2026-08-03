@@ -14,7 +14,7 @@
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 
@@ -74,9 +74,9 @@ def test_non_multiple_value_flag_keeps_last_value():
 
 def test_provided_by_only_skips_slot_when_flag_present():
     spec = CommandSpec(
-        options=(Option(short="-e", value_kind=OperandKind.TEXT), ),
-        positional=(Operand(kind=OperandKind.TEXT, provided_by=("-e", )), ),
-        rest=Operand(kind=OperandKind.PATH),
+        options=(Option(short="-e", type="str"), ),
+        positional=(Operand(type="str", provided_by=("-e", )), ),
+        rest=Operand(type="path"),
     )
     with_flag = parse_command(spec, ["-e", "pat", "/x"], "/")
     assert with_flag.paths() == ["/x"]
@@ -226,9 +226,9 @@ def test_cluster_into_multiple_flag_accumulates():
 def test_long_equals_and_separate_multiple_accumulate():
     spec = CommandSpec(
         options=(Option(long="--tag",
-                        value_kind=OperandKind.TEXT,
+                        type="str",
                         multiple=True), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     )
     parsed = parse_command(spec, ["--tag=a", "--tag", "b", "/x"], "/")
     assert parsed.flags["--tag"] == ["a", "b"]
@@ -309,10 +309,10 @@ def test_short_value_optional_uses_only_attached_value():
 def test_overflow_operands_pass_through_like_last_slot():
     parsed = parse_command(SPECS["uniq"], ["a.txt", "b.txt", "c.txt"],
                            cwd="/data")
-    assert [k for _, k in parsed.args] == [OperandKind.PATH] * 3
+    assert [k for _, k in parsed.args] == ["path"] * 3
 
     parsed = parse_command(SPECS["tr"], ["a", "b", "extra.txt"], cwd="/data")
-    assert [k for _, k in parsed.args] == [OperandKind.TEXT] * 3
+    assert [k for _, k in parsed.args] == ["str"] * 3
 
 
 def test_spellings_share_one_dest_and_honor_command_line_order():
@@ -357,7 +357,7 @@ def test_count_flag_accumulates_occurrences():
     spec = CommandSpec(options=(Option(short="-v",
                                        long="--verbose",
                                        count=True), ),
-                       rest=Operand(kind=OperandKind.PATH))
+                       rest=Operand(type="path"))
     packed = parse_command(spec, ["-vvv", "/f"], "/")
     assert packed.flags["--verbose"] == 3
     separate = parse_command(spec, ["-v", "--verbose", "-v", "/f"], "/")
@@ -384,7 +384,7 @@ def test_choices_exempt_bare_optional_value_form():
 
 def test_choices_check_every_value_of_a_multiple_flag():
     spec = CommandSpec(options=(Option(short="-m",
-                                       value_kind=OperandKind.TEXT,
+                                       type="str",
                                        multiple=True,
                                        choices=("x", "y")), ))
     parsed = parse_command(spec, ["-m", "x", "-m", "z"], "/")
@@ -393,7 +393,7 @@ def test_choices_check_every_value_of_a_multiple_flag():
 
 def test_required_option_reported_when_absent():
     spec = CommandSpec(options=(
-        Option(long="--out", value_kind=OperandKind.TEXT, required=True), ))
+        Option(long="--out", type="str", required=True), ))
     missing = parse_command(spec, [], "/")
     assert missing.missing_required_options == ["--out"]
     present = parse_command(spec, ["--out", "x"], "/")
@@ -402,7 +402,7 @@ def test_required_option_reported_when_absent():
 
 def test_default_lands_as_if_typed_and_satisfies_required():
     spec = CommandSpec(options=(Option(long="--mode",
-                                       value_kind=OperandKind.TEXT,
+                                       type="str",
                                        required=True,
                                        default="fast"), ))
     parsed = parse_command(spec, [], "/")
@@ -414,7 +414,7 @@ def test_default_lands_as_if_typed_and_satisfies_required():
 
 def test_path_default_resolves_and_routes():
     spec = CommandSpec(options=(Option(
-        long="--file", value_kind=OperandKind.PATH, default="cfg.txt"), ))
+        long="--file", type="path", default="cfg.txt"), ))
     parsed = parse_command(spec, [], "/data")
     assert parsed.flags["--file"] == "/data/cfg.txt"
     assert parsed.path_flag_values == ["/data/cfg.txt"]
@@ -423,7 +423,7 @@ def test_path_default_resolves_and_routes():
 def test_multiple_default_lands_as_one_element_list():
     spec = CommandSpec(options=(Option(short="-f",
                                        long="--file",
-                                       value_kind=OperandKind.PATH,
+                                       type="path",
                                        multiple=True,
                                        default="cfg.txt"), ))
     parsed = parse_command(spec, [], "/data")
@@ -444,9 +444,9 @@ def test_unique_long_prefix_expands_like_getopt_long():
 
 def test_ambiguous_long_prefix_reports_possibilities_in_order():
     spec = CommandSpec(options=(
-        Option(long="--context", value_kind=OperandKind.TEXT),
+        Option(long="--context", type="str"),
         Option(
-            long="--color", value_optional=True, value_kind=OperandKind.TEXT),
+            long="--color", value_optional=True, type="str"),
         Option(long="--count")))
     parsed = parse_command(spec, ["--c"], "/")
     assert parsed.ambiguous_options == [("--c", ("--context", "--color",
@@ -457,7 +457,7 @@ def test_ambiguous_long_prefix_reports_possibilities_in_order():
 def test_exact_long_wins_over_a_longer_spelling():
     spec = CommandSpec(
         options=(Option(long="--binary"),
-                 Option(long="--binary-files", value_kind=OperandKind.TEXT)))
+                 Option(long="--binary-files", type="str")))
     parsed = parse_command(spec, ["--binary"], "/")
     assert parsed.flags["--binary"] is True
     assert parsed.ambiguous_options == []
@@ -465,21 +465,21 @@ def test_exact_long_wins_over_a_longer_spelling():
 
 def test_abbreviated_long_carries_an_attached_value():
     spec = CommandSpec(options=(Option(
-        long="--color", value_optional=True, value_kind=OperandKind.TEXT), ))
+        long="--color", value_optional=True, type="str"), ))
     parsed = parse_command(spec, ["--colo=never"], "/")
     assert parsed.flags["--color"] == "never"
 
 
 def test_abbreviated_value_long_takes_the_next_word():
     spec = CommandSpec(
-        options=(Option(long="--exclude", value_kind=OperandKind.TEXT), ))
+        options=(Option(long="--exclude", type="str"), ))
     parsed = parse_command(spec, ["--excl", "tmp"], "/")
     assert parsed.flags["--exclude"] == "tmp"
 
 
 def test_free_text_commands_keep_exact_only_long_matching():
     spec = CommandSpec(options=(Option(long="--verbose"), ),
-                       rest=Operand(kind=OperandKind.TEXT))
+                       rest=Operand(type="str"))
     parsed = parse_command(spec, ["--verb", "hi"], "/")
     assert "--verbose" not in parsed.flags
     assert parsed.texts() == ["--verb", "hi"]
@@ -487,7 +487,7 @@ def test_free_text_commands_keep_exact_only_long_matching():
 
 def test_int_typed_value_is_reported_not_raised():
     spec = CommandSpec(options=(
-        Option(long="--port", value_kind=OperandKind.TEXT, type="int"), ))
+        Option(long="--port", type="int"), ))
     parsed = parse_command(spec, ["--port", "abc"], "/")
     assert parsed.invalid_int_options == [("--port", "abc")]
     ok = parse_command(spec, ["--port", "-42"], "/")
@@ -496,9 +496,9 @@ def test_int_typed_value_is_reported_not_raised():
 
 
 def test_int_typed_multiple_checks_every_value():
-    spec = CommandSpec(options=(Option(
-        long="--id", value_kind=OperandKind.TEXT, multiple=True, type="int"),
-                                ))
+    spec = CommandSpec(options=(Option(long="--id",
+                                       multiple=True,
+                                       type="int"), ))
     parsed = parse_command(spec, ["--id", "1", "--id", "x"], "/")
     assert parsed.invalid_int_options == [("--id", "x")]
 
@@ -514,11 +514,11 @@ def test_synonym_spellings_resolve_a_shared_prefix_like_glibc():
 
 def test_ambiguity_lists_synonyms_like_gnu():
     spec = CommandSpec(options=(
-        Option(long="--context", value_kind=OperandKind.TEXT),
+        Option(long="--context", type="str"),
         Option(
-            long="--color", value_optional=True, value_kind=OperandKind.TEXT),
+            long="--color", value_optional=True, type="str"),
         Option(
-            long="--colour", value_optional=True, value_kind=OperandKind.TEXT),
+            long="--colour", value_optional=True, type="str"),
         Option(long="--count")))
     parsed = parse_command(spec, ["--c"], "/")
     assert parsed.ambiguous_options == [("--c", ("--context", "--color",
@@ -527,7 +527,7 @@ def test_ambiguity_lists_synonyms_like_gnu():
 
 def test_option_error_kinds_keep_scan_order():
     spec = CommandSpec(
-        options=(Option(long="--context", value_kind=OperandKind.TEXT),
+        options=(Option(long="--context", type="str"),
                  Option(long="--count")))
     parsed = parse_command(spec, ["--c", "--bogus"], "/")
     assert parsed.option_error_kinds == ["ambiguous", "invalid"]

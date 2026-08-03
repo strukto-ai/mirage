@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.gmail.send import reply_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -26,10 +26,10 @@ SPEC = CommandSpec(
     description="Reply to the sender of a Gmail message (excludes CC).",
     options=(
         Option(long="--message-id",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Gmail message ID to reply to (required)"),
         Option(long="--body",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Reply body (use $'\\n' for newlines; required)"),
     ),
 )

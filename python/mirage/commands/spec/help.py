@@ -14,16 +14,15 @@
 
 from collections.abc import Sequence
 
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 
 # (name, one-line help) rows a CLI group passes for its children.
 SubcommandRows = Sequence[tuple[str, str]]
 
-_VALUE_LABEL = {
-    OperandKind.NONE: "",
-    OperandKind.PATH: " <path>",
-    OperandKind.TEXT: " <text>",
-}
+def _value_label(value_type: str) -> str:
+    if value_type == "bool":
+        return ""
+    return " <path>" if value_type == "path" else " <text>"
 
 
 def _flag_display(opt: Option) -> str:
@@ -32,7 +31,7 @@ def _flag_display(opt: Option) -> str:
         parts.append(opt.short)
     if opt.long is not None:
         parts.append(opt.long)
-    return ", ".join(parts) + _VALUE_LABEL[opt.value_kind]
+    return ", ".join(parts) + _value_label(opt.type)
 
 
 def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
@@ -70,12 +69,11 @@ def render_help(name: str, spec: CommandSpec,
     if subcommands:
         usage_bits.append("<command> [<args>]")
     for op in spec.positional:
-        usage_bits.append("<path>" if op.kind ==
-                          OperandKind.PATH else "<text>")
+        usage_bits.append("<path>" if op.type == "path" else "<text>")
     if spec.rest is not None:
-        kind = spec.rest.kind
+        kind = spec.rest.type
         usage_bits.append("[<path>...]" if kind ==
-                          OperandKind.PATH else "[<text>...]")
+                          "path" else "[<text>...]")
     lines.append("Usage: " + " ".join(usage_bits))
 
     if subcommands:

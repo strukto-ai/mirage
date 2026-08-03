@@ -16,14 +16,14 @@ import json
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.discord.members import search_members
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--guild_id", value_kind=OperandKind.TEXT),
-    Option(long="--query", value_kind=OperandKind.TEXT),
+    Option(long="--guild_id", type="str"),
+    Option(long="--query", type="str"),
 ), )
 
 

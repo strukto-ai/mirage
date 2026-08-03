@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 
 
 def test_renders_name_description_usage_and_flags():
@@ -21,10 +21,10 @@ def test_renders_name_description_usage_and_flags():
         description="Send a thing.",
         options=(
             Option(long="--to",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="Recipient"),
             Option(long="--help",
-                   value_kind=OperandKind.NONE,
+                   type="bool",
                    description="Show help"),
         ),
     )
@@ -45,7 +45,7 @@ def test_falls_back_to_bare_name_without_description():
 def test_epilog_trails_the_flag_table_after_a_blank_line():
     spec = CommandSpec(
         options=(Option(long="--help",
-                        value_kind=OperandKind.NONE,
+                        type="bool",
                         description="Show help"), ),
         epilog="Services:\n  drive\n",
     )
@@ -63,7 +63,7 @@ def test_render_help_with_subcommands_lists_commands():
         description="Google Workspace",
         options=(Option(short="-C",
                         long="--cwd",
-                        value_kind=OperandKind.TEXT,
+                        type="str",
                         description="run as if started there"), ),
     )
     rows = [("gmail", "Gmail messages\nlong tail ignored"), ("docs", "")]

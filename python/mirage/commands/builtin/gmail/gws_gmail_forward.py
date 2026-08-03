@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.gmail.send import forward_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -26,10 +26,10 @@ SPEC = CommandSpec(
     description="Forward a Gmail message to a new recipient.",
     options=(
         Option(long="--message-id",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Gmail message ID to forward (required)"),
         Option(long="--to",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Forward recipient email address (required)"),
     ),
 )

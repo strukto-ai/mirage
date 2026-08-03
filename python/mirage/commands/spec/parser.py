@@ -14,9 +14,10 @@
 
 from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
-from mirage.commands.spec.constants import (INT_VALUE, NUMERIC_SHORT,
+from mirage.commands.spec.constants import (FLOAT_VALUE, INT_VALUE,
+                                            NUMERIC_SHORT,
                                             flag_kwarg_name)
-from mirage.commands.spec.types import CommandSpec, OperandKind, ParsedArgs
+from mirage.commands.spec.types import CommandSpec, ValueType, ParsedArgs
 from mirage.utils.path import resolve_path
 
 
@@ -141,7 +142,7 @@ def parse_command(
     # argv slots (filtered_argv drops --cache tokens, raw_args keeps
     # only operands); kinds must be written at the original positions
     # or one dropped token shifts every later kind onto the wrong word.
-    word_kinds: list[OperandKind | None] = [None] * len(argv)
+    word_kinds: list[ValueType | None] = [None] * len(argv)
     warnings: list[str] = []
     invalid_options: list[str] = []
     ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
@@ -150,7 +151,8 @@ def parse_command(
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
     # stray flag never corrupts pattern/path classification.
-    lenient_dash_operands = cs.rest_kind == OperandKind.TEXT
+    lenient_dash_operands = (cs.rest_kind is not None
+                             and cs.rest_kind != "path")
     i = 0
     end_of_flags = False
 
@@ -326,6 +328,14 @@ def parse_command(
         for part in candidates:
             if not INT_VALUE.match(part):
                 invalid_int_options.append((dest_name, part))
+    invalid_float_options: list[tuple[str, str]] = []
+    for dest_name in cs.float_dests:
+        value = flags.get(dest_name)
+        candidates = value if isinstance(
+            value, list) else ([value] if isinstance(value, str) else [])
+        for part in candidates:
+            if not FLOAT_VALUE.match(part):
+                invalid_float_options.append((dest_name, part))
 
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = []
     for dest_name, allowed in cs.choices_by_dest.items():
@@ -341,18 +351,18 @@ def parse_command(
         dest_name for dest_name in cs.required_dests if dest_name not in flags
     ]
 
-    positional: tuple[OperandKind, ...] = tuple(
-        op.kind for op in spec.positional
+    positional: tuple[ValueType, ...] = tuple(
+        op.type for op in spec.positional
         if not any(cs.dest_of(name) in flags for name in op.provided_by))
 
     # Overflow operands past the declared positional slots pass through
     # classified like the last slot (TEXT when there is none), so a
     # fixed-arity command receives them and raises its own extra-operand
     # UsageError (#452). The parser classifies, it never drops or raises.
-    overflow_kind = positional[-1] if positional else OperandKind.TEXT
+    overflow_kind = positional[-1] if positional else "str"
 
-    classified: list[tuple[str, OperandKind]] = []
-    raw_operands: list[tuple[str, OperandKind]] = []
+    classified: list[tuple[str, ValueType]] = []
+    raw_operands: list[tuple[str, ValueType]] = []
     for j, arg in enumerate(raw_args):
         if j < len(positional):
             kind = positional[j]
@@ -360,17 +370,17 @@ def parse_command(
             kind = cs.rest_kind
         else:
             kind = overflow_kind
-        if kind == OperandKind.PATH:
-            classified.append((resolve_path(arg, cwd), OperandKind.PATH))
-            raw_operands.append((arg, OperandKind.PATH))
+        if kind == "path":
+            classified.append((resolve_path(arg, cwd), "path"))
+            raw_operands.append((arg, "path"))
         else:
-            classified.append((arg, OperandKind.TEXT))
-            raw_operands.append((arg, OperandKind.TEXT))
+            classified.append((arg, kind))
+            raw_operands.append((arg, kind))
         word_kinds[raw_indices[j]] = kind
 
     path_flag_values: list[str] = []
     for flag_name, kind in cs.kind_by_dest.items():
-        if kind != OperandKind.PATH or flag_name not in flags:
+        if kind != "path" or flag_name not in flags:
             continue
         value = flags[flag_name]
         if isinstance(value, list):
@@ -384,7 +394,7 @@ def parse_command(
 
     text_flag_values: list[str] = []
     for flag_name, kind in cs.kind_by_dest.items():
-        if kind != OperandKind.TEXT or flag_name not in flags:
+        if kind == "path" or flag_name not in flags:
             continue
         value = flags[flag_name]
         if isinstance(value, list):
@@ -407,6 +417,7 @@ def parse_command(
         needs_value_options=needs_value_options,
         invalid_value_options=invalid_value_options,
         invalid_int_options=invalid_int_options,
+        invalid_float_options=invalid_float_options,
         missing_required_options=missing_required_options,
     )
 

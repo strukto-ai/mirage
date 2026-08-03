@@ -17,7 +17,7 @@ import json
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.builtin.trello._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
                                         Option)
 from mirage.core.trello._client import card_update
 from mirage.core.trello.normalize import normalize_card
@@ -26,12 +26,12 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--card_id", value_kind=OperandKind.TEXT),
-    Option(long="--name", value_kind=OperandKind.TEXT),
-    Option(long="--desc", value_kind=OperandKind.TEXT),
-    Option(long="--desc_file", value_kind=OperandKind.PATH),
-    Option(long="--due", value_kind=OperandKind.TEXT),
-    Option(long="--closed", value_kind=OperandKind.TEXT),
+    Option(long="--card_id", type="str"),
+    Option(long="--name", type="str"),
+    Option(long="--desc", type="str"),
+    Option(long="--desc_file", type="path"),
+    Option(long="--due", type="str"),
+    Option(long="--closed", type="str"),
 ), )
 
 

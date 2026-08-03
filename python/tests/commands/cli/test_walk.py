@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli import CLISpec, walk
-from mirage.commands.spec.types import OperandKind, Option
+from mirage.commands.spec.types import ValueType, Option
 
 
 async def _verb(config, paths, *texts, **flags):
@@ -27,7 +27,7 @@ def _tree() -> CLISpec:
         options=(
             Option(short="-C",
                    long="--cwd",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    description="run as if started there"),
             Option(short="-v", long="--verbose", count=True),
         ),
@@ -35,7 +35,7 @@ def _tree() -> CLISpec:
             CLISpec(name="gmail",
                     description="Gmail messages",
                     options=(Option(long="--account",
-                                    value_kind=OperandKind.TEXT,
+                                    type="str",
                                     default="primary",
                                     choices=("primary", "work")), ),
                     subcommands=(
@@ -185,7 +185,7 @@ def test_required_group_option_missing_exits_129():
     tree = CLISpec(
         name="tool",
         options=(Option(long="--token",
-                        value_kind=OperandKind.TEXT,
+                        type="str",
                         required=True), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
@@ -207,7 +207,7 @@ def test_optional_value_long_at_group_level():
     tree = CLISpec(
         name="tool",
         options=(Option(long="--color",
-                        value_kind=OperandKind.TEXT,
+                        type="str",
                         value_optional=True), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
@@ -222,7 +222,7 @@ def test_optional_value_long_at_group_level():
 def test_multichar_short_at_group_level():
     tree = CLISpec(
         name="tool",
-        options=(Option(short="-name", value_kind=OperandKind.TEXT), ),
+        options=(Option(short="-name", type="str"), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
     detached = walk("tool", tree, ["-name", "foo", "run"])
@@ -272,7 +272,7 @@ def test_group_ambiguous_prefix_uses_git_wording():
     tree = CLISpec(
         name="tool",
         options=(Option(long="--context",
-                        value_kind=OperandKind.TEXT), Option(long="--count")),
+                        type="str"), Option(long="--count")),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )
     result = walk("tool", tree, ["--co", "run"])
@@ -292,7 +292,6 @@ def test_int_typed_group_option_uses_git_wording():
     tree = CLISpec(
         name="tool",
         options=(Option(long="--depth",
-                        value_kind=OperandKind.TEXT,
                         type="int"), ),
         subcommands=(CLISpec(name="run", fn=_verb), ),
     )

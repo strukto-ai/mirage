@@ -16,12 +16,12 @@ import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import OperandKind
+from mirage.commands.spec.types import ValueType
 from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_kinds)
 
-PATH = OperandKind.PATH
-TEXT = OperandKind.TEXT
+PATH = "path"
+TEXT = "str"
 
 
 def test_spec_for_command_prefers_cwd_mount():

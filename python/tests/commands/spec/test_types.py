@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
                                         Option, spec_flag_names)
 
 
@@ -59,7 +59,7 @@ def test_spec_flag_names_are_canonical_and_ambiguous_mapped():
     # reading False after dest unification.
     spec = CommandSpec(options=(
         Option(short="l"),
-        Option(short="m", long="--max-count", value_kind=OperandKind.TEXT),
+        Option(short="m", long="--max-count", type="str"),
         Option(long="--hidden"),
     ))
     names = spec_flag_names(spec)

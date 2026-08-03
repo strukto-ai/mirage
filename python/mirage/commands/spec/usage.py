@@ -93,6 +93,23 @@ def invalid_int_error(cmd_name: str, option: str,
     return (line + hint).encode(), usage_exit_code(cmd_name)
 
 
+def invalid_float_error(cmd_name: str, option: str,
+                        value: str) -> tuple[bytes, int]:
+    """Refusal for a non-number value on a float-typed option.
+
+    Mirrors argparse's ``invalid float value: '5x'`` the same way
+    invalid_int_error mirrors the int wording.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--timeout').
+        value (str): the rejected value.
+    """
+    line = f"{cmd_name}: invalid float value: '{value}' for '{option}'\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
 def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     """GNU-shaped error for a declared value flag with no argument left.
 

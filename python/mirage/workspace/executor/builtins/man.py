@@ -58,7 +58,7 @@ def _render_options_table(spec: CommandSpec) -> list[str]:
         short = opt.short if opt.short is not None else ""
         long = opt.long if opt.long is not None else ""
         desc = opt.description if opt.description is not None else ""
-        lines.append(f"| {short} | {long} | {opt.value_kind.value} | {desc} |")
+        lines.append(f"| {short} | {long} | {opt.type} | {desc} |")
     lines.append("")
     return lines
 

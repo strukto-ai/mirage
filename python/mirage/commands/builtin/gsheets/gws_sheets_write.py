@@ -16,17 +16,17 @@ import json
 
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.gsheets.write import update_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--spreadsheet", value_kind=OperandKind.TEXT),
-    Option(long="--range", value_kind=OperandKind.TEXT),
-    Option(long="--values", value_kind=OperandKind.TEXT),
-    Option(long="--json-values", value_kind=OperandKind.TEXT),
+    Option(long="--spreadsheet", type="str"),
+    Option(long="--range", type="str"),
+    Option(long="--values", type="str"),
+    Option(long="--json-values", type="str"),
 ), )
 
 

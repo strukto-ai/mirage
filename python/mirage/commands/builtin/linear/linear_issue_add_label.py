@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, FlagView, ValueType,
                                         Option)
 from mirage.core.linear._client import (get_issue, issue_update,
                                         resolve_issue_id)
@@ -26,9 +26,9 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--issue_id", value_kind=OperandKind.TEXT),
-    Option(long="--issue_key", value_kind=OperandKind.TEXT),
-    Option(long="--label_id", value_kind=OperandKind.TEXT),
+    Option(long="--issue_id", type="str"),
+    Option(long="--issue_key", type="str"),
+    Option(long="--label_id", type="str"),
 ), )
 
 

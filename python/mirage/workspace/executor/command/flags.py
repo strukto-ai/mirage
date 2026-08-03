@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec import (CommandSpec, OperandKind, flag_kwarg_name,
+from mirage.commands.spec import (CommandSpec, ValueType, flag_kwarg_name,
                                   parse_command, parse_to_kwargs)
 from mirage.commands.spec.usage import (  # yapf: disable
-    ambiguous_option_error, invalid_argument_error, invalid_int_error,
-    missing_required_error, missing_value_error, unknown_option_error)
+    ambiguous_option_error, invalid_argument_error, invalid_float_error,
+    invalid_int_error, missing_required_error, missing_value_error,
+    unknown_option_error)
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.types import ParsedCommand
 
@@ -98,13 +99,13 @@ def parse_flags(
         repeat_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
-            if opt.value_kind == OperandKind.PATH and opt.multiple
+            if opt.type == "path" and opt.multiple
             for name in (opt.short, opt.long) if name
         }
         single_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
-            if opt.value_kind == OperandKind.PATH and not opt.multiple
+            if opt.type == "path" and not opt.multiple
             for name in (opt.short, opt.long) if name
         }
         if not str_flag_paths:
@@ -124,7 +125,7 @@ def parse_flags(
         paths: list[PathSpec] = []
         texts: list[str] = []
         for value, kind in parsed.args:
-            if kind == OperandKind.PATH:
+            if kind == "path":
                 scope = scope_map.get(value)
                 if scope is None:
                     scope = synthesize_path_spec(value)
@@ -135,12 +136,14 @@ def parse_flags(
             paths, texts, flag_kwargs, parsed.warnings, parsed.invalid_options,
             parsed.ambiguous_options, parsed.option_error_kinds,
             parsed.needs_value_options, parsed.invalid_value_options,
-            parsed.invalid_int_options, parsed.missing_required_options)
+            parsed.invalid_int_options, parsed.invalid_float_options,
+            parsed.missing_required_options)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return ParsedCommand(paths, texts, {}, [], [], [], [], [], [], [], [])
+    return ParsedCommand(paths, texts, {}, [], [], [], [], [], [], [], [],
+                         [])
 
 
 def option_error(cmd_name: str,
@@ -176,6 +179,9 @@ def option_error(cmd_name: str,
     if parsed.invalid_int_options:
         option, value = parsed.invalid_int_options[0]
         return invalid_int_error(cmd_name, option, value)
+    if parsed.invalid_float_options:
+        option, value = parsed.invalid_float_options[0]
+        return invalid_float_error(cmd_name, option, value)
     if parsed.missing_required_options:
         return missing_required_error(cmd_name,
                                       parsed.missing_required_options[0])

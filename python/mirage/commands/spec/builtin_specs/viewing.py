@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+from mirage.commands.spec.types import (CommandSpec, Operand, ValueType,
                                         Option)
 
 SPECS: dict[str, CommandSpec] = {
@@ -30,72 +30,72 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-s", long="--squeeze-blank"),
             Option(short="-u"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'head':
     CommandSpec(
         options=(
             Option(short="-n",
                    long="--lines",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    numeric_shorthand=True),
-            Option(short="-c", long="--bytes", value_kind=OperandKind.TEXT),
+            Option(short="-c", long="--bytes", type="str"),
             Option(short="-q", long="--quiet"),
             Option(long="--silent"),
             Option(short="-v", long="--verbose"),
             Option(short="-z", long="--zero-terminated"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'tail':
     CommandSpec(
         options=(
             Option(short="-n",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    numeric_shorthand=True),
-            Option(short="-c", value_kind=OperandKind.TEXT),
+            Option(short="-c", type="str"),
             Option(short="-q"),
             Option(short="-v"),
             Option(short="-f", long="--follow"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'nl':
     CommandSpec(
         options=(
             Option(short="-b",
                    long="--body-numbering",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-d",
                    long="--section-delimiter",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-f",
                    long="--footer-numbering",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-h",
                    long="--header-numbering",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-l",
                    long="--join-blank-lines",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-n",
                    long="--number-format",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-p", long="--no-renumber"),
             Option(short="-v",
                    long="--starting-line-number",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-i",
                    long="--line-increment",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-w",
                    long="--number-width",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-s",
                    long="--number-separator",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'tac':
     CommandSpec(
@@ -103,67 +103,67 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-b", long="--before"),
             Option(short="-r", long="--regex"),
             Option(short="-s", long="--separator",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'column':
     CommandSpec(
         options=(
             Option(short="-t"),
-            Option(short="-s", value_kind=OperandKind.TEXT),
-            Option(short="-o", value_kind=OperandKind.TEXT),
+            Option(short="-s", type="str"),
+            Option(short="-o", type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'fold':
     CommandSpec(
         options=(
-            Option(short="-w", long="--width", value_kind=OperandKind.TEXT),
+            Option(short="-w", long="--width", type="str"),
             Option(short="-s", long="--spaces"),
             Option(short="-b", long="--bytes"),
             Option(short="-c", long="--characters"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'fmt':
     CommandSpec(
         options=(
-            Option(short="-w", long="--width", value_kind=OperandKind.TEXT),
-            Option(short="-g", long="--goal", value_kind=OperandKind.TEXT),
+            Option(short="-w", long="--width", type="str"),
+            Option(short="-g", long="--goal", type="str"),
             Option(short="-c", long="--crown-margin"),
-            Option(short="-p", long="--prefix", value_kind=OperandKind.TEXT),
+            Option(short="-p", long="--prefix", type="str"),
             Option(short="-s", long="--split-only"),
             Option(short="-t", long="--tagged-paragraph"),
             Option(short="-u", long="--uniform-spacing"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'rev':
-    CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+    CommandSpec(rest=Operand(type="path")),
     'expand':
     CommandSpec(
         options=(
-            Option(short="-t", long="--tabs", value_kind=OperandKind.TEXT),
+            Option(short="-t", long="--tabs", type="str"),
             Option(short="-i", long="--initial"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'unexpand':
     CommandSpec(
         options=(
-            Option(short="-t", long="--tabs", value_kind=OperandKind.TEXT),
+            Option(short="-t", long="--tabs", type="str"),
             Option(short="-a", long="--all"),
             Option(long="--first-only"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'look':
     CommandSpec(
         options=(Option(short="-f"), ),
         positional=(
-            Operand(kind=OperandKind.TEXT),
-            Operand(kind=OperandKind.PATH),
+            Operand(type="str"),
+            Operand(type="path"),
         ),
     ),
     'od':
@@ -171,18 +171,18 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-A",
                    long="--address-radix",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-j",
                    long="--skip-bytes",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-N",
                    long="--read-bytes",
-                   value_kind=OperandKind.TEXT),
+                   type="str"),
             Option(short="-t",
                    long="--format",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    multiple=True),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
 }

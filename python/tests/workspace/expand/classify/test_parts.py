@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import OperandKind
+from mirage.commands.spec.types import ValueType
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.expand.classify.parts import classify_parts
@@ -35,7 +35,7 @@ def test_text_kind_keeps_string():
     result = classify_parts(["cat", "/ram/x"],
                             _registry(),
                             "/",
-                            word_kinds=[OperandKind.TEXT])
+                            word_kinds=["str"])
     assert result[1] == "/ram/x"
 
 
@@ -43,7 +43,7 @@ def test_path_kind_classifies_bare_filename():
     result = classify_parts(["cat", "file.txt"],
                             _registry(),
                             "/ram",
-                            word_kinds=[OperandKind.PATH])
+                            word_kinds=["path"])
     assert isinstance(result[1], PathSpec)
     assert result[1].virtual == "/ram/file.txt"
 
@@ -52,7 +52,7 @@ def test_duplicate_word_kinds_per_slot():
     result = classify_parts(["grep", "*.txt", "*.txt"],
                             _registry(),
                             "/ram",
-                            word_kinds=[OperandKind.TEXT, OperandKind.PATH])
+                            word_kinds=["str", "path"])
     assert result[1] == "*.txt"
     assert isinstance(result[2], PathSpec)
     assert result[2].pattern == "*.txt"

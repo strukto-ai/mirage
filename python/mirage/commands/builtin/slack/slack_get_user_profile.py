@@ -16,13 +16,13 @@ import json
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.slack.users import get_user_profile
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(Option(long="--user_id",
-                                   value_kind=OperandKind.TEXT), ), )
+                                   type="str"), ), )
 
 
 @command("slack-get-user-profile", resource="slack", spec=SPEC)

@@ -15,13 +15,13 @@
 import pytest
 
 from mirage.commands.registry import command
-from mirage.commands.spec import CommandSpec, Operand, OperandKind
+from mirage.commands.spec import CommandSpec, Operand, ValueType
 from mirage.io.types import IOResult
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 
-SPEC = CommandSpec(rest=Operand(kind=OperandKind.PATH), )
+SPEC = CommandSpec(rest=Operand(type="path"), )
 
 
 @command("testcmd", resource="ram", filetype=".custom", spec=SPEC)

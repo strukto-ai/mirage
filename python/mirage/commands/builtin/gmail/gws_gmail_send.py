@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.gmail.send import send_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -26,13 +26,13 @@ SPEC = CommandSpec(
     description="Send a new email via Gmail.",
     options=(
         Option(long="--to",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Recipient email address (required)"),
         Option(long="--subject",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Email subject line (required)"),
         Option(long="--body",
-               value_kind=OperandKind.TEXT,
+               type="str",
                description="Email body (use $'\\n' for newlines; required)"),
     ),
 )

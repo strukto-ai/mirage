@@ -16,15 +16,15 @@ import json
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, ValueType, Option
 from mirage.core.slack.react import add_reaction
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--channel_id", value_kind=OperandKind.TEXT),
-    Option(long="--ts", value_kind=OperandKind.TEXT),
-    Option(long="--reaction", value_kind=OperandKind.TEXT),
+    Option(long="--channel_id", type="str"),
+    Option(long="--ts", type="str"),
+    Option(long="--reaction", type="str"),
 ), )
 
 
