@@ -21,39 +21,44 @@ from mirage.runtime.types import ScriptSource
 
 
 @dataclass(frozen=True, slots=True)
-class CommandFacts:
-    """Parse facts for one command of the line being routed.
+class ParsedCommand:
+    """One command of the line being routed, distilled from the parse.
 
     Args:
         command (str): the command name (first word).
         words (tuple[str, ...]): every word of the command, name first.
         builtin (bool): whether the command has a builtin spec.
         paths (tuple[str, ...]): absolute-path operands.
+        cli (str | None): the installed CLI whose head word ``command``
+            is, None otherwise. Lets a policy steer an installed name
+            between the virtual CLI and a runtime capturing the same
+            word.
     """
 
     command: str
     words: tuple[str, ...]
     builtin: bool
     paths: tuple[str, ...]
+    cli: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PolicyContext:
-    """Facts about the line being routed, parse-before-policy.
+    """What a policy may consult about the line, parse-before-policy.
 
     For ``cat /data/logs.txt | python3 process.py`` typed in ``/data``,
     monty's script (monty captures ``python3``) is consulted with::
 
         ctx.line      == "cat /data/logs.txt | python3 process.py"
         ctx.commands  == (
-            CommandFacts(command="cat",
-                         words=("cat", "/data/logs.txt"),
-                         builtin=True,
-                         paths=("/data/logs.txt",)),
-            CommandFacts(command="python3",
-                         words=("python3", "process.py"),
-                         builtin=True,
-                         paths=()),
+            ParsedCommand(command="cat",
+                          words=("cat", "/data/logs.txt"),
+                          builtin=True,
+                          paths=("/data/logs.txt",)),
+            ParsedCommand(command="python3",
+                          words=("python3", "process.py"),
+                          builtin=True,
+                          paths=()),
         )
         ctx.command   == "python3"  # monty's first captured stage
         ctx.builtin   == True
@@ -66,7 +71,7 @@ class PolicyContext:
 
     Args:
         line (str): the raw command line.
-        commands (tuple[CommandFacts, ...]): parsed commands, empty on
+        commands (tuple[ParsedCommand, ...]): parsed commands, empty on
             a syntax error.
         command (str): the stage addressed to the consulted party: an
             entry script sees its runtime's first captured stage (see
@@ -81,7 +86,7 @@ class PolicyContext:
     """
 
     line: str
-    commands: tuple[CommandFacts, ...]
+    commands: tuple[ParsedCommand, ...]
     command: str
     builtin: bool
     cwd: str
@@ -102,11 +107,11 @@ class PolicyContext:
         Args:
             runtime (Runtime): the runtime being consulted.
         """
-        for fact in self.commands:
-            if fact.command in runtime.captures:
+        for parsed in self.commands:
+            if parsed.command in runtime.captures:
                 return replace(self,
-                               command=fact.command,
-                               builtin=fact.builtin)
+                               command=parsed.command,
+                               builtin=parsed.builtin)
         return self
 
     def to_dict(self, runtime: Runtime | None = None) -> dict[str, Any]:
@@ -117,7 +122,7 @@ class PolicyContext:
         identical in both languages, so a script in any evaluator's
         language (and any transport, in-process or remote) receives
         the same structure. Keys: line, commands (command/words/
-        builtin/paths per stage), command, builtin, cwd, env,
+        builtin/paths/cli per stage), command, builtin, cwd, env,
         session_id, agent_id, mounts, plus runtime (name/captures)
         for per-runtime scripts. from_dict is the inverse, so a
         payload can be stored as JSON and replayed.
@@ -134,6 +139,7 @@ class PolicyContext:
                 "words": list(c.words),
                 "builtin": c.builtin,
                 "paths": list(c.paths),
+                "cli": c.cli,
             } for c in self.commands],
             "command":
             self.command,
@@ -172,10 +178,12 @@ class PolicyContext:
         return cls(
             line=str(payload["line"]),
             commands=tuple(
-                CommandFacts(command=str(c["command"]),
-                             words=tuple(c["words"]),
-                             builtin=bool(c["builtin"]),
-                             paths=tuple(c["paths"]))
+                ParsedCommand(
+                    command=str(c["command"]),
+                    words=tuple(c["words"]),
+                    builtin=bool(c["builtin"]),
+                    paths=tuple(c["paths"]),
+                    cli=(str(c["cli"]) if c.get("cli") is not None else None))
                 for c in payload["commands"]),
             command=str(payload["command"]),
             builtin=bool(payload["builtin"]),

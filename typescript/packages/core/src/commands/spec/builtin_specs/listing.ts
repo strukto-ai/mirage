@@ -35,11 +35,18 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-a' }),
       new Option({ short: '-d', long: '--max-depth', type: 'str' }),
       new Option({ short: '-c' }),
+      new Option({ short: '-L' }),
+      new Option({ short: '-P' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),
   file: new CommandSpec({
-    options: [new Option({ short: '-b' }), new Option({ short: '-i' })],
+    options: [
+      new Option({ short: '-b' }),
+      new Option({ short: '-i' }),
+      new Option({ short: '-L' }),
+      new Option({ short: '-h' }),
+    ],
     rest: new Operand({ type: 'path' }),
   }),
   find: new CommandSpec({
@@ -52,6 +59,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-iname', type: 'str', multiple: true }),
       new Option({ short: '-path', type: 'str', multiple: true }),
       new Option({ short: '-mindepth', type: 'str', multiple: true }),
+      // GNU find's link policy: -P (no follow) is the default, -H
+      // follows only the start point, -L follows everything.
+      new Option({ short: '-P' }),
+      new Option({ short: '-H' }),
+      new Option({ short: '-L' }),
       new Option({ short: '-print' }),
       new Option({ short: '-print0' }),
       new Option({ short: '-delete' }),
@@ -81,6 +93,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-R' }),
       new Option({ short: '-d' }),
       new Option({ short: '-F' }),
+      new Option({ short: '-L' }),
       // Accepted no-op like grep --color (#471).
       new Option({ long: '--color', type: 'str', valueOptional: true }),
     ],
@@ -91,7 +104,11 @@ export const SPECS: Record<string, CommandSpec> = {
     rest: new Operand({ type: 'str' }),
   }),
   stat: new CommandSpec({
-    options: [new Option({ short: '-c', type: 'str' }), new Option({ short: '-f', type: 'str' })],
+    options: [
+      new Option({ short: '-c', type: 'str' }),
+      new Option({ short: '-f', type: 'str' }),
+      new Option({ short: '-L' }),
+    ],
     rest: new Operand({ type: 'path' }),
   }),
   tree: new CommandSpec({

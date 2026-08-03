@@ -346,4 +346,161 @@ describe('symlinks (namespace-backed)', () => {
     expect(dec(r.stdout)).toContain('beta')
     await ws.close()
   })
+  async function seeded(): Promise<Workspace> {
+    const ws = buildWorkspace()
+    await ws.execute('mkdir -p /data/dir')
+    await ws.execute('echo hello > /data/dir/real.txt')
+    await ws.execute('ln -s /data/dir/real.txt /data/link.txt')
+    await ws.execute('ln -s /data/dir /data/dlink')
+    return ws
+  }
+
+  async function dangling(): Promise<Workspace> {
+    const ws = await seeded()
+    await ws.execute('ln -s /data/nope /data/dangle')
+    return ws
+  }
+
+  it('ls -l reports a link operand without following it', async () => {
+    const ws = await seeded()
+    const r = await ws.execute('ls -l /data/link.txt')
+    expect(r.exitCode).toBe(0)
+    const line = dec(r.stdout).trim()
+    expect(line.startsWith('lrwxrwxrwx')).toBe(true)
+    expect(line.endsWith('/data/link.txt -> /data/dir/real.txt')).toBe(true)
+    await ws.close()
+  })
+
+  it('ls -l on a dangling link succeeds', async () => {
+    const ws = await dangling()
+    const r = await ws.execute('ls -l /data/dangle')
+    expect(r.exitCode).toBe(0)
+    expect(dec(r.stdout).trim().endsWith('/data/dangle -> /data/nope')).toBe(true)
+    await ws.close()
+  })
+
+  it('ls -l on a directory link shows the link, bare ls dereferences', async () => {
+    const ws = await seeded()
+    const long = await ws.execute('ls -l /data/dlink')
+    expect(dec(long.stdout).trim().endsWith('/data/dlink -> /data/dir')).toBe(true)
+    const bare = await ws.execute('ls /data/dlink')
+    expect(dec(bare.stdout)).toBe('real.txt\n')
+    await ws.close()
+  })
+
+  it('ls -R lists links and does not descend them', async () => {
+    const ws = await dangling()
+    const out = dec((await ws.execute('ls -R /data')).stdout)
+    expect(out.split('\n').slice(0, 5)).toEqual(['/data:', 'dangle', 'dir', 'dlink', 'link.txt'])
+    expect(out).toContain('/data/dir:')
+    expect(out).not.toContain('/data/dlink:')
+    await ws.close()
+  })
+
+  it('ls -F marks links with an at sign', async () => {
+    const ws = await seeded()
+    const out = dec((await ws.execute('ls -F /data')).stdout)
+    expect(out).toContain('dlink@')
+    expect(out).toContain('link.txt@')
+    await ws.close()
+  })
+
+  it('find reports links and -type l selects them', async () => {
+    const ws = await dangling()
+    expect(dec((await ws.execute('find /data -type l')).stdout)).toBe(
+      '/data/dangle\n/data/dlink\n/data/link.txt\n',
+    )
+    expect(dec((await ws.execute('find /data -type f')).stdout)).toBe('/data/dir/real.txt\n')
+    await ws.close()
+  })
+
+  it('readlink -e fails on a dangling link while -f prints it', async () => {
+    const ws = await dangling()
+    const e = await ws.execute('readlink -e /data/dangle')
+    expect(e.exitCode).toBe(1)
+    expect(dec(e.stdout)).toBe('')
+    const f = await ws.execute('readlink -f /data/dangle')
+    expect(f.exitCode).toBe(0)
+    expect(dec(f.stdout)).toBe('/data/nope\n')
+    await ws.close()
+  })
+
+  it('file describes a link and calls a dangling one broken', async () => {
+    const ws = await dangling()
+    expect(dec((await ws.execute('file /data/link.txt')).stdout)).toBe(
+      '/data/link.txt: symbolic link to /data/dir/real.txt\n',
+    )
+    expect(dec((await ws.execute('file /data/dangle')).stdout)).toBe(
+      '/data/dangle: broken symbolic link to /data/nope\n',
+    )
+    await ws.close()
+  })
+
+  it('du -a accounts for links and does not follow a link operand', async () => {
+    const ws = await dangling()
+    const listed = dec((await ws.execute('du -a /data')).stdout)
+      .split('\n')
+      .filter((l) => l !== '')
+      .map((l) => l.split('\t')[1])
+    expect(listed).toContain('/data/dangle')
+    expect(listed).toContain('/data/dlink')
+    expect(listed).toContain('/data/link.txt')
+    // GNU du reports the link itself without -L; mirage sizes it by the
+    // target length because du counts bytes, not blocks.
+    const one = dec((await ws.execute('du /data/link.txt')).stdout)
+      .trim()
+      .split('\t')
+    expect(one[1]).toBe('/data/link.txt')
+    expect(Number(one[0])).toBe('/data/dir/real.txt'.length)
+    await ws.close()
+  })
+
+  it('stat lstats a link and -L dereferences', async () => {
+    const ws = await seeded()
+    expect(dec((await ws.execute('stat /data/link.txt')).stdout)).toContain('type=symlink')
+    expect(dec((await ws.execute('stat -L /data/link.txt')).stdout)).toContain('type=text')
+    await ws.close()
+  })
+  it('find -L classifies a link by its target', async () => {
+    const ws = buildWorkspace()
+    for (const c of [
+      'mkdir -p /data/d/sub',
+      'echo hello > /data/d/real.txt',
+      'echo inner > /data/d/sub/inner.txt',
+      'ln -s /data/d/real.txt /data/d/flink',
+      'ln -s /data/d/sub /data/d/dlink',
+      'ln -s /data/nowhere /data/d/dangle',
+    ]) {
+      await ws.execute(c)
+    }
+    const f = await ws.execute('find -L /data/d -type f')
+    expect(dec(f.stdout).trimEnd().split('\n')).toEqual([
+      '/data/d/flink',
+      '/data/d/real.txt',
+      '/data/d/sub/inner.txt',
+    ])
+    const d = await ws.execute('find -L /data/d -type d')
+    expect(dec(d.stdout).trimEnd().split('\n')).toEqual(['/data/d', '/data/d/dlink', '/data/d/sub'])
+    // Only a dangling link stays type l under -L.
+    const l = await ws.execute('find -L /data/d -type l')
+    expect(dec(l.stdout).trimEnd().split('\n')).toEqual(['/data/d/dangle'])
+    await ws.close()
+  })
+
+  it('find without -L reports every link as l', async () => {
+    const ws = buildWorkspace()
+    for (const c of [
+      'mkdir -p /data/d/sub',
+      'echo hello > /data/d/real.txt',
+      'ln -s /data/d/real.txt /data/d/flink',
+      'ln -s /data/d/sub /data/d/dlink',
+    ]) {
+      await ws.execute(c)
+    }
+    const l = await ws.execute('find /data/d -type l')
+    expect(dec(l.stdout).trimEnd().split('\n')).toEqual(['/data/d/dlink', '/data/d/flink'])
+    const f = await ws.execute('find /data/d -type f')
+    expect(dec(f.stdout).trimEnd().split('\n')).toEqual(['/data/d/real.txt'])
+    await ws.close()
+  })
 })

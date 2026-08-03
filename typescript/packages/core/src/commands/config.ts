@@ -18,7 +18,7 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../workspace/executor/runtime.ts'
-import type { StatOverlay } from '../ops/config.ts'
+import type { LinkView, StatOverlay } from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
@@ -56,6 +56,11 @@ export interface CommandOpts {
   execAllowed?: boolean
   runtime?: Runtime
   statOverlay?: StatOverlay
+  // The namespace's symlink facts. Symlinks are namespace state no
+  // backend readdir or stat can see; a command that does not read this
+  // simply ignores it, so there is no allowlist of symlink-aware
+  // commands anywhere.
+  links?: LinkView
   signal?: AbortSignal
   timeoutSeconds?: number
 }

@@ -14,6 +14,7 @@
 
 import type { FileStat } from '../../types.ts'
 import { FileType } from '../../types.ts'
+import { FILE_MIME_MAP } from './constants.ts'
 
 export function detectFileType(header: Uint8Array, stat: FileStat): FileType {
   if (stat.type !== null && stat.type !== FileType.BINARY) return stat.type
@@ -49,27 +50,12 @@ function startsWith(data: Uint8Array, sig: number[]): boolean {
   return true
 }
 
-export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
-  text: 'text/plain; charset=us-ascii',
-  json: 'application/json; charset=us-ascii',
-  csv: 'text/csv; charset=us-ascii',
-  directory: 'inode/directory',
-  binary: 'application/octet-stream',
-  'image/png': 'image/png',
-  'image/jpeg': 'image/jpeg',
-  'image/gif': 'image/gif',
-  'application/zip': 'application/zip',
-  'application/gzip': 'application/gzip',
-  'application/pdf': 'application/pdf',
-  parquet: 'application/octet-stream',
-  orc: 'application/octet-stream',
-  feather: 'application/octet-stream',
-  hdf5: 'application/octet-stream',
-})
-
 export function formatFileResult(
   pathOriginal: string,
-  result: FileType,
+  // A FileType, or a ready-made description (a symlink line) that
+  // passes through as-is. FileType is a string union, so one `string`
+  // covers both.
+  result: string,
   brief: boolean,
   mime: boolean,
 ): string {

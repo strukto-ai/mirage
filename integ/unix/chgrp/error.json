@@ -69,40 +69,6 @@
       }
     },
     {
-      "id": "chgrp_recursive_unsupported",
-      "seq": 611006,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "opfs",
-        "s3",
-        "databricks",
-        "gridfs",
-        "s3-prefix",
-        "databricks-prefix",
-        "gridfs-prefix",
-        "hf",
-        "hf-prefix",
-        "dropbox",
-        "dropbox-root",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh",
-        "nextcloud",
-        "gdrive",
-        "gdrive-folder",
-        "box"
-      ],
-      "command": "chgrp -R staff /data/cg 2>&1",
-      "expect": {
-        "exit": 2,
-        "stdout": "chgrp: -R is not supported\n",
-        "stderr": ""
-      }
-    },
-    {
       "id": "chgrp_enoent",
       "seq": 611007,
       "targets": [

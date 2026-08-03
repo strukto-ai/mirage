@@ -15,7 +15,7 @@
 import json
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy.types import CommandFacts, PolicyContext
+from mirage.runtime.policy.types import ParsedCommand, PolicyContext
 from mirage.runtime.types import RunArgs, RunResult
 
 
@@ -29,17 +29,18 @@ class StubRuntime(Runtime):
 
 def sample_ctx() -> PolicyContext:
     return PolicyContext(
-        line="cat /data/x | python3 p.py",
-        commands=(CommandFacts(command="cat",
-                               words=("cat", "/data/x"),
-                               builtin=True,
-                               paths=("/data/x", )),
-                  CommandFacts(command="python3",
-                               words=("python3", "p.py"),
-                               builtin=True,
-                               paths=())),
-        command="cat",
-        builtin=True,
+        line="slack send /data/x | python3 p.py",
+        commands=(ParsedCommand(command="slack",
+                                words=("slack", "send", "/data/x"),
+                                builtin=False,
+                                paths=("/data/x", ),
+                                cli="slack"),
+                  ParsedCommand(command="python3",
+                                words=("python3", "p.py"),
+                                builtin=True,
+                                paths=())),
+        command="slack",
+        builtin=False,
         cwd="/data",
         env={"K": "V"},
         session_id="s1",

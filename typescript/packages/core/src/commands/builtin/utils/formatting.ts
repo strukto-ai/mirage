@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, type FileStat } from '../../../types.ts'
-
-const SIZE_UNITS: Record<string, number> = {
-  B: 1,
-  K: 1024,
-  M: 1024 ** 2,
-  G: 1024 ** 3,
-  T: 1024 ** 4,
-}
+import { FileType, LINK_TARGET_KEY, type FileStat } from '../../../types.ts'
+import {
+  DEFAULT_MODES,
+  EPOCH_LS_TIME,
+  MONTHS,
+  NUMERIC_PREFIX,
+  SIZE_UNITS,
+  TYPE_CHARS,
+} from './constants.ts'
 
 export function humanSize(n: number): string {
   const units = ['B', 'K', 'M', 'G', 'T']
@@ -42,8 +42,6 @@ export function parseSize(text: string): number {
   return parseInt(text, 10)
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
 function permTriplet(bits: number, special?: string): string {
   const execBit =
     special !== undefined
@@ -57,9 +55,8 @@ function permTriplet(bits: number, special?: string): string {
 }
 
 export function lsModeString(s: FileStat): string {
-  const isDir = s.type === FileType.DIRECTORY
-  const typeChar = isDir ? 'd' : '-'
-  const mode = s.mode ?? (isDir ? 0o755 : 0o644)
+  const typeChar = (s.type != null ? TYPE_CHARS[s.type] : undefined) ?? '-'
+  const mode = s.mode ?? (s.type != null ? (DEFAULT_MODES[s.type] ?? 0o644) : 0o644)
   return (
     typeChar +
     permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +
@@ -74,10 +71,10 @@ function padLeft(s: string, width: number): string {
 
 function lsTimeString(modified: string | null | undefined): string {
   if (modified === null || modified === undefined || modified === '') {
-    return 'Jan  1 00:00'
+    return EPOCH_LS_TIME
   }
   const t = Date.parse(modified)
-  if (Number.isNaN(t)) return 'Jan  1 00:00'
+  if (Number.isNaN(t)) return EPOCH_LS_TIME
   const d = new Date(t)
   const month = MONTHS[d.getUTCMonth()] ?? 'Jan'
   const day = padLeft(String(d.getUTCDate()), 2)
@@ -93,6 +90,13 @@ export interface LsLongOptions {
   sizeWidth?: number
 }
 
+// The name column: GNU appends `-> target` for a symlink row.
+function lsName(s: FileStat): string {
+  if (s.type !== FileType.SYMLINK) return s.name
+  const target = s.extra[LINK_TARGET_KEY]
+  return typeof target === 'string' && target !== '' ? `${s.name} -> ${target}` : s.name
+}
+
 export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {}): string[] {
   const owner = opts.owner ?? 'user'
   const group = opts.group ?? 'user'
@@ -105,17 +109,15 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
     // compact placeholder form instead of inventing size 0 + epoch mtime,
     // mirroring the python formatter.
     if (s.size == null && s.modified == null) {
-      return `${mode}\t-\t-\t${s.name}`
+      return `${mode}\t-\t-\t${lsName(s)}`
     }
     const size = padLeft(sizes[i] ?? '0', width)
     const time = lsTimeString(s.modified)
     const who = s.uid !== null ? String(s.uid) : owner
     const grp = s.gid !== null ? String(s.gid) : group
-    return `${mode} 1 ${who} ${grp} ${size} ${time} ${s.name}`
+    return `${mode} 1 ${who} ${grp} ${size} ${time} ${lsName(s)}`
   })
 }
-
-const NUMERIC_PREFIX = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/
 
 export function toNumber(val: string): number {
   const m = NUMERIC_PREFIX.exec(val.trim())

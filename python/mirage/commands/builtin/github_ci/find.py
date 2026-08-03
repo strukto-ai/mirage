@@ -26,6 +26,7 @@ from mirage.core.github_ci.readdir import is_cross_run_root, is_dir_name
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -60,6 +61,8 @@ async def find(
     empty: bool = False,
     prefix: str = "",
     index: IndexCacheStore,
+    L: bool = False,
+    links: LinkView | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     # The wrapper only exists for the cross-run guard: walking every run
@@ -88,5 +91,7 @@ async def find(
                                        stat=partial(_stat, accessor),
                                        is_dir_name=is_dir_name,
                                        index=index,
-                                       args=args))
+                                       args=args,
+                                       links=links,
+                                       follow=L))
     return format_records(results), IOResult()

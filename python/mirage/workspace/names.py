@@ -37,7 +37,12 @@ JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "ps"})
 
 # Commands with lstat semantics: they act on the symlink entry itself,
 # so dispatch must not rewrite their operands through the link table.
-NO_FOLLOW_COMMANDS = frozenset(
-    {"rm", "mv", "ln", "readlink", "rmdir", "unlink"})
+# `stat` is here because GNU stat lstats, but it takes -L to dereference
+# after all, which route's `dereferences` reads back out of the command
+# line; `file`, `du` and `find` are the same shape.
+NO_FOLLOW_COMMANDS = frozenset({
+    "rm", "mv", "ln", "readlink", "rmdir", "unlink", "stat", "file", "du",
+    "find"
+})
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS

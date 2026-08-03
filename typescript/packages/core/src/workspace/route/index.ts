@@ -17,6 +17,8 @@ export {
   NAMESPACE_COMMANDS,
   NO_FOLLOW_COMMANDS,
   UNSUPPORTED_BUILTINS,
+  dereferences,
+  reportsLink,
 } from './constants.ts'
 export { route } from './route.ts'
 export { Consumer, SHELL_CONSUMERS, WordPolicy, wordPolicy } from './types.ts'

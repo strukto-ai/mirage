@@ -89,11 +89,71 @@ async def handle_ln(
     return ok("ln", out)
 
 
-def handle_readlink(
+async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
+    """Whether a resolved virtual path names something that exists.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path.
+    """
+    spec = PathSpec(virtual=virtual,
+                    directory=virtual[:virtual.rfind("/") + 1] or "/",
+                    resource_path="")
+    try:
+        return await _stat_or_none(dispatch, spec) is not None
+    except (OSError, ValueError):
+        return False
+
+
+async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
+                           virtual: str) -> FileStat | None:
+    """The stat of what a link points at, or None when it dangles.
+
+    Under ``-L`` the reported entity is the target, so its type drives
+    ``-type`` and its size and mtime drive ``-size`` and ``-mtime``. The
+    stat goes through dispatch rather than one backend because a link
+    may point into another mount.
+
+    Only the two ways a link can legitimately have no target are mapped
+    to None: a loop (ELOOP) and a missing target, the latter by
+    ``_stat_or_none``. Every other backend failure propagates, because a
+    permission or connection error is not a dangling link and reporting
+    it as one would print the link as ``-type l`` and exit 0.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path of the link.
+    """
+    try:
+        target = namespace.follow(virtual)
+    except CycleError:
+        return None
+    spec = PathSpec(virtual=target,
+                    directory=target[:target.rfind("/") + 1] or "/",
+                    resource_path="")
+    return await _stat_or_none(dispatch, spec)
+
+
+async def handle_readlink(
     namespace: Namespace,
+    dispatch: Callable[..., Any],
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
+    """Print a symlink's target, GNU readlink semantics.
+
+    The three canonicalizing flags differ only in how much of the
+    resolved path has to exist: ``-m`` requires nothing, ``-f`` requires
+    every component but the last, and ``-e`` requires all of it. A path
+    that falls short prints nothing and exits 1.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        dispatch (Callable): op dispatcher, used for the existence check.
+        session (Session): current session, for the working directory.
+        args (list[str | PathSpec]): the command's words after the name.
+    """
     flags, operands = split_flags(args, "fenm")
     if not operands:
         return fail("readlink", "readlink: missing operand\n")
@@ -106,9 +166,16 @@ def handle_readlink(
             # -f/-e/-m canonicalize: resolve every symlink (including a
             # trailing one) and normalize the path, GNU realpath-style.
             try:
-                lines.append(posixpath.normpath(namespace.follow(abs_op)))
+                resolved = posixpath.normpath(namespace.follow(abs_op))
             except CycleError:
                 exit_code = 1
+                continue
+            probe = (resolved if "e" in flags else
+                     posixpath.dirname(resolved) if "f" in flags else None)
+            if probe is not None and not await path_exists(dispatch, probe):
+                exit_code = 1
+                continue
+            lines.append(resolved)
             continue
         target = namespace.readlink(abs_op)
         if target is None:
@@ -269,6 +336,8 @@ __all__ = [
     "follow_paths",
     "handle_ln",
     "handle_readlink",
+    "link_target_stat",
+    "path_exists",
     "link_flags",
     "prepare_mv",
     "strip_link_operands",

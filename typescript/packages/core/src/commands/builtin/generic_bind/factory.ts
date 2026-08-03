@@ -16,7 +16,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { FileStat, type PathSpec } from '../../../types.ts'
+import { type PathSpec } from '../../../types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { type CommandIO, type StatOp, resolveGlobOf, supports } from './adapter.ts'
@@ -31,15 +31,7 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
     if (manager === null) return result
     const cached = await manager.cachedBytes(path)
     if (cached === null) return result
-    return new FileStat({
-      name: result.name,
-      size: cached.length,
-      modified: result.modified,
-      fingerprint: result.fingerprint,
-      revision: result.revision,
-      type: result.type,
-      extra: result.extra,
-    })
+    return result.with({ size: cached.length })
   }
 }
 

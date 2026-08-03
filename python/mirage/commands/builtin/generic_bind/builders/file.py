@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic.file import file_cmd as generic_file
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import PathSpec
 
 
@@ -30,6 +31,7 @@ async def file(
     b: bool = False,
     i: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    links: LinkView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
@@ -40,7 +42,8 @@ async def file(
                                                   index),
                               stat_fn=bound_op(ops.stat, accessor, index),
                               b=b,
-                              i=i)
+                              i=i,
+                              links=links)
 
 
 BUILDER = Builder('file', file, None, False, None, read=True)

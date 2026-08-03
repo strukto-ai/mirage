@@ -18,7 +18,9 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 export interface FindEntry {
   key: string
   name: string
-  kind: 'f' | 'd'
+  // 'l' is a namespace symlink: GNU find without -L reports the link
+  // itself and never walks through it, so it is never 'f' or 'd'.
+  kind: 'f' | 'd' | 'l'
   depth: number
   isEmpty?: boolean | null
 }

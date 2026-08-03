@@ -30,7 +30,7 @@
       "command": "ls -1 /data/sub",
       "expect": {
         "exit": 0,
-        "stdout": "arch.zip\ndeep\nnested.txt\nlink.txt\n",
+        "stdout": "arch.zip\ndeep\nlink.txt\nnested.txt\n",
         "stderr": ""
       }
     }

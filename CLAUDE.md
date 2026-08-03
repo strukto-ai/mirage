@@ -46,6 +46,82 @@ Command history is a recording, not a command log. A hidden `Observer` records e
 - **Snapshots.** History is captured as events into snapshot state and restored on load.
 - **Format is GNU bash, not zsh** (`#<epoch>`, not `: <ts>:<dur>;<cmd>`).
 
+## Symlinks
+
+Symlinks are **namespace state, not backend state**. The `Namespace` node table
+owns them (target stored verbatim as typed), no resource stores or reports one,
+and no backend `readdir` or `stat` can see one. Three consequences, in the order
+they bite:
+
+- **A new resource needs no symlink code at all.** Links live above every
+  backend, so a backend author never implements, stores, or forwards one. This
+  is the whole point of keeping them in the namespace; do not push link
+  awareness down into a resource or an accessor.
+- **A command opts in by naming the parameter, nothing else.** Declare
+  `links: LinkView | None = None` on the wrapper and the generic and the
+  dispatcher starts passing it; delete the parameter and it stops. `execute_cmd`
+  offers the fact to every handler and `accepts_kwarg` (`utils/params.py`)
+  decides delivery from the signature, so there is no allowlist, spec field, or
+  registry that can fall out of step. A bare `**kwargs` deliberately does not
+  count as consent: every wrapper has one, and it is the opaque bag of the
+  user's typed command-line flags, forwarded wholesale to the generic. Counting
+  it would file a live namespace object among the parsed flags of every command
+  in the repo. This is the same rule already stated for `stdin`/`index`/`prefix`
+  under "Command wrappers and flags", and `stat_overlay` is delivered the same
+  way.
+  `LinkView` bundles every link fact (`stat_at`, `children`, `subtree`,
+  `resolve`, `exists`, `target_stat`) so a command that grows a new need adds a
+  field read, not a new keyword threaded through `execute_cmd`, the builder and
+  the generic. Families wired today: `ls`, `stat`, `find`, `du`, `file`.
+  `exists` and `target_stat` answer through the op dispatcher, not one
+  backend's stat, so a link that points into another mount resolves correctly.
+- **A bespoke command in one of those families must declare it too.** The
+  opt-in is the whole mechanism, so a backend that ships its own `find`/`ls`/
+  `du`/`stat`/`file` and omits the parameter still runs, still exits 0, and
+  simply cannot see a link, which nothing notices until someone makes one on
+  that backend. `tests/commands/test_links_optin.py` asserts it instead: it
+  derives the link-aware names from the generic builders and fails naming any
+  registered command that shadows one without accepting `links`. TypeScript
+  needs no equivalent because wrappers forward the whole `opts` object, so a
+  generic reads `opts.links` whatever the wrapper declares; the one command
+  that walks its own tree (`email/find`) calls `linkResults` directly for the
+  same reason.
+- **Merge links in the generic, above the native-op/walk fork.** `find` and `du`
+  each have two paths: a backend with a native op (`find_core`, `du_size`/
+  `du_entries`) and a backend walked by `readdir`. Link merging lives in one
+  shared place per family (`link_results` in `generic/find.py`, `link_leaves` in
+  `generic/du.py`) that both paths call. Merging inside only one path makes a
+  mount's symlink behavior depend on whether its backend happens to ship a
+  native op, which is the worst kind of divergence to debug.
+
+Follow policy is two symmetric tables in `workspace/route/constants.py`, both
+read off the raw command line (operand rewriting happens before flag parsing):
+`NO_FOLLOW_COMMANDS` lists commands that lstat (`rm`, `mv`, `ln`, `readlink`,
+`rmdir`, `unlink`, `stat`, `file`, `du`, `find`), with `DEREFERENCE_FLAGS`
+naming the flag that turns following back on (`-L`). `find` states its policy as
+a leading `-P`/`-H`/`-L` option instead, last one wins, so it lives in
+`LAST_WINS_LINK_OPTIONS`;
+`NO_FOLLOW_FLAGS` is the mirror, for a following command that a flag makes lstat
+(`ls -l` and `ls -d` report a command-line link itself, while a bare `ls`
+dereferences a link to a directory, and `ls -L` overrides both).
+
+Those tables only cover the *operand*; honoring `-L` below it is the generic's
+job, not the router's.
+
+Rendering derives from one fact: `link_stat` builds
+the row with `FileType.SYMLINK` and the target under `FileStat.extra`
+(`LINK_TARGET_KEY`), so `lrwxrwxrwx`, the `name -> target` column, `-F`'s `@`,
+and `file`'s "symbolic link to" all follow from it without a second lookup.
+
+`du` sizes a link at its target string's length. This is not a divergence:
+mirage's `du` counts bytes, which is GNU's `--apparent-size --block-size=1`
+(`du -b`) mode, and in that mode GNU reports a symlink as `len(target)` too. The
+familiar `0` comes from GNU's default 1 KiB *block* mode, where a short target
+sits inline in the inode and occupies no data blocks (`stat` reports
+`size=15 blocks=0` for it). mirage has no block mode at all, so `0` is not an
+option it can express; comparing against it would also make every regular file
+look wrong (a 6-byte file is `6` in bytes, `4` in 1 KiB blocks).
+
 ## FUSE
 
 - **The mount layer is split core/adapter in both languages.** `MountCore`

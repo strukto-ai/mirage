@@ -22,6 +22,7 @@ from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -72,6 +73,8 @@ async def du(
     c: bool = False,
     index: IndexCacheStore,
     cwd: PathSpec | str = "/",
+    L: bool = False,
+    links: LinkView | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     out = await run_du(
@@ -87,5 +90,6 @@ async def du(
         c=c,
         max_depth=max_depth,
         d=d,
+        links=None if L else links,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

@@ -158,3 +158,27 @@ async def test_yaml_unknown_cli_key_fails_loud():
     })
     with pytest.raises(ValueError, match="unknown cli 'nope'"):
         Workspace(**cfg.to_workspace_kwargs())
+
+
+@pytest.mark.asyncio
+async def test_policy_sees_the_cli_fact():
+    denied: list[str | None] = []
+
+    def policy(ctx):
+        denied.append(ctx.commands[0].cli if ctx.commands else None)
+        if ctx.commands and ctx.commands[0].cli == "slack-eng":
+            return {"deny": "cli lines are frozen"}
+        return None
+
+    workspace = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                          mode=MountMode.WRITE,
+                          policy=policy)
+    workspace.register_cli("slack-eng", make_tree(), config={"token": "tok"})
+    io = await workspace.execute("slack-eng message send -t x hi")
+    assert io.exit_code == 126
+    err = await materialize(io.stderr) if io.stderr else b""
+    assert b"policy denied" in err
+    assert denied[-1] == "slack-eng"
+    io = await workspace.execute("echo unaffected")
+    assert io.exit_code == 0
+    assert denied[-1] is None

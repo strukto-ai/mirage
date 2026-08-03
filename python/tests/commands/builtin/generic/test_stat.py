@@ -4,8 +4,10 @@ import pytest
 
 from mirage.commands.builtin.generic.stat import stat
 from mirage.io.types import materialize
+from mirage.ops.types import LinkView
 from mirage.resource.ram import RAMResource
-from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.types import (LINK_TARGET_KEY, FileStat, FileType, MountMode,
+                          PathSpec)
 from mirage.workspace import Workspace
 
 _MTIME = "2026-01-02T15:30:45Z"
@@ -266,3 +268,78 @@ async def test_stat_and_ls_agree_on_owner():
     _, ls_long, _ = await _run(ws, "ls -l /data/f.txt")
     assert stat_owner.strip() == "agent7 agent7"
     assert "agent7 agent7" in ls_long
+
+
+def _link_fs(target: str = "/data/f.txt") -> FileStat:
+    return FileStat(name="link",
+                    size=len(target.encode()),
+                    modified=_MTIME,
+                    type=FileType.SYMLINK,
+                    extra={LINK_TARGET_KEY: target})
+
+
+def _link_lookup(virtual: str) -> FileStat | None:
+    return _link_fs() if virtual.endswith("link") else None
+
+
+async def _always_exists(virtual: str) -> bool:
+    return True
+
+
+async def _no_target(virtual: str) -> FileStat | None:
+    return None
+
+
+_LINKS = LinkView(stat_at=_link_lookup,
+                  children=lambda directory: [],
+                  subtree=lambda directory: [],
+                  resolve=lambda virtual: virtual,
+                  exists=_always_exists,
+                  target_stat=_no_target)
+
+
+@pytest.mark.asyncio
+async def test_a_link_operand_reports_the_link_not_its_target():
+    """GNU stat lstats: no -L means the link is what gets reported."""
+    out, io = await stat([PathSpec.from_str_path("/data/link")],
+                         stat_fn=partial(_const_stat, _fs()),
+                         links=_LINKS)
+    assert io.exit_code == 0
+    text = (await materialize(out)).decode()
+    assert "name=link" in text
+    assert "type=symlink" in text
+
+
+@pytest.mark.asyncio
+async def test_dash_l_dereferences_instead_of_reporting_the_link():
+    out, io = await stat([PathSpec.from_str_path("/data/link")],
+                         stat_fn=partial(_const_stat, _fs()),
+                         links=_LINKS,
+                         L=True)
+    assert io.exit_code == 0
+    text = (await materialize(out)).decode()
+    assert "name=f.txt" in text
+    assert "type=text" in text
+
+
+@pytest.mark.asyncio
+async def test_a_non_link_operand_still_reaches_the_backend():
+    out, io = await stat([PathSpec.from_str_path("/data/f.txt")],
+                         stat_fn=partial(_const_stat, _fs()),
+                         links=_LINKS)
+    assert io.exit_code == 0
+    assert "name=f.txt" in (await materialize(out)).decode()
+
+
+@pytest.mark.asyncio
+async def test_format_directives_describe_a_link_as_gnu_does():
+    """%F names the type, %A the mode string, %f the type bits."""
+    assert await _render("%F", _link_fs()) == "symbolic link"
+    assert await _render("%A", _link_fs()) == "lrwxrwxrwx"
+    assert (await _render("%f", _link_fs())) == "a1ff"
+
+
+@pytest.mark.asyncio
+async def test_link_size_is_the_target_string_length():
+    assert await _render("%s", _link_fs("/a/very/long/target")) == str(
+        len("/a/very/long/target"))

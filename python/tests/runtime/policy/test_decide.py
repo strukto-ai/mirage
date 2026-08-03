@@ -21,9 +21,9 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
                                    PolicyError, RouteResult, ScriptSource,
-                                   command_facts, decide_line, evaluate_policy,
+                                   decide_line, evaluate_policy,
                                    evaluate_script, evaluator_of,
-                                   parse_verdict)
+                                   parse_verdict, parsed_commands)
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult
@@ -47,11 +47,11 @@ class BetaRuntime(Runtime):
 
 
 def ctx_for(line: str) -> PolicyContext:
-    facts = command_facts(parse(line))
+    commands = parsed_commands(parse(line))
     return PolicyContext(line=line,
-                         commands=facts,
-                         command=facts[0].command if facts else "",
-                         builtin=facts[0].builtin if facts else False,
+                         commands=commands,
+                         command=commands[0].command if commands else "",
+                         builtin=commands[0].builtin if commands else False,
                          cwd="/",
                          env={},
                          session_id="s",

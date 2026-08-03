@@ -15,16 +15,22 @@
 import type { Runtime } from '../runtime.ts'
 import type { EvalValue } from '../runtime_types.ts'
 
-/** Parse facts for one command of the line being routed. */
-export interface CommandFacts {
+/** One command of the line being routed, distilled from the parse. */
+export interface ParsedCommand {
   command: string
   words: readonly string[]
   builtin: boolean
   paths: readonly string[]
+  /**
+   * The installed CLI whose head word `command` is, null otherwise.
+   * Lets a policy steer an installed name between the virtual CLI and
+   * a runtime capturing the same word.
+   */
+  cli: string | null
 }
 
 /**
- * Facts about the line being routed, parse-before-policy. `command` /
+ * What a policy may consult about the line, parse-before-policy. `command` /
  * `builtin` name the stage addressed to the consulted party: an entry
  * script sees its runtime's first captured stage (see ctxForRuntime),
  * the global policy sees the line's first command.
@@ -53,7 +59,7 @@ export interface CommandFacts {
  */
 export interface PolicyContext {
   line: string
-  commands: readonly CommandFacts[]
+  commands: readonly ParsedCommand[]
   command: string
   builtin: boolean
   cwd: string
@@ -70,8 +76,8 @@ export interface PolicyContext {
  * JSON-shaped (strings, bools, lists, dicts), snake_case keys,
  * identical in both languages, so a script in any evaluator's
  * language (and any transport, in-process or remote) receives the
- * same structure. Keys: line, commands (command/words/builtin/paths
- * per stage), command, builtin, cwd, env, session_id, agent_id,
+ * same structure. Keys: line, commands (command/words/builtin/paths/
+ * cli per stage), command, builtin, cwd, env, session_id, agent_id,
  * mounts, plus runtime (name/captures) for per-runtime scripts.
  * policyContextFromPayload is the inverse, so a payload can be stored
  * as JSON and replayed.
@@ -87,6 +93,7 @@ export function policyContextPayload(
       words: [...c.words],
       builtin: c.builtin,
       paths: [...c.paths],
+      cli: c.cli,
     })),
     command: ctx.command,
     builtin: ctx.builtin,
@@ -115,6 +122,7 @@ export function policyContextFromPayload(payload: Record<string, unknown>): Poli
     words: (c.words as string[]).slice(),
     builtin: Boolean(c.builtin),
     paths: (c.paths as string[]).slice(),
+    cli: typeof c.cli === 'string' ? c.cli : null,
   }))
   return {
     line: String(payload.line),

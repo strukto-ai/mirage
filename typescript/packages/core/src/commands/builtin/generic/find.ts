@@ -18,12 +18,13 @@ import { isEnoent, modifiedTs } from '../../../core/generic/find.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'
-import { PathSpec, type FileStat } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { optionsTree, prefixPathNodes } from '../findEval.ts'
+import { keep, optionsTree, prefixPathNodes, type FindEntry, type PredNode } from '../findEval.ts'
+import type { LinkView } from '../../../ops/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -125,6 +126,81 @@ function extractOrNames(name: string | null, texts: readonly string[]): string[]
   return names
 }
 
+// Namespace symlinks under the search root that match the expression.
+//
+// Symlinks live in the namespace, not in any backend, so a backend's
+// find never sees them. Merging them here, above every backend, is what
+// keeps a mount's symlink behavior from depending on its backend.
+//
+// GNU find without -L reports the link itself and never walks through
+// it, so a link is kind 'l'. Its size is the target string's length,
+// which is what -size compares, and it carries the link's own mtime.
+//
+// Under -L a link is classified by what it points at instead: a link to
+// a file tests as 'f', a link to a directory as 'd', and only a dangling
+// link stays 'l' (GNU reports the link itself when the target cannot be
+// stat'd). -size and -mtime then compare the target's stat, since that
+// is the file being reported.
+export async function linkResults(
+  links: LinkView | null,
+  searchRoot: string,
+  prefix: string,
+  searchKey: string,
+  tree: PredNode,
+  minDepth: number | null,
+  maxDepth: number | null,
+  minSize: number | null,
+  maxSize: number | null,
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+  follow: boolean,
+): Promise<string[]> {
+  if (links === null) return []
+  const out: string[] = []
+  // GNU find's default is -P: a start point that is itself a symlink is
+  // reported as the link and never walked through. The backend cannot
+  // see it at all, so the subtree scan (which only covers entries
+  // *under* the root) would miss it.
+  const entries = [...links.subtree(searchRoot)]
+  const own = links.statAt(searchRoot)
+  if (own !== null) entries.push([searchRoot, own])
+  for (const [path, ownStat] of entries) {
+    let st = ownStat
+    let kind: FindEntry['kind'] = 'l'
+    if (follow) {
+      const target = await links.targetStat(path)
+      if (target !== null) {
+        kind = target.type === FileType.DIRECTORY ? 'd' : 'f'
+        st = target
+      }
+    }
+    const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
+    const rel = stripSlash(key)
+    const depth =
+      searchKey !== ''
+        ? rel === searchKey
+          ? 0
+          : rel.split('/').length - searchKey.split('/').length
+        : rel === ''
+          ? 0
+          : rel.split('/').length
+    if (maxDepth !== null && depth > maxDepth) continue
+    const entry: FindEntry = { key, name: path.split('/').pop() ?? path, kind, depth }
+    if (!keep(entry, tree, minDepth)) continue
+    const size = st.size ?? 0
+    if (minSize !== null && size < minSize) continue
+    if (maxSize !== null && size > maxSize) continue
+    if (mtimeMin !== null || mtimeMax !== null) {
+      const ts = st.modified !== null ? Date.parse(st.modified) / 1000 : null
+      if (ts === null) continue
+      if (mtimeMin !== null && ts < mtimeMin) continue
+      if (mtimeMax !== null && ts > mtimeMax) continue
+    }
+    out.push(path)
+  }
+  return out
+}
+
 export async function findGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -213,9 +289,10 @@ export async function findGeneric(
       ...options,
       tree: prefixPathNodes(optionsTree(options), prefix),
     }
+    const rootIsLink = (opts.links ?? null)?.statAt(root.virtual) != null
     let keys: string[]
     try {
-      keys = await find(root, rootOptions)
+      keys = rootIsLink ? [] : await find(root, rootOptions)
     } catch (err) {
       // GNU find reports missing roots and moves on; anything else
       // (rate limits, auth failures) must surface.
@@ -237,7 +314,25 @@ export async function findGeneric(
       stat !== undefined
         ? await applyMtimeFilter(rootMatches, effMtimeMin, effMtimeMax, stat, prefix)
         : rootMatches
-    matches.push(...respellRaw(filtered, root.virtual, root.rawPath))
+    const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
+    const withLinks = filtered.concat(
+      await linkResults(
+        opts.links ?? null,
+        rootPath,
+        prefix,
+        stripSlash(rootKey),
+        optionsTree(rootOptions),
+        expr !== null ? expr.minDepth : minDepth,
+        expr !== null ? expr.maxDepth : maxDepth,
+        expr !== null ? expr.minSize : minSize,
+        expr !== null ? expr.maxSize : maxSize,
+        effMtimeMin,
+        effMtimeMax,
+        fl.asBool('L'),
+      ),
+    )
+    withLinks.sort()
+    matches.push(...respellRaw(withLinks, root.virtual, root.rawPath))
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')

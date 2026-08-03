@@ -34,7 +34,7 @@ import type { ShellParser } from '../shell/parse.ts'
 import { DriftQueue, installDriftState } from './snapshot/drift.ts'
 import { snapshot as writeSnapshot } from './snapshot/api.ts'
 import { readFileBytes } from './snapshot/fs.ts'
-import { applyStateDict, buildMountArgs, toStateDict } from './snapshot/state.ts'
+import { applyStateDict, buildMountArgs, type CLIOverrides, toStateDict } from './snapshot/state.ts'
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
 import type { FileEvent, FileStat } from '../types.ts'
@@ -183,6 +183,7 @@ export class Workspace {
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
     this.policyRouter = new PolicyRouter(
+      this.registry,
       this.runtimes,
       this.policy,
       this.sessionManager,
@@ -845,10 +846,11 @@ export class Workspace {
     source: string | Uint8Array,
     options: WorkspaceOptions = {},
     overrides: Record<string, Resource> = {},
+    cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const bytes = typeof source === 'string' ? readFileBytes(source) : source
     const state = (await readSnapshotTar(bytes)) as WorkspaceStateDict
-    return this.fromState(state, options, overrides)
+    return this.fromState(state, options, overrides, cliOverrides)
   }
 
   static async fromState<T extends typeof Workspace>(
@@ -856,8 +858,9 @@ export class Workspace {
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
     overrides: Record<string, Resource> = {},
+    cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
-    const ws = await this._fromState(state, options, overrides)
+    const ws = await this._fromState(state, options, overrides, cliOverrides)
     ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
     return ws
   }
@@ -867,8 +870,9 @@ export class Workspace {
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
     overrides: Record<string, Resource> = {},
+    cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
-    const args = buildMountArgs(state, overrides)
+    const args = buildMountArgs(state, overrides, cliOverrides)
     const resources: Record<string, MountSpec> = {}
     for (const [prefix, [resource, mode]] of Object.entries(args.mountArgs)) {
       resources[prefix] = [resource, mode]
@@ -876,6 +880,7 @@ export class Workspace {
     const mergedOptions: WorkspaceOptions = {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
+      ...(args.clis !== undefined ? { clis: args.clis } : {}),
       ...options,
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>
@@ -908,8 +913,16 @@ export class Workspace {
         }
       }
     }
+    // A same-process copy reinstalls every CLI from its live install
+    // (spec + validated config), the way remote mounts share their live
+    // resources: a directly installed spec and a redacted secret both
+    // survive without a registry lookup.
+    const cliOverrides: CLIOverrides = {}
+    for (const [name, install] of this.registry.clis.items()) {
+      cliOverrides[name] = [install.spec, install.config as Record<string, unknown> | null]
+    }
     const Ctor = this.constructor as typeof Workspace
-    return (await Ctor._fromState(state, opts, overrides)) as this
+    return (await Ctor._fromState(state, opts, overrides, cliOverrides)) as this
   }
 
   async close(): Promise<void> {

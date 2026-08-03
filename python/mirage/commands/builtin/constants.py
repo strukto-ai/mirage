@@ -19,3 +19,26 @@ class PatternType(str, Enum):
     EXACT = "exact"
     SIMPLE = "simple"
     REGEX = "regex"
+
+
+FILE_MIME_MAP: dict[str, str] = {
+    "text": "text/plain; charset=us-ascii",
+    "json": "application/json; charset=us-ascii",
+    "csv": "text/csv; charset=us-ascii",
+    "directory": "inode/directory",
+    "binary": "application/octet-stream",
+    "image/png": "image/png",
+    "image/jpeg": "image/jpeg",
+    "image/gif": "image/gif",
+    "application/zip": "application/zip",
+    "application/gzip": "application/gzip",
+    "application/pdf": "application/pdf",
+    "parquet": "application/octet-stream",
+    "orc": "application/octet-stream",
+    "feather": "application/octet-stream",
+    "hdf5": "application/octet-stream",
+}
+
+# GNU `file -i` reports a symlink by its inode type, never by whatever
+# the target would have sniffed as.
+MIME_SYMLINK = "inode/symlink; charset=binary"

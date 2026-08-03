@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  commandFacts,
+  parsedCommands,
   decideLine,
   PolicyError,
   type PolicyContext,
@@ -22,6 +22,7 @@ import {
 } from '../executor/policy/index.ts'
 import { catchAll, runtimeBindingsFor, type Runtime } from '../executor/runtime.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
+import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
@@ -35,6 +36,7 @@ import type { Runtimes } from './runtimes.ts'
  * eval inherits the typed line's decision and never re-routes.
  */
 export class PolicyRouter {
+  private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
   private readonly policy: PolicyFn | null
   private readonly sessions: SessionManager
@@ -42,12 +44,14 @@ export class PolicyRouter {
   private readonly visibleMounts: () => string[]
 
   constructor(
+    registry: MountRegistry,
     runtimes: Runtimes,
     policy: PolicyFn | null,
     sessions: SessionManager,
     agentId: string | null,
     visibleMounts: () => string[],
   ) {
+    this.registry = registry
     this.runtimes = runtimes
     this.policy = policy
     this.sessions = sessions
@@ -81,14 +85,14 @@ export class PolicyRouter {
     }
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (this.policy === null && !hasScripts) return null
-    const facts = commandFacts(root)
+    const commands = parsedCommands(root, this.registry.clis.names())
     const sessionId = options.sessionId ?? this.sessions.defaultId
     const session = this.sessions.get(sessionId)
     const ctx: PolicyContext = {
       line: command,
-      commands: facts,
-      command: facts[0]?.command ?? '',
-      builtin: facts[0]?.builtin ?? false,
+      commands,
+      command: commands[0]?.command ?? '',
+      builtin: commands[0]?.builtin ?? false,
       cwd: options.cwd ?? session.cwd,
       env: { ...session.env, ...(options.env ?? {}) },
       sessionId,

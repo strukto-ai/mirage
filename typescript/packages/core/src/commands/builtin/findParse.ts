@@ -102,8 +102,16 @@ function mtimeArg(value: string): [number | null, number | null] {
   return [lo, hi]
 }
 
+// GNU find's link-policy options are leading options, not predicates:
+// they may only appear before the start points, and never take part in
+// the expression. Without this the tail scan would treat `-L` as the
+// start of the expression and swallow the paths after it.
+const LINK_OPTIONS = new Set(['-P', '-H', '-L'])
+
 export function findExprTail(rawArgv: string[]): string[] {
-  for (let i = 0; i < rawArgv.length; i++) {
+  let start = 0
+  while (start < rawArgv.length && LINK_OPTIONS.has(rawArgv[start] ?? '')) start++
+  for (let i = start; i < rawArgv.length; i++) {
     const tok = rawArgv[i]
     if (tok === undefined) continue
     if (isExpressionToken(tok) || (tok.startsWith('-') && tok.length > 1)) {

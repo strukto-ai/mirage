@@ -276,7 +276,12 @@ export { unzipGeneric } from './commands/builtin/generic/unzip.ts'
 export { zipGeneric } from './commands/builtin/generic/zip_cmd.ts'
 export { tarGeneric } from './commands/builtin/generic/tar.ts'
 export { realpathGeneric } from './commands/builtin/generic/realpath.ts'
-export { findGeneric, findSizeMtimeError, invalidFindArg } from './commands/builtin/generic/find.ts'
+export {
+  findGeneric,
+  findSizeMtimeError,
+  invalidFindArg,
+  linkResults,
+} from './commands/builtin/generic/find.ts'
 export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
@@ -328,7 +333,8 @@ export {
   resolveGlobWith,
   spellMatch,
 } from './utils/glob_walk.ts'
-export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'
+export { detectFileType, formatFileResult } from './commands/builtin/file_helper.ts'
+export { FILE_MIME_MAP, MIME_SYMLINK } from './commands/builtin/constants.ts'
 export {
   type AggregateResult,
   concatAggregate,
@@ -509,7 +515,7 @@ export {
   type RuntimeOptions,
 } from './workspace/executor/runtime_types.ts'
 export {
-  commandFacts,
+  parsedCommands,
   decideLine,
   evaluatorOf,
   policyContextFromPayload,
@@ -521,7 +527,7 @@ export {
   PolicyError,
   RouteResult,
   type PolicyResult,
-  type CommandFacts,
+  type ParsedCommand,
   type PolicyDecision,
   type PolicyContext,
   type PolicyFn,
@@ -639,6 +645,7 @@ export {
   CLISpec,
   type CLISpecInit,
   type CLIVerbFn,
+  type CLIConfigModel,
   type CLIVerbOpts,
   type WalkFlagBag,
   WalkResult,

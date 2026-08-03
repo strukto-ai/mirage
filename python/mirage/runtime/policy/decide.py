@@ -105,7 +105,7 @@ async def evaluate_script(script: PolicyScript, ctx: PolicyContext,
     Args:
         script (PolicyScript): a callable taking the PolicyContext, or
             a config-borne ScriptSource.
-        ctx (PolicyContext): facts about the line.
+        ctx (PolicyContext): the parse context for the line.
         runtime (Runtime): the runtime being asked (ctx.runtime).
         entries (list[Runtime]): the workspace's ordered world; a
             ScriptSource selects its evaluator from it by language.
@@ -178,7 +178,7 @@ async def evaluate_policy(policy: PolicyFn, ctx: PolicyContext,
     Args:
         policy (PolicyFn): a callable taking the PolicyContext, or a
             config-borne ScriptSource (last expression = the verdict).
-        ctx (PolicyContext): facts about the line.
+        ctx (PolicyContext): the parse context for the line.
         entries (list[Runtime]): the workspace's ordered world; a
             ScriptSource selects its evaluator from it by language.
 
@@ -215,7 +215,7 @@ async def decide_line(entries: list[Runtime], policy: PolicyFn | None,
     Args:
         entries (list[Runtime]): the workspace's ordered world.
         policy (PolicyFn | None): the global policy, if configured.
-        ctx (PolicyContext): facts about the line.
+        ctx (PolicyContext): the parse context for the line.
         static_bindings (dict[str, Runtime]): the workspace's static
             command bindings.
     """

@@ -21,11 +21,14 @@ from mirage.commands.errors import UsageError
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
+from mirage.ops.types import LinkView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.table import VfsRuntime
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import format_fs_error
+from mirage.workspace.executor.builtins.links import (link_target_stat,
+                                                      path_exists)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -107,6 +110,31 @@ def scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, object]:
         k: (v[-1] if isinstance(v, list) and v else v)
         for k, v in flag_kwargs.items()
     }
+
+
+def link_view(namespace: Namespace | None,
+              dispatch: DispatchFn | None) -> LinkView | None:
+    """The symlink facts on offer, or None when there are no links.
+
+    Which commands actually receive this is decided at dispatch, by
+    whether the handler names a ``links`` parameter, so there is no list
+    of symlink-aware commands to keep in step here or anywhere else.
+
+    Args:
+        namespace (Namespace | None): addressing authority holding the
+            link table, None outside a workspace.
+        dispatch (DispatchFn | None): op dispatcher, which answers
+            existence across mounts rather than within one backend.
+    """
+    if namespace is None or dispatch is None or not namespace.has_links():
+        return None
+    return LinkView(stat_at=namespace.link_stat_at,
+                    children=namespace.link_stats_under,
+                    subtree=namespace.link_stats_below,
+                    resolve=namespace.follow,
+                    exists=functools.partial(path_exists, dispatch),
+                    target_stat=functools.partial(link_target_stat, namespace,
+                                                  dispatch))
 
 
 def namespace_stat_overlay(namespace: Namespace, virtual: str,
@@ -196,14 +224,17 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
+    # Two facts the backend cannot supply, offered to every command and
+    # delivered only to the handlers that name them as a parameter.
     # ls/stat render stat rows from the backend's own stat, which never
     # sees namespace attr overlays (chmod/chown/touch on overlay backends)
-    # or the default owner; inject the merge so ls -l and stat -c agree.
+    # or the default owner; the merge makes ls -l and stat -c agree.
     # cp/mv -u freshness checks compare the same merged mtimes, and
     # find -mtime filters on them (touch results, observed writes).
+    # Symlinks are namespace state no backend readdir or stat can see.
     stat_overlay = (functools.partial(namespace_stat_overlay, namespace)
-                    if cmd_name in ("ls", "stat", "cp", "mv", "find")
-                    and namespace is not None else None)
+                    if namespace is not None else None)
+    links = link_view(namespace, dispatch)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)
@@ -225,6 +256,7 @@ async def run_on_mount(
             runtime=line_runtime,
             runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
             stat_overlay=stat_overlay,
+            links=links,
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)
@@ -250,9 +282,6 @@ async def run_on_mount(
     if cmd_name == "ls" and io.exit_code != LS_FAILURE:
         stdout = await inject_child_mounts(stdout, registry, paths,
                                            flag_kwargs, session.cwd)
-        if namespace is not None and namespace.has_links():
-            stdout = await inject_links(stdout, namespace, paths, flag_kwargs,
-                                        session.cwd)
 
     if cmd_name == "find":
         stdout, action_err = await _apply_find_actions(stdout, flag_kwargs,
@@ -271,58 +300,34 @@ async def run_on_mount(
     return wrap_cachable_streams(stdout, io)
 
 
-async def inject_links(
-    stdout: ByteSource | None,
-    namespace: Namespace,
-    paths: list[PathSpec],
-    flag_kwargs: dict[str, object],
-    cwd: str,
-) -> ByteSource | None:
-    """Append symlink entries living under the listed directory.
+def listed_names(existing: str, long_form: bool) -> set[str]:
+    """Names already rendered in an ls listing, for injection dedup.
 
-    Links are namespace state, invisible to backend readdir, so ``ls``
-    surfaces them the same way child mounts are surfaced. Long form
-    renders GNU-style ``name -> target``.
+    Long rows come in two shapes: the degraded ``mode\t-\t-\tname``
+    form used for entries with neither size nor mtime, and the full GNU
+    row whose name is the ninth whitespace-separated field. Splitting on
+    tabs alone reads a full row as a single field, so a name would never
+    match and an injected row could duplicate an entry the backend
+    already listed.
 
     Args:
-        stdout (ByteSource | None): backend ls output.
-        namespace (Namespace): addressing authority holding the link table.
-        paths (list[PathSpec]): positional ls operands.
-        flag_kwargs (dict): parsed ls flags.
-        cwd (str): current working directory fallback operand.
+        existing (str): the backend's rendered ls output.
+        long_form (bool): whether -l rows are being parsed.
     """
-    if flag_kwargs.get("d") is True or flag_kwargs.get("R") is True:
-        return stdout
-    if len(paths) > 1:
-        return stdout
-    listed = paths[0].virtual if paths else cwd
-    links = namespace.links_under(listed)
-    if not links:
-        return stdout
-
-    existing_bytes = await materialize(stdout) if stdout is not None else b""
-    existing = existing_bytes.decode("utf-8")
-    long_form = flag_kwargs.get("args_l") is True
-    classify = flag_kwargs.get("F") is True
-    present: set[str] = set()
+    names: set[str] = set()
     for line in existing.split("\n"):
         if line == "":
             continue
-        name = line.split("\t")[-1] if long_form else line.rstrip("/*@|=")
-        if name:
-            present.add(name)
-    extras: list[str] = []
-    for name in sorted(links):
-        if name in present:
-            continue
-        if long_form:
-            extras.append(f"l\t-\t-\t{name} -> {links[name]}")
+        if not long_form:
+            names.add(line.rstrip("/*@|="))
+        elif "\t" in line:
+            names.add(line.split("\t")[-1])
         else:
-            extras.append(f"{name}@" if classify else name)
-    if not extras:
-        return stdout
-    sep = "" if existing == "" or existing.endswith("\n") else "\n"
-    return (existing + sep + "\n".join(extras) + "\n").encode("utf-8")
+            parts = line.split(maxsplit=8)
+            if len(parts) == 9:
+                names.add(parts[8])
+    names.discard("")
+    return names
 
 
 async def inject_child_mounts(
@@ -347,16 +352,7 @@ async def inject_child_mounts(
     existing = existing_bytes.decode("utf-8")
     long_form = flag_kwargs.get("args_l") is True
     classify = flag_kwargs.get("F") is True
-    present: set[str] = set()
-    for line in existing.split("\n"):
-        if line == "":
-            continue
-        if long_form:
-            name = line.split("\t")[-1]
-        else:
-            name = line.rstrip("/*@|=")
-        if name:
-            present.add(name)
+    present = listed_names(existing, long_form)
     extras: list[str] = []
     for name in child_names:
         if name in present:

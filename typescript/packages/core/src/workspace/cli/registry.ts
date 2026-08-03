@@ -15,6 +15,8 @@
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { JOB_BUILTINS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../route/constants.ts'
+import { z } from 'zod'
+
 import type { CLIInstall } from './types.ts'
 
 /**
@@ -68,7 +70,28 @@ export class CLIRegistry {
       }
       return null
     }
-    return spec.configModel(config ?? {})
+    const model = spec.configModel
+    if (model instanceof z.ZodObject) {
+      // Unknown keys fail loud (a typo'd YAML key must not be silently
+      // ignored), mirroring the Python pydantic arm; a schema that
+      // declares its own extra-key policy (strict/passthrough/catchall)
+      // enforces it through parse instead, like pydantic extra="allow".
+      if (model.def.catchall === undefined) {
+        const unknown = Object.keys(config ?? {}).filter((k) => !(k in model.shape))
+        if (unknown.length > 0) {
+          throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
+        }
+      }
+      return model.parse(config ?? {})
+    }
+    const result = model(config ?? {})
+    // The snapshot stores the normalized config and replays it through
+    // the normalizer, so the output must be a JSON-shaped mapping (or
+    // null), matching the Python side's model-instance contract.
+    if (result !== null && (typeof result !== 'object' || Array.isArray(result))) {
+      throw new Error(`CLI '${name}': configModel must return an object or null`)
+    }
+    return result
   }
 
   /** Remove an installed CLI; its head word stops resolving (127). */
@@ -87,5 +110,10 @@ export class CLIRegistry {
   /** Snapshot of the installed CLIs keyed by head word. */
   items(): Map<string, CLIInstall> {
     return new Map(this.installs)
+  }
+
+  /** The installed head words. */
+  names(): ReadonlySet<string> {
+    return new Set(this.installs.keys())
   }
 }

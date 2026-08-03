@@ -21,6 +21,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import PathSpec
 
 
@@ -36,6 +37,8 @@ async def stat(
     c: str | None = None,
     f: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
+    L: bool = False,
+    links: LinkView | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
@@ -43,4 +46,6 @@ async def stat(
     return await generic_stat(list(paths),
                               stat_fn=bound_op(history_stat, accessor, index),
                               c=c,
-                              f=f)
+                              f=f,
+                              links=links,
+                              L=L)

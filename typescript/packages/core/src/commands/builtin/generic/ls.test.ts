@@ -14,7 +14,8 @@
 
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
+import type { LinkView } from '../../../ops/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import { LS_FAILURE, LS_MINOR_PROBLEM, LS_OK, exitStatusFor, lsGeneric } from './ls.ts'
@@ -364,5 +365,48 @@ describe('lsGeneric exit codes', () => {
     expect(exitStatusFor([serious])).toBe(LS_FAILURE)
     expect(exitStatusFor([minor, serious])).toBe(LS_FAILURE)
     expect(exitStatusFor([serious, minor])).toBe(LS_FAILURE)
+  })
+})
+
+describe('link operands on backends with different readdir shapes', () => {
+  const linkRowStat = new FileStat({
+    name: 'flink',
+    size: 19,
+    modified: '2026-01-02T15:30:00Z',
+    type: FileType.SYMLINK,
+    extra: { [LINK_TARGET_KEY]: '/data/symx/real.txt' },
+  })
+
+  const links: LinkView = {
+    statAt: (v: string) => (v.endsWith('flink') ? linkRowStat : null),
+    children: () => [],
+    subtree: () => [],
+    resolve: (v: string) => v,
+    exists: () => Promise.resolve(true),
+    targetStat: () => Promise.resolve(null),
+  }
+
+  const missing = (p: PathSpec): Promise<never> => Promise.reject(new Error(`ENOENT: ${p.virtual}`))
+
+  it('reports the link when readdir throws', async () => {
+    const [out] = (await lsGeneric(
+      [PathSpec.fromStrPath('/data/symx/flink')],
+      { flags: { args_l: true }, cwd: '/', links } as never,
+      missing,
+      missing,
+    )) as [Uint8Array, unknown]
+    expect(new TextDecoder().decode(out)).toContain('flink -> /data/symx/real.txt')
+  })
+
+  // Backends without real directories (s3, nextcloud) answer readdir on
+  // a link with an empty list, which rendered an empty directory.
+  it('reports the link when readdir returns empty', async () => {
+    const [out] = (await lsGeneric(
+      [PathSpec.fromStrPath('/data/symx/flink')],
+      { flags: { args_l: true }, cwd: '/', links } as never,
+      () => Promise.resolve([]),
+      missing,
+    )) as [Uint8Array, unknown]
+    expect(new TextDecoder().decode(out)).toContain('flink -> /data/symx/real.txt')
   })
 })

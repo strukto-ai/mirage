@@ -7,6 +7,7 @@ from functools import partial
 from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
+from mirage.ops.types import LinkView
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
@@ -148,6 +149,7 @@ async def du_operands(
     resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
+    links: LinkView | None = None,
 ) -> tuple[list[PathSpec], list[str]]:
     """Split the operands into the ones du can read and the ones it cannot.
 
@@ -168,6 +170,9 @@ async def du_operands(
         stat (Callable): raises when an operand cannot be read.
         has_content (Callable | None): asked only when stat failed, to
             tell an implicit directory from an absent path.
+        links (LinkView | None): the namespace's symlink facts. A link
+            has no backend inode, so it fails stat while still being a
+            perfectly readable operand.
 
     Returns:
         tuple[list[PathSpec], list[str]]: readable operands, then the
@@ -182,6 +187,9 @@ async def du_operands(
         # then reports as unreadable.
         missing = [p.raw_path for p in targets]
     for path in resolved:
+        if links is not None and links.stat_at(path.virtual) is not None:
+            present.append(path)
+            continue
         try:
             await stat(path)
         except (FileNotFoundError, ValueError):
@@ -325,24 +333,58 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
     return order
 
 
+def link_leaves(links: LinkView | None, root: str) -> list[tuple[str, int]]:
+    """Symlinks under an operand as du leaf entries.
+
+    Links live in the namespace, so neither a backend's native du op nor
+    a readdir walk reports them. Merging here, above that fork, is what
+    keeps a backend with a native op and one without from disagreeing.
+
+    Deliberate divergence: GNU sizes a symlink at 0 because it counts
+    disk blocks and a short target is stored inside the inode. mirage
+    counts bytes throughout (an object store has no block size), so a
+    link counts as its target string's length, the same number ``ls -l``
+    prints for it.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        root (str): the operand's absolute virtual path.
+    """
+    if links is None:
+        return []
+    return [(path, st.size or 0) for path, st in links.subtree(root)]
+
+
 async def _du_one(
     path: PathSpec,
     compute_size: ComputeSize,
     compute_entries: ComputeEntries,
     flags: DuFlags,
+    links: LinkView | None = None,
 ) -> tuple[list[str], int]:
     label = path.raw_path
 
+    link_row = links.stat_at(path.virtual) if links is not None else None
+    if link_row is not None:
+        # GNU du does not follow a symlink operand without -L; the
+        # operand is the link, and it accounts for the link alone.
+        size = link_row.size or 0
+        return [_line(size, flags.h, label)], size
+
+    leaves = link_leaves(links, path.virtual)
+    link_total = sum(size for _, size in leaves)
+
     if flags.s:
-        total = await compute_size(path)
+        total = await compute_size(path) + link_total
         return [_line(total, flags.h, label)], total
 
     entries, total = await compute_entries(path)
-    if not entries:
+    total += link_total
+    if not entries and not leaves:
         total = await compute_size(path)
         return [_line(total, flags.h, label)], total
 
-    virtual = to_virtual(entries, path)
+    virtual = to_virtual(entries, path) + leaves
     root_key = _norm(path.virtual)
     # A file operand walks to itself. GNU prints it once, with or
     # without -a, never as a leaf line plus a roll-up line.
@@ -373,6 +415,7 @@ async def run_du(
     max_depth: str | None = None,
     d: str | None = None,
     truncated: Callable[[], bool] | None = None,
+    links: LinkView | None = None,
 ) -> DuOutput:
     """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
@@ -395,6 +438,7 @@ async def run_du(
         max_depth (str | None): raw --max-depth text.
         d (str | None): raw -d text, the short spelling of --max-depth.
         truncated (Callable[[], bool] | None): whether a walk was cut off.
+        links (LinkView | None): the namespace's symlink facts.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
@@ -404,15 +448,20 @@ async def run_du(
                         h=h,
                         c=c,
                         max_depth=max_depth if max_depth is not None else d)
-    present, missing = await du_operands(
-        paths, cwd, resolve_glob, stat, partial(du_has_content,
-                                                compute_entries))
+    present, missing = await du_operands(paths,
+                                         cwd,
+                                         resolve_glob,
+                                         stat,
+                                         partial(du_has_content,
+                                                 compute_entries),
+                                         links=links)
     return await du(present,
                     compute_size=compute_size,
                     compute_entries=compute_entries,
                     flags=flags,
                     missing=missing,
-                    truncated=truncated)
+                    truncated=truncated,
+                    links=links)
 
 
 async def du(
@@ -423,6 +472,7 @@ async def du(
     flags: DuFlags,
     missing: Sequence[str] = (),
     truncated: Callable[[], bool] | None = None,
+    links: LinkView | None = None,
 ) -> DuOutput:
     """Render ``du`` output for a list of operands.
 
@@ -438,12 +488,14 @@ async def du(
             typed. GNU reports each and exits 1 but still prints the rest.
         truncated (Callable[[], bool] | None): read after the walks to ask
             whether any of them hit its entry cap.
+        links (LinkView | None): the namespace's symlink facts, merged
+            into every operand's leaf list.
     """
     lines: list[str] = []
     totals: list[int] = []
     for path in paths:
         block, total = await _du_one(path, compute_size, compute_entries,
-                                     flags)
+                                     flags, links)
         lines.extend(block)
         totals.append(total)
     # GNU still prints the grand total when every operand failed ("0

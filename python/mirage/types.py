@@ -57,6 +57,7 @@ class LsSortBy(str, Enum):
 
 class FileType(str, Enum):
     DIRECTORY = "directory"
+    SYMLINK = "symlink"
     TEXT = "text"
     BINARY = "binary"
     JSON = "json"
@@ -67,6 +68,12 @@ class FileType(str, Enum):
     ZIP = "application/zip"
     GZIP = "application/gzip"
     PDF = "application/pdf"
+
+
+# FileStat.extra key holding a symlink's target, verbatim as it was
+# typed. A link has no backend inode, so this is the only place the
+# target travels with the stat row.
+LINK_TARGET_KEY = "link_target"
 
 
 class FileStat(BaseModel):
@@ -516,6 +523,7 @@ class StateKey(StrEnum):
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
     NODES = "nodes"
+    CLIS = "clis"
 
 
 class FileChangeKind(StrEnum):
@@ -670,6 +678,12 @@ class MountKey(StrEnum):
     CONSISTENCY = "consistency"
     RESOURCE_CLASS = "resource_class"
     RESOURCE_STATE = "resource_state"
+
+
+class CLIKey(StrEnum):
+    NAME = "name"
+    SPEC = "spec"
+    CONFIG = "config"
 
 
 class CacheKey(StrEnum):

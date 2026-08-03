@@ -23,6 +23,7 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
+import type { LinkView } from '../../../ops/types.ts'
 
 export type DuEntries = [entries: [string, number][], total: number]
 export type ComputeSize = (p: PathSpec) => Promise<number>
@@ -175,6 +176,7 @@ async function duOperands(
   stat: (p: PathSpec) => Promise<unknown>,
   hasContent?: (p: PathSpec) => Promise<boolean>,
   mountPrefix?: string,
+  links: LinkView | null = null,
 ): Promise<{ present: PathSpec[]; missing: string[] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd, mountPrefix)]
   const resolved = await resolveGlob(targets)
@@ -184,6 +186,12 @@ async function duOperands(
   // reports as unreadable.
   if (resolved.length === 0) missing.push(...targets.map((p) => p.rawPath))
   for (const path of resolved) {
+    // A link has no backend inode, so it fails stat while still being a
+    // perfectly readable operand.
+    if (links?.statAt(path.virtual) != null) {
+      present.push(path)
+      continue
+    }
     // A missing path is the diagnostic, not an error to propagate. Any
     // other backend failure (403, a driver fault) is real and must surface
     // rather than being renamed "No such file or directory".
@@ -298,27 +306,56 @@ export function rollup(
   return order
 }
 
+// Symlinks under an operand as du leaf entries.
+//
+// Links live in the namespace, so no backend du op or readdir walk
+// reports them. Merging here, above that fork, is what keeps a backend
+// with a native op and one without from disagreeing.
+//
+// Deliberate divergence: GNU sizes a symlink at 0 because it counts
+// disk blocks and a short target is stored inside the inode. mirage
+// counts bytes throughout (an object store has no block size), so a
+// link counts as its target string's length, the same number `ls -l`
+// prints for it.
+function linkLeaves(links: LinkView | null, root: string): [string, number][] {
+  if (links === null) return []
+  return links.subtree(root).map(([path, st]): [string, number] => [path, st.size ?? 0])
+}
+
 async function duOne(
   path: PathSpec,
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
   fmt: (size: number) => string,
   flags: DuFlags,
+  links: LinkView | null,
 ): Promise<[string[], number]> {
   const label = path.rawPath
 
+  const linkRow = links?.statAt(path.virtual) ?? null
+  if (linkRow !== null) {
+    // GNU du does not follow a symlink operand without -L; the operand
+    // is the link, and it accounts for the link alone.
+    const size = linkRow.size ?? 0
+    return [[`${fmt(size)}\t${label}`], size]
+  }
+
+  const leaves = linkLeaves(links, path.virtual)
+  const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
+
   if (flags.s) {
-    const total = await computeSize(path)
+    const total = (await computeSize(path)) + linkTotal
     return [[`${fmt(total)}\t${label}`], total]
   }
 
-  const [raw, total] = await computeEntries(path)
-  if (raw.length === 0) {
+  const [raw, rawTotal] = await computeEntries(path)
+  const total = rawTotal + linkTotal
+  if (raw.length === 0 && leaves.length === 0) {
     const fallback = await computeSize(path)
     return [[`${fmt(fallback)}\t${label}`], fallback]
   }
 
-  const entries = toVirtual(raw, path)
+  const entries = toVirtual(raw, path).concat(leaves)
   const rootKey = norm(path.virtual)
   // A file operand walks to itself. GNU prints it once, with or without -a,
   // never as a leaf line plus a roll-up line.
@@ -356,6 +393,13 @@ export async function runDu(
   truncated?: () => boolean,
 ): Promise<DuOutput> {
   const flags = parseDuFlags(opts)
+  // -L dereferences: the operand was already rewritten at dispatch, and
+  // withholding the link table stops the links below it from being
+  // counted as entries in their own right, which is what GNU does (it
+  // follows each one and finds the target already accounted for). A
+  // link pointing outside the operand's own subtree is undercounted;
+  // GNU would traverse into it.
+  const links = new FlagView(opts.flags, specOf('du')).asBool('L') ? null : (opts.links ?? null)
   const { present, missing } = await duOperands(
     paths,
     opts.cwd,
@@ -363,8 +407,9 @@ export async function runDu(
     stat,
     (p) => duHasContent(computeEntries, p),
     opts.mountPrefix,
+    links,
   )
-  return duGeneric(present, flags, computeSize, computeEntries, missing, truncated)
+  return duGeneric(present, flags, computeSize, computeEntries, missing, truncated, links)
 }
 
 /**
@@ -384,13 +429,14 @@ export async function duGeneric(
   computeEntries: ComputeEntries,
   missing: string[] = [],
   truncated?: () => boolean,
+  links: LinkView | null = null,
 ): Promise<DuOutput> {
   const fmt = (size: number): string => (flags.h ? humanSize(size) : String(size))
 
   const lines: string[] = []
   let grand = 0
   for (const root of paths) {
-    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags)
+    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags, links)
     lines.push(...block)
     grand += total
   }

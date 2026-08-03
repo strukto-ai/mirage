@@ -111,3 +111,7 @@ class CLIRegistry:
     def items(self) -> dict[str, CLIInstall]:
         """Snapshot of the installed CLIs keyed by head word."""
         return dict(self._installs)
+
+    def names(self) -> frozenset[str]:
+        """The installed head words."""
+        return frozenset(self._installs)

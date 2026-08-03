@@ -14,6 +14,8 @@
 
 import pytest
 
+from mirage.core.timeutil import epoch_to_iso
+from mirage.types import FileType
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 
@@ -378,3 +380,66 @@ def test_node_meta_from_fields_ignores_unknown_keys():
     restored = NodeMeta.from_fields({"mode": 0o600, "bogus": "x"})
     assert restored.mode == 0o600
     assert restored.target is None
+
+
+@pytest.mark.asyncio
+async def test_link_stat_at_reports_the_link_not_the_target(namespace):
+    await namespace.symlink("/data/link", "/data/hello.txt", 1.0)
+    st = namespace.link_stat_at("/data/link")
+    assert st is not None
+    assert st.name == "link"
+    assert st.type == FileType.SYMLINK
+    # GNU reports the target string's length, not the target's size.
+    assert st.size == len("/data/hello.txt")
+
+
+@pytest.mark.asyncio
+async def test_link_stat_at_is_none_for_a_plain_overlay_node(namespace):
+    await namespace.set_attrs("/data/hello.txt", mode=0o600)
+    assert namespace.link_stat_at("/data/hello.txt") is None
+
+
+def test_link_stat_at_is_none_for_an_unknown_path(namespace):
+    assert namespace.link_stat_at("/data/nope") is None
+
+
+@pytest.mark.asyncio
+async def test_link_stat_size_counts_utf8_bytes_not_characters(namespace):
+    await namespace.symlink("/data/link", "/data/éé", 1.0)
+    st = namespace.link_stat_at("/data/link")
+    assert st is not None
+    assert st.size == len("/data/éé".encode())
+
+
+@pytest.mark.asyncio
+async def test_link_stat_carries_the_links_own_mtime(namespace):
+    await namespace.symlink("/data/link", "/t", 1234.0)
+    st = namespace.link_stat_at("/data/link")
+    assert st is not None
+    assert st.modified == epoch_to_iso(1234.0)
+
+
+@pytest.mark.asyncio
+async def test_link_stats_under_is_one_level_only(namespace):
+    await namespace.symlink("/data/a", "/t1", 1.0)
+    await namespace.symlink("/data/sub/b", "/t2", 1.0)
+    assert [s.name for s in namespace.link_stats_under("/data")] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_link_stats_below_spans_the_whole_subtree(namespace):
+    await namespace.symlink("/data/a", "/t1", 1.0)
+    await namespace.symlink("/data/sub/b", "/t2", 1.0)
+    await namespace.symlink("/data/sub/deep/c", "/t3", 1.0)
+    await namespace.symlink("/other/d", "/t4", 1.0)
+    found = sorted(path for path, _ in namespace.link_stats_below("/data"))
+    assert found == ["/data/a", "/data/sub/b", "/data/sub/deep/c"]
+
+
+@pytest.mark.asyncio
+async def test_link_stats_below_does_not_match_a_sibling_name_prefix(
+        namespace):
+    await namespace.symlink("/data/a", "/t1", 1.0)
+    await namespace.symlink("/database/b", "/t2", 1.0)
+    found = [path for path, _ in namespace.link_stats_below("/data")]
+    assert found == ["/data/a"]

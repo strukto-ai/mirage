@@ -316,6 +316,62 @@ async def _apply_attrs(
         errors.append(_permission_error(cmd, namespace, resolved, exc))
 
 
+async def _walk_stats(
+    dispatch: Callable[..., Any],
+    root: PathSpec,
+    root_stat: FileStat,
+) -> list[tuple[PathSpec, FileStat]]:
+    """A subtree as ``(path, stat)`` pairs, parents before children.
+
+    Each entry's stat is captured during the walk because chmod's
+    symbolic clauses (``u+x``) build on the entry's own current mode.
+    Symlinks never appear: they are namespace state, so no backend
+    readdir reports one, which is exactly GNU chmod -R's rule of
+    changing neither a traversed link nor its referent.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        root (PathSpec): subtree root (already link-resolved).
+        root_stat (FileStat): the root's stat, already read.
+    """
+    entries = [(root, root_stat)]
+    queue = [root] if root_stat.type == FileType.DIRECTORY else []
+    while queue:
+        directory = queue.pop(0)
+        children, _ = await dispatch("readdir", directory)
+        for child_virtual in children:
+            child = PathSpec.from_str_path(child_virtual)
+            child_stat, _ = await dispatch("stat", child)
+            entries.append((child, child_stat))
+            if child_stat.type == FileType.DIRECTORY:
+                queue.append(child)
+    return entries
+
+
+async def _walk_owned(
+    namespace: Namespace,
+    dispatch: Callable[..., Any],
+    root: PathSpec,
+    root_stat: FileStat,
+) -> tuple[list[PathSpec], list[str]]:
+    """A subtree split into backend paths and namespace link nodes.
+
+    chown and chgrp change a traversed symlink itself rather than its
+    referent (POSIX gives ``-R`` an implicit ``-P``), and a link is
+    namespace state that no readdir can report, so the link nodes are
+    folded back in from the node table.
+
+    Args:
+        namespace (Namespace): addressing authority (link table).
+        dispatch (Callable): op dispatcher.
+        root (PathSpec): subtree root.
+        root_stat (FileStat): the root's stat, already read.
+    """
+    walked = await _walk_stats(dispatch, root, root_stat)
+    links = [path for path, _stat in namespace.link_stats_below(root.virtual)]
+    return [path for path, _stat in walked], links
+
+
 async def handle_chmod(
     namespace: Namespace,
     dispatch: Callable[..., Any],
@@ -324,7 +380,11 @@ async def handle_chmod(
     """chmod MODE FILE...: set permission bits via setattr.
 
     Follows symlinks (GNU chmod always dereferences). Stored, not
-    enforced: mount mode does real access control.
+    enforced: mount mode does real access control. ``-R`` walks the
+    operand's subtree and applies the mode to every entry, skipping
+    symlinks the way GNU does (a traversed link changes neither itself
+    nor its referent); a command-line link to a directory is still
+    followed and its target walked.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -336,12 +396,11 @@ async def handle_chmod(
         return fail("chmod", f"chmod: invalid option -- '{bad}'\n", 2)
     if len(operands) < 2:
         return fail("chmod", "chmod: missing operand\n", 2)
-    if "R" in flags:
-        return fail("chmod", "chmod: -R is not supported\n", 2)
     mode_text = operand_text(operands[0])
     if parse_mode(mode_text, 0) is None:
         return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
 
+    recursive = "R" in flags
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         found = await _resolve_operand(namespace, dispatch, "chmod", target,
@@ -349,22 +408,28 @@ async def handle_chmod(
         if found is None:
             continue
         resolved, stat = found
-        # Backends without a mode default to what ls renders: 755 for
-        # directories, 644 for files (symbolic clauses build on this).
-        if stat.mode is not None:
-            current = stat.mode
+        if recursive:
+            entries = await _walk_stats(dispatch, resolved, stat)
         else:
-            current = (DEFAULT_DIR_MODE if stat.type == FileType.DIRECTORY else
-                       DEFAULT_FILE_MODE)
-        new_mode = parse_mode(mode_text, current)
-        if new_mode is None:
-            return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
-        await _apply_attrs(namespace,
-                           dispatch,
-                           "chmod",
-                           resolved,
-                           errors,
-                           mode=new_mode)
+            entries = [(resolved, stat)]
+        for path, path_stat in entries:
+            # Backends without a mode default to what ls renders: 755 for
+            # directories, 644 for files (symbolic clauses build on this).
+            if path_stat.mode is not None:
+                current = path_stat.mode
+            else:
+                current = (DEFAULT_DIR_MODE if path_stat.type
+                           == FileType.DIRECTORY else DEFAULT_FILE_MODE)
+            new_mode = parse_mode(mode_text, current)
+            if new_mode is None:
+                return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n",
+                            1)
+            await _apply_attrs(namespace,
+                               dispatch,
+                               "chmod",
+                               path,
+                               errors,
+                               mode=new_mode)
     return finish("chmod", errors)
 
 
@@ -376,7 +441,10 @@ async def handle_chown(
     """chown OWNER[:GROUP] FILE...: set ownership via setattr.
 
     Ownership is stored, not enforced (mirage has no user model); names
-    are kept verbatim, numeric ids become ints.
+    are kept verbatim, numeric ids become ints. ``-R`` walks the
+    operand's subtree; POSIX gives it an implicit ``-P``, so a symlink
+    is changed itself rather than followed, whether it is the operand
+    or reached during the walk.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -388,14 +456,13 @@ async def handle_chown(
         return fail("chown", f"chown: invalid option -- '{bad}'\n", 2)
     if len(operands) < 2:
         return fail("chown", "chown: missing operand\n", 2)
-    if "R" in flags:
-        return fail("chown", "chown: -R is not supported\n", 2)
     owner_text = operand_text(operands[0])
     uid, gid = parse_owner(owner_text)
     if uid is None and gid is None:
         return fail("chown", f"chown: invalid spec: '{owner_text}'\n", 1)
 
-    no_deref = "h" in flags
+    recursive = "R" in flags
+    no_deref = recursive or "h" in flags
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
@@ -405,14 +472,22 @@ async def handle_chown(
                                        errors)
         if found is None:
             continue
-        resolved, _stat = found
-        await _apply_attrs(namespace,
-                           dispatch,
-                           "chown",
-                           resolved,
-                           errors,
-                           uid=uid,
-                           gid=gid)
+        resolved, stat = found
+        if recursive:
+            paths, links = await _walk_owned(namespace, dispatch, resolved,
+                                             stat)
+        else:
+            paths, links = [resolved], []
+        for path in paths:
+            await _apply_attrs(namespace,
+                               dispatch,
+                               "chown",
+                               path,
+                               errors,
+                               uid=uid,
+                               gid=gid)
+        for link in links:
+            await namespace.set_attrs(link, uid=uid, gid=gid)
     return finish("chown", errors)
 
 
@@ -426,7 +501,8 @@ async def handle_chgrp(
     The group half of chown: writes gid and leaves uid untouched. Group is
     stored, not enforced (mirage has no group model); a name is kept
     verbatim, a numeric id becomes an int. ``-h`` writes the link node's
-    own group.
+    own group, and ``-R`` walks the subtree under the same implicit
+    ``-P`` as chown.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -438,14 +514,13 @@ async def handle_chgrp(
         return fail("chgrp", f"chgrp: invalid option -- '{bad}'\n", 2)
     if len(operands) < 2:
         return fail("chgrp", "chgrp: missing operand\n", 2)
-    if "R" in flags:
-        return fail("chgrp", "chgrp: -R is not supported\n", 2)
     group_text = operand_text(operands[0])
     gid = parse_group(group_text)
     if gid is None:
         return fail("chgrp", f"chgrp: invalid group: '{group_text}'\n", 1)
 
-    no_deref = "h" in flags
+    recursive = "R" in flags
+    no_deref = recursive or "h" in flags
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
@@ -455,13 +530,21 @@ async def handle_chgrp(
                                        errors)
         if found is None:
             continue
-        resolved, _stat = found
-        await _apply_attrs(namespace,
-                           dispatch,
-                           "chgrp",
-                           resolved,
-                           errors,
-                           gid=gid)
+        resolved, stat = found
+        if recursive:
+            paths, links = await _walk_owned(namespace, dispatch, resolved,
+                                             stat)
+        else:
+            paths, links = [resolved], []
+        for path in paths:
+            await _apply_attrs(namespace,
+                               dispatch,
+                               "chgrp",
+                               path,
+                               errors,
+                               gid=gid)
+        for link in links:
+            await namespace.set_attrs(link, gid=gid)
     return finish("chgrp", errors)
 
 

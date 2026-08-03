@@ -256,6 +256,7 @@ export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
 
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
+  SYMLINK: 'symlink',
   TEXT: 'text',
   BINARY: 'binary',
   JSON: 'json',
@@ -269,6 +270,11 @@ export const FileType = Object.freeze({
 } as const)
 
 export type FileType = (typeof FileType)[keyof typeof FileType]
+
+// FileStat.extra key holding a symlink's target, verbatim as it was
+// typed. A link has no backend inode, so this is the only place the
+// target travels with the stat row.
+export const LINK_TARGET_KEY = 'link_target'
 
 export interface FileStatInit {
   name: string
@@ -310,6 +316,30 @@ export class FileStat {
     this.atime = init.atime ?? null
     this.extra = init.extra ?? {}
     Object.freeze(this)
+  }
+
+  // Copy with some fields replaced, the mirror of Python's
+  // `model_copy(update=...)`. Callers that rename a row (ls printing an
+  // operand as typed, a link row taking the link's name) must use this
+  // rather than re-listing fields at the call site: a hand-written list
+  // silently drops whatever it forgot, which is how link ownership went
+  // missing. This is the one place the field list is repeated, and it
+  // sits next to the declarations so an added field is hard to miss.
+  with(update: Partial<FileStatInit>): FileStat {
+    return new FileStat({
+      name: this.name,
+      size: this.size,
+      modified: this.modified,
+      fingerprint: this.fingerprint,
+      revision: this.revision,
+      type: this.type,
+      mode: this.mode,
+      uid: this.uid,
+      gid: this.gid,
+      atime: this.atime,
+      extra: this.extra,
+      ...update,
+    })
   }
 }
 

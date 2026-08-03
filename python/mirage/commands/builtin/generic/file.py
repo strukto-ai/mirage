@@ -1,43 +1,41 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from mirage.commands.builtin.file_helper import _detect
+from mirage.commands.builtin.constants import MIME_SYMLINK
+from mirage.commands.builtin.file_helper import _detect, format_file_result
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.ops.types import LinkView
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
+from mirage.utils.path import CycleError
 
 _logger = logging.getLogger(__name__)
 
-_MIME_MAP: dict[str, str] = {
-    "text": "text/plain; charset=us-ascii",
-    "json": "application/json; charset=us-ascii",
-    "csv": "text/csv; charset=us-ascii",
-    "directory": "inode/directory",
-    "binary": "application/octet-stream",
-    "image/png": "image/png",
-    "image/jpeg": "image/jpeg",
-    "image/gif": "image/gif",
-    "application/zip": "application/zip",
-    "application/gzip": "application/gzip",
-    "application/pdf": "application/pdf",
-    "parquet": "application/octet-stream",
-    "orc": "application/octet-stream",
-    "feather": "application/octet-stream",
-    "hdf5": "application/octet-stream",
-}
 
+# GNU `file -i` reports a symlink by its inode type, never by whatever
+# the target would have sniffed as.
+async def _link_description(path: PathSpec, links: LinkView) -> str | None:
+    """How ``file`` describes a symlink operand, or None if it is not one.
 
-def _format_file_result(
-    path: str,
-    result: FileType | str,
-    brief: bool,
-    mime: bool,
-) -> str:
-    key = result.value if isinstance(result, FileType) else str(result)
-    desc = _MIME_MAP.get(key, key) if mime else key
-    if brief:
-        return desc
-    return f"{path}: {desc}"
+    GNU names the target verbatim as it was stored, and calls the link
+    broken when the target does not resolve to anything. A cycle counts
+    as broken: nothing is reachable through it either.
+
+    Args:
+        path (PathSpec): the operand being described.
+        links (LinkView): the namespace's symlink facts.
+    """
+    row = links.stat_at(path.virtual)
+    if row is None:
+        return None
+    target = row.extra.get(LINK_TARGET_KEY, "")
+    try:
+        resolved = links.resolve(path.virtual)
+    except CycleError:
+        return f"broken symbolic link to {target}"
+    if not await links.exists(resolved):
+        return f"broken symbolic link to {target}"
+    return f"symbolic link to {target}"
 
 
 async def file_cmd(
@@ -47,15 +45,38 @@ async def file_cmd(
     stat_fn: Callable[..., Awaitable[FileStat]],
     b: bool = False,
     i: bool = False,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Describe each operand's content type, GNU file semantics.
+
+    Args:
+        paths (list[PathSpec]): operands to describe.
+        read_bytes (Callable): backend reader, for the content sniff.
+        stat_fn (Callable): backend stat.
+        b (bool): brief, omit the filename column. GNU always names the
+            operand exactly as typed, never a resolved or absolutised
+            form, so every row is labelled with ``raw_path``.
+        i (bool): report a MIME type instead of a description.
+        links (LinkView | None): the namespace's symlink facts. Without
+            -L the operand arrives unfollowed, so a link is described as
+            a link rather than sniffed as its target.
+    """
     if not paths:
         raise ValueError("file: missing operand")
     lines: list[str] = []
     for p in paths:
+        if links is not None:
+            described = await _link_description(p, links)
+            if described is not None:
+                lines.append(
+                    format_file_result(p.raw_path,
+                                       MIME_SYMLINK if i else described, b,
+                                       False))
+                continue
         s = await stat_fn(p)
         if s.type == FileType.DIRECTORY:
             lines.append(
-                _format_file_result(p.virtual, FileType.DIRECTORY, b, i))
+                format_file_result(p.raw_path, FileType.DIRECTORY, b, i))
             continue
         try:
             header = (await read_bytes(p))[:512]
@@ -64,7 +85,7 @@ async def file_cmd(
                           exc)
             header = b""
         result = _detect(p.virtual, header, s)
-        lines.append(_format_file_result(p.virtual, result, b, i))
+        lines.append(format_file_result(p.raw_path, result, b, i))
     return format_records(lines), IOResult()
 
 

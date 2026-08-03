@@ -16,8 +16,10 @@ import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from mirage.core.timeutil import epoch_to_iso
 from mirage.resource.base import BaseResource
-from mirage.types import MountMode, NodeMetaKey
+from mirage.types import (LINK_TARGET_KEY, FileStat, FileType, MountMode,
+                          NodeMetaKey)
 from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
@@ -77,6 +79,34 @@ class NodeMeta:
             observed_mtime=(float(observed) if isinstance(
                 observed, (int, float)) else None),
         )
+
+
+def link_stat(name: str, meta: NodeMeta) -> FileStat:
+    """Render a symlink node as a stat row.
+
+    Size is the target string's byte length and mode is left unset so
+    the formatter supplies 0777, which is what a real symlink inode
+    reports (a link carries no permission bits of its own). Ownership is
+    not in that category: a link has a real uid/gid that ``chown -h``
+    writes and ``ls -l`` shows, so both ride through from the node. The
+    target rides along in ``extra`` so every surface that has to name it
+    (ls -l's ``name -> target``, file's "symbolic link to") reads one
+    fact rather than querying the link table a second time.
+
+    Args:
+        name (str): name to report, usually the link's basename.
+        meta (NodeMeta): the node entry; its target must not be None.
+    """
+    target = meta.target or ""
+    return FileStat(
+        name=name,
+        size=len(target.encode("utf-8")),
+        modified=epoch_to_iso(meta.mtime) if meta.mtime is not None else None,
+        type=FileType.SYMLINK,
+        uid=meta.uid,
+        gid=meta.gid,
+        extra={LINK_TARGET_KEY: target},
+    )
 
 
 class Namespace:
@@ -390,6 +420,55 @@ class Namespace:
             if (meta.target is not None and path.startswith(base)
                     and "/" not in path[len(base):]):
                 out[path[len(base):]] = meta.target
+        return out
+
+    def link_stat_at(self, path: str) -> FileStat | None:
+        """lstat a path: the link's own stat, or None when not a link.
+
+        A symlink has no backend inode, so the node table is the only
+        authority for it. Every no-follow stat surface (the ops facade,
+        the dispatcher, FUSE) answers through here so they cannot
+        disagree about what a link looks like.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        meta = self._nodes.get(path.rstrip("/") or path)
+        if meta is None or meta.target is None:
+            return None
+        return link_stat(path.rstrip("/").rsplit("/", 1)[-1], meta)
+
+    def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
+        """Every link at any depth under a directory, with its own stat.
+
+        A walker (``find``) needs the whole subtree, unlike a listing
+        (``ls``) which wants one level.
+
+        Args:
+            directory (str): absolute virtual directory path.
+        """
+        base = directory.rstrip("/") + "/"
+        return [(path, link_stat(path.rsplit("/", 1)[-1], meta))
+                for path, meta in self._nodes.items()
+                if meta.target is not None and path.startswith(base)]
+
+    def link_stats_under(self, directory: str) -> list[FileStat]:
+        """Stat rows for the links living directly under a directory.
+
+        Links are namespace state and invisible to a backend readdir, so
+        listing commands merge these rows into the backend's entries
+        before sorting, the way the kernel returns them from one
+        readdir.
+
+        Args:
+            directory (str): absolute virtual directory path.
+        """
+        base = directory.rstrip("/") + "/"
+        out: list[FileStat] = []
+        for path, meta in self._nodes.items():
+            if (meta.target is not None and path.startswith(base)
+                    and "/" not in path[len(base):]):
+                out.append(link_stat(path[len(base):], meta))
         return out
 
     async def purge_under(self, directory: str) -> int:

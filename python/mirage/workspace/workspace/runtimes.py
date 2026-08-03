@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import PolicyDecision, command_facts
+from mirage.runtime.policy import PolicyDecision, parsed_commands
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)
@@ -142,5 +142,5 @@ class Runtimes:
         bindings: Mapping[str, Runtime
                           | None] = (decision.bindings if decision is not None
                                      else self._registry.runtime_bindings)
-        facts = command_facts(ast)
-        return whole_line_runtime(bindings, [fact.command for fact in facts])
+        commands = parsed_commands(ast, self._registry.clis.names())
+        return whole_line_runtime(bindings, [c.command for c in commands])

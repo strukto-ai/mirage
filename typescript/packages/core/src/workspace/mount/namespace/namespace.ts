@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Resource } from '../../../resource/base.ts'
-import { type MountMode, type PathSpec } from '../../../types.ts'
+import {
+  FileStat,
+  FileType,
+  LINK_TARGET_KEY,
+  type MountMode,
+  type PathSpec,
+} from '../../../types.ts'
+import { epochToIso } from '../../../utils/dates.ts'
 import { globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { ResolveFn } from '../../dispatcher.ts'
@@ -41,6 +48,28 @@ export interface NodeMeta {
   // time at all, so `find -mtime` works on mtime-less backends for
   // files written through mirage.
   observedMtime?: number
+}
+
+// Render a symlink node as a stat row. Size is the target string's
+// byte length and mode is left unset so the formatter supplies 0777,
+// which is what a real symlink inode reports (a link carries no
+// permission bits of its own). Ownership is not in that category: a link
+// has a real uid/gid that `chown -h` writes and `ls -l` shows, so both
+// ride through from the node. The target rides along in `extra` so
+// every surface that has to name it (ls -l's `name -> target`, file's
+// "symbolic link to") reads one fact rather than querying the link
+// table a second time.
+function linkStat(name: string, meta: NodeMeta): FileStat {
+  const target = meta.target ?? ''
+  return new FileStat({
+    name,
+    size: new TextEncoder().encode(target).length,
+    modified: meta.mtime !== undefined ? epochToIso(meta.mtime) : null,
+    type: FileType.SYMLINK,
+    ...(meta.uid !== undefined ? { uid: meta.uid } : {}),
+    ...(meta.gid !== undefined ? { gid: meta.gid } : {}),
+    extra: { [LINK_TARGET_KEY]: target },
+  })
 }
 
 export interface SetAttrsFields {
@@ -316,6 +345,48 @@ export class Namespace {
     const targets = this.symlinkTargets()
     if (targets.size === 0) return path
     return resolveSymlinks(path, targets)
+  }
+
+  // lstat a path: the link's own stat, or null when not a link. A
+  // symlink has no backend inode, so the node table is the only
+  // authority for it.
+  linkStatAt(path: string): FileStat | null {
+    const key = rstripSlash(path) || path
+    const meta = this.nodeTable.get(key)
+    if (meta?.target === undefined) return null
+    return linkStat(key.split('/').pop() ?? key, meta)
+  }
+
+  // Every link at any depth under a directory, with its own stat. A
+  // walker (find, du) needs the whole subtree, unlike a listing (ls)
+  // which wants one level.
+  linkStatsBelow(directory: string): [string, FileStat][] {
+    const base = rstripSlash(directory) + '/'
+    const out: [string, FileStat][] = []
+    for (const [path, meta] of this.nodeTable) {
+      if (meta.target !== undefined && path.startsWith(base)) {
+        out.push([path, linkStat(path.split('/').pop() ?? path, meta)])
+      }
+    }
+    return out
+  }
+
+  // Stat rows for the links living directly under a directory. Links
+  // are namespace state and invisible to a backend readdir, so listing
+  // commands merge these rows into the backend's entries.
+  linkStatsUnder(directory: string): FileStat[] {
+    const base = rstripSlash(directory) + '/'
+    const out: FileStat[] = []
+    for (const [path, meta] of this.nodeTable) {
+      if (
+        meta.target !== undefined &&
+        path.startsWith(base) &&
+        !path.slice(base.length).includes('/')
+      ) {
+        out.push(linkStat(path.slice(base.length), meta))
+      }
+    }
+    return out
   }
 
   // Links living directly under a directory: basename -> target.

@@ -8,7 +8,9 @@ from mirage.commands.builtin.generic.ls import (LS_FAILURE, LS_MINOR_PROBLEM,
                                                 LS_OK, LsWarning,
                                                 exit_status_for, format_simple,
                                                 ls, walk)
-from mirage.types import FileStat, FileType, LsSortBy, PathSpec
+from mirage.ops.types import LinkView
+from mirage.types import (LINK_TARGET_KEY, FileStat, FileType, LsSortBy,
+                          PathSpec)
 
 
 def _spec(path: str) -> PathSpec:
@@ -680,3 +682,66 @@ async def test_ls_l_no_filetype_enrichment():
     )
     decoded = output.decode()
     assert "data.parquet" in decoded
+
+
+def _link_view(link: FileStat) -> LinkView:
+    """A namespace holding exactly one link, named flink."""
+
+    async def _exists(virtual: str) -> bool:
+        return True
+
+    async def _target_stat(virtual: str) -> FileStat | None:
+        return None
+
+    return LinkView(stat_at=lambda v: link if v.endswith("flink") else None,
+                    children=lambda d: [],
+                    subtree=lambda d: [],
+                    resolve=lambda v: v,
+                    exists=_exists,
+                    target_stat=_target_stat)
+
+
+_LINK_ROW = FileStat(name="flink",
+                     size=19,
+                     modified="2026-01-02T15:30:00Z",
+                     type=FileType.SYMLINK,
+                     extra={LINK_TARGET_KEY: "/data/symx/real.txt"})
+
+
+@pytest.mark.asyncio
+async def test_link_operand_on_a_backend_whose_readdir_raises():
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    out, io = await ls([PathSpec.from_str_path("/data/symx/flink")],
+                       readdir=readdir,
+                       stat=stat,
+                       long=True,
+                       links=_link_view(_LINK_ROW))
+    assert io.exit_code == 0
+    assert out.decode().strip().endswith("flink -> /data/symx/real.txt")
+
+
+@pytest.mark.asyncio
+async def test_link_operand_on_a_backend_whose_readdir_returns_empty():
+    """Backends without real directories (s3, nextcloud) answer readdir
+    on a link with an empty list rather than raising, which rendered the
+    operand as an empty directory instead of the link's own row."""
+
+    async def readdir(p, index=None):
+        return []
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    out, io = await ls([PathSpec.from_str_path("/data/symx/flink")],
+                       readdir=readdir,
+                       stat=stat,
+                       long=True,
+                       links=_link_view(_LINK_ROW))
+    assert io.exit_code == 0
+    assert out.decode().strip().endswith("flink -> /data/symx/real.txt")

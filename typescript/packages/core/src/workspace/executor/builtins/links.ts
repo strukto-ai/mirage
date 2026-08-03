@@ -17,6 +17,7 @@ import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError, gnuDirname, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
@@ -264,11 +265,59 @@ export async function prepareMv(
   return { items: rewritten, postUnlink: targetDst, postRename, early: null }
 }
 
-export function handleReadlink(
+// Whether a resolved virtual path names something that exists.
+export async function pathExists(dispatch: DispatchFn, virtual: string): Promise<boolean> {
+  const spec = PathSpec.fromStrPath(virtual, '')
+  try {
+    return (await statOrNull(dispatch, spec)) !== null
+  } catch {
+    return false
+  }
+}
+
+// The stat of what a link points at, or null when it dangles.
+//
+// Under -L the reported entity is the target, so its type drives -type
+// and its size and mtime drive -size and -mtime. The stat goes through
+// dispatch rather than one backend because a link may point into
+// another mount, and through the overlay because the target's mtime may
+// be namespace state (touch results, observed writes). Python gets the
+// overlay from the ops dispatcher itself; here it is applied on the way
+// out, against the resolved path rather than the link's.
+export async function linkTargetStat(
   namespace: Namespace,
+  dispatch: DispatchFn,
+  virtual: string,
+  overlay: StatOverlay | null,
+): Promise<FileStat | null> {
+  let target: string
+  try {
+    target = namespace.follow(virtual)
+  } catch {
+    // A loop (ELOOP) is one of the two ways a link legitimately has no
+    // target; statOrNull maps the other (missing). Every other backend
+    // failure propagates, because a permission or connection error is
+    // not a dangling link and reporting it as one would print the link
+    // as -type l and exit 0.
+    return null
+  }
+  const stat = await statOrNull(dispatch, PathSpec.fromStrPath(target, ''))
+  if (stat === null || overlay === null) return stat
+  return overlay(target, stat)
+}
+
+// Print a symlink's target, GNU readlink semantics.
+//
+// The three canonicalizing flags differ only in how much of the resolved
+// path has to exist: -m requires nothing, -f requires every component
+// but the last, and -e requires all of it. A path that falls short
+// prints nothing and exits 1.
+export async function handleReadlink(
+  namespace: Namespace,
+  dispatch: DispatchFn,
   session: Session,
   args: (string | PathSpec)[],
-): Result {
+): Promise<Result> {
   const [flags, operands] = splitFlags(args, 'fenm')
   if (operands.length === 0) {
     return errorResult('readlink', 'readlink: missing operand\n')
@@ -281,12 +330,24 @@ export function handleReadlink(
     if (canonical) {
       // -f/-e/-m canonicalize: resolve every symlink (including a trailing
       // one) and normalize the path, GNU realpath-style.
+      let resolved: string
       try {
-        lines.push(norm(namespace.follow(absOp)))
+        resolved = norm(namespace.follow(absOp))
       } catch (err) {
         if (!(err instanceof CycleError)) throw err
         exitCode = 1
+        continue
       }
+      const probe = flags.has('e')
+        ? resolved
+        : flags.has('f')
+          ? resolved.slice(0, resolved.lastIndexOf('/')) || '/'
+          : null
+      if (probe !== null && !(await pathExists(dispatch, probe))) {
+        exitCode = 1
+        continue
+      }
+      lines.push(resolved)
       continue
     }
     const target = namespace.readlink(absOp)

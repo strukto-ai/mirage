@@ -21,7 +21,7 @@ from typing import Any, overload
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
-from mirage.ops.config import StatOverlay
+from mirage.ops.types import StatOverlay
 from mirage.types import FileStat, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 

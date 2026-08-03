@@ -25,8 +25,9 @@ from mirage.context import assert_mount_allowed, effective_mount_mode
 from mirage.observe import OpRecord
 from mirage.observe.context import push_mount_prefix
 from mirage.ops.config import (NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks,
-                               OpsMount, StatOverlay)
+                               OpsMount)
 from mirage.ops.registry import OpsRegistry, RegisteredOp
+from mirage.ops.types import StatOverlay
 from mirage.policy import Policies, post_ops_gate, pre_ops_gate
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key

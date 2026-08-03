@@ -28,7 +28,7 @@
       "command": "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd",
       "expect": {
         "exit": 0,
-        "stdout": "xd\nxm.txt\nxm_copy.txt\nxm_moved.txt\nxm_link.txt\n",
+        "stdout": "xd\nxm.txt\nxm_copy.txt\nxm_link.txt\nxm_moved.txt\n",
         "stderr": ""
       }
     }
