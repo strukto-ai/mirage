@@ -41,8 +41,13 @@ async def create_thread(
             f"/channels/{channel_id}/messages/{message_id}/threads",
             {"name": name},
         )
+    # Standalone threads must state a type: the API otherwise defaults
+    # to PRIVATE_THREAD, which needs extra permissions. 11 = PUBLIC_THREAD.
     return await discord_post(
         config,
         f"/channels/{channel_id}/threads",
-        {"name": name},
+        {
+            "name": name,
+            "type": 11
+        },
     )

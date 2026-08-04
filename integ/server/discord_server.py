@@ -387,6 +387,12 @@ class DiscordServer:
                     "code": 10008
                 }, status=404)
         body = await request.json()
+        if mid is None and body.get("type") not in (11, 12):
+            return web.json_response(
+                {
+                    "message": "Invalid Form Body",
+                    "code": 50035
+                }, status=400)
         thread = self.state.next_thread(cid, str(body.get("name", "")), mid)
         return web.json_response(thread)
 

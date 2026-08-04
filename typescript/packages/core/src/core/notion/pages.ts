@@ -16,6 +16,8 @@ import type { NotionTransport } from './_client.ts'
 
 type Json = Record<string, unknown>
 
+const MAX_PAGE_SIZE = 100
+
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : []
 }
@@ -28,6 +30,7 @@ async function paginateTool(
   transport: NotionTransport,
   toolName: string,
   baseArgs: Record<string, unknown>,
+  maxResults?: number,
 ): Promise<Json[]> {
   const collected: Json[] = []
   let cursor: string | null = null
@@ -38,6 +41,9 @@ async function paginateTool(
     const results = asArray(response.results)
     for (const item of results) {
       collected.push(asObject(item))
+    }
+    if (maxResults !== undefined && collected.length >= maxResults) {
+      return collected.slice(0, maxResults)
     }
     const hasMore = response.has_more === true
     const next = response.next_cursor
@@ -142,13 +148,14 @@ export async function searchPages(
   transport: NotionTransport,
   query: string,
   pageSize: number,
+  maxResults?: number,
 ): Promise<Json[]> {
   const baseArgs: Json = {
     filter: { value: 'page', property: 'object' },
-    page_size: pageSize,
+    page_size: Math.min(pageSize, MAX_PAGE_SIZE),
   }
   if (query !== '') baseArgs.query = query
-  return paginateTool(transport, 'API-post-search', baseArgs)
+  return paginateTool(transport, 'API-post-search', baseArgs, maxResults)
 }
 
 export async function appendBlocks(

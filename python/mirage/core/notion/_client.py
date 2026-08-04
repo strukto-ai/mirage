@@ -20,6 +20,7 @@ from mirage.core.notion.config import NotionConfig
 from mirage.resource.secrets import reveal_secret
 
 API_VERSION = "2022-06-28"
+MAX_PAGE_SIZE = 100
 
 
 class NotionAPIError(RuntimeError):
@@ -131,13 +132,16 @@ async def paginate_post(
     path: str,
     body: dict[str, Any] | None = None,
     page_size: int = 100,
+    max_results: int | None = None,
 ) -> list[dict[str, Any]]:
     merged = dict(body or {})
-    merged["page_size"] = page_size
+    merged["page_size"] = min(page_size, MAX_PAGE_SIZE)
     results: list[dict[str, Any]] = []
     while True:
         data = await notion_post(config, path, merged)
         results.extend(data.get("results", []))
+        if max_results is not None and len(results) >= max_results:
+            return results[:max_results]
         if not data.get("has_more"):
             break
         merged["start_cursor"] = data["next_cursor"]

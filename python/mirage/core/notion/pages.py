@@ -23,6 +23,7 @@ async def search_pages(
     config: NotionConfig,
     query: str = "",
     page_size: int = 100,
+    max_results: int | None = None,
 ) -> list[dict[str, Any]]:
     body: dict[str, Any] = {
         "filter": {
@@ -32,7 +33,13 @@ async def search_pages(
     }
     if query:
         body["query"] = query
-    return await paginate_post(config, "/search", body, page_size=page_size)
+    return await paginate_post(
+        config,
+        "/search",
+        body,
+        page_size=page_size,
+        max_results=max_results,
+    )
 
 
 async def search_databases(

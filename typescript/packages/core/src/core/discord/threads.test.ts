@@ -45,5 +45,6 @@ describe('createThread', () => {
     const t = new FakeTransport()
     await createThread(new DiscordAccessor(t), 'C1', 'topic')
     expect(t.calls[0]?.endpoint).toBe('/channels/C1/threads')
+    expect(t.calls[0]?.body).toEqual({ name: 'topic', type: 11 })
   })
 })

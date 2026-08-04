@@ -109,6 +109,20 @@ describe('searchDatabases', () => {
   })
 })
 
+describe('searchPages', () => {
+  it('caps the page size at the API maximum and stops at maxResults', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push(
+      { results: [{ id: 'p1' }, { id: 'p2' }], has_more: true, next_cursor: 'c1' },
+      { results: [{ id: 'p3' }, { id: 'p4' }], has_more: true, next_cursor: 'c2' },
+    )
+    const pages = await searchPages(transport, '', 250, 3)
+    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
+    expect(transport.invocations).toHaveLength(2)
+    expect(transport.invocations[0]?.args.page_size).toBe(100)
+  })
+})
+
 describe('getDatabase', () => {
   it('invokes API-retrieve-a-database with the database id', async () => {
     const transport = new FakeTransport()

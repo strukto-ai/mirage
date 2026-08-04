@@ -115,7 +115,7 @@ async def test_datasources_query_forwards_filter(monkeypatch):
 @pytest.mark.asyncio
 async def test_search_normalizes_rows(monkeypatch):
 
-    async def fake_search(config, query="", page_size=20):
+    async def fake_search(config, query="", page_size=20, max_results=None):
         return [{
             "id": "P1",
             "url": "u",

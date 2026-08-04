@@ -28,5 +28,10 @@ export async function createThread(
       { name },
     )
   }
-  return accessor.transport.call('POST', `/channels/${channelId}/threads`, undefined, { name })
+  // Standalone threads must state a type: the API otherwise defaults
+  // to PRIVATE_THREAD, which needs extra permissions. 11 = PUBLIC_THREAD.
+  return accessor.transport.call('POST', `/channels/${channelId}/threads`, undefined, {
+    name,
+    type: 11,
+  })
 }

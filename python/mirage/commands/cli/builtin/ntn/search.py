@@ -34,6 +34,7 @@ async def search(
         config,
         query=fl.as_str("query") or "",
         page_size=limit,
+        max_results=limit,
     )
     results = [{
         "title": extract_title(page) or "Untitled",

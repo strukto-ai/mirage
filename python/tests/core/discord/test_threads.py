@@ -39,5 +39,7 @@ async def test_create_thread_standalone():
                new_callable=AsyncMock,
                return_value={"id": "T2"}) as post:
         await create_thread(CONFIG, "C1", "topic")
-    post.assert_awaited_once_with(CONFIG, "/channels/C1/threads",
-                                  {"name": "topic"})
+    post.assert_awaited_once_with(CONFIG, "/channels/C1/threads", {
+        "name": "topic",
+        "type": 11
+    })

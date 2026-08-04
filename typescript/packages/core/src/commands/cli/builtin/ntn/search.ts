@@ -35,7 +35,7 @@ export async function search(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags)
   const limit = fl.asInt('limit') ?? 20
-  const pages = await searchPages(notionTransport(config), fl.asStr('query') ?? '', limit)
+  const pages = await searchPages(notionTransport(config), fl.asStr('query') ?? '', limit, limit)
   const results = pages.slice(0, limit).map((page) => {
     const parent = page.parent as Record<string, unknown> | undefined
     const title = extractTitle(page)
