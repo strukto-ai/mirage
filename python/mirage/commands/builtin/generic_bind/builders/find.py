@@ -17,7 +17,8 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
-from mirage.commands.builtin.generic.find import (is_link, parse_find_args,
+from mirage.commands.builtin.generic.find import (is_link, missing_start_line,
+                                                  parse_find_args,
                                                   resolve_start, walk_find)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
@@ -128,6 +129,7 @@ async def _find_walk(
         stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
     # GNU find walks every start point in operand order.
     results: list[str] = []
+    missing: list[str] = []
     for search in searches:
         # Same start-point rule as the native-op path, so what `find` does
         # with a file or a missing operand does not depend on whether the
@@ -136,6 +138,11 @@ async def _find_walk(
                                     args,
                                     stat_path,
                                     is_link=is_link(links, search))
+        if start.missing:
+            # GNU names each start point it cannot stat, keeps going with
+            # the rest, and exits 1.
+            missing.append(missing_start_line(search))
+            continue
         if not start.walk:
             results.extend(start.results)
             continue
@@ -150,6 +157,10 @@ async def _find_walk(
         # GNU prints each result under the operand as typed; walk_find
         # returns virtual paths, so rebase like generic_find does.
         results.extend(respell_raw(walked, search.virtual, search.raw_path))
+    if missing:
+        return format_records(results), IOResult(stderr=("\n".join(missing) +
+                                                         "\n").encode(),
+                                                 exit_code=1)
     return format_records(results), IOResult()
 
 

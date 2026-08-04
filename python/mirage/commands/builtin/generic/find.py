@@ -116,14 +116,26 @@ def apply_mount_prefix(results: list[str], mount_prefix: str) -> list[str]:
     return out
 
 
+def missing_start_line(search_path: PathSpec) -> str:
+    """GNU's stderr line for a start point that does not exist.
+
+    One spelling of the diagnostic, because both find paths emit it: the
+    native-op path returns it alone, the walk collects one per operand.
+
+    Args:
+        search_path (PathSpec): the start point, as the operand named it.
+    """
+    label = search_path.raw_path or search_path.virtual
+    return f"find: '{label}': No such file or directory"
+
+
 def missing_start(search_path: PathSpec) -> tuple[bytes, IOResult]:
     """GNU's result for a start point that does not exist.
 
     Args:
         search_path (PathSpec): the start point, as the operand named it.
     """
-    stderr = (f"find: '{search_path.raw_path}': "
-              f"No such file or directory\n").encode()
+    stderr = (missing_start_line(search_path) + "\n").encode()
     return b"", IOResult(stderr=stderr, exit_code=1)
 
 
@@ -141,14 +153,17 @@ def is_link(links: LinkView | None, search: PathSpec) -> bool:
 class StartPoint:
     """What a start point makes ``find`` do with one operand.
 
-    Either the subtree is walked, or these rows are the whole answer.
+    One of three things: the subtree is walked, these rows are the whole
+    answer, or nothing is there and GNU's diagnostic is.
     """
 
     walk: bool
     results: list[str]
+    missing: bool = False
 
 
 WALK_START = StartPoint(walk=True, results=[])
+MISSING_START = StartPoint(walk=False, results=[], missing=True)
 
 
 async def resolve_start(
@@ -164,13 +179,13 @@ async def resolve_start(
     cannot depend on whether the mounted backend ships a native find op
     or is walked through readdir. GNU stats every start point for the
     same reason: only a directory has a subtree, anything else is
-    reported as itself.
+    reported as itself, and nothing at all is a diagnostic.
 
-    Only a *positive* non-directory answer short-circuits. A stat that
-    sees nothing is not proof of absence: on a backend with implicit
-    directories (an object store's key prefix), a directory exists only
-    as its children, so stat misses what readdir would list. Those fall
-    through to the walk, which is the only thing that can tell.
+    ``stat_path`` asks both channels a backend can answer on, so a
+    directory that exists only as its children still reports as one and
+    None means nothing is there (see ``resolve_path_stat``). That is what
+    makes the missing case answerable above every backend rather than
+    only where one wires a stat.
 
     A symlink start point is left to the caller, which merges namespace
     links separately; it has no backend inode to stat.
@@ -185,7 +200,9 @@ async def resolve_start(
     if stat_path is None or is_link:
         return WALK_START
     start = await stat_path(search.virtual)
-    if start is None or start.type == FileType.DIRECTORY:
+    if start is None:
+        return MISSING_START
+    if start.type == FileType.DIRECTORY:
         return WALK_START
     prefix = mount_prefix_of(search.virtual, search.resource_path)
     # `-path` matches the display path, so Path nodes carry the mount
@@ -283,13 +300,11 @@ async def find(
     # link_results emits below.
     root_is_link = (links is not None
                     and links.stat_at(search_path.virtual) is not None)
-    # Existence guard, for the backends that wire a stat (cheap enough to
-    # spend one on every result for -mtime). GNU names a start point it
-    # cannot stat and exits 1; this used to render the errno object, so it
-    # printed the path twice instead of the message. Backends without a
-    # wired stat still report absence their own way, because a stat that
-    # sees nothing is not proof of absence when directories are implicit.
-    if stat is not None and not root_is_link:
+    # Fallback existence guard for a caller with no dispatcher probe (a
+    # unit test, or a command run outside a workspace). With stat_path
+    # wired, resolve_start below answers absence for every backend, so
+    # spending a second stat here would only duplicate it.
+    if stat_path is None and stat is not None and not root_is_link:
         try:
             await stat(search_path)
         except (FileNotFoundError, ValueError):
@@ -315,6 +330,8 @@ async def find(
                                 args,
                                 stat_path,
                                 is_link=root_is_link)
+    if start.missing:
+        return missing_start(search_path)
     if not start.walk and not root_is_link:
         return format_records(start.results), IOResult()
     results: list[str] = [] if root_is_link else await find_core(

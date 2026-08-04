@@ -142,16 +142,16 @@ async def tree(
     root_label = path.raw_path or path.virtual
     # What the operand is decides the whole result, so it is resolved
     # before the walk rather than inferred from how a backend answered
-    # readdir on it: an object store lists a file key as an empty prefix
-    # and Graph 404s, which read as two different trees.
-    # Only a positive non-directory answer is acted on here. A stat that
-    # sees nothing is not proof of absence: on a backend with implicit
-    # directories (an object store's key prefix) a directory exists only
-    # as its children, so that case falls through to the walk below,
-    # which already reports an unopenable root.
+    # readdir on it: an object store lists a file key as an empty prefix,
+    # lists a missing path as one too, and Graph 404s, which read as
+    # three different trees. The probe asks both channels a backend can
+    # answer on, so a directory that exists only as its children still
+    # reports as one and None means nothing is there.
     if stat_path is not None:
         start = await stat_path(path.virtual)
-        if start is not None and start.type != FileType.DIRECTORY:
+        if start is None:
+            return _unopenable(root_label, dirs_only, 0, 2)
+        if start.type != FileType.DIRECTORY:
             return _unopenable(root_label, dirs_only, 1, 0)
     lines, dirs, files = await _walk(path,
                                      readdir,

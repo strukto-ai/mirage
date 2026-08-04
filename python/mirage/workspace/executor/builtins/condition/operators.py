@@ -19,6 +19,7 @@ from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY)
 from mirage.workspace.executor.builtins.condition.types import (CondContext,
                                                                 CondError)
+from mirage.workspace.executor.builtins.links import resolve_path_stat
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 
 
@@ -40,33 +41,21 @@ async def path_kind(ctx: CondContext,
                     val: str | PathSpec) -> tuple[str | None, FileStat | None]:
     """Resolve an operand to 'dir' / 'file' / None plus its stat.
 
-    Symlinks are followed first (test -e/-f/-d act on the target); a
-    stat that names a directory type answers directly, otherwise a
-    readdir probe catches backends whose stat cannot see directories.
-    The probe demands a non-empty listing: prefix stores (s3, gridfs,
-    hf, nextcloud) list a missing path as [] instead of raising, and
-    they cannot hold an empty directory anyway.
+    Symlinks are followed first (test -e/-f/-d act on the target), then
+    ``resolve_path_stat`` answers what is there. That probe is shared with
+    ``find`` and ``tree``'s start point, so ``test -d`` and a traversal
+    cannot disagree about whether a path exists.
 
     Args:
         ctx (CondContext): evaluation context.
         val (str | PathSpec): operand as typed or classified.
     """
-    scope = operand_scope(ctx, val)
-    try:
-        stat, _ = await ctx.dispatch("stat", scope)
-    except (FileNotFoundError, ValueError, NotADirectoryError):
-        stat = None
-    if stat is not None:
-        if stat.type == FileType.DIRECTORY:
-            return "dir", stat
-        return "file", stat
-    try:
-        entries, _ = await ctx.dispatch("readdir", scope)
-    except (FileNotFoundError, ValueError, NotADirectoryError):
+    stat = await resolve_path_stat(ctx.dispatch, operand_scope(ctx, val))
+    if stat is None:
         return None, None
-    if entries:
-        return "dir", None
-    return None, None
+    if stat.type == FileType.DIRECTORY:
+        return "dir", stat
+    return "file", stat
 
 
 async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:

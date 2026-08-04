@@ -563,32 +563,51 @@ async def test_find_file_start_point_respells_the_operand():
 
 
 @pytest.mark.asyncio
-async def test_find_unstattable_start_point_falls_through_to_the_walk():
-    """A stat that sees nothing is not proof of absence.
+async def test_find_implicit_directory_start_point_is_walked():
+    """A directory that exists only as its children is still walked.
 
-    On a backend with implicit directories (an object store's key prefix)
-    a directory exists only as its children, so stat misses what readdir
-    would list. Short-circuiting there would make `find <dir>` report
-    nothing on every such backend.
+    On a prefix store a directory is not an object, so the probe answers
+    for it through readdir instead (``resolve_path_stat``). Reporting it
+    as a non-directory row would make `find <dir>` print the directory
+    and nothing under it on every such backend.
     """
 
     async def core(*_a, **_kw) -> list[str]:
-        return ["/nope/child.txt"]
+        return ["/logs/child.txt"]
 
-    stdout, io = await find([_file_spec(virtual="/mnt/nope", key="nope")], (),
-                            find_core=core,
-                            stat_path=_stat_path(None))
+    stdout, io = await find(
+        [_file_spec(virtual="/mnt/logs", key="logs")],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="logs", type=FileType.DIRECTORY)),
+    )
     assert io.exit_code == 0
-    assert stdout == b"/mnt/nope/child.txt\n"
+    assert stdout == b"/mnt/logs/child.txt\n"
 
 
 @pytest.mark.asyncio
-async def test_find_missing_start_point_is_gnu_error_when_stat_is_wired():
-    """GNU names a start point it cannot stat and exits 1.
+async def test_find_missing_start_point_is_gnu_error():
+    """GNU names a start point that is not there and exits 1.
 
-    Reached through the backend's own stat, which is wired for backends
-    whose stat is cheap; `find: '<path>': <errno text>` used to print the
-    path twice instead of the message.
+    The probe answers on both channels a backend can offer, so None means
+    nothing is there rather than "this backend's stat could not see it".
+    That is what makes the diagnostic uniform instead of arriving only on
+    the backends that wire a stat into find.
+    """
+    stdout, io = await find([_file_spec(virtual="/mnt/nope", key="nope")], (),
+                            find_core=_unreached_core,
+                            stat_path=_stat_path(None))
+    assert io.exit_code == 1
+    assert stdout == b""
+    assert io.stderr == b"find: '/mnt/nope': No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_find_missing_start_point_falls_back_to_backend_stat():
+    """Without a dispatcher probe, the backend's own stat still answers.
+
+    A command run outside a workspace has no ``stat_path``; the fallback
+    guard keeps GNU's diagnostic rather than silently exiting 0.
     """
 
     async def stat(_spec: PathSpec) -> FileStat:

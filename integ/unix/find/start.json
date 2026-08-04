@@ -407,6 +407,108 @@
     "stdout": "/data/sub/nested.txt\n",
     "stderr": ""
    }
+  },
+  {
+   "id": "find_start_missing",
+   "seq": 389,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data/nope",
+   "expect": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "find: '/data/nope': No such file or directory\n"
+   }
+  },
+  {
+   "id": "find_start_missing_type_f",
+   "seq": 390,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data/nope -type f",
+   "expect": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "find: '/data/nope': No such file or directory\n"
+   }
+  },
+  {
+   "id": "find_start_missing_nested",
+   "seq": 391,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data/sub/nope",
+   "expect": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "find: '/data/sub/nope': No such file or directory\n"
+   }
   }
  ]
 }

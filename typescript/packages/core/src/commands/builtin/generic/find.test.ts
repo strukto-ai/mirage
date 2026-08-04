@@ -120,21 +120,42 @@ describe('generic command find', () => {
       expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/other/link.txt\n')
     })
 
-    // A stat that sees nothing is not proof of absence: on a backend with
-    // implicit directories (an object store's key prefix) a directory
-    // exists only as its children, so stat misses what readdir would list.
-    it('falls through to the walk when the start point cannot be statted', async () => {
+    // The probe answers on both channels a backend can offer, so null
+    // means nothing is there rather than "this backend's stat could not
+    // see it". GNU findutils 4.10.0: exit 1 and the diagnostic below.
+    it('names a start point that is not there and exits 1', async () => {
       const root = new PathSpec({
         resourcePath: 'nope',
         virtual: '/mnt/nope',
         directory: '/mnt/',
         resolved: false,
+        rawPath: '/mnt/nope',
       })
-      const result = await findGeneric([root], [], optsWith(null), () =>
-        Promise.resolve(['/nope/child.txt']),
+      const result = await findGeneric([root], [], optsWith(null), unreachedFind)
+      expect(result?.[1].exitCode).toBe(1)
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('')
+      expect(DEC.decode(result?.[1].stderr as Uint8Array)).toBe(
+        "find: '/mnt/nope': No such file or directory\n",
+      )
+    })
+
+    // A directory that exists only as its children resolves through the
+    // probe's readdir channel, so it arrives here as a DIRECTORY and is
+    // walked; reporting it as a non-directory row would print the
+    // directory and nothing under it on every prefix store.
+    it('walks an implicit directory start point', async () => {
+      const dirStat = { name: 'logs', type: FileType.DIRECTORY } as FileStat
+      const root = new PathSpec({
+        resourcePath: 'logs',
+        virtual: '/mnt/logs',
+        directory: '/mnt/',
+        resolved: false,
+      })
+      const result = await findGeneric([root], [], optsWith(dirStat), () =>
+        Promise.resolve(['/logs/child.txt']),
       )
       expect(result?.[1].exitCode).toBe(0)
-      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/nope/child.txt\n')
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/logs/child.txt\n')
     })
 
     it('still walks a directory start point', async () => {

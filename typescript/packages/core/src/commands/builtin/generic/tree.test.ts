@@ -148,15 +148,32 @@ describe('treeGeneric operand that is not a directory', () => {
     expect(DEC.decode(out)).toBe('/a.txt  [error opening dir]\n\n0 directories\n')
   })
 
-  // A stat that sees nothing is not proof of absence, so the walk decides;
-  // it already renders an unopenable root as the marker with exit 2.
-  it('still walks an operand it cannot stat', async () => {
-    const failing = (): Promise<string[]> => Promise.reject(new Error('ENOENT'))
-    const [out, io] = (await treeGeneric([spec('/nope')], optsWith(null), failing, unreached)) as [
-      Uint8Array,
-      { exitCode: number },
-    ]
+  // The probe answers on both channels a backend can offer, so null means
+  // nothing is there and the walk is never attempted. GNU tree 2.2.1 marks
+  // it inline, counts nothing, and exits 2.
+  it('marks an operand that is not there and exits 2', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/nope')],
+      optsWith(null),
+      unreached,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(out)).toBe('/nope  [error opening dir]\n\n0 directories, 0 files\n')
+  })
+
+  // An unreadable directory that does exist still reaches the walk, which
+  // renders the same marker with exit 2 (a permission error, not absence).
+  it('still walks a directory it cannot list', async () => {
+    const dirStat = new FileStat({ name: 'locked', type: FileType.DIRECTORY })
+    const failing = (): Promise<string[]> => Promise.reject(new Error('EACCES'))
+    const [out, io] = (await treeGeneric(
+      [spec('/locked')],
+      optsWith(dirStat),
+      failing,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(2)
+    expect(DEC.decode(out)).toBe('/locked  [error opening dir]\n\n0 directories, 0 files\n')
   })
 })

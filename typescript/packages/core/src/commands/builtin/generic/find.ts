@@ -329,6 +329,7 @@ export async function findGeneric(
           ...(emptyFlag ? { empty: true } : {}),
         }
   const matches: string[] = []
+  const missing: string[] = []
   for (const root of targets) {
     // `-path` matches the display path as printed; stamp the mount
     // prefix onto path nodes before the backend walks mount-relative
@@ -345,15 +346,23 @@ export async function findGeneric(
     // nothing at all is GNU's diagnostic. Statted through the dispatcher,
     // so a start point the router already resolved into another mount
     // answers there rather than on this command's mount.
-    // Only a positive non-directory answer short-circuits. A stat that
-    // sees nothing is not proof of absence: on a backend with implicit
-    // directories (an object store's key prefix) a directory exists only
-    // as its children, so stat misses what readdir would list. Those fall
-    // through to the walk, which is the only thing that can tell.
+    // The probe asks both channels a backend can answer on, so a directory
+    // that exists only as its children still reports as one and null means
+    // nothing is there (see resolvePathStat). That is what makes the
+    // missing case answerable above every backend rather than only where
+    // one wires a stat.
     const startStat = opts.statPath
     if (startStat !== undefined && !rootIsLink) {
       const start = await startStat(root.virtual)
-      if (start !== null && start.type !== FileType.DIRECTORY) {
+      if (start === null) {
+        // GNU names each start point it cannot stat, keeps going with the
+        // rest, and exits 1. Reported as the operand was typed, falling
+        // back to the resolved path for a synthesized root.
+        const label = root.rawPath !== '' ? root.rawPath : root.virtual
+        missing.push(`find: '${label}': No such file or directory`)
+        continue
+      }
+      if (start.type !== FileType.DIRECTORY) {
         const rows = startPointResults(
           root,
           start,
@@ -418,5 +427,8 @@ export async function findGeneric(
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
+  if (missing.length > 0) {
+    return [out, new IOResult({ stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 })]
+  }
   return [out, new IOResult()]
 }

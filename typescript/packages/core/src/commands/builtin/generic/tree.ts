@@ -144,17 +144,23 @@ export async function treeGeneric(
     lines.push(label)
     // What the operand is decides the whole result, so it is resolved
     // before the walk rather than inferred from how a backend answered
-    // readdir on it: an object store lists a file key as an empty prefix
-    // and Graph 404s, which read as two different trees. GNU marks a
-    // non-directory operand the same way but counts it and exits 0.
-    // Only a positive non-directory answer is acted on here. A stat that
-    // sees nothing is not proof of absence: on a backend with implicit
-    // directories (an object store's key prefix) a directory exists only
-    // as its children, so that case falls through to the walk below,
-    // which already reports an unopenable root.
+    // readdir on it: an object store lists a file key as an empty prefix,
+    // lists a missing path as one too, and Graph 404s, which read as
+    // three different trees. The probe asks both channels a backend can
+    // answer on, so a directory that exists only as its children still
+    // reports as one and null means nothing is there.
+    //
+    // GNU prints the same inline marker either way; what differs is the
+    // count and the status. A non-directory exists, so it is counted and
+    // the exit stays 0; a path that is not there is not counted and exits 2.
     if (opts.statPath !== undefined) {
       const start = await opts.statPath(p.virtual)
-      if (start !== null && start.type !== FileType.DIRECTORY) {
+      if (start === null) {
+        lines[before] = `${label}  [error opening dir]`
+        anyError = true
+        continue
+      }
+      if (start.type !== FileType.DIRECTORY) {
         lines[before] = `${label}  [error opening dir]`
         totalFiles += 1
         continue

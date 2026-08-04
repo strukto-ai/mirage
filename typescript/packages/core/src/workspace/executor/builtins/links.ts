@@ -15,7 +15,7 @@
 import { resolvePath } from '../../../utils/path.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
-import { CycleError, gnuDirname, norm } from '../../../utils/path.ts'
+import { CycleError, gnuBasename, gnuDirname, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
@@ -265,6 +265,56 @@ export async function prepareMv(
   return { items: rewritten, postUnlink: targetDst, postRename, early: null }
 }
 
+// What an existence probe reads as "nothing here": the path is absent, or
+// a component of it is not traversable. Deliberately narrower than a walk's
+// tolerance, because a permission or missing-capability error is not
+// absence, and mapping it to one would report a path that exists as
+// missing. Mirrors python MISS_ERRORS.
+function isMissError(exc: unknown): boolean {
+  const code = (exc as { code?: string }).code
+  if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return true
+  const msg = exc instanceof Error ? exc.message : String(exc)
+  return /not found|no such file|not a directory|is a directory/i.test(msg)
+}
+
+// What a path is, asked on both channels a backend can answer on.
+//
+// A point lookup alone cannot decide. On a prefix store a directory is not
+// an object, it is the set of keys under it, so stat misses what readdir
+// would list. Absence therefore takes *both* channels coming back empty,
+// which is the only evidence that nothing is there.
+//
+// The listing has to be non-empty to count: those stores answer a missing
+// path with [] rather than raising, and cannot hold an empty directory
+// anyway (one with no keys under it does not exist). Measured across every
+// integ target: an implicit directory answers here, a missing path does not.
+export async function resolvePathStat(
+  dispatch: DispatchFn,
+  path: PathSpec,
+): Promise<FileStat | null> {
+  let stat: FileStat | null = null
+  try {
+    const [s] = await dispatch('stat', path)
+    stat = s as FileStat | null
+  } catch (exc) {
+    if (!isMissError(exc)) throw exc
+  }
+  if (stat !== null) return stat
+  let entries: unknown
+  try {
+    const [raw] = await dispatch('readdir', path)
+    entries = raw
+  } catch (exc) {
+    if (!isMissError(exc)) throw exc
+    return null
+  }
+  if (!Array.isArray(entries) || entries.length === 0) return null
+  return new FileStat({
+    name: gnuBasename(rstripSlash(path.virtual)),
+    type: FileType.DIRECTORY,
+  })
+}
+
 // Stat one virtual path through the workspace, null when absent.
 //
 // Resolves through the op dispatcher rather than one backend, so a path
@@ -279,7 +329,7 @@ export async function pathStat(
   overlay: StatOverlay | null = null,
 ): Promise<FileStat | null> {
   const spec = PathSpec.fromStrPath(virtual, '')
-  const stat = await statOrNull(dispatch, spec)
+  const stat = await resolvePathStat(dispatch, spec)
   if (stat === null) return null
   return overlay !== null ? overlay(virtual, stat) : stat
 }
