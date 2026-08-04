@@ -23,11 +23,19 @@ _FOLDER_MIME = "application/vnd.google-apps.folder"
 _FILE_MIME = "application/octet-stream"
 
 _PATCH_TARGETS = {
+    # Every module that imports the function by value needs its own
+    # binding: patching one leaves the others pointing at the real Drive
+    # API, which 401s mid-test. `find` reaches Drive through resolve and
+    # tree, neither of which readdir's binding covers (#684).
     "list_files": [
         "mirage.core.gdrive.readdir.list_files",
+        "mirage.core.gdrive.resolve.list_files",
+        "mirage.core.gdrive.tree.list_files",
+        "mirage.core.gdrive.rename.list_files",
     ],
     "list_shared_drives": [
         "mirage.core.gdrive.readdir.list_shared_drives",
+        "mirage.core.gdrive.resolve.list_shared_drives",
     ],
     "list_all_files": [
         "mirage.core.gdocs.readdir.list_all_files",
@@ -177,24 +185,35 @@ def _build_fakes(registry):
         mime_type: str | None = None,
         trashed: bool = False,
         page_size: int = 1000,
+        modified_after: str | None = None,
+        modified_before: str | None = None,
+        name: str | None = None,
     ) -> list[dict]:
+        # The signature mirrors the real list_files so a caller that passes
+        # a filter this fake ignores fails loudly at the call site rather
+        # than silently listing an unfiltered folder. `name` is honored
+        # because resolve_key walks a path one exact name at a time.
         del drive_id, mime_type, trashed, page_size
+        del modified_after, modified_before
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
             return []
-        return fake.list_children(folder_id)
+        children = fake.list_children(folder_id)
+        if name is not None:
+            children = [c for c in children if c.get("name") == name]
+        return children
 
     async def fake_list_all_files(
         token_manager,
         mime_type: str | None = None,
         trashed: bool = False,
         page_size: int = 1000,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], bool]:
         del mime_type, trashed, page_size
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
-            return []
-        return fake.all_files()
+            return [], True
+        return fake.all_files(), True
 
     async def fake_list_shared_drives(token_manager) -> list[dict]:
         return []
@@ -245,8 +264,16 @@ def patch_gdrive(*pairs) -> ExitStack:
               new=fakes["refresh"]))
     for name, targets in _PATCH_TARGETS.items():
         for target in targets:
+            # A target that will not resolve used to be skipped, which is
+            # how #684 stayed quiet: the binding kept pointing at the real
+            # Drive API and the test reached the network. A stale target is
+            # a fixture bug, so it fails here.
             try:
                 stack.enter_context(patch(target, new=fakes[name]))
-            except (AttributeError, ModuleNotFoundError):
-                pass
+            except (AttributeError, ModuleNotFoundError) as exc:
+                stack.close()
+                raise AssertionError(
+                    f"gdrive_mock cannot patch {target!r}: {exc}. Fix the "
+                    "target in _PATCH_TARGETS; leaving it unpatched sends "
+                    "the test to the real Drive API.") from exc
     return stack

@@ -149,10 +149,11 @@ async def test_list_all_files(token_manager):
             new_callable=AsyncMock,
             side_effect=[page1, page2],
     ):
-        result = await list_all_files(token_manager)
+        result, complete = await list_all_files(token_manager)
         assert len(result) == 2
         assert result[0]["id"] == "f1"
         assert result[1]["id"] == "f2"
+        assert complete is True
 
 
 @pytest.mark.asyncio
@@ -200,6 +201,60 @@ async def test_list_all_files_with_modified_range(token_manager):
     assert "modifiedTime < '2026-06-01T00:00:00Z'" in q
     assert "mimeType='application/vnd.google-apps.document'" in q
     assert "trashed=false" in q
+
+
+@pytest.mark.asyncio
+async def test_list_all_files_searches_every_corpus(token_manager):
+    """The g* mounts must see Shared Drive files, like gdrive does.
+
+    Without the all-drives triple Drive answers from the user corpus only,
+    so the same account sees a Shared Drive spreadsheet under gdrive and
+    not under gsheets, with no error to explain the difference.
+    """
+    captured = {}
+
+    async def fake_get(token_manager, url, params=None):
+        captured["params"] = params
+        return {"files": []}
+
+    with patch("mirage.core.google.drive.google_get", new=fake_get):
+        await list_all_files(token_manager=token_manager)
+
+    params = captured["params"]
+    assert params["corpora"] == "allDrives"
+    assert params["includeItemsFromAllDrives"] == "true"
+    assert params["supportsAllDrives"] == "true"
+    # allDrives is the union of every corpus, so naming one contradicts it.
+    assert "driveId" not in params
+    # incompleteSearch is a partial-response field: unasked for, unreturned.
+    assert params["fields"].startswith("incompleteSearch,")
+
+
+@pytest.mark.asyncio
+async def test_list_all_files_reports_an_incomplete_search(token_manager):
+    """A corpus Drive gave up on makes the whole listing short.
+
+    The flag can arrive on any page, so it must survive pagination: the
+    caller uses it to decide whether the listing may be cached as a
+    directory.
+    """
+    page1 = {
+        "files": [{
+            "id": "f1",
+            "name": "a.txt"
+        }],
+        "incompleteSearch": True,
+        "nextPageToken": "token2",
+    }
+    page2 = {"files": [{"id": "f2", "name": "b.txt"}]}
+    with patch(
+            "mirage.core.google.drive.google_get",
+            new_callable=AsyncMock,
+            side_effect=[page1, page2],
+    ):
+        result, complete = await list_all_files(token_manager)
+    assert [f["id"] for f in result] == ["f1", "f2"]
+    assert complete is False
 
 
 @pytest.mark.asyncio

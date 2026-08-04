@@ -19,9 +19,9 @@ import { assertMountAllowed, MountNotAllowedError } from '../../../context/sessi
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { LinkView, StatOverlay } from '../../../ops/types.ts'
+import type { LinkView, StatOverlay, StatPath } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { linkTargetStat, pathExists } from '../builtins/links.ts'
+import { linkTargetStat, pathExists, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { VfsRuntime, type Runtime } from '../runtime.ts'
@@ -193,6 +193,10 @@ export async function runOnMount(
   // command that does not read `links` off its context ignores it, so
   // there is no list of symlink-aware commands to keep in step.
   const links = linkView(namespace ?? null, dispatch, statOverlay)
+  // A traversal command's start point is statted through the dispatcher so
+  // a start point under another mount answers (`find -L` follows a link
+  // across mounts before the command ever runs).
+  const statPath: StatPath = (path: string) => pathStat(dispatch, path, statOverlay)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -213,6 +217,7 @@ export async function runOnMount(
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
       ...(statOverlay !== null ? { statOverlay } : {}),
       ...(links !== null ? { links } : {}),
+      statPath,
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
     })

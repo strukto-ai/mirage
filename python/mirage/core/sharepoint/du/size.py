@@ -38,5 +38,5 @@ async def size(accessor: SharePointAccessor,
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:
         return 0
-    return await du_tree_total(accessor.config,
-                               drive_loc(resolved, path.mount_path))
+    return await du_tree_total(
+        accessor.config, drive_loc(accessor.config, resolved, path.mount_path))

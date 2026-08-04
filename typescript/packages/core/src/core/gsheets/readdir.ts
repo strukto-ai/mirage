@@ -55,7 +55,7 @@ export async function readdir(
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   }
 
-  const files = await listAllFiles(accessor.tokenManager, {
+  const { files, complete } = await listAllFiles(accessor.tokenManager, {
     mimeType: MIME,
     modifiedAfter: modifiedRange ? modifiedRange[0] : null,
     modifiedBefore: modifiedRange ? modifiedRange[1] : null,
@@ -89,7 +89,12 @@ export async function readdir(
   }
 
   if (index !== undefined) {
-    if (modifiedRange !== null) {
+    // A modified-range listing is a filtered view rather than the directory,
+    // and an incomplete all-corpora search is a directory Drive could not
+    // finish reading. Neither may stand in for the directory: caching one
+    // would pin a short listing until it expires. The entries are real
+    // either way, so cache those and let the next readdir re-list.
+    if (modifiedRange !== null || !complete) {
       for (const [name, entry] of entries) {
         await index.put(`${virtualKey}/${name}`, entry)
       }

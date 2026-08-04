@@ -73,12 +73,20 @@ def test_numeric_shorthand_not_a_path():
     assert kinds == [None, PATH]
 
 
-def test_find_ignore_tokens_not_classified():
+def test_find_ignore_tokens_classified_as_text():
+    """Expression syntax is TEXT, never left to the shape heuristic.
+
+    ``None`` used to mean "apply the default classification" here, and
+    the default read ``(`` as the bare path ``/(``, so a parenthesised
+    expression handed ``find`` two phantom start points on top of the
+    real one. Invisible until a start point that does not exist became
+    an error, which is what GNU does.
+    """
     kinds = spec_word_kinds(SPECS["find"],
                             ["/data", "(", "-name", "*.txt", ")"])
     assert kinds[0] == PATH
-    assert kinds[1] is None
-    assert kinds[4] is None
+    assert kinds[1] == TEXT
+    assert kinds[4] == TEXT
 
 
 def test_duplicate_word_text_and_path_slots():

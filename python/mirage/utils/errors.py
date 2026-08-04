@@ -51,6 +51,15 @@ FS_ERRORS: tuple[type[OSError], ...] = tuple(t for t, _ in _FS_STRERROR)
 # while its siblings keep going.
 WALK_ERRORS: tuple[type[Exception], ...] = (*FS_ERRORS, ValueError)
 
+# What an existence probe reads as "nothing here": the path is absent, or
+# a component of it is not traversable. Deliberately narrower than
+# WALK_ERRORS, because a permission or missing-capability error is not
+# absence, and mapping it to one would report a path that exists as
+# missing. Mirrors TS isMissError.
+MISS_ERRORS: tuple[type[Exception],
+                   ...] = (FileNotFoundError, NotADirectoryError,
+                           IsADirectoryError, ValueError)
+
 
 def _virtual_of(path: object) -> str:
     original = getattr(path, "virtual", None)

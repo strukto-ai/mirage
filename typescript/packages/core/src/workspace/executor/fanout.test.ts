@@ -13,23 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../io/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
-import { MountMode } from '../../types.ts'
+import { FileStat, FileType, MountMode, type PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { Session } from '../session/session.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCommand } from './command.ts'
+import { basename } from '../../core/ram/utils.ts'
 
 const NEVER_EXECUTE: ExecuteNodeFn = () => {
   throw new Error('executeNode should not have been called')
 }
 
-const NEVER_DISPATCH: DispatchFn = () => {
-  throw new Error('dispatch should not have been called')
-}
+// `find` resolves its start point through the dispatcher, because a start
+// point the router followed into another mount can only be statted there.
+// Anything else reaching the dispatcher is still a test failure.
+const STAT_ONLY_DISPATCH: DispatchFn = ((op: string, path: PathSpec) => {
+  if (op !== 'stat') throw new Error(`dispatch(${op}) should not have been called`)
+  return Promise.resolve([
+    new FileStat({ name: basename(path.virtual), type: FileType.DIRECTORY }),
+    new IOResult(),
+  ])
+}) as unknown as DispatchFn
 
 function wireMount(mount: MountEntry): void {
   const cmds = mount.resource.commands?.()
@@ -56,7 +64,7 @@ describe('fanOutTraversal glob matching', () => {
     const s = new Session({ sessionId: 'test', cwd: '/' })
     const [, io] = await handleCommand(
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
+      STAT_ONLY_DISPATCH,
       reg,
       ['find', '/data', '-name', '['],
       s,
@@ -73,7 +81,7 @@ describe('fanOutTraversal glob matching', () => {
     const s = new Session({ sessionId: 'test', cwd: '/' })
     const [out, io] = await handleCommand(
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
+      STAT_ONLY_DISPATCH,
       reg,
       ['find', '/data', '-name', 'sub[0-9]'],
       s,
@@ -96,7 +104,7 @@ describe('fanOutTraversal mount-entry synthesis honors the expression tree', () 
     )
     wireRegistry(reg)
     const s = new Session({ sessionId: 'test', cwd: '/' })
-    const [out] = await handleCommand(NEVER_EXECUTE, NEVER_DISPATCH, reg, argv, s)
+    const [out] = await handleCommand(NEVER_EXECUTE, STAT_ONLY_DISPATCH, reg, argv, s)
     return out === null ? '' : new TextDecoder().decode(await materialize(out))
   }
 
@@ -129,7 +137,7 @@ describe('fanOutTraversal -maxdepth applies to child-mount depth', () => {
     const s = new Session({ sessionId: 'test', cwd: '/' })
     const [out] = await handleCommand(
       NEVER_EXECUTE,
-      NEVER_DISPATCH,
+      STAT_ONLY_DISPATCH,
       reg,
       ['find', '/', '-maxdepth', '2'],
       s,

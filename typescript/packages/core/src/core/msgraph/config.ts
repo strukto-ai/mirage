@@ -14,8 +14,13 @@
 
 import { z } from 'zod'
 import { secretSchema } from '../../resource/secrets.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 export type AccessTokenProvider = () => string | Promise<string>
+
+export const GRAPH_VERSION = 'v1.0'
+
+export const DEFAULT_GRAPH_API = `https://graph.microsoft.com/${GRAPH_VERSION}`
 
 // Shared by the OneDrive and SharePoint config schemas, mirroring Python's
 // MsGraphConfig base model. `accessToken` accepts a provider callable as well
@@ -26,6 +31,7 @@ export const MSGRAPH_CONFIG_SHAPE = {
     z.union([z.string(), z.custom<AccessTokenProvider>((value) => typeof value === 'function')]),
   ),
   tenantHost: z.string().optional(),
+  graphBaseUrl: z.string().optional(),
   timeout: z.number().optional(),
   maxRetries: z.number().optional(),
 }
@@ -33,6 +39,10 @@ export const MSGRAPH_CONFIG_SHAPE = {
 export interface MsGraphConfig {
   accessToken: string | AccessTokenProvider
   tenantHost?: string
+  // Full service root, version segment included, for any deployment other
+  // than the worldwide one: a sovereign cloud, a private endpoint, or a
+  // test server.
+  graphBaseUrl?: string
   timeout?: number
   maxRetries?: number
 }
@@ -40,6 +50,7 @@ export interface MsGraphConfig {
 export interface MsGraphConfigResolved {
   accessToken: string | AccessTokenProvider
   tenantHost: string | null
+  graphBaseUrl: string | null
   timeout: number
   maxRetries: number
 }
@@ -59,7 +70,18 @@ export function resolveMsGraphConfig(config: MsGraphConfig): MsGraphConfigResolv
   return {
     accessToken: config.accessToken,
     tenantHost: optionalText(config.tenantHost),
+    graphBaseUrl: optionalText(config.graphBaseUrl),
     timeout,
     maxRetries,
   }
+}
+
+// The Graph service root every URL for this mount hangs off. Read from the
+// config rather than a module constant so two mounts in one process can
+// address different deployments, and so a test server is reached by
+// configuring a mount instead of rebinding a global in every module that
+// spells a URL.
+export function graphApi(config: MsGraphConfigResolved): string {
+  if (config.graphBaseUrl !== null) return rstripSlash(config.graphBaseUrl)
+  return DEFAULT_GRAPH_API
 }

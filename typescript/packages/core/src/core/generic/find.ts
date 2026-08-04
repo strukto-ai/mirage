@@ -163,8 +163,13 @@ export async function walkFind(
     collected.push({ path: rootPath, depth: 0, file: rootStat.type !== FileType.DIRECTORY })
   }
   // GNU depth convention: the search root is depth 0, its children are
-  // depth 1, so the walk starts at 1 and -maxdepth 0 descends nowhere.
-  await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
+  // depth 1, so the walk starts at 1 and -maxdepth 0 descends nowhere. A
+  // start point that is not a directory has no children, so readdir on it
+  // is either an error the walk would have to swallow (Box answers
+  // ENOTDIR) or a wasted round trip everywhere else.
+  if (rootStat === null || rootStat.type === FileType.DIRECTORY) {
+    await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
+  }
   const results: string[] = []
   const tree = prefixPathNodes(optionsTree(options), prefix)
   const needEmpty = treeHasEmpty(tree)

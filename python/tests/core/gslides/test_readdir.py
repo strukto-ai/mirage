@@ -58,7 +58,7 @@ async def test_readdir_owned(accessor, index):
     with patch(
             "mirage.core.gslides.readdir.list_all_files",
             new_callable=AsyncMock,
-            return_value=files,
+            return_value=(files, True),
     ):
         result = await readdir(
             accessor,
@@ -97,7 +97,7 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
     async def fake_list(token_manager, mime_type=None, **kwargs):
         captured.update(kwargs)
         captured["mime_type"] = mime_type
-        return []
+        return [], True
 
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
@@ -140,8 +140,8 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
                         **kwargs):
         call_count["n"] += 1
         if modified_after:
-            return files
-        return full_files
+            return files, True
+        return full_files, True
 
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
@@ -192,8 +192,8 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
                         **kwargs):
         call_count["n"] += 1
         if modified_after:
-            return may_only
-        return full_files
+            return may_only, True
+        return full_files, True
 
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
@@ -218,7 +218,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
         captured.update(kwargs)
-        return []
+        return [], True
 
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
@@ -237,7 +237,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
         captured.update(kwargs)
-        return []
+        return [], True
 
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
@@ -268,7 +268,7 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
     with patch(
             "mirage.core.gslides.readdir.list_all_files",
             new_callable=AsyncMock,
-            return_value=files,
+            return_value=(files, True),
     ):
         result = await readdir(
             accessor,
@@ -281,3 +281,39 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
     entry = (await index.get(result[0])).entry
     assert entry.size is None
     assert entry.extra["source_size"] == 1234
+
+
+@pytest.mark.asyncio
+async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
+        accessor, index):
+    """Drive reporting a corpus it skipped means the listing is short.
+
+    Caching it would pin the short listing until it expires, so a Shared
+    Drive document stays invisible long after the cause clears. The entries
+    are real, so they stay cached; only the directory is withheld.
+    """
+    files = [{
+        "id": "d1",
+        "name": "Doc",
+        "modifiedTime": "2026-05-15T00:00:00.000Z",
+        "owners": [{
+            "me": True
+        }]
+    }]
+    complete = {"v": False}
+
+    async def fake_list(token_manager, mime_type=None, **kwargs):
+        return files, complete["v"]
+
+    owned = PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+                     virtual="/gslides/owned",
+                     directory="/gslides/owned")
+    with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
+        listed = await readdir(accessor, owned, index)
+        assert len(listed) == 1
+        assert (await index.list_dir("/gslides/owned")).entries is None
+        assert (await index.get(listed[0])).entry.id == "d1"
+
+        complete["v"] = True
+        await readdir(accessor, owned, index)
+        assert (await index.list_dir("/gslides/owned")).entries is not None

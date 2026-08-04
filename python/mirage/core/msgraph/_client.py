@@ -14,6 +14,7 @@
 
 import asyncio
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -22,9 +23,27 @@ from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
-GRAPH_API = "https://graph.microsoft.com/v1.0"
 RETRY_STATUSES = {429, 503, 504}
 MAX_BACKOFF = 30.0
+# The characters `encodeURIComponent` leaves alone that `quote` would
+# escape. Keeping the two spellings identical matters beyond neatness:
+# a drive id is almost always `b!<base64url>`, and the ref paths built
+# from it go into a JSON body that Graph reads literally, so escaping
+# the `!` in one language only would break copy and rename there.
+_URI_COMPONENT_SAFE = "!*'()"
+
+
+def id_segment(value: str) -> str:
+    """Escape a Graph identifier for use as one URL path segment.
+
+    A guest user's UPN carries ``#EXT#`` and a SharePoint site id is
+    comma-joined, both of which change what the URL addresses if
+    interpolated raw: the ``#`` opens a fragment and truncates the path.
+
+    Args:
+        value (str): the identifier, unescaped.
+    """
+    return quote(value, safe=_URI_COMPONENT_SAFE)
 
 
 def split_path(path: PathSpec) -> tuple[str, str]:

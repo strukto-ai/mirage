@@ -14,9 +14,10 @@
 
 import { z } from 'zod'
 import { Accessor } from './base.ts'
-import { GRAPH_API, graphList } from '../core/msgraph/client.ts'
+import { graphList } from '../core/msgraph/client.ts'
 import {
   MSGRAPH_CONFIG_SHAPE,
+  graphApi,
   resolveMsGraphConfig,
   type MsGraphConfig,
   type MsGraphConfigResolved,
@@ -36,6 +37,7 @@ export interface SharePointConfig extends MsGraphConfig {
 export interface SharePointConfigRedacted {
   accessToken: '<REDACTED>'
   tenantHost?: string
+  graphBaseUrl?: string
   timeout?: number
   maxRetries?: number
   siteFilter?: string
@@ -107,8 +109,16 @@ function encodedPath(path: string): string {
     .join('/')
 }
 
-export function sharePointItemUrl(driveId: string, path: string, action = ''): string {
-  const base = `${GRAPH_API}/drives/${encodeURIComponent(driveId)}`
+// Takes the config, not just the drive id, because the service root is a
+// per-mount setting (national cloud, private endpoint, test server) rather
+// than a constant.
+export function sharePointItemUrl(
+  config: MsGraphConfigResolved,
+  driveId: string,
+  path: string,
+  action = '',
+): string {
+  const base = `${graphApi(config)}/drives/${encodeURIComponent(driveId)}`
   const stripped = stripSlash(path)
   if (stripped === '') return `${base}/root${action}`
   const stem = `${base}/root:/${encodedPath(stripped)}`
@@ -140,7 +150,7 @@ export class SharePointAccessor extends Accessor {
   }
 
   private async siteItems(): Promise<Record<string, unknown>[]> {
-    const sites = await graphList(this.config, `${GRAPH_API}/sites`, {
+    const sites = await graphList(this.config, `${graphApi(this.config)}/sites`, {
       search: this.config.siteFilter ?? '*',
       $select: 'id,displayName,name,webUrl',
     })
@@ -156,7 +166,8 @@ export class SharePointAccessor extends Accessor {
   }
 
   private async driveItems(siteId: string): Promise<Record<string, unknown>[]> {
-    return graphList(this.config, `${GRAPH_API}/sites/${encodeURIComponent(siteId)}/drives`, {
+    const url = `${graphApi(this.config)}/sites/${encodeURIComponent(siteId)}/drives`
+    return graphList(this.config, url, {
       $select: 'id,name',
     })
   }
@@ -236,7 +247,7 @@ export class SharePointAccessor extends Accessor {
       drive: resolved.driveId,
       path: resolved.itemPath ?? '',
       virtual: stripSlash(virtual),
-      url: (item, action) => sharePointItemUrl(resolved.driveId ?? '', item, action),
+      url: (item, action) => sharePointItemUrl(this.config, resolved.driveId ?? '', item, action),
       ref: (folder) => sharePointRefPath(resolved.driveId ?? '', folder),
     })
   }

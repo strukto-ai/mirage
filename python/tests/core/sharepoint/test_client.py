@@ -27,32 +27,32 @@ def test_headers_resolves_callable_token():
 
 
 def test_item_url_root_no_path():
-    url = item_url(_DRIVE, "/")
+    url = item_url(_cfg(), _DRIVE, "/")
     assert url == f"{_BASE}/drives/{_DRIVE}/root"
 
 
 def test_item_url_root_children():
-    url = item_url(_DRIVE, "/", action="/children")
+    url = item_url(_cfg(), _DRIVE, "/", action="/children")
     assert url == f"{_BASE}/drives/{_DRIVE}/root/children"
 
 
 def test_item_url_nested_file():
-    url = item_url(_DRIVE, "/docs/report.docx")
+    url = item_url(_cfg(), _DRIVE, "/docs/report.docx")
     assert url == f"{_BASE}/drives/{_DRIVE}/root:/docs/report.docx"
 
 
 def test_item_url_nested_content():
-    url = item_url(_DRIVE, "/docs/report.docx", action="/content")
+    url = item_url(_cfg(), _DRIVE, "/docs/report.docx", action="/content")
     assert url == f"{_BASE}/drives/{_DRIVE}/root:/docs/report.docx:/content"
 
 
 def test_item_url_nested_children():
-    url = item_url(_DRIVE, "/folder", action="/children")
+    url = item_url(_cfg(), _DRIVE, "/folder", action="/children")
     assert url == f"{_BASE}/drives/{_DRIVE}/root:/folder:/children"
 
 
 def test_item_url_quotes_spaces():
-    url = item_url(_DRIVE, "/My Folder/a b.txt")
+    url = item_url(_cfg(), _DRIVE, "/My Folder/a b.txt")
     assert url == f"{_BASE}/drives/{_DRIVE}/root:/My%20Folder/a%20b.txt"
 
 

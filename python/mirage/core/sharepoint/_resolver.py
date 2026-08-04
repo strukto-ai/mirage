@@ -3,9 +3,10 @@ from functools import partial
 from typing import Any, Literal
 
 from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive_ops import DriveLoc
-from mirage.core.sharepoint._client import (GRAPH_API, drive_ref_path,
-                                            graph_list, item_url)
+from mirage.core.sharepoint._client import (drive_ref_path, graph_api,
+                                            graph_list, id_segment, item_url)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -32,14 +33,14 @@ def _scoped_item_path(key_prefix: str | None, raw: str) -> str:
 async def _list_sites(accessor: SharePointAccessor) -> list[dict[str, Any]]:
     config = accessor.config
     search = config.site_filter or "*"
-    url = f"{GRAPH_API}/sites"
+    url = f"{graph_api(config)}/sites"
     params = {"search": search, "$select": "id,displayName,name"}
     return await graph_list(config, url, params=params)
 
 
 async def _list_drives(accessor: SharePointAccessor,
                        site_id: str) -> list[dict[str, Any]]:
-    url = f"{GRAPH_API}/sites/{site_id}/drives"
+    url = f"{graph_api(accessor.config)}/sites/{id_segment(site_id)}/drives"
     params = {"$select": "id,name"}
     return await graph_list(accessor.config, url, params=params)
 
@@ -196,10 +197,11 @@ async def list_drives(accessor: SharePointAccessor, site_id: str) -> list[str]:
     return [name for name, _ in await drive_entries(accessor, site_id)]
 
 
-def drive_loc(resolved: ResolvedPath, virt: str) -> DriveLoc:
+def drive_loc(config: MsGraphConfig, resolved: ResolvedPath,
+              virt: str) -> DriveLoc:
     assert resolved.drive_id is not None
     return DriveLoc(drive=resolved.drive_id,
                     path=resolved.item_path or "",
                     virt=virt.strip("/"),
-                    url=partial(item_url, resolved.drive_id),
+                    url=partial(item_url, config, resolved.drive_id),
                     ref=partial(drive_ref_path, resolved.drive_id))

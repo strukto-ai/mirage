@@ -31,6 +31,10 @@ const FIELDS =
   'createdTime,modifiedTime,' +
   'owners,capabilities/canEdit,parents)'
 
+// A search across every corpus is answered best-effort, so Drive reports
+// whether it reached them all. The flag is only returned when asked for.
+const ALL_DRIVES_FIELDS = `incompleteSearch,${FIELDS}`
+
 const DRIVE_FIELDS = 'nextPageToken,drives(id,name)'
 
 // Rendered vfs filename suffixes; readdir emits only folders and these.
@@ -72,6 +76,7 @@ export interface DriveFile {
 interface ListResponse {
   files?: DriveFile[]
   nextPageToken?: string
+  incompleteSearch?: boolean
 }
 
 export interface SharedDrive {
@@ -159,6 +164,11 @@ export async function listSharedDrives(
   return drives
 }
 
+// Searches every corpus the account can reach, so a document that lives in a
+// Shared Drive lists like one in My Drive. Drive answers an all-corpora
+// search best-effort and sets `incompleteSearch` when it gave up on one,
+// which is reported back rather than hidden: a caller that caches the listing
+// must not cache a short one as if it were the whole directory.
 export async function listAllFiles(
   tm: TokenManager,
   opts: {
@@ -168,7 +178,7 @@ export async function listAllFiles(
     modifiedAfter?: string | null
     modifiedBefore?: string | null
   } = {},
-): Promise<DriveFile[]> {
+): Promise<{ files: DriveFile[]; complete: boolean }> {
   const mimeType = opts.mimeType ?? null
   const trashed = opts.trashed ?? false
   const pageSize = opts.pageSize ?? 1000
@@ -181,22 +191,29 @@ export async function listAllFiles(
   if (modifiedBefore !== null) parts.push(`modifiedTime < '${modifiedBefore}'`)
   const q = parts.length > 0 ? parts.join(' and ') : null
   const files: DriveFile[] = []
+  let complete = true
   let pageToken: string | null = null
   for (;;) {
     const params: Record<string, string | number> = {
-      fields: FIELDS,
+      fields: ALL_DRIVES_FIELDS,
       pageSize,
       orderBy: 'modifiedTime desc',
+      // No driveId: allDrives is the union of My Drive and every shared
+      // drive the account belongs to, so naming one would contradict it.
+      corpora: 'allDrives',
+      includeItemsFromAllDrives: 'true',
+      supportsAllDrives: 'true',
     }
     if (q !== null) params.q = q
     if (pageToken !== null) params.pageToken = pageToken
     const url = `${driveBase(tm)}/files`
     const data = (await googleGet(tm, url, params)) as ListResponse
     if (data.files !== undefined) files.push(...data.files)
+    if (data.incompleteSearch === true) complete = false
     pageToken = data.nextPageToken ?? null
     if (pageToken === null) break
   }
-  return files
+  return { files, complete }
 }
 
 export async function downloadFile(tm: TokenManager, fileId: string): Promise<Uint8Array> {

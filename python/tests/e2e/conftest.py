@@ -107,6 +107,28 @@ class AsyncMockS3Client:
         assert name == "list_objects_v2"
         return AsyncMockPaginator(self.objects)
 
+    async def list_objects_v2(self,
+                              Bucket: str,
+                              Prefix: str = "",
+                              Delimiter: str | None = None,
+                              MaxKeys: int | None = None) -> dict:
+        """One listing page, the call `stat` probes a prefix with.
+
+        S3 has no directory objects, so a directory is a prefix that has
+        children: ``stat`` asks for one key under it. Only the paginated
+        form was faked here, so any code path that stats a directory
+        reached the real client and failed on the missing attribute.
+        """
+        del Bucket
+        page = (_paginate_directory(self.objects, Prefix)
+                if Delimiter == "/" else _paginate_flat(self.objects, Prefix))
+        if MaxKeys is None:
+            return page
+        return {
+            "Contents": page.get("Contents", [])[:MaxKeys],
+            "CommonPrefixes": page.get("CommonPrefixes", [])[:MaxKeys],
+        }
+
     async def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
         self.objects[Key] = Body
 

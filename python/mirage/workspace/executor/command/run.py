@@ -28,7 +28,7 @@ from mirage.runtime.table import VfsRuntime
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
-                                                      path_exists)
+                                                      path_exists, path_stat)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -224,7 +224,7 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    # Two facts the backend cannot supply, offered to every command and
+    # Three facts the backend cannot supply, offered to every command and
     # delivered only to the handlers that name them as a parameter.
     # ls/stat render stat rows from the backend's own stat, which never
     # sees namespace attr overlays (chmod/chown/touch on overlay backends)
@@ -232,9 +232,14 @@ async def run_on_mount(
     # cp/mv -u freshness checks compare the same merged mtimes, and
     # find -mtime filters on them (touch results, observed writes).
     # Symlinks are namespace state no backend readdir or stat can see.
+    # A traversal command's start point is statted through the dispatcher
+    # so a start point under another mount answers (`find -L` follows a
+    # link across mounts before the command ever runs).
     stat_overlay = (functools.partial(namespace_stat_overlay, namespace)
                     if namespace is not None else None)
     links = link_view(namespace, dispatch)
+    stat_path = (functools.partial(path_stat, dispatch)
+                 if dispatch is not None else None)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)
@@ -257,6 +262,7 @@ async def run_on_mount(
             runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
             stat_overlay=stat_overlay,
             links=links,
+            stat_path=stat_path,
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)

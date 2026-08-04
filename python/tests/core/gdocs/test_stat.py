@@ -110,7 +110,7 @@ async def test_stat_not_found(accessor, index):
     with patch(
             "mirage.core.gdocs.readdir.list_all_files",
             new_callable=AsyncMock,
-            return_value=files,
+            return_value=(files, True),
     ):
         with pytest.raises(FileNotFoundError):
             await stat(
@@ -137,7 +137,7 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     with patch(
             "mirage.core.gdocs.readdir.list_all_files",
             new_callable=AsyncMock,
-            return_value=files,
+            return_value=(files, True),
     ) as mock_list:
         result = await stat(
             accessor,

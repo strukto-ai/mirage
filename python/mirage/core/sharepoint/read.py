@@ -18,7 +18,7 @@ async def read_bytes(accessor: SharePointAccessor,
     if resolved.drive_id is None or resolved.item_path is None:
         raise enoent(virtual)
     return await read_item(accessor.config,
-                           drive_loc(resolved, stripped),
+                           drive_loc(accessor.config, resolved, stripped),
                            virtual,
                            stripped,
                            "sharepoint",

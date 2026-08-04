@@ -72,7 +72,7 @@ async def test_unlink_missing_raises(accessor, index):
     files = []
     with patch("mirage.core.gdocs.readdir.list_all_files",
                new_callable=AsyncMock,
-               return_value=files):
+               return_value=(files, True)):
         with pytest.raises(FileNotFoundError):
             await unlink(
                 accessor,

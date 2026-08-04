@@ -17,12 +17,14 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
+from mirage.commands.builtin.generic.find import (is_link, missing_start_line,
+                                                  parse_find_args,
+                                                  resolve_start, walk_find)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatOverlay
+from mirage.ops.types import LinkView, StatOverlay, StatPath
 from mirage.types import PathSpec
 from mirage.utils.path import respell_raw
 
@@ -45,6 +47,7 @@ async def find(
     index: IndexCacheStore = NULL_INDEX,
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
     L: bool = False,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -54,7 +57,7 @@ async def find(
     if ops.find is None:
         return await _find_walk(ops, accessor, paths, texts, name, type, size,
                                 mtime, maxdepth, iname, path, mindepth, empty,
-                                index, stat_overlay, links, L)
+                                index, stat_overlay, links, stat_path, L)
     stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
     if stat is not None and stat_overlay is not None:
         # -mtime must see namespace times (touch results, observed
@@ -67,6 +70,7 @@ async def find(
                               texts,
                               find_core=partial(ops.find, accessor),
                               stat=stat,
+                              stat_path=stat_path,
                               name=name,
                               type=type,
                               size=size,
@@ -101,6 +105,7 @@ async def _find_walk(
     index: IndexCacheStore,
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
     L: bool = False,
     H: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -124,7 +129,23 @@ async def _find_walk(
         stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
     # GNU find walks every start point in operand order.
     results: list[str] = []
+    missing: list[str] = []
     for search in searches:
+        # Same start-point rule as the native-op path, so what `find` does
+        # with a file or a missing operand does not depend on whether the
+        # mounted backend ships a find op.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if start.missing:
+            # GNU names each start point it cannot stat, keeps going with
+            # the rest, and exits 1.
+            missing.append(missing_start_line(search))
+            continue
+        if not start.walk:
+            results.extend(start.results)
+            continue
         walked = await walk_find(search,
                                  readdir=partial(ops.readdir, accessor),
                                  stat=stat_fn,
@@ -136,6 +157,10 @@ async def _find_walk(
         # GNU prints each result under the operand as typed; walk_find
         # returns virtual paths, so rebase like generic_find does.
         results.extend(respell_raw(walked, search.virtual, search.raw_path))
+    if missing:
+        return format_records(results), IOResult(stderr=("\n".join(missing) +
+                                                         "\n").encode(),
+                                                 exit_code=1)
     return format_records(results), IOResult()
 
 

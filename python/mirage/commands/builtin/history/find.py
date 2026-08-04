@@ -23,7 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.history.find import find as find_core
 from mirage.core.history.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, StatPath
 from mirage.types import PathSpec
 
 
@@ -48,6 +48,7 @@ async def find(
     index: IndexCacheStore = NULL_INDEX,
     L: bool = False,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_find(
@@ -65,5 +66,6 @@ async def find(
         mindepth=mindepth,
         empty=empty,
         links=links,
+        stat_path=stat_path,
         follow=L,
     )

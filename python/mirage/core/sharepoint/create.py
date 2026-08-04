@@ -13,6 +13,9 @@ async def create(accessor: SharePointAccessor, path: PathSpec) -> None:
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None or resolved.item_path is None:
         raise enoent(virtual)
-    url = item_url(resolved.drive_id, resolved.item_path, action="/content")
+    url = item_url(accessor.config,
+                   resolved.drive_id,
+                   resolved.item_path,
+                   action="/content")
     await graph_put_bytes(accessor.config, url, b"")
     await invalidate_after_write(path)

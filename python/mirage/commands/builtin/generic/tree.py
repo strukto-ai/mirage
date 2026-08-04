@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import IOResult
+from mirage.ops.types import StatPath
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.fnmatch import fnmatch
@@ -101,6 +102,28 @@ def _summary(dirs: int, files: int, dirs_only: bool) -> str:
     return f"{dirs} {dir_word}, {files} {file_word}"
 
 
+def _unopenable(root_label: str, dirs_only: bool, files: int,
+                exit_code: int) -> tuple[bytes, IOResult]:
+    """GNU's inline marker for a root it could not open.
+
+    ``tree`` prints the marker and nothing on stderr, so the exit code and
+    the counted file carry the distinction: a path that is not a directory
+    exists and is counted (exit 0), a path that is not there is not
+    (exit 2).
+
+    Args:
+        root_label (str): the operand as typed.
+        dirs_only (bool): whether ``-d`` omits the file count.
+        files (int): files to report in the summary.
+        exit_code (int): process exit status.
+    """
+    body = [
+        f"{root_label}  [error opening dir]", "",
+        _summary(0, files, dirs_only)
+    ]
+    return format_records(body), IOResult(exit_code=exit_code)
+
+
 async def tree(
     path: PathSpec,
     *,
@@ -113,8 +136,23 @@ async def tree(
     dirs_only: bool = False,
     match_pattern: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
+    stat_path: StatPath | None = None,
 ) -> tuple[bytes, IOResult]:
     warnings: list[str] = []
+    root_label = path.raw_path or path.virtual
+    # What the operand is decides the whole result, so it is resolved
+    # before the walk rather than inferred from how a backend answered
+    # readdir on it: an object store lists a file key as an empty prefix,
+    # lists a missing path as one too, and Graph 404s, which read as
+    # three different trees. The probe asks both channels a backend can
+    # answer on, so a directory that exists only as its children still
+    # reports as one and None means nothing is there.
+    if stat_path is not None:
+        start = await stat_path(path.virtual)
+        if start is None:
+            return _unopenable(root_label, dirs_only, 0, 2)
+        if start.type != FileType.DIRECTORY:
+            return _unopenable(root_label, dirs_only, 1, 0)
     lines, dirs, files = await _walk(path,
                                      readdir,
                                      stat,
@@ -127,18 +165,13 @@ async def tree(
                                      match_pattern=match_pattern,
                                      warnings=warnings,
                                      index=index)
-    root_label = path.raw_path or path.virtual
     # GNU signals an unopenable path with the inline "[error opening dir]"
     # marker and exit 2, and writes nothing to stderr. `warnings` therefore
-    # only decides the marker; emitting it would diverge.
+    # only decides the marker; emitting it would diverge. With stat_path
+    # wired the two clear cases are already answered above, so this covers
+    # a directory that exists but could not be read (a permission error).
     if warnings and not lines:
-        # The root could not be opened (GNU prints the error marker inline
-        # and exits 2).
-        body = [
-            f"{root_label}  [error opening dir]", "",
-            _summary(0, 0, dirs_only)
-        ]
-        return format_records(body), IOResult(exit_code=2)
+        return _unopenable(root_label, dirs_only, 0, 2)
     # GNU counts the root as a directory once it has any listed entry (an
     # empty root reports 0), then a blank line and the summary (the file
     # count is omitted under -d).

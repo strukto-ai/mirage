@@ -20,6 +20,7 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec, word_text
+from mirage.utils.errors import MISS_ERRORS
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.shared import (Result, abs_path, fail,
                                                        ok, split_flags)
@@ -89,8 +90,49 @@ async def handle_ln(
     return ok("ln", out)
 
 
-async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
-    """Whether a resolved virtual path names something that exists.
+async def resolve_path_stat(dispatch: Callable[..., Any],
+                            path: PathSpec) -> FileStat | None:
+    """What a path is, asked on both channels a backend can answer on.
+
+    A point lookup alone cannot decide. On a prefix store a directory is
+    not an object, it is the set of keys under it, so ``stat`` misses
+    what ``readdir`` would list. Absence therefore takes *both* channels
+    coming back empty, which is the only evidence that nothing is there.
+
+    The listing has to be non-empty to count: those stores answer a
+    missing path with ``[]`` rather than raising, and cannot hold an
+    empty directory anyway (one with no keys under it does not exist).
+    Measured across every integ target: an implicit directory answers
+    here, a missing path does not.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        path (PathSpec): path to resolve.
+    """
+    try:
+        stat, _ = await dispatch("stat", path)
+    except MISS_ERRORS:
+        stat = None
+    if stat is not None:
+        return stat
+    try:
+        entries, _ = await dispatch("readdir", path)
+    except MISS_ERRORS:
+        return None
+    if not entries:
+        return None
+    return FileStat(name=posixpath.basename(path.virtual.rstrip("/")),
+                    type=FileType.DIRECTORY)
+
+
+async def path_stat(dispatch: Callable[..., Any],
+                    virtual: str) -> FileStat | None:
+    """Stat one virtual path through the workspace, None when absent.
+
+    Resolves through the op dispatcher rather than one backend, so a path
+    under another mount answers correctly. This is what a traversal
+    command asks about its own start point: a directory can be walked, a
+    file is reported as itself, and None is GNU's missing-operand error.
 
     Args:
         dispatch (Callable): op dispatcher.
@@ -99,8 +141,18 @@ async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
     spec = PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1] or "/",
                     resource_path="")
+    return await resolve_path_stat(dispatch, spec)
+
+
+async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
+    """Whether a resolved virtual path names something that exists.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path.
+    """
     try:
-        return await _stat_or_none(dispatch, spec) is not None
+        return await path_stat(dispatch, virtual) is not None
     except (OSError, ValueError):
         return False
 
@@ -340,5 +392,6 @@ __all__ = [
     "path_exists",
     "link_flags",
     "prepare_mv",
+    "resolve_path_stat",
     "strip_link_operands",
 ]

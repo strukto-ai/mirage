@@ -14,7 +14,6 @@
 
 import type { MsGraphConfigResolved } from './config.ts'
 
-export const GRAPH_API = 'https://graph.microsoft.com/v1.0'
 export const RETRY_STATUSES: ReadonlySet<number> = new Set([429, 503, 504])
 export const MAX_BACKOFF = 30
 

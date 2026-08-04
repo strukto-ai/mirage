@@ -98,3 +98,82 @@ describe('treeGeneric with trailing-slash folder entries', () => {
     )
   })
 })
+
+// GNU tree 2.2.1, pinned on debian:stable-slim. A file operand gets the
+// same inline marker an unopenable one does, but it exists, so it is
+// counted and the exit status stays 0:
+//   tree <file>     -> "<file>  [error opening dir]", 0 directories, 1 file, 0
+//   tree -d <file>  -> same marker, "0 directories", exit 0
+//   tree <missing>  -> same marker, 0 directories, 0 files, exit 2
+describe('treeGeneric operand that is not a directory', () => {
+  function optsWith(
+    start: FileStat | null,
+    flags: Record<string, string | boolean> = {},
+  ): CommandOpts {
+    return {
+      stdin: null,
+      flags,
+      filetypeFns: null,
+      cwd: '/',
+      resource: null,
+      statPath: () => Promise.resolve(start),
+    } as unknown as CommandOpts
+  }
+
+  const unreached = (): Promise<never> => {
+    throw new Error('a non-directory operand must not be listed')
+  }
+
+  const fileStat = new FileStat({ name: 'a.txt', size: 6, type: FileType.TEXT })
+
+  it('counts a file operand and exits 0', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/a.txt')],
+      optsWith(fileStat),
+      unreached,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe('/a.txt  [error opening dir]\n\n0 directories, 1 file\n')
+  })
+
+  it('omits the file count under -d', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/a.txt')],
+      optsWith(fileStat, { d: true }),
+      unreached,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe('/a.txt  [error opening dir]\n\n0 directories\n')
+  })
+
+  // The probe answers on both channels a backend can offer, so null means
+  // nothing is there and the walk is never attempted. GNU tree 2.2.1 marks
+  // it inline, counts nothing, and exits 2.
+  it('marks an operand that is not there and exits 2', async () => {
+    const [out, io] = (await treeGeneric(
+      [spec('/nope')],
+      optsWith(null),
+      unreached,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(2)
+    expect(DEC.decode(out)).toBe('/nope  [error opening dir]\n\n0 directories, 0 files\n')
+  })
+
+  // An unreadable directory that does exist still reaches the walk, which
+  // renders the same marker with exit 2 (a permission error, not absence).
+  it('still walks a directory it cannot list', async () => {
+    const dirStat = new FileStat({ name: 'locked', type: FileType.DIRECTORY })
+    const failing = (): Promise<string[]> => Promise.reject(new Error('EACCES'))
+    const [out, io] = (await treeGeneric(
+      [spec('/locked')],
+      optsWith(dirStat),
+      failing,
+      unreached,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(2)
+    expect(DEC.decode(out)).toBe('/locked  [error opening dir]\n\n0 directories, 0 files\n')
+  })
+})

@@ -11,8 +11,12 @@ import { MountMode, OneDriveResource, Workspace } from '@struktoai/mirage-node'
 
 const drive = new OneDriveResource({
   accessToken: () => getMicrosoftGraphToken(),
-  // driveId: '...',       // optional; defaults to /me/drive
-  // siteId: '...',        // optional alternative to driveId
+  // Name at most one drive; none means /me/drive.
+  // driveId: '...',       // explicit Graph drive ID
+  // siteId: '...',        // a SharePoint site's default drive
+  // groupId: '...',       // a Teams / Microsoft 365 group's library
+  // userId: '...',        // another user's drive (app-only auth)
+  // graphBaseUrl: 'https://graph.microsoft.us/v1.0',  // non-worldwide root
   // keyPrefix: 'Reports', // optional folder-scoped mount
 })
 
@@ -27,9 +31,26 @@ Use `@struktoai/mirage-browser` for the same API in a browser. An access-token c
 | `accessToken` | required | Token string or sync/async callback returning a token. Redacted in snapshots. |
 | `driveId` | unset | Explicit Graph drive ID. |
 | `siteId` | unset | Use the default drive for a Graph site. |
+| `groupId` | unset | Use a Teams / Microsoft 365 group's document library. |
+| `userId` | unset | Use another user's drive, by id or UPN (app-only auth). |
+| `graphBaseUrl` | unset | Full service root, for any deployment but the worldwide one. |
 | `keyPrefix` | unset | Mount a folder subtree as the resource root. |
 | `tenantHost` | unset | Tenant metadata retained for Graph-compatible configuration. |
 | `timeout` | `30` | Request and copy-monitor timeout in seconds. |
 | `maxRetries` | `5` | Retries for `429`, `503`, and `504`. |
+
+`driveId`, `siteId`, `groupId` and `userId` are four ways of saying which drive
+the mount is, so set at most one: setting two throws at construction rather
+than silently addressing whichever came first. Setting none means `/me/drive`,
+which is the only form an app-only token cannot use.
+
+Mounts address `https://graph.microsoft.com/v1.0` unless `graphBaseUrl` says
+otherwise. Set it to reach anything else: a sovereign cloud, a private
+endpoint, or a test server, given in full including the version segment. The
+sovereign deployments are network-isolated instances rather than regions, so a
+token minted for one is rejected by the others and a mount pointed at the
+wrong root fails outright. mirage ships no table of their hostnames, having no
+way to verify one; take the root from Microsoft's national cloud
+documentation for your tenant.
 
 Reads, writes, resumable uploads, recursive copy, move, delete, directory creation, and version-pinned snapshot reads mirror the [Python OneDrive resource](/python/resource/onedrive).

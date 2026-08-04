@@ -142,6 +142,30 @@ export async function treeGeneric(
     const label = p.rawPath !== '' ? p.rawPath : p.virtual
     const before = lines.length
     lines.push(label)
+    // What the operand is decides the whole result, so it is resolved
+    // before the walk rather than inferred from how a backend answered
+    // readdir on it: an object store lists a file key as an empty prefix,
+    // lists a missing path as one too, and Graph 404s, which read as
+    // three different trees. The probe asks both channels a backend can
+    // answer on, so a directory that exists only as its children still
+    // reports as one and null means nothing is there.
+    //
+    // GNU prints the same inline marker either way; what differs is the
+    // count and the status. A non-directory exists, so it is counted and
+    // the exit stays 0; a path that is not there is not counted and exits 2.
+    if (opts.statPath !== undefined) {
+      const start = await opts.statPath(p.virtual)
+      if (start === null) {
+        lines[before] = `${label}  [error opening dir]`
+        anyError = true
+        continue
+      }
+      if (start.type !== FileType.DIRECTORY) {
+        lines[before] = `${label}  [error opening dir]`
+        totalFiles += 1
+        continue
+      }
+    }
     const counts = await walkTree(readdir, stat, p, '', lines, treeOpts, 0)
     if (counts.failed && lines.length === before + 1) {
       // The root could not be opened (GNU marks it inline and exits 2).

@@ -45,14 +45,17 @@ function makeAccessor(): GSheetsAccessor {
 
 describe('gsheets read auto-bootstrap', () => {
   it('refetches owned listing when entry is evicted from index', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue([
-      {
-        id: 'sheet1',
-        name: 'Budget',
-        modifiedTime: '2026-04-01T00:00:00.000Z',
-        owners: [{ me: true }],
-      },
-    ])
+    vi.mocked(drive.listAllFiles).mockResolvedValue({
+      files: [
+        {
+          id: 'sheet1',
+          name: 'Budget',
+          modifiedTime: '2026-04-01T00:00:00.000Z',
+          owners: [{ me: true }],
+        },
+      ],
+      complete: true,
+    })
     vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 'sheet1' })
 
     const accessor = makeAccessor()
@@ -67,7 +70,7 @@ describe('gsheets read auto-bootstrap', () => {
   })
 
   it('throws ENOENT when file missing even after recursion', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue([])
+    vi.mocked(drive.listAllFiles).mockResolvedValue({ files: [], complete: true })
     vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
 
     const accessor = makeAccessor()

@@ -12,7 +12,8 @@ from mirage.utils.errors import enoent
 async def _create_dir(accessor: SharePointAccessor, drive_id: str,
                       stripped: str) -> None:
     parent = posixpath.dirname("/" + stripped).strip("/")
-    url = item_url(drive_id,
+    url = item_url(accessor.config,
+                   drive_id,
                    "/" + parent if parent else "/",
                    action="/children")
     await create_child_folder(accessor.config, url,

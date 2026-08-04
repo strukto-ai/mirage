@@ -83,6 +83,7 @@ async def _find_namespace(
         for drive_name, drive_id in drives:
             drive_key = f"{site_key}/{drive_name}"
             loc = drive_loc(
+                accessor.config,
                 ResolvedPath(level="drive", site_id=site_id,
                              drive_id=drive_id), drive_key)
             is_empty = (await drive_root_empty(accessor.config, loc)
@@ -181,7 +182,7 @@ async def find(
         return []
     virt = path.mount_path if isinstance(path, PathSpec) else path
     return await find_items(accessor.config,
-                            drive_loc(resolved, virt),
+                            drive_loc(accessor.config, resolved, virt),
                             start_basename(path),
                             partial(_dir_exists, accessor, path),
                             name=name,

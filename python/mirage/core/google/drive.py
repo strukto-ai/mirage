@@ -37,6 +37,10 @@ FIELDS = ("nextPageToken,"
           "createdTime,modifiedTime,"
           "owners,capabilities/canEdit,parents)")
 
+# A search across every corpus is answered best-effort, so Drive reports
+# whether it reached them all. The flag is only returned when asked for.
+ALL_DRIVES_FIELDS = "incompleteSearch," + FIELDS
+
 DRIVE_FIELDS = "nextPageToken,drives(id,name)"
 
 MIME_TO_EXT = {
@@ -162,8 +166,18 @@ async def list_all_files(
     page_size: int = 1000,
     modified_after: str | None = None,
     modified_before: str | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
     """List all files (no folder filter) via Drive API.
+
+    Searches every corpus the account can reach, so a document that lives
+    in a Shared Drive lists like one in My Drive. The alternative would be
+    a mount that silently omits them while ``gdrive`` shows them for the
+    same account.
+
+    Drive answers an all-corpora search best-effort and sets
+    ``incompleteSearch`` when it gave up on one, which is reported back
+    rather than hidden: a caller that caches the listing must not cache a
+    short one as if it were the whole directory.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.
@@ -176,7 +190,8 @@ async def list_all_files(
             with modifiedTime < this.
 
     Returns:
-        list[dict]: file metadata dicts.
+        tuple[list[dict], bool]: file metadata dicts, and whether Drive
+        searched every corpus it was asked for.
     """
     parts = []
     if mime_type:
@@ -189,12 +204,19 @@ async def list_all_files(
         parts.append(f"modifiedTime < '{modified_before}'")
     q = " and ".join(parts) if parts else None
     files: list[dict[str, Any]] = []
+    complete = True
     page_token: str | None = None
     while True:
         params: dict[str, str | int] = {
-            "fields": FIELDS,
+            "fields": ALL_DRIVES_FIELDS,
             "pageSize": page_size,
             "orderBy": "modifiedTime desc",
+            # No driveId: allDrives is the union of My Drive and every
+            # shared drive the account belongs to, so naming one would
+            # contradict it.
+            "corpora": "allDrives",
+            "includeItemsFromAllDrives": "true",
+            "supportsAllDrives": "true",
         }
         if q:
             params["q"] = q
@@ -203,10 +225,12 @@ async def list_all_files(
         url = f"{drive_base(token_manager)}/files"
         data = await google_get(token_manager, url, params=params)
         files.extend(data.get("files", []))
+        if data.get("incompleteSearch"):
+            complete = False
         page_token = data.get("nextPageToken")
         if not page_token:
             break
-    return files
+    return files, complete
 
 
 async def delete_file(

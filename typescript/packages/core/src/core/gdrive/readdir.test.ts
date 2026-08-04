@@ -172,6 +172,36 @@ describe('readdir shared drives', () => {
     expect(out).toContain('/readme.txt')
   })
 
+  it('leaves the root uncached when shared drive enumeration fails', async () => {
+    // Caching a short listing would keep the mount My-Drive-only until the
+    // entry expires, long after the cause (a missing scope) is fixed. The
+    // entries are real, so they stay cached; only the directory listing is
+    // withheld, so the next readdir retries enumeration.
+    const files = [
+      {
+        id: 'f1',
+        name: 'readme.txt',
+        mimeType: 'text/plain',
+        modifiedTime: '2026-04-01T00:00:00.000Z',
+      },
+    ]
+    vi.mocked(drive.listFiles).mockResolvedValue(files)
+    vi.mocked(drive.listSharedDrives).mockRejectedValue(new Error('no scope'))
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const root = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+    await readdir(accessor, root, index)
+    expect((await index.listDir('/')).entries).toBeUndefined()
+    expect((await index.get('/readme.txt')).entry?.id).toBe('f1')
+
+    vi.mocked(drive.listFiles).mockResolvedValue(files)
+    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team' }])
+    const out = await readdir(accessor, root, index)
+    expect(out).toContain('/Team/')
+    expect((await index.listDir('/')).entries).toBeDefined()
+  })
+
   it('passes drive_id from the cached entry when listing inside a shared drive', async () => {
     vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
     vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {

@@ -18,7 +18,8 @@ from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import metadata_provision
 from mirage.commands.builtin.email.io import resolve_glob
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
+from mirage.commands.builtin.generic.find import (is_link, parse_find_args,
+                                                  resolve_start, walk_find)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -29,7 +30,7 @@ from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import search_messages
 from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
@@ -76,6 +77,7 @@ async def find(
     index: IndexCacheStore,
     L: bool = False,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
@@ -104,6 +106,15 @@ async def find(
     ]
     results: list[str] = []
     for search in searches:
+        # Same start-point rule as every other find path: only a
+        # directory has a subtree to walk.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if not start.walk:
+            results.extend(start.results)
+            continue
         results.extend(await walk_find(search,
                                        readdir=partial(_readdir, accessor),
                                        stat=partial(_stat, accessor),

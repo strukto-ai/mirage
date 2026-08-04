@@ -17,21 +17,22 @@ from urllib.parse import quote
 
 from mirage.accessor.onedrive import OneDriveConfig
 # yapf: disable
-from mirage.core.msgraph._client import (GRAPH_API, MAX_BACKOFF,
-                                         RETRY_STATUSES, GraphError,
-                                         graph_delete, graph_get,
+from mirage.core.msgraph._client import (MAX_BACKOFF, RETRY_STATUSES,
+                                         GraphError, graph_delete, graph_get,
                                          graph_get_bytes, graph_list,
                                          graph_patch, graph_post,
                                          graph_post_monitor, graph_put_bytes,
-                                         graph_stream, headers, new_session,
-                                         poll_monitor, upload_chunk)
+                                         graph_stream, headers, id_segment,
+                                         new_session, poll_monitor,
+                                         upload_chunk)
 # yapf: enable
+from mirage.core.msgraph.config import graph_api
 from mirage.core.msgraph.drive_ops import DriveLoc
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 __all__ = [
-    "GRAPH_API",
+    "graph_api",
     "drive_loc",
     "MAX_BACKOFF",
     "RETRY_STATUSES",
@@ -48,6 +49,7 @@ __all__ = [
     "graph_put_bytes",
     "graph_stream",
     "headers",
+    "id_segment",
     "item_url",
     "new_session",
     "poll_monitor",
@@ -62,11 +64,30 @@ def split_path(path: PathSpec) -> tuple[str, str]:
 
 
 def drive_base(config: OneDriveConfig) -> str:
+    """The drive this mount addresses, as a Graph URL prefix.
+
+    Exactly one target may be named (``OneDriveConfig`` enforces it), so
+    the arms are alternatives rather than a precedence chain. Naming none
+    means the signed-in user's own drive, which is the only form that
+    works under delegated auth with no extra identifiers.
+
+    Each identifier is escaped as a single path segment. A guest user's
+    UPN carries ``#EXT#``, and interpolated raw that ``#`` would open a
+    URL fragment and send a truncated path.
+
+    Args:
+        config (OneDriveConfig): mount config.
+    """
+    api = graph_api(config)
     if config.drive_id:
-        return f"{GRAPH_API}/drives/{config.drive_id}"
+        return f"{api}/drives/{id_segment(config.drive_id)}"
     if config.site_id:
-        return f"{GRAPH_API}/sites/{config.site_id}/drive"
-    return f"{GRAPH_API}/me/drive"
+        return f"{api}/sites/{id_segment(config.site_id)}/drive"
+    if config.group_id:
+        return f"{api}/groups/{id_segment(config.group_id)}/drive"
+    if config.user_id:
+        return f"{api}/users/{id_segment(config.user_id)}/drive"
+    return f"{api}/me/drive"
 
 
 def _full_path(config: OneDriveConfig, path: str) -> str:
@@ -91,7 +112,7 @@ def item_url(config: OneDriveConfig, path: str, action: str = "") -> str:
 def drive_ref_path(config: OneDriveConfig, folder: str = "") -> str:
     # `folder` is resource-relative; the key_prefix must apply here exactly
     # like item_url, or copy/rename destinations land at the drive root.
-    base = drive_base(config)[len(GRAPH_API):]
+    base = drive_base(config)[len(graph_api(config)):]
     full = _full_path(config, folder)
     if full:
         return f"{base}/root:/{quote(full, safe='/')}"

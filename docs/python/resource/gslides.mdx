@@ -59,6 +59,21 @@ If the modified date is unavailable, the date prefix is omitted.
 Reading a presentation file returns the full Google Slides API JSON
 for that presentation.
 
+### Shared Drives
+
+The listing covers every corpus the account can reach, so a presentation that
+lives in a Shared Drive appears here too. A Shared Drive presentation has no
+owner (the drive owns it), so it lands under `shared`, which is what that
+directory means. This matches the `gdrive` mount, where Shared Drives are
+top-level directories: without it the same account would see a presentation
+under one Google mount and not the other, with no error explaining the
+difference.
+
+Drive answers an all-corpora search best-effort. When it reports that it
+skipped a corpus, the short listing is still returned but is not cached as
+the directory, so the next `ls` re-lists instead of serving the gap until
+the cache expires.
+
 ## Cache
 
 The Google Slides resource uses `IndexCacheStore`. Index entries

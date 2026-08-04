@@ -18,7 +18,7 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../workspace/executor/runtime.ts'
-import type { LinkView, StatOverlay } from '../ops/types.ts'
+import type { LinkView, StatOverlay, StatPath } from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
@@ -61,6 +61,10 @@ export interface CommandOpts {
   // simply ignores it, so there is no allowlist of symlink-aware
   // commands anywhere.
   links?: LinkView
+  // Dispatcher-backed stat of one path, for a traversal command's start
+  // point: only a directory has a subtree to walk, and a start point the
+  // router resolved into another mount answers there, not on this mount.
+  statPath?: StatPath
   signal?: AbortSignal
   timeoutSeconds?: number
 }

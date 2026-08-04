@@ -17,17 +17,11 @@ import type { ByteSource } from '../../../../io/types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
+import { resolvePathStat } from '../links.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
 import { CondError } from './types.ts'
 import type { CondContext } from './types.ts'
-
-function isMissError(exc: unknown): boolean {
-  const code = (exc as { code?: string }).code
-  if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return true
-  const msg = exc instanceof Error ? exc.message : String(exc)
-  return /not found|no such file|not a directory|is a directory/i.test(msg)
-}
 
 /** Resolve a file operand to an addressable scope. */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
@@ -39,38 +33,18 @@ function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
 
 /**
  * Resolve an operand to 'dir' / 'file' / null plus its stat. Symlinks are
- * followed first; a stat naming a directory type answers directly, and a
- * readdir probe catches backends whose stat cannot see directories. The
- * probe demands a non-empty listing: prefix stores (s3, gridfs, hf,
- * nextcloud) list a missing path as [] instead of raising, and they
- * cannot hold an empty directory anyway.
+ * followed first, then resolvePathStat answers what is there. That probe is
+ * shared with find and tree's start point, so `test -d` and a traversal
+ * cannot disagree about whether a path exists.
  */
 async function pathKind(
   ctx: CondContext,
   val: string | PathSpec,
 ): Promise<['dir' | 'file' | null, FileStat | null]> {
-  const scope = operandScope(ctx, val)
-  let stat: FileStat | null = null
-  try {
-    const [s] = await ctx.dispatch('stat', scope)
-    stat = s as FileStat | null
-  } catch (exc) {
-    if (!isMissError(exc)) throw exc
-  }
-  if (stat !== null) {
-    if (stat.type === FileType.DIRECTORY) return ['dir', stat]
-    return ['file', stat]
-  }
-  let entries: unknown
-  try {
-    const [raw] = await ctx.dispatch('readdir', scope)
-    entries = raw
-  } catch (exc) {
-    if (!isMissError(exc)) throw exc
-    return [null, null]
-  }
-  if (Array.isArray(entries) && entries.length > 0) return ['dir', null]
-  return [null, null]
+  const stat = await resolvePathStat(ctx.dispatch, operandScope(ctx, val))
+  if (stat === null) return [null, null]
+  if (stat.type === FileType.DIRECTORY) return ['dir', stat]
+  return ['file', stat]
 }
 
 export async function applyUnary(

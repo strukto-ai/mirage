@@ -47,7 +47,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             patch(
                 "mirage.core.gsheets.readdir.list_all_files",
                 new_callable=AsyncMock,
-                return_value=files,
+                return_value=(files, True),
             ),
             patch(
                 "mirage.core.gsheets.read.read_spreadsheet",
@@ -72,7 +72,7 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             patch(
                 "mirage.core.gsheets.readdir.list_all_files",
                 new_callable=AsyncMock,
-                return_value=[],
+                return_value=([], True),
             ),
             patch(
                 "mirage.core.gsheets.read.read_spreadsheet",
