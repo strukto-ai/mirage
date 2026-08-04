@@ -324,6 +324,58 @@
         "stdout": "piped comment body\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ln_cli_issue_transition",
+      "seq": 567108,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue transition PLAT-1 --state-name Done | jq -r '.state_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_set_project",
+      "seq": 567109,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue set-project PLAT-2 --project prj_search | jq -r '.project_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_add_label",
+      "seq": 567110,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue add-label PLAT-2 --label lbl_feature | jq -r '.label_names | join(\",\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "bug,feature\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_comment_update",
+      "seq": 567111,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear comment update --comment cmt_plat1_1 --body \"edited by cli\" | jq -r '.body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "edited by cli\n",
+        "stderr": ""
+      }
     }
   ]
 }
