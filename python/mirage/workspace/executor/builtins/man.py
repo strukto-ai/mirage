@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass
 
+from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS, CommandSpec
 from mirage.io import IOResult
@@ -120,6 +121,50 @@ def _render_shell_builtin_man(name: str, spec: CommandSpec) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_cli_entry(head: str, verbs: list[str],
+                      registry: MountRegistry) -> str | None:
+    """The page for an installed CLI, or None when the verbs miss.
+
+    The page is the node's own ``--help``, rendered by the one renderer
+    that serves ``--help`` and the bare-group refusal, so a CLI's manual
+    cannot drift from the program. A tree is a manual with sections:
+    ``man linear`` lists the verbs and ``man linear issue create`` is
+    the page for one leaf.
+
+    Args:
+        head (str): installed head word, as typed.
+        verbs (list[str]): verb words after the head, aliases allowed.
+        registry (MountRegistry): registry holding the installs.
+    """
+    install = registry.clis.get(head)
+    if install is None:
+        return None
+    found = find_node(install.spec, verbs)
+    if found is None:
+        return None
+    node, path = found
+    return node_help(" ".join((head, ) + path), node)
+
+
+def _render_cli_index(registry: MountRegistry) -> list[str]:
+    """The installed-CLI section of the bare ``man`` listing.
+
+    Args:
+        registry (MountRegistry): registry holding the installs.
+    """
+    installs = registry.clis.items()
+    if not installs:
+        return []
+    lines = ["# clis", ""]
+    for name in sorted(installs):
+        spec = installs[name].spec
+        desc = (spec.description
+                if spec.description is not None else "(no description)")
+        lines.append(f"- {name} \u2014 {desc}")
+    lines.append("")
+    return lines
+
+
 def _render_man_index(session: Session, registry: MountRegistry) -> str:
     by_kind: dict[str, MountEntry] = {}
     for m in registry.mounts():
@@ -164,6 +209,7 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
                     and cmd.name not in general_seen):
                 general_seen[cmd.name] = cmd
         lines.append("")
+    lines.extend(_render_cli_index(registry))
     lines.append("# general")
     lines.append("")
     for name in sorted(general_seen):
@@ -172,6 +218,37 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
                 if cmd.spec.description is not None else "(no description)")
         lines.append(f"- {name} \u2014 {desc}")
     return "\n".join(lines) + "\n"
+
+
+def _cli_man(
+    head: str, verbs: list[str], cmd_str: str, registry: MountRegistry
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """The page (or pages) for an installed head word.
+
+    A CLI may not take a general command's name, but a mount can
+    register a custom command under any name, so both pages can exist
+    for one word. The CLI goes first: it is the one dispatch would run.
+
+    Args:
+        head (str): installed head word, as typed.
+        verbs (list[str]): verb words after the head, aliases allowed.
+        cmd_str (str): the line, for the execution node.
+        registry (MountRegistry): registry holding installs and mounts.
+    """
+    entry = _render_cli_entry(head, verbs, registry)
+    if entry is None:
+        typed = " ".join([head, *verbs])
+        err = f"man: no entry for {typed}\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=1,
+                                                         stderr=err)
+    sections = [entry]
+    hits = _collect_man_hits(head, registry) if not verbs else []
+    if hits:
+        sections.append(_render_man_entry(head, hits))
+    out = "\n".join(sections).encode()
+    return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 
 async def handle_man(
@@ -183,18 +260,23 @@ async def handle_man(
         out = _render_man_index(session, registry).encode()
         return out, IOResult(), ExecutionNode(command="man", exit_code=0)
     name = args[0]
+    cmd_str = "man " + " ".join(args)
+    # Only an installed head word reads the words after it: they are its
+    # verb path. Everything else keeps man's older shape and documents
+    # args[0].
+    if registry.clis.get(name) is not None:
+        return _cli_man(name, args[1:], cmd_str, registry)
     hits = _collect_man_hits(name, registry)
     if not hits:
         spec_key = _SHELL_BUILTIN_MAN.get(name)
         spec = SPECS.get(spec_key) if spec_key is not None else None
         if spec is not None:
             out = _render_shell_builtin_man(name, spec).encode()
-            return out, IOResult(), ExecutionNode(command=f"man {name}",
-                                                  exit_code=0)
+            return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
         err = f"man: no entry for {name}\n".encode()
         return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command=f"man {name}",
+                              stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,
                                                          stderr=err)
     out = _render_man_entry(name, hits).encode()
-    return out, IOResult(), ExecutionNode(command=f"man {name}", exit_code=0)
+    return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)

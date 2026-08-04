@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.commands.cli.types import CLISpec
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -137,6 +138,40 @@ def test_man_unknown_command_exits_1():
     err = io.stderr.decode() if isinstance(io.stderr, bytes) else _run(
         _materialize(io.stderr))
     assert "no entry for" in err
+
+
+def _cli_ws():
+    ws = _ws()
+    ws.register_cli(
+        "linear",
+        CLISpec(name="linear",
+                description="Linear API client",
+                subcommands=(CLISpec(name="issue",
+                                     description="Manage issues",
+                                     fn=lambda: None), )))
+    return ws
+
+
+def test_installed_cli_is_discoverable_from_the_shell():
+    ws = _cli_ws()
+    assert _out(_exec(ws, "type linear")) == "linear is a mirage CLI\n"
+    assert _out(_exec(ws, "type -t linear")) == "cli\n"
+    assert _out(_exec(ws, "which linear")) == "linear\n"
+    assert "Usage: linear" in _out(_exec(ws, "man linear"))
+    assert "# clis" in _out(_exec(ws, "man"))
+
+
+def test_which_reports_a_missing_name_through_the_status_only():
+    io = _exec(_cli_ws(), "which nope-xyz")
+    assert io.exit_code == 1
+    assert not io.stdout
+    assert not io.stderr
+
+
+def test_a_shell_function_shadows_a_cli_and_type_a_shows_both():
+    ws = _cli_ws()
+    assert _out(_exec(ws, "linear() { echo shadowed; }; type -a linear")) == (
+        "linear is a function\nlinear is a mirage CLI\n")
 
 
 def test_workspace_file_prompt_mentions_help_and_man():

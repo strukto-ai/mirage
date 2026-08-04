@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli import CLISpec, walk
+from mirage.commands.cli.walk import find_child, find_node
 from mirage.commands.spec.types import Option
 
 
@@ -311,3 +312,31 @@ def test_float_typed_group_option_uses_git_wording():
     ok = walk("tool", tree, ["--ratio", "2.5", "run"])
     assert ok.leaf is not None
     assert ok.group_flags == {"--ratio": "2.5"}
+
+
+def test_find_child_matches_name_or_alias():
+    tree = CLISpec(name="gws",
+                   subcommands=(CLISpec(name="checkout",
+                                        aliases=("co", ),
+                                        fn=_verb), ))
+    assert find_child(tree, "checkout").name == "checkout"
+    assert find_child(tree, "co").name == "checkout"
+    assert find_child(tree, "nope") is None
+
+
+def test_find_node_returns_the_node_and_its_canonical_path():
+    node, path = find_node(_tree(), ["gmail", "send"])
+    assert node.name == "send"
+    assert path == ("gmail", "send")
+
+
+def test_find_node_with_no_verbs_is_the_root():
+    tree = _tree()
+    node, path = find_node(tree, [])
+    assert node is tree
+    assert path == ()
+
+
+def test_find_node_misses_on_an_unknown_verb():
+    assert find_node(_tree(), ["gmail", "bogus"]) is None
+    assert find_node(_tree(), ["bogus"]) is None

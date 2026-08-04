@@ -16,7 +16,7 @@ from mirage.workspace.route.constants import (JOB_BUILTINS, NAMESPACE_COMMANDS,
                                               NO_FOLLOW_COMMANDS,
                                               UNSUPPORTED_BUILTINS,
                                               dereferences, reports_link)
-from mirage.workspace.route.route import route
+from mirage.workspace.route.route import route, route_all
 from mirage.workspace.route.types import (SHELL_CONSUMERS, Consumer,
                                           WordPolicy, word_policy)
 
@@ -31,5 +31,6 @@ __all__ = [
     "UNSUPPORTED_BUILTINS",
     "WordPolicy",
     "route",
+    "route_all",
     "word_policy",
 ]

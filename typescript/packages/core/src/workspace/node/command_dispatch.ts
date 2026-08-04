@@ -48,6 +48,7 @@ import {
   handleCd,
   handleCommandBuiltin,
   handleType,
+  handleWhich,
   handleEcho,
   handleEnv,
   handleEval,
@@ -629,6 +630,10 @@ async function runArgv(
 
   if (name === SB.TYPE) {
     return handleType(args, session, registry)
+  }
+
+  if (name === SB.WHICH) {
+    return handleWhich(args, session, registry)
   }
 
   if (name === SB.XARGS) {

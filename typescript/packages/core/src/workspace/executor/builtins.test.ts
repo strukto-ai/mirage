@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { CLISpec } from '../../commands/cli/types.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -1274,6 +1275,72 @@ function fakeShell(exitCodes: number[] = []): {
     },
   }
 }
+
+describe('handleMan for installed CLIs', () => {
+  function cliRegistry(): MountRegistry {
+    const reg = new MountRegistry({ '/ram/': new RAMResource() }, MountMode.WRITE)
+    wireRegistry(reg)
+    reg.clis.install(
+      'linear',
+      new CLISpec({
+        name: 'linear',
+        description: 'Linear API client',
+        subcommands: [
+          new CLISpec({
+            name: 'issue',
+            description: 'Manage issues',
+            aliases: ['i'],
+            subcommands: [
+              new CLISpec({
+                name: 'create',
+                description: 'Create one',
+                fn: () => [null, new IOResult()],
+              }),
+            ],
+          }),
+        ],
+      }),
+    )
+    return reg
+  }
+
+  it('renders an installed CLI', async () => {
+    const [out, io] = handleMan(
+      ['linear'],
+      new Session({ sessionId: 't', cwd: '/' }),
+      cliRegistry(),
+    )
+    expect(io.exitCode).toBe(0)
+    const text = await readBody(out)
+    expect(text).toContain('Usage: linear')
+    expect(text).toContain('issue')
+  })
+
+  it('descends a verb path and resolves aliases', async () => {
+    const reg = cliRegistry()
+    const s = new Session({ sessionId: 't', cwd: '/' })
+    const text = await readBody(handleMan(['linear', 'issue', 'create'], s, reg)[0])
+    expect(text).toContain('Usage: linear issue create')
+    expect(await readBody(handleMan(['linear', 'i', 'create'], s, reg)[0])).toBe(text)
+  })
+
+  it('names the whole line for an unknown verb', () => {
+    const s = new Session({ sessionId: 't', cwd: '/' })
+    const [out, io] = handleMan(['linear', 'bogus'], s, cliRegistry())
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
+    const errBytes = io.stderr instanceof Uint8Array ? io.stderr : null
+    expect(decode(errBytes)).toBe('man: no entry for linear bogus\n')
+  })
+
+  it('lists installed CLIs in the bare index, before general', async () => {
+    const s = new Session({ sessionId: 't', cwd: '/' })
+    const text = await readBody(handleMan([], s, cliRegistry())[0])
+    expect(text).toContain('# clis')
+    expect(text).toContain('- linear — Linear API client')
+    expect(text.indexOf('# clis')).toBeLessThan(text.indexOf('# general'))
+  })
+})
 
 describe('handleEcho GNU option rules', () => {
   it('trailing -n prints literally', () => {

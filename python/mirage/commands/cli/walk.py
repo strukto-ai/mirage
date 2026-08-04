@@ -35,6 +35,43 @@ def _verb_display(child: CLISpec) -> str:
     return child.name
 
 
+def find_child(node: CLISpec, word: str) -> CLISpec | None:
+    """The subcommand a word names, by canonical name or alias.
+
+    Args:
+        node (CLISpec): the group being descended.
+        word (str): the verb word as typed.
+    """
+    return next(
+        (c for c in node.subcommands if word == c.name or word in c.aliases),
+        None)
+
+
+def find_node(spec: CLISpec,
+              verbs: Sequence[str]) -> tuple[CLISpec, tuple[str, ...]] | None:
+    """Descend a tree by verb words, None if a word names no subcommand.
+
+    Returns the node and its canonical path, so an alias renders under
+    the name it resolves to, the attribution rule ``walk`` uses. This is
+    introspection only (``man``): no options are parsed and no usage
+    error is produced, so a caller gets the node or nothing.
+
+    Args:
+        spec (CLISpec): the root of the tree.
+        verbs (Sequence[str]): verb words after the head, aliases
+            allowed.
+    """
+    node = spec
+    path: tuple[str, ...] = ()
+    for word in verbs:
+        child = find_child(node, word)
+        if child is None:
+            return None
+        node = child
+        path = path + (child.name, )
+    return node, path
+
+
 def node_help(name: str, node: CLISpec) -> str:
     """A group node's help: the ordinary command help plus Commands rows.
 
@@ -373,8 +410,7 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
             # An alias resolves to its canonical node; the path records
             # the canonical name (argparse prog attribution: errors under
             # `gws co` render as `gws checkout`).
-            child = next((c for c in node.subcommands
-                          if token == c.name or token in c.aliases), None)
+            child = find_child(node, token)
             if child is None:
                 return _unknown_verb(head, name, token)
             node = child

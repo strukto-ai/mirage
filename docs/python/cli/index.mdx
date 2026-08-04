@@ -39,6 +39,33 @@ wording (exit 1), and missing required flags fail with argparse's
 wording (exit 2). Two installs under different head words are two
 accounts.
 
+## Discovering an installed CLI
+
+An install is discoverable from inside the shell, so an agent that was
+never told about it can still find it. This works for your own
+registered CLI exactly as for a builtin one: every page is rendered from
+the spec, so there is nothing extra to write.
+
+```bash
+man                      # lists installs under "# clis", beside the mounts
+man linear               # the tree: description, verbs, flags
+man linear issue create  # one leaf, same text as `linear issue create --help`
+type linear              # linear is a mirage CLI
+type -t linear           # cli
+which linear             # linear
+```
+
+`type -t` prints one of `keyword`, `function`, `cli` or `builtin`.
+`which` prints the bare name rather than a path, since mirage has no
+PATH, and reports a miss through exit `1` with no output, like GNU
+`which`.
+
+A shell function may shadow a head word, exactly as in bash. It is
+reversible with `unset -f`, bypassable with `command linear ...`, and
+`type -a linear` lists both layers. Installing and uninstalling a CLI is
+a host-side API only (`ws.register_cli` / `ws.unregister_cli`): there is no shell
+verb for it, so an agent cannot uninstall the tools it was given.
+
 ## Builtin CLIs
 
 | Program                              | Acts on          | Vocabulary                                  |

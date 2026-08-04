@@ -18,6 +18,22 @@ import { NAMESPACE_COMMANDS, SHELL_NAMES } from './constants.ts'
 import { Consumer } from './types.ts'
 
 /**
+ * Yield every layer holding the name, most-preferred first.
+ *
+ * The one place precedence is written down: `route` reads the first
+ * yield and `routeAll` reads all of them. Lazy on purpose, so the winner
+ * costs exactly what it did before the split (a name an installed CLI
+ * answers never reaches the mount lookup).
+ */
+function* layers(name: string, session: Session, registry: MountRegistry): Generator<Consumer> {
+  if (SHELL_NAMES.has(name)) yield Consumer.SESSION
+  if (NAMESPACE_COMMANDS.has(name)) yield Consumer.NAMESPACE
+  if (name in session.functions) yield Consumer.FUNCTION
+  if (registry.clis.get(name) !== null) yield Consumer.CLI
+  if (registry.mountForCommand(name) !== null) yield Consumer.MOUNT
+}
+
+/**
  * Route a command name to the layer that consumes it.
  *
  * Order mirrors dispatch precedence: shell builtins shadow functions,
@@ -41,12 +57,23 @@ import { Consumer } from './types.ts'
  *
  * Runtimes are orthogonal, not a seventh row: a capture decides where a
  * command executes (docker vs vfs), never whether the name exists.
+ *
+ * This is the winner only. A name can sit in more than one layer at once
+ * (a function shadowing an installed CLI); `routeAll` reports them all,
+ * which is what `type -a` prints.
  */
 export function route(name: string, session: Session, registry: MountRegistry): Consumer {
-  if (SHELL_NAMES.has(name)) return Consumer.SESSION
-  if (NAMESPACE_COMMANDS.has(name)) return Consumer.NAMESPACE
-  if (name in session.functions) return Consumer.FUNCTION
-  if (registry.clis.get(name) !== null) return Consumer.CLI
-  if (registry.mountForCommand(name) !== null) return Consumer.MOUNT
+  for (const consumer of layers(name, session, registry)) return consumer
   return Consumer.UNKNOWN
+}
+
+/**
+ * Every layer holding the name, most-preferred first.
+ *
+ * Empty when nothing holds it, where `route` says UNKNOWN. Only
+ * introspection (`type -a`, `which -a`) needs this: dispatch runs the
+ * winner and never asks what it shadowed.
+ */
+export function routeAll(name: string, session: Session, registry: MountRegistry): Consumer[] {
+  return [...layers(name, session, registry)]
 }

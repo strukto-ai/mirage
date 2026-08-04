@@ -17,7 +17,7 @@ from mirage.io import IOResult
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.route import SHELL_CONSUMERS, Consumer, route
+from mirage.workspace.route import SHELL_CONSUMERS, Consumer, route, route_all
 from mirage.workspace.session import Session
 
 
@@ -109,3 +109,28 @@ def test_shell_consumers_resolve_globs():
     assert Consumer.CLI in SHELL_CONSUMERS
     assert Consumer.MOUNT not in SHELL_CONSUMERS
     assert Consumer.UNKNOWN not in SHELL_CONSUMERS
+
+
+def test_route_all_reports_every_layer_winner_first():
+    session, ws = _fixture()
+    ws.register_cli("prog", _cli_tree())
+    assert route_all("prog", session, ws._registry) == [Consumer.CLI]
+    session.functions["prog"] = []
+    assert route_all("prog", session,
+                     ws._registry) == [Consumer.FUNCTION, Consumer.CLI]
+
+
+def test_route_all_is_empty_where_route_says_unknown():
+    session, ws = _fixture()
+    assert route_all("bogus", session, ws._registry) == []
+    assert route("bogus", session, ws._registry) is Consumer.UNKNOWN
+
+
+def test_route_agrees_with_the_first_layer_route_all_reports():
+    session, ws = _fixture()
+    ws.register_cli("prog", _cli_tree())
+    session.functions["greet"] = []
+    for name in ("cd", "ln", "greet", "prog", "cat", "bogus"):
+        layers = route_all(name, session, ws._registry)
+        winner = layers[0] if layers else Consumer.UNKNOWN
+        assert route(name, session, ws._registry) is winner

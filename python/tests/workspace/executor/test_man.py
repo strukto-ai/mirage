@@ -15,6 +15,7 @@
 import asyncio
 from unittest.mock import MagicMock
 
+from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec.types import CommandSpec, Option
 from mirage.workspace.cli.registry import CLIRegistry
@@ -188,3 +189,74 @@ def test_render_man_index_dedupes_general_across_mounts():
     reg = _mk_registry([m1, m2])
     text = _render_man_index(Session(session_id="t"), reg)
     assert text.count("- bc \u2014 bc desc") == 1
+
+
+def _cli_tree() -> CLISpec:
+    return CLISpec(
+        name="linear",
+        description="Linear API client",
+        subcommands=(CLISpec(name="issue",
+                             description="Manage issues",
+                             aliases=("i", ),
+                             subcommands=(CLISpec(name="create",
+                                                  description="Create one",
+                                                  fn=lambda: None), )), ),
+    )
+
+
+def _cli_registry(mounts=None):
+    reg = _mk_registry(mounts or [])
+    reg.clis.install("linear", _cli_tree())
+    return reg
+
+
+def test_handle_man_renders_an_installed_cli():
+    out, io, _node = asyncio.run(
+        handle_man(["linear"], Session(session_id="t"), _cli_registry()))
+    assert io.exit_code == 0
+    text = out.decode()
+    assert "Usage: linear" in text
+    assert "issue" in text
+
+
+def test_handle_man_descends_a_verb_path_and_resolves_aliases():
+    reg = _cli_registry()
+    text = asyncio.run(
+        handle_man(["linear", "issue", "create"], Session(session_id="t"),
+                   reg))[0].decode()
+    assert "Usage: linear issue create" in text
+    aliased = asyncio.run(
+        handle_man(["linear", "i", "create"], Session(session_id="t"),
+                   reg))[0].decode()
+    assert aliased == text
+
+
+def test_handle_man_unknown_verb_names_the_whole_line():
+    out, io, node = asyncio.run(
+        handle_man(["linear", "bogus"], Session(session_id="t"),
+                   _cli_registry()))
+    assert out is None
+    assert io.exit_code == 1
+    assert io.stderr == b"man: no entry for linear bogus\n"
+    assert node.exit_code == 1
+
+
+def test_handle_man_prints_the_cli_before_a_colliding_mount_command():
+    spec = CommandSpec(description="mount side")
+    mount = _mk_mount("/ram/", "ram", cmds={"linear": _mk_cmd("linear", spec)})
+    reg = _cli_registry([mount])
+    text = asyncio.run(handle_man(["linear"], Session(session_id="t"),
+                                  reg))[0].decode()
+    assert text.index("Usage: linear") < text.index("mount side")
+
+
+def test_render_man_index_lists_installed_clis():
+    text = _render_man_index(Session(session_id="t"), _cli_registry())
+    assert "# clis" in text
+    assert "- linear \u2014 Linear API client" in text
+    assert text.index("# clis") < text.index("# general")
+
+
+def test_render_man_index_omits_the_cli_section_when_none_installed():
+    assert "# clis" not in _render_man_index(Session(session_id="t"),
+                                             _mk_registry([]))

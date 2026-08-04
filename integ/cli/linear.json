@@ -402,6 +402,110 @@
         "stdout": "Search\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ln_disc_type",
+      "seq": 567114,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "type linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear is a mirage CLI\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_type_word",
+      "seq": 567115,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "type -t linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "cli\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_which",
+      "seq": 567116,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "which linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_man_root",
+      "seq": 567117,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "man linear | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear: Linear GraphQL API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_man_leaf",
+      "seq": 567118,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "man linear issue create | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear issue create: Create an issue\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_man_index",
+      "seq": 567119,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "man | grep '^- linear'",
+      "expect": {
+        "exit": 0,
+        "stdout": "- linear — Linear GraphQL API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_type_a_shadowed",
+      "seq": 567120,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear() { echo shadowed; }; type -a linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear is a function\nlinear is a mirage CLI\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_which_miss",
+      "seq": 567121,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "which nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

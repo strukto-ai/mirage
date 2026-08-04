@@ -28,6 +28,34 @@ function verbDisplay(child: CLISpec): string {
   return child.aliases.length > 0 ? `${child.name} (${child.aliases.join(', ')})` : child.name
 }
 
+/** The subcommand a word names, by canonical name or alias. */
+export function findChild(node: CLISpec, word: string): CLISpec | null {
+  return node.subcommands.find((c) => c.name === word || c.aliases.includes(word)) ?? null
+}
+
+/**
+ * Descend a tree by verb words, null if a word names no subcommand.
+ *
+ * Returns the node and its canonical path, so an alias renders under the
+ * name it resolves to, the attribution rule `walk` uses. This is
+ * introspection only (`man`): no options are parsed and no usage error is
+ * produced, so a caller gets the node or nothing.
+ */
+export function findNode(
+  spec: CLISpec,
+  verbs: readonly string[],
+): { node: CLISpec; path: string[] } | null {
+  let node = spec
+  const path: string[] = []
+  for (const word of verbs) {
+    const child = findChild(node, word)
+    if (child === null) return null
+    node = child
+    path.push(child.name)
+  }
+  return { node, path }
+}
+
 /**
  * A group node's help: the ordinary command help plus Commands rows.
  * One renderer serves leaves and groups; the same text serves `--help`
@@ -345,8 +373,8 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
       // An alias resolves to its canonical node; the path records the
       // canonical name (argparse prog attribution: errors under `gws co`
       // render as `gws checkout`).
-      const child = node.subcommands.find((c) => c.name === token || c.aliases.includes(token))
-      if (child === undefined) {
+      const child = findChild(node, token)
+      if (child === null) {
         return unknownVerb(head, name, token)
       }
       node = child

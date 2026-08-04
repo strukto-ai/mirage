@@ -159,8 +159,9 @@ Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements t
 - **Substitutions:** command substitution `` `cmd` `` and `$(cmd)`; arithmetic `$((expr))`; parameter expansion `${VAR}`, `${VAR:-default}`, `${VAR%suffix}`, etc.; input-direction process substitution `<(cmd)`.
 - **Control flow:** `if`/`elif`/`else`/`fi`, `for`, `while`, `until`, `case`, `select`, `function name() {}`, `break`, `continue`, `return`.
 - **Grouping:** subshells `(cmd)`, compound `{ cmd; }`, negation `! cmd`.
-- **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `set`, `shift`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`.
+- **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `set`, `shift`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`, `man`, `command`, `type`, `which`.
 - **Builtin options (GNU semantics):** `echo -n/-e/-E` (leading-word option rule: `echo hi -n` prints `hi -n`), `read -r`, `xargs -n/-0/-d/-r/--` (batching, GNU exit codes: `123` when an invocation fails, `126`/`127` stop the run), `timeout DURATION` with `s`/`m`/`h`/`d` suffixes (kills at the deadline with exit `124`, usage errors exit `125`). `shift` and `return` report bash's `numeric argument required` errors.
+- **Name lookup:** `type name` reports what a name resolves to (`type -t` prints one of `keyword`, `function`, `cli`, `builtin`; `type -a` lists every layer holding the name), `which name` prints the name of anything runnable (there is no PATH, so there is no path to print) and reports a miss through exit `1` alone, and `man name` renders a page: a command's spec, or an installed CLI's own `--help` tree (`man linear issue create`).
 - **Globs:** `*`, `?`, `[...]` classes and `[!...]` negation (Python `fnmatch` semantics in both implementations), resolved by the shell or pushed down to the resource.
 - **Comments:** `#`.
 

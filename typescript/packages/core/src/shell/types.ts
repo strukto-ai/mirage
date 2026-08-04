@@ -215,6 +215,7 @@ export const ShellBuiltin = Object.freeze({
   TIMEOUT: 'timeout',
   COMMAND: 'command',
   TYPE: 'type',
+  WHICH: 'which',
   BREAK: 'break',
   CONTINUE: 'continue',
   RETURN: 'return',

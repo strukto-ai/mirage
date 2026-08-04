@@ -12,10 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterator
+
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.route.constants import NAMESPACE_COMMANDS, SHELL_NAMES
 from mirage.workspace.route.types import Consumer
 from mirage.workspace.session import Session
+
+
+def _layers(name: str, session: Session,
+            registry: MountRegistry) -> Iterator[Consumer]:
+    """Yield every layer holding the name, most-preferred first.
+
+    The one place precedence is written down: ``route`` reads the first
+    yield and ``route_all`` reads all of them. Lazy on purpose, so the
+    winner costs exactly what it did before the split (a name an
+    installed CLI answers never reaches the mount lookup).
+
+    Args:
+        name (str): expanded command name.
+        session (Session): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+    """
+    if name in SHELL_NAMES:
+        yield Consumer.SESSION
+    if name in NAMESPACE_COMMANDS:
+        yield Consumer.NAMESPACE
+    if name in session.functions:
+        yield Consumer.FUNCTION
+    if registry.clis.get(name) is not None:
+        yield Consumer.CLI
+    if registry.mount_for_command(name) is not None:
+        yield Consumer.MOUNT
 
 
 def route(name: str, session: Session, registry: MountRegistry) -> Consumer:
@@ -43,19 +71,29 @@ def route(name: str, session: Session, registry: MountRegistry) -> Consumer:
     Runtimes are orthogonal, not a seventh row: a capture decides where
     a command executes (docker vs vfs), never whether the name exists.
 
+    This is the winner only. A name can sit in more than one layer at
+    once (a function shadowing an installed CLI); ``route_all`` reports
+    them all, which is what ``type -a`` prints.
+
     Args:
         name (str): expanded command name.
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
-    if name in SHELL_NAMES:
-        return Consumer.SESSION
-    if name in NAMESPACE_COMMANDS:
-        return Consumer.NAMESPACE
-    if name in session.functions:
-        return Consumer.FUNCTION
-    if registry.clis.get(name) is not None:
-        return Consumer.CLI
-    if registry.mount_for_command(name) is not None:
-        return Consumer.MOUNT
-    return Consumer.UNKNOWN
+    return next(_layers(name, session, registry), Consumer.UNKNOWN)
+
+
+def route_all(name: str, session: Session,
+              registry: MountRegistry) -> list[Consumer]:
+    """Every layer holding the name, most-preferred first.
+
+    Empty when nothing holds it, where ``route`` says UNKNOWN. Only
+    introspection (``type -a``, ``which -a``) needs this: dispatch runs
+    the winner and never asks what it shadowed.
+
+    Args:
+        name (str): expanded command name.
+        session (Session): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+    """
+    return list(_layers(name, session, registry))

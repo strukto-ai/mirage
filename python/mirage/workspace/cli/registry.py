@@ -30,6 +30,17 @@ class CLIRegistry:
     colliding name, or a config the spec's ``config_model`` rejects
     raises at install time, so a workspace that loads has only valid
     entries.
+
+    The lifecycle is host-side only, and must stay that way: install and
+    uninstall are called by the program embedding mirage, never by a
+    line the agent types, so an agent cannot take away the tools it was
+    given. Do not add an ``install``/``uninstall`` shell builtin. What
+    an agent can do is shadow a head word with a shell function, which
+    is bash's own rule, reversible with ``unset -f``, bypassable with
+    ``command <name>``, and visible through ``type -a``. Pinning a head
+    word against that belongs in the policy layer's ``pre_execute``,
+    since it is a per-deployment call rather than a property of the
+    registry.
     """
 
     def __init__(self) -> None:

@@ -20,5 +20,5 @@ export {
   dereferences,
   reportsLink,
 } from './constants.ts'
-export { route } from './route.ts'
+export { route, routeAll } from './route.ts'
 export { Consumer, SHELL_CONSUMERS, WordPolicy, wordPolicy } from './types.ts'

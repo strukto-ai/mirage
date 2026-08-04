@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { Option } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
-import { walk } from './walk.ts'
+import { findChild, findNode, walk } from './walk.ts'
 
 const verb: CLIVerbFn = () => null
 
@@ -350,5 +350,30 @@ describe('walk float-typed group options', () => {
     const ok = walk('tool', spec, ['--ratio', '2.5', 'run'])
     expect(ok.leaf).not.toBeNull()
     expect(ok.groupFlags).toEqual({ '--ratio': '2.5' })
+  })
+})
+
+describe('findChild / findNode', () => {
+  it('matches a subcommand by name or alias', () => {
+    const spec = new CLISpec({
+      name: 'gws',
+      subcommands: [new CLISpec({ name: 'checkout', aliases: ['co'], fn: verb })],
+    })
+    expect(findChild(spec, 'checkout')?.name).toBe('checkout')
+    expect(findChild(spec, 'co')?.name).toBe('checkout')
+    expect(findChild(spec, 'nope')).toBeNull()
+  })
+
+  it('returns the node and its canonical path', () => {
+    const found = findNode(tree(), ['gmail', 'send'])
+    expect(found?.node.name).toBe('send')
+    expect(found?.path).toEqual(['gmail', 'send'])
+  })
+
+  it('is the root with no verbs and null on an unknown verb', () => {
+    const spec = tree()
+    expect(findNode(spec, [])).toEqual({ node: spec, path: [] })
+    expect(findNode(spec, ['gmail', 'bogus'])).toBeNull()
+    expect(findNode(spec, ['bogus'])).toBeNull()
   })
 })

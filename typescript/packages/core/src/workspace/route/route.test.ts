@@ -18,7 +18,7 @@ import { IOResult } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { Consumer, SHELL_CONSUMERS, dereferences, route } from './index.ts'
+import { Consumer, SHELL_CONSUMERS, dereferences, route, routeAll } from './index.ts'
 import { Session } from '../session/session.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -115,6 +115,32 @@ describe('route', () => {
     expect(SHELL_CONSUMERS.has(Consumer.CLI)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.MOUNT)).toBe(false)
     expect(SHELL_CONSUMERS.has(Consumer.UNKNOWN)).toBe(false)
+  })
+})
+
+describe('routeAll', () => {
+  it('reports every layer, winner first', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    expect(routeAll('prog', session, ws.registry)).toEqual([Consumer.CLI])
+    session.functions.prog = 'prog() { :; }'
+    expect(routeAll('prog', session, ws.registry)).toEqual([Consumer.FUNCTION, Consumer.CLI])
+  })
+
+  it('is empty where route says UNKNOWN', () => {
+    const { session, ws } = fixture()
+    expect(routeAll('bogus', session, ws.registry)).toEqual([])
+    expect(route('bogus', session, ws.registry)).toBe(Consumer.UNKNOWN)
+  })
+
+  it('agrees with route on the winner', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    session.functions.greet = 'greet() { :; }'
+    for (const name of ['cd', 'ln', 'greet', 'prog', 'cat', 'bogus']) {
+      const layers = routeAll(name, session, ws.registry)
+      expect(route(name, session, ws.registry)).toBe(layers[0] ?? Consumer.UNKNOWN)
+    }
   })
 })
 

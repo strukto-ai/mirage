@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.executor.builtins.capacity import handle_df
-from mirage.workspace.executor.builtins.command import (handle_command_builtin,
-                                                        handle_type)
+from mirage.workspace.executor.builtins.command import handle_command_builtin
 from mirage.workspace.executor.builtins.condition import handle_test
 from mirage.workspace.executor.builtins.dirs import handle_cd
 from mirage.workspace.executor.builtins.history import handle_history
@@ -22,6 +21,7 @@ from mirage.workspace.executor.builtins.links import (follow_paths, handle_ln,
                                                       handle_readlink,
                                                       link_flags, prepare_mv,
                                                       strip_link_operands)
+from mirage.workspace.executor.builtins.lookup import handle_type, handle_which
 from mirage.workspace.executor.builtins.man import (_collect_man_hits,
                                                     _render_man_entry,
                                                     _render_man_index,
@@ -56,7 +56,6 @@ __all__ = [
     'handle_bash',
     'handle_cd',
     'handle_command_builtin',
-    'handle_type',
     'handle_echo',
     'handle_env',
     'handle_eval',
@@ -90,6 +89,8 @@ __all__ = [
     'handle_timeout',
     'handle_trap',
     'handle_unset',
+    'handle_type',
+    'handle_which',
     'handle_whoami',
     'note_local_array',
     'handle_xargs',
