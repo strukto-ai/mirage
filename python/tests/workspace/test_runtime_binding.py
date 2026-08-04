@@ -20,6 +20,7 @@ from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
 from mirage.policy import Deny, Route
 from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
@@ -359,6 +360,38 @@ async def test_syntax_error_gates_before_policy():
         assert io.exit_code == 2
         assert b"syntax error" in io.stderr
         assert calls == []
+    finally:
+        await ws.close()
+
+
+class BrokenEvaluator(Runtime, EvaluatorMixin):
+    name = "broken-eval"
+    captures = ("python3", )
+
+    async def run(self, args: RunArgs) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    async def eval(self, code, *, inputs=None, session=None):
+        raise RuntimeError("evaluator container is gone")
+
+
+@pytest.mark.asyncio
+async def test_a_broken_evaluator_fails_the_line_closed():
+    """Infrastructure failure refuses the line, never a raw raise.
+
+    A script that does not parse is the caller's mistake (PolicyError);
+    an evaluator whose own machinery breaks is not, so the policy chain
+    fails closed. Mirrors the TS test of the same name.
+    """
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[BrokenEvaluator(), "vfs"],
+                   policy=ScriptSource("'beta'"))
+    try:
+        io = await ws.execute("echo hi")
+        assert io.exit_code == 126
+        assert b"policy denied" in io.stderr
+        assert b"RoutingPolicy failed" in io.stderr
     finally:
         await ws.close()
 

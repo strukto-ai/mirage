@@ -47,6 +47,24 @@ class HangingEvaluator extends Runtime implements Evaluator {
   }
 }
 
+class BrokenEvaluator extends Runtime implements Evaluator {
+  readonly [EVALUATOR] = true as const
+  readonly evalLanguage = 'python' as const
+  readonly name = 'broken-eval'
+
+  constructor() {
+    super({ captures: ['python3'] })
+  }
+
+  run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+
+  eval(): Promise<EvalResult> {
+    return Promise.reject(new Error('evaluator container is gone'))
+  }
+}
+
 class NamedEvaluator extends Runtime implements Evaluator {
   readonly [EVALUATOR] = true as const
   readonly evalLanguage: 'python' | 'js'
@@ -261,6 +279,31 @@ describe('routing ladder', () => {
       await expect(ws.execute('echo hi')).rejects.toThrow(/policy script timed out after 0.1s/)
     } finally {
       POLICY_EVAL_TIMEOUT.seconds = saved
+      await ws.close()
+    }
+  })
+
+  it('a broken evaluator fails the line closed', async () => {
+    // A script that does not parse is the caller's mistake
+    // (PolicyError); an evaluator whose own machinery breaks is not, so
+    // the policy chain fails closed. Mirrors the python test of the
+    // same name.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new BrokenEvaluator(), 'vfs'],
+        policy: new ScriptSource("'beta'"),
+      },
+    )
+    try {
+      const denied = await ws.execute('echo hi')
+      expect(denied.exitCode).toBe(126)
+      expect(DEC.decode(denied.stderr)).toContain('policy denied')
+      expect(DEC.decode(denied.stderr)).toContain('RoutingPolicy failed')
+    } finally {
       await ws.close()
     }
   })

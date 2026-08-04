@@ -56,9 +56,14 @@ export function evaluatorOf(
 /**
  * Evaluate a config script on the world's evaluator. The script sees
  * the ctx payload as the `ctx` global and its LAST EXPRESSION is the
- * verdict; the script's language is the evaluator's language. Throws
- * PolicyError when the world has no evaluator, the script times out,
- * or it does not parse or raises.
+ * verdict; the script's language is the evaluator's language.
+ *
+ * Throws PolicyError for the caller-fixable mistakes: no evaluator in
+ * the world, a script that hangs, a script that does not parse or
+ * raises. Any other failure is the evaluator's own infrastructure
+ * breaking (a dead container, a dropped connection); it propagates
+ * unchanged so the policy chain fails closed on it, matching the
+ * python eval_source.
  */
 export async function evalSource(
   source: string,
@@ -89,9 +94,7 @@ export async function evalSource(
       const prefix = caught.syntax ? 'policy script syntax error: ' : 'policy script failed: '
       throw new PolicyError(prefix + caught.message, { cause: caught })
     }
-    throw new PolicyError(caught instanceof Error ? caught.message : String(caught), {
-      cause: caught,
-    })
+    throw caught
   }
 }
 
