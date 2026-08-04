@@ -104,6 +104,16 @@ describe('handleType', () => {
     expect(await body(handleType(['-t', 'if'], makeSession(), makeRegistry())[0])).toBe('keyword\n')
   })
 
+  it('resolves -t and -p as one group, last one typed winning', async () => {
+    // bash: `type -tp cd` prints a path (empty here), `type -pt cd` the
+    // type word.
+    expect(await body(handleType(['-tp', 'cd'], makeSession(), makeRegistry())[0])).toBe('')
+    expect(await body(handleType(['-pt', 'cd'], makeSession(), makeRegistry())[0])).toBe(
+      'builtin\n',
+    )
+    expect(await body(handleType(['-P', 'cd'], makeSession(), makeRegistry())[0])).toBe('')
+  })
+
   it('classifies a mount command as a builtin', async () => {
     const [out] = handleType(['cat'], makeSession(), makeRegistry())
     expect(await body(out)).toBe('cat is a shell builtin\n')
@@ -124,6 +134,14 @@ describe('handleType', () => {
     const [out] = handleType(['-f', 'linear'], session, makeRegistry(true))
     expect(await body(out)).toBe('linear is a mirage CLI\n')
     expect(session.functions.linear).toBe('linear() { :; }')
+  })
+
+  it('-f on a function-only name is not found', () => {
+    const session = makeSession()
+    session.functions.myfn = 'myfn() { :; }'
+    const [out, io] = handleType(['-f', 'myfn'], session, makeRegistry())
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
   })
 
   it('warns and exits 1 for an unknown name', async () => {

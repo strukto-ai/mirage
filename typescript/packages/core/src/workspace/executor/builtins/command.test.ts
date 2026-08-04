@@ -18,7 +18,7 @@ import type { ByteSource } from '../../../io/types.ts'
 import { CLIRegistry } from '../../cli/registry.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { Session } from '../../session/session.ts'
-import { handleCommandBuiltin, parseFlags } from './command.ts'
+import { handleCommandBuiltin } from './command.ts'
 
 const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
 
@@ -43,36 +43,20 @@ function decode(b: Uint8Array | null): string {
   return b === null ? '' : new TextDecoder().decode(b)
 }
 
-describe('parseFlags', () => {
-  it('last of -v/-V wins', () => {
-    expect(parseFlags(['-v', 'ls'])).toEqual(['v', ['ls'], null])
-    expect(parseFlags(['-V', 'ls'])).toEqual(['V', ['ls'], null])
-    expect(parseFlags(['-vV', 'ls'])).toEqual(['V', ['ls'], null])
-    expect(parseFlags(['-Vv', 'ls'])).toEqual(['v', ['ls'], null])
+describe('command option handling', () => {
+  it.each([
+    [['-vV', 'cd'], 'cd is a shell builtin\n'],
+    [['-Vv', 'cd'], 'cd\n'],
+    [['-pv', 'cd'], 'cd\n'],
+  ])('last of -v/-V wins and -p is inert: %s', async (args, expected) => {
+    const [out] = await handleCommandBuiltin(vi.fn(), args, makeSession(), makeRegistry())
+    expect(await body(out)).toBe(expected)
   })
 
-  it('accepts -p but it is inert', () => {
-    expect(parseFlags(['-p', 'ls'])).toEqual([null, ['ls'], null])
-    expect(parseFlags(['-pv', 'ls'])).toEqual(['v', ['ls'], null])
-  })
-
-  it('stops at the first operand (flag after name belongs to target)', () => {
-    expect(parseFlags(['ls', '-l'])).toEqual([null, ['ls', '-l'], null])
-    expect(parseFlags(['-v', 'ls', '-l'])).toEqual(['v', ['ls', '-l'], null])
-  })
-
-  it('-- ends options', () => {
-    expect(parseFlags(['--', 'ls'])).toEqual([null, ['ls'], null])
-    expect(parseFlags(['-v', '--', 'ls'])).toEqual(['v', ['ls'], null])
-  })
-
-  it('reports the first invalid option', () => {
-    expect(parseFlags(['-x', 'ls'])).toEqual([null, [], '-x'])
-    expect(parseFlags(['-vx', 'ls'])).toEqual([null, [], '-x'])
-  })
-
-  it('a bare dash is an operand', () => {
-    expect(parseFlags(['-'])).toEqual([null, ['-'], null])
+  it('leaves a flag after the target name to the target', async () => {
+    const shell = vi.fn(() => Promise.resolve(new IOResult()))
+    await handleCommandBuiltin(shell, ['ls', '-l'], makeSession(), makeRegistry())
+    expect(shell).toHaveBeenCalledWith('ls -l', expect.anything())
   })
 })
 

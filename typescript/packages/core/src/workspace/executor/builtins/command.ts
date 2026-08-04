@@ -18,40 +18,11 @@ import { shellJoin } from '../../../shell/join.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
+import { lastOf, scanOptions } from './getopt.ts'
 import { classify, describe } from './lookup.ts'
 import type { Result, ExecuteStringFn } from './scope.ts'
 
 const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'
-
-/**
- * Split `command`'s own options from its operands.
- *
- * bash uses non-permuting getopt: option scanning stops at the first
- * non-option word (or `--`), so a flag after the target name belongs to
- * the target. Only `-p -v -V` are valid; `-p` is accepted but inert
- * (mirage has no PATH), and the last of `-v`/`-V` wins. Returns
- * `[mode, rest, bad]` where `bad` is the first invalid option or null.
- */
-export function parseFlags(args: readonly string[]): [string | null, string[], string | null] {
-  let mode: string | null = null
-  let i = 0
-  while (i < args.length) {
-    const tok = args[i] ?? ''
-    if (tok === '--') {
-      i += 1
-      break
-    }
-    if (!(tok.startsWith('-') && tok.length > 1)) break
-    for (const ch of tok.slice(1)) {
-      if (ch === 'v') mode = 'v'
-      else if (ch === 'V') mode = 'V'
-      else if (ch === 'p') continue
-      else return [null, [], `-${ch}`]
-    }
-    i += 1
-  }
-  return [mode, [...args.slice(i)], null]
-}
 
 /**
  * Run the `-v`/`-V` introspection modes.
@@ -99,7 +70,8 @@ function probe(
  * function table for the inner run so a shadowing function is skipped
  * while builtins and mount commands still resolve. Already expanded
  * operands are re-joined with shellJoin so they survive re-parsing as one
- * token each; the pipe stdin flows to the inner command.
+ * token each; the pipe stdin flows to the inner command. `-p` is accepted
+ * but inert (mirage has no PATH) and the last of `-v`/`-V` wins.
  */
 export async function handleCommandBuiltin(
   executeFn: ExecuteStringFn,
@@ -108,15 +80,17 @@ export async function handleCommandBuiltin(
   registry: MountRegistry,
   stdin: ByteSource | null = null,
 ): Promise<Result> {
-  const [mode, rest, bad] = parseFlags(args)
-  if (bad !== null) {
-    const err = new TextEncoder().encode(`command: ${bad}: invalid option\n${USAGE}`)
+  const scan = scanOptions(args, 'pvV')
+  if (scan.bad !== null) {
+    const err = new TextEncoder().encode(`command: ${scan.bad}: invalid option\n${USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: 'command', exitCode: 2, stderr: err }),
     ]
   }
+  const mode = lastOf(scan.letters, 'vV')
+  const rest = scan.operands
   if (mode !== null) return probe(mode, rest, session, registry)
   if (rest.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: 'command', exitCode: 0 })]

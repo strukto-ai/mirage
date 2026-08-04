@@ -18,6 +18,7 @@ import { route, routeAll } from '../../route/route.ts'
 import { Consumer } from '../../route/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
+import { lastOf, scanOptions } from './getopt.ts'
 import type { Result } from './scope.ts'
 
 const TYPE_USAGE = 'type: usage: type [-afptP] name [name ...]\n'
@@ -111,16 +112,23 @@ export function classifyAll(name: string, session: Session, registry: MountRegis
   return kinds
 }
 
-/** The kinds to report for one name, honoring an `-a` style flag. */
+/**
+ * The kinds to report for one name, honoring `-a` and `-f`.
+ *
+ * Both flags are filters over the layer list, never edits to the
+ * session: `-f` drops the function layer so the layer below it is what
+ * remains, and `-a` keeps them all instead of the winner only.
+ */
 function locations(
   name: string,
   session: Session,
   registry: MountRegistry,
   allMode: boolean,
+  nofunc = false,
 ): NameKind[] {
-  if (allMode) return classifyAll(name, session, registry)
-  const kind = classify(name, session, registry)
-  return kind === null ? [] : [kind]
+  let kinds = classifyAll(name, session, registry)
+  if (nofunc) kinds = kinds.filter((kind) => kind !== NameKind.FUNCTION)
+  return allMode ? kinds : kinds.slice(0, 1)
 }
 
 /** Render the verbose line `command -V` and `type` print. */
@@ -129,89 +137,41 @@ export function describe(name: string, kind: NameKind): string {
 }
 
 /**
- * Split `type`'s options from its name operands.
- *
- * Recognizes `-t` (type word only), `-p`/`-P` (path; empty for mirage's
- * pathless runnables), `-a` (every location) and `-f` (skip the function
- * table). Non-permuting like bash. Returns
- * `[mode, allMode, nofunc, rest, bad]` where `bad` is the first invalid
- * option.
- */
-function parseTypeFlags(
-  args: readonly string[],
-): ['t' | 'p' | null, boolean, boolean, string[], string | null] {
-  let mode: 't' | 'p' | null = null
-  let allMode = false
-  let nofunc = false
-  let i = 0
-  while (i < args.length) {
-    const tok = args[i] ?? ''
-    if (tok === '--') {
-      i += 1
-      break
-    }
-    if (!(tok.startsWith('-') && tok.length > 1)) break
-    for (const ch of tok.slice(1)) {
-      if (ch === 't') mode = 't'
-      else if (ch === 'p' || ch === 'P') mode = 'p'
-      else if (ch === 'a') allMode = true
-      else if (ch === 'f') nofunc = true
-      else return [null, false, false, [], `-${ch}`]
-    }
-    i += 1
-  }
-  return [mode, allMode, nofunc, [...args.slice(i)], null]
-}
-
-/** `locations` with `type -f`'s function table masked out. */
-function maskedLocations(
-  name: string,
-  session: Session,
-  registry: MountRegistry,
-  allMode: boolean,
-  nofunc: boolean,
-): NameKind[] {
-  const saved = session.functions[name]
-  if (!nofunc || saved === undefined) return locations(name, session, registry, allMode)
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.functions[name]
-  try {
-    return locations(name, session, registry, allMode)
-  } finally {
-    session.functions[name] = saved
-  }
-}
-
-/**
  * Run the `type` builtin (`type [-afptP] name [name ...]`).
  *
  * Resolution matches `command -V`, but the exit rule is `type`'s: 0 only
  * when every name resolves. `-t` prints the classification word,
- * `-p`/`-P` print a path (always empty here), `-a` prints one line per
- * layer holding the name (a shell function shadowing an installed CLI is
- * the case that has two), and a missing name warns on stderr unless a
- * word-only mode (`-t`/`-p`) is active.
+ * `-p`/`-P` print a path (always empty here) and are one mutually
+ * exclusive group with `-t`, `-a` prints one line per layer holding the
+ * name (a shell function shadowing an installed CLI is the case that has
+ * two), `-f` ignores the function table, and a missing name warns on
+ * stderr unless a word-only mode (`-t`/`-p`) is active.
  */
 export function handleType(
   args: readonly string[],
   session: Session,
   registry: MountRegistry,
 ): Result {
-  const [mode, allMode, nofunc, rest, bad] = parseTypeFlags(args)
+  const scan = scanOptions(args, 'afptP')
   const enc = new TextEncoder()
-  if (bad !== null) {
-    const err = enc.encode(`type: ${bad}: invalid option\n${TYPE_USAGE}`)
+  if (scan.bad !== null) {
+    const err = enc.encode(`type: ${scan.bad}: invalid option\n${TYPE_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: 'type', exitCode: 2, stderr: err }),
     ]
   }
+  const last = lastOf(scan.letters, 'tpP')
+  const mode = last === null || last === 't' ? last : 'p'
+  const allMode = scan.letters.includes('a')
+  const nofunc = scan.letters.includes('f')
+  const rest = scan.operands
   const outLines: string[] = []
   const errLines: string[] = []
   let allFound = true
   for (const name of rest) {
-    const kinds = maskedLocations(name, session, registry, allMode, nofunc)
+    const kinds = locations(name, session, registry, allMode, nofunc)
     if (kinds.length === 0) {
       allFound = false
       if (mode === null) errLines.push(`type: ${name}: not found`)
@@ -231,34 +191,6 @@ export function handleType(
 }
 
 /**
- * Split `which`'s options from its name operands.
- *
- * debianutils `which` takes `-a` (every location) and `-s` (status
- * only). Deliberate divergence: `--` ends the options here, which the C
- * implementation mishandles. Returns `[allMode, silent, rest, bad]`.
- */
-function parseWhichFlags(args: readonly string[]): [boolean, boolean, string[], string | null] {
-  let allMode = false
-  let silent = false
-  let i = 0
-  while (i < args.length) {
-    const tok = args[i] ?? ''
-    if (tok === '--') {
-      i += 1
-      break
-    }
-    if (!(tok.startsWith('-') && tok.length > 1)) break
-    for (const ch of tok.slice(1)) {
-      if (ch === 'a') allMode = true
-      else if (ch === 's') silent = true
-      else return [false, false, [], `-${ch}`]
-    }
-    i += 1
-  }
-  return [allMode, silent, [...args.slice(i)], null]
-}
-
-/**
  * Run the `which` builtin (`which [-as] name [name ...]`).
  *
  * Pinned against debianutils `which` (debian:stable-slim): a miss prints
@@ -271,23 +203,29 @@ function parseWhichFlags(args: readonly string[]): [boolean, boolean, string[], 
  * everything is in-process, so reporting nothing would make the command
  * useless). Keywords stay unresolvable, as they are not commands
  * anywhere. `-a` prints one line per layer, so a shadowed name prints
- * its name twice; `type -a` is the surface that names the layers.
+ * its name twice; `type -a` is the surface that names the layers. The
+ * refusal for an unknown option is bash's shape, not the C tool's
+ * `Illegal option`, because this is a builtin and the usage line cannot
+ * honestly name `/usr/bin/which`.
  */
 export function handleWhich(
   args: readonly string[],
   session: Session,
   registry: MountRegistry,
 ): Result {
-  const [allMode, silent, rest, bad] = parseWhichFlags(args)
+  const scan = scanOptions(args, 'as')
   const enc = new TextEncoder()
-  if (bad !== null) {
-    const err = enc.encode(`which: ${bad}: invalid option\n${WHICH_USAGE}`)
+  if (scan.bad !== null) {
+    const err = enc.encode(`which: ${scan.bad}: invalid option\n${WHICH_USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: 'which', exitCode: 2, stderr: err }),
     ]
   }
+  const allMode = scan.letters.includes('a')
+  const silent = scan.letters.includes('s')
+  const rest = scan.operands
   const outLines: string[] = []
   let allFound = true
   for (const name of rest) {
@@ -298,7 +236,7 @@ export function handleWhich(
       allFound = false
       continue
     }
-    if (!silent) outLines.push(...kinds.map(() => name))
+    if (!silent) outLines.push(...Array.from({ length: kinds.length }, () => name))
   }
   const out = outLines.length > 0 ? enc.encode(`${outLines.join('\n')}\n`) : null
   const code = rest.length > 0 && allFound ? 0 : 1

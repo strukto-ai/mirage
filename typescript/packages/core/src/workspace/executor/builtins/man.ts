@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { CLISpec } from '../../../commands/cli/types.ts'
 import { findNode, nodeHelp } from '../../../commands/cli/walk.ts'
 import type { RegisteredCommand } from '../../../commands/config.ts'
 import { BUILTIN_SPECS } from '../../../commands/spec/builtins.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
+import type { CLIInstall } from '../../cli/types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import { DEV_PREFIX } from '../../mount/registry.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
@@ -94,33 +96,26 @@ function renderManEntry(name: string, hits: ManHit[]): string {
 }
 
 /**
- * The page for an installed CLI, or null when the verbs miss.
+ * The page for one node of an installed CLI, null when the verbs miss.
  *
  * The page is the node's own `--help`, rendered by the one renderer that
  * serves `--help` and the bare-group refusal, so a CLI's manual cannot
  * drift from the program. A tree is a manual with sections: `man linear`
  * lists the verbs and `man linear issue create` is the page for one leaf.
  */
-function renderCliEntry(
-  head: string,
-  verbs: readonly string[],
-  registry: MountRegistry,
-): string | null {
-  const install = registry.clis.get(head)
-  if (install === null) return null
-  const found = findNode(install.spec, verbs)
+function renderCliEntry(head: string, verbs: readonly string[], spec: CLISpec): string | null {
+  const found = findNode(spec, verbs)
   if (found === null) return null
   return nodeHelp([head, ...found.path].join(' '), found.node)
 }
 
 /** The installed-CLI section of the bare `man` listing. */
 function renderCliIndex(registry: MountRegistry): string[] {
-  const installs = registry.clis.items()
-  if (installs.size === 0) return []
+  const installs = [...registry.clis.items().entries()].sort(([a], [b]) => (a < b ? -1 : 1))
+  if (installs.length === 0) return []
   const lines = ['# clis', '']
-  for (const name of [...installs.keys()].sort()) {
-    const spec = installs.get(name)?.spec
-    lines.push(`- ${name} — ${spec?.description ?? '(no description)'}`)
+  for (const [name, install] of installs) {
+    lines.push(`- ${name} — ${install.spec.description ?? '(no description)'}`)
   }
   lines.push('')
   return lines
@@ -199,13 +194,14 @@ function renderShellBuiltinMan(
  * The CLI goes first: it is the one dispatch would run.
  */
 function cliMan(
-  head: string,
+  install: CLIInstall,
   verbs: readonly string[],
   cmdStr: string,
   registry: MountRegistry,
 ): Result {
   const enc = new TextEncoder()
-  const entry = renderCliEntry(head, verbs, registry)
+  const head = install.name
+  const entry = renderCliEntry(head, verbs, install.spec)
   if (entry === null) {
     const err = enc.encode(`man: no entry for ${[head, ...verbs].join(' ')}\n`)
     return [
@@ -238,7 +234,8 @@ export function handleMan(args: string[], session: Session, registry: MountRegis
   // Only an installed head word reads the words after it: they are its
   // verb path. Everything else keeps man's older shape and documents
   // args[0].
-  if (registry.clis.get(name) !== null) return cliMan(name, args.slice(1), cmdStr, registry)
+  const install = registry.clis.get(name)
+  if (install !== null) return cliMan(install, args.slice(1), cmdStr, registry)
   const hits = collectManHits(name, registry)
   if (hits.length === 0) {
     const specKey = SHELL_BUILTIN_MAN[name]

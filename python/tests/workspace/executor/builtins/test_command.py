@@ -3,8 +3,7 @@ import pytest
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.workspace.cli.registry import CLIRegistry
-from mirage.workspace.executor.builtins.command import (_parse_flags,
-                                                        handle_command_builtin)
+from mirage.workspace.executor.builtins.command import handle_command_builtin
 from mirage.workspace.session.session import Session
 
 
@@ -43,36 +42,25 @@ def make_registry() -> FakeRegistry:
     return FakeRegistry({"cat", "grep", "ls", "jq"})
 
 
-def test_parse_flags_last_v_or_V_wins():
-    assert _parse_flags(["-v", "ls"]) == ("v", ["ls"], None)
-    assert _parse_flags(["-V", "ls"]) == ("V", ["ls"], None)
-    assert _parse_flags(["-vV", "ls"]) == ("V", ["ls"], None)
-    assert _parse_flags(["-Vv", "ls"]) == ("v", ["ls"], None)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args,expected", [
+    (["-vV", "cd"], b"cd is a shell builtin\n"),
+    (["-Vv", "cd"], b"cd\n"),
+    (["-pv", "cd"], b"cd\n"),
+])
+async def test_last_of_v_or_V_wins_and_p_is_inert(args: list[str],
+                                                  expected: bytes):
+    out, _io, _ = await handle_command_builtin(FakeShell(), args,
+                                               make_session(), make_registry())
+    assert await materialize(out) == expected
 
 
-def test_parse_flags_p_is_accepted_but_inert():
-    assert _parse_flags(["-p", "ls"]) == (None, ["ls"], None)
-    assert _parse_flags(["-pv", "ls"]) == ("v", ["ls"], None)
-
-
-def test_parse_flags_stops_at_first_operand():
-    # A flag after the target name belongs to the target.
-    assert _parse_flags(["ls", "-l"]) == (None, ["ls", "-l"], None)
-    assert _parse_flags(["-v", "ls", "-l"]) == ("v", ["ls", "-l"], None)
-
-
-def test_parse_flags_double_dash_ends_options():
-    assert _parse_flags(["--", "ls"]) == (None, ["ls"], None)
-    assert _parse_flags(["-v", "--", "ls"]) == ("v", ["ls"], None)
-
-
-def test_parse_flags_invalid_option():
-    assert _parse_flags(["-x", "ls"]) == (None, [], "-x")
-    assert _parse_flags(["-vx", "ls"]) == (None, [], "-x")
-
-
-def test_parse_flags_bare_dash_is_operand():
-    assert _parse_flags(["-"]) == (None, ["-"], None)
+@pytest.mark.asyncio
+async def test_a_flag_after_the_target_belongs_to_the_target():
+    shell = FakeShell()
+    await handle_command_builtin(shell, ["ls", "-l"], make_session(),
+                                 make_registry())
+    assert shell.lines == ["ls -l"]
 
 
 @pytest.mark.asyncio

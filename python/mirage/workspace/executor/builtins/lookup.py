@@ -16,6 +16,7 @@ from enum import StrEnum
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.route import Consumer, route, route_all
 from mirage.workspace.session import Session
@@ -125,20 +126,28 @@ def classify_all(name: str, session: Session,
     return kinds
 
 
-def locations(name: str, session: Session, registry: MountRegistry,
-              all_mode: bool) -> list[NameKind]:
-    """The kinds to report for one name, honoring an ``-a`` style flag.
+def _locations(name: str,
+               session: Session,
+               registry: MountRegistry,
+               all_mode: bool,
+               nofunc: bool = False) -> list[NameKind]:
+    """The kinds to report for one name, honoring ``-a`` and ``-f``.
+
+    Both flags are filters over the layer list, never edits to the
+    session: ``-f`` drops the function layer so the layer below it is
+    what remains, and ``-a`` keeps them all instead of the winner only.
 
     Args:
         name (str): the operand word.
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry.
         all_mode (bool): report every layer instead of the winner only.
+        nofunc (bool): ignore a shell function of this name.
     """
-    if all_mode:
-        return classify_all(name, session, registry)
-    kind = classify(name, session, registry)
-    return [] if kind is None else [kind]
+    kinds = classify_all(name, session, registry)
+    if nofunc:
+        kinds = [kind for kind in kinds if kind is not NameKind.FUNCTION]
+    return kinds if all_mode else kinds[:1]
 
 
 def describe(name: str, kind: NameKind) -> str:
@@ -151,71 +160,6 @@ def describe(name: str, kind: NameKind) -> str:
     return f"{name} is {_DESCRIPTIONS[kind]}"
 
 
-def _parse_type_flags(
-        args: list[str]) -> tuple[str | None, bool, bool, list[str], str
-                                  | None]:
-    """Split ``type``'s options from its name operands.
-
-    Recognizes ``-t`` (type word only), ``-p``/``-P`` (path; empty for
-    mirage's pathless runnables), ``-a`` (every location) and ``-f``
-    (skip the function table). Non-permuting like bash: option scanning
-    stops at the first non-option word or ``--``.
-
-    Args:
-        args (list[str]): words after the ``type`` name.
-
-    Returns:
-        ``(mode, all_mode, nofunc, rest, bad)`` where ``mode`` is
-        ``"t"``/``"p"``/``None``, ``nofunc`` skips functions, ``rest`` is
-        the operands, and ``bad`` is the first invalid option (as
-        ``-x``) or ``None``.
-    """
-    mode: str | None = None
-    all_mode = False
-    nofunc = False
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        if tok == "--":
-            i += 1
-            break
-        if not (tok.startswith("-") and len(tok) > 1):
-            break
-        for ch in tok[1:]:
-            if ch == "t":
-                mode = "t"
-            elif ch in ("p", "P"):
-                mode = "p"
-            elif ch == "a":
-                all_mode = True
-            elif ch == "f":
-                nofunc = True
-            else:
-                return None, False, False, [], f"-{ch}"
-        i += 1
-    return mode, all_mode, nofunc, args[i:], None
-
-
-def _masked_locations(name: str, session: Session, registry: MountRegistry,
-                      all_mode: bool, nofunc: bool) -> list[NameKind]:
-    """``locations`` with ``type -f``'s function table masked out.
-
-    Args:
-        name (str): the operand word.
-        session (Session): shell session (function table).
-        registry (MountRegistry): mount registry.
-        all_mode (bool): report every layer instead of the winner only.
-        nofunc (bool): hide a shell function of this name for the lookup.
-    """
-    if not (nofunc and name in session.functions):
-        return locations(name, session, registry, all_mode)
-    saved = session.functions.pop(name)
-    try:
-        return locations(name, session, registry, all_mode)
-    finally:
-        session.functions[name] = saved
-
-
 def handle_type(
     args: list[str],
     session: Session,
@@ -225,28 +169,35 @@ def handle_type(
 
     Resolution matches ``command -V``, but the exit rule is ``type``'s:
     0 only when every name resolves. ``-t`` prints the classification
-    word, ``-p``/``-P`` print a path (always empty here), ``-a`` prints
-    one line per layer holding the name (a shell function shadowing an
-    installed CLI is the case that has two), and a missing name warns on
-    stderr unless a word-only mode (``-t``/``-p``) is active.
+    word, ``-p``/``-P`` print a path (always empty here) and are one
+    mutually exclusive group with ``-t``, ``-a`` prints one line per
+    layer holding the name (a shell function shadowing an installed CLI
+    is the case that has two), ``-f`` ignores the function table, and a
+    missing name warns on stderr unless a word-only mode (``-t``/``-p``)
+    is active.
 
     Args:
         args (list[str]): words after the ``type`` name.
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry for name resolution.
     """
-    mode, all_mode, nofunc, rest, bad = _parse_type_flags(args)
-    if bad is not None:
-        err = (f"type: {bad}: invalid option\n" + _TYPE_USAGE).encode()
+    scan = scan_options(args, "afptP")
+    if scan.bad is not None:
+        err = (f"type: {scan.bad}: invalid option\n" + _TYPE_USAGE).encode()
         return None, IOResult(exit_code=2,
                               stderr=err), ExecutionNode(command="type",
                                                          exit_code=2,
                                                          stderr=err)
+    last = last_of(scan.letters, "tpP")
+    mode = last if last is None or last == "t" else "p"
+    all_mode = "a" in scan.letters
+    nofunc = "f" in scan.letters
+    rest = scan.operands
     out_lines: list[str] = []
     err_lines: list[str] = []
     all_found = True
     for name in rest:
-        kinds = _masked_locations(name, session, registry, all_mode, nofunc)
+        kinds = _locations(name, session, registry, all_mode, nofunc)
         if not kinds:
             all_found = False
             if mode is None:
@@ -263,42 +214,6 @@ def handle_type(
                          stderr=err), ExecutionNode(command="type",
                                                     exit_code=code,
                                                     stderr=err)
-
-
-def _parse_which_flags(
-        args: list[str]) -> tuple[bool, bool, list[str], str | None]:
-    """Split ``which``'s options from its name operands.
-
-    debianutils ``which`` takes ``-a`` (every location) and ``-s``
-    (status only). Deliberate divergence: ``--`` ends the options here,
-    which the C implementation mishandles.
-
-    Args:
-        args (list[str]): words after the ``which`` name.
-
-    Returns:
-        ``(all_mode, silent, rest, bad)`` where ``bad`` is the first
-        invalid option (as ``-x``) or ``None``.
-    """
-    all_mode = False
-    silent = False
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        if tok == "--":
-            i += 1
-            break
-        if not (tok.startswith("-") and len(tok) > 1):
-            break
-        for ch in tok[1:]:
-            if ch == "a":
-                all_mode = True
-            elif ch == "s":
-                silent = True
-            else:
-                return False, False, [], f"-{ch}"
-        i += 1
-    return all_mode, silent, args[i:], None
 
 
 def handle_which(
@@ -319,32 +234,37 @@ def handle_which(
     would make the command useless). Keywords stay unresolvable, as they
     are not commands anywhere. ``-a`` prints one line per layer, so a
     shadowed name prints its name twice; ``type -a`` is the surface that
-    names the layers.
+    names the layers. The refusal for an unknown option is bash's shape,
+    not the C tool's ``Illegal option``, because this is a builtin and
+    the usage line cannot honestly name ``/usr/bin/which``.
 
     Args:
         args (list[str]): words after the ``which`` name.
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry for name resolution.
     """
-    all_mode, silent, rest, bad = _parse_which_flags(args)
-    if bad is not None:
-        err = (f"which: {bad}: invalid option\n" + _WHICH_USAGE).encode()
+    scan = scan_options(args, "as")
+    if scan.bad is not None:
+        err = (f"which: {scan.bad}: invalid option\n" + _WHICH_USAGE).encode()
         return None, IOResult(exit_code=2,
                               stderr=err), ExecutionNode(command="which",
                                                          exit_code=2,
                                                          stderr=err)
+    all_mode = "a" in scan.letters
+    silent = "s" in scan.letters
+    rest = scan.operands
     out_lines: list[str] = []
     all_found = True
     for name in rest:
         kinds = [
-            kind for kind in locations(name, session, registry, all_mode)
+            kind for kind in _locations(name, session, registry, all_mode)
             if kind is not NameKind.KEYWORD
         ]
         if not kinds:
             all_found = False
             continue
         if not silent:
-            out_lines.extend(name for _ in kinds)
+            out_lines.extend([name] * len(kinds))
     out = ("\n".join(out_lines) + "\n").encode() if out_lines else None
     code = 0 if (rest and all_found) else 1
     return out, IOResult(exit_code=code), ExecutionNode(command="which",

@@ -12,13 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS, CommandSpec
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
 from mirage.workspace.session import Session
@@ -121,9 +124,9 @@ def _render_shell_builtin_man(name: str, spec: CommandSpec) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_cli_entry(head: str, verbs: list[str],
-                      registry: MountRegistry) -> str | None:
-    """The page for an installed CLI, or None when the verbs miss.
+def _render_cli_entry(head: str, verbs: Sequence[str],
+                      spec: CLISpec) -> str | None:
+    """The page for one node of an installed CLI, None when verbs miss.
 
     The page is the node's own ``--help``, rendered by the one renderer
     that serves ``--help`` and the bare-group refusal, so a CLI's manual
@@ -133,13 +136,11 @@ def _render_cli_entry(head: str, verbs: list[str],
 
     Args:
         head (str): installed head word, as typed.
-        verbs (list[str]): verb words after the head, aliases allowed.
-        registry (MountRegistry): registry holding the installs.
+        verbs (Sequence[str]): verb words after the head, aliases
+            allowed.
+        spec (CLISpec): the installed program tree.
     """
-    install = registry.clis.get(head)
-    if install is None:
-        return None
-    found = find_node(install.spec, verbs)
+    found = find_node(spec, verbs)
     if found is None:
         return None
     node, path = found
@@ -156,8 +157,8 @@ def _render_cli_index(registry: MountRegistry) -> list[str]:
     if not installs:
         return []
     lines = ["# clis", ""]
-    for name in sorted(installs):
-        spec = installs[name].spec
+    for name, install in sorted(installs.items()):
+        spec = install.spec
         desc = (spec.description
                 if spec.description is not None else "(no description)")
         lines.append(f"- {name} \u2014 {desc}")
@@ -221,7 +222,8 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
 
 
 def _cli_man(
-    head: str, verbs: list[str], cmd_str: str, registry: MountRegistry
+    install: CLIInstall, verbs: Sequence[str], cmd_str: str,
+    registry: MountRegistry
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """The page (or pages) for an installed head word.
 
@@ -230,12 +232,14 @@ def _cli_man(
     for one word. The CLI goes first: it is the one dispatch would run.
 
     Args:
-        head (str): installed head word, as typed.
-        verbs (list[str]): verb words after the head, aliases allowed.
+        install (CLIInstall): the installed CLI, head word included.
+        verbs (Sequence[str]): verb words after the head, aliases
+            allowed.
         cmd_str (str): the line, for the execution node.
-        registry (MountRegistry): registry holding installs and mounts.
+        registry (MountRegistry): registry holding the mounts.
     """
-    entry = _render_cli_entry(head, verbs, registry)
+    head = install.name
+    entry = _render_cli_entry(head, verbs, install.spec)
     if entry is None:
         typed = " ".join([head, *verbs])
         err = f"man: no entry for {typed}\n".encode()
@@ -264,8 +268,9 @@ async def handle_man(
     # Only an installed head word reads the words after it: they are its
     # verb path. Everything else keeps man's older shape and documents
     # args[0].
-    if registry.clis.get(name) is not None:
-        return _cli_man(name, args[1:], cmd_str, registry)
+    install = registry.clis.get(name)
+    if install is not None:
+        return _cli_man(install, args[1:], cmd_str, registry)
     hits = _collect_man_hits(name, registry)
     if not hits:
         spec_key = _SHELL_BUILTIN_MAN.get(name)

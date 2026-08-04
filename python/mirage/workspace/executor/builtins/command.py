@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import shlex
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup import classify, describe
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -26,47 +27,8 @@ from mirage.workspace.types import ExecutionNode
 _USAGE = "command: usage: command [-pVv] command [arg ...]\n"
 
 
-def _parse_flags(args: list[str]) -> tuple[str | None, list[str], str | None]:
-    """Split ``command``'s own options from its operands.
-
-    bash uses non-permuting getopt: option scanning stops at the first
-    non-option word (or ``--``), so a flag after the target name belongs
-    to the target, not to ``command``. Only ``-p -v -V`` are valid; ``-p``
-    is accepted but has no identity effect (mirage has no PATH), and the
-    last of ``-v``/``-V`` wins.
-
-    Args:
-        args (list[str]): words after the ``command`` name.
-
-    Returns:
-        ``(mode, rest, bad)`` where ``mode`` is ``"v"``/``"V"``/``None``,
-        ``rest`` is the operand words, and ``bad`` is the first invalid
-        option (as ``-x``) or ``None``.
-    """
-    mode: str | None = None
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        if tok == "--":
-            i += 1
-            break
-        if not (tok.startswith("-") and len(tok) > 1):
-            break
-        for ch in tok[1:]:
-            if ch == "v":
-                mode = "v"
-            elif ch == "V":
-                mode = "V"
-            elif ch == "p":
-                continue
-            else:
-                return None, [], f"-{ch}"
-        i += 1
-    return mode, args[i:], None
-
-
 def _probe(
-    mode: str, rest: list[str], session: Session, registry: MountRegistry
+    mode: str, rest: Sequence[str], session: Session, registry: MountRegistry
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the ``-v``/``-V`` introspection modes.
 
@@ -78,7 +40,7 @@ def _probe(
 
     Args:
         mode (str): ``"v"`` or ``"V"``.
-        rest (list[str]): operand words to classify.
+        rest (Sequence[str]): operand words to classify.
         session (Session): shell session state.
         registry (MountRegistry): mount registry.
     """
@@ -116,7 +78,8 @@ async def handle_command_builtin(
     session function table for the inner run so a shadowing function is
     skipped while builtins and mount commands still resolve. Already
     expanded operands are re-joined with ``shlex`` so they survive
-    re-parsing as one token each.
+    re-parsing as one token each. ``-p`` is accepted but inert (mirage
+    has no PATH) and the last of ``-v``/``-V`` wins.
 
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
@@ -125,13 +88,15 @@ async def handle_command_builtin(
         registry (MountRegistry): mount registry for name resolution.
         stdin (ByteSource | None): piped input for the inner run.
     """
-    mode, rest, bad = _parse_flags(args)
-    if bad is not None:
-        err = f"command: {bad}: invalid option\n{_USAGE}".encode()
+    scan = scan_options(args, "pvV")
+    if scan.bad is not None:
+        err = f"command: {scan.bad}: invalid option\n{_USAGE}".encode()
         return None, IOResult(exit_code=2,
                               stderr=err), ExecutionNode(command="command",
                                                          exit_code=2,
                                                          stderr=err)
+    mode = last_of(scan.letters, "vV")
+    rest = scan.operands
     if mode is not None:
         return _probe(mode, rest, session, registry)
     if not rest:

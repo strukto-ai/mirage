@@ -114,6 +114,17 @@ def test_type_t_prints_word():
                             make_registry())) == "keyword\n"
 
 
+def test_type_last_of_t_and_p_wins():
+    # bash: `type -tp cd` prints a path (empty here), `type -pt cd` the
+    # type word.
+    assert _out(handle_type(["-tp", "cd"], make_session(),
+                            make_registry())) == ""
+    assert _out(handle_type(["-pt", "cd"], make_session(),
+                            make_registry())) == "builtin\n"
+    assert _out(handle_type(["-P", "cd"], make_session(),
+                            make_registry())) == ""
+
+
 def test_type_mount_command_is_builtin():
     assert _out(handle_type(["cat"], make_session(),
                             make_registry())) == "cat is a shell builtin\n"
@@ -129,12 +140,21 @@ def test_type_a_prints_every_layer():
                             make_registry(True))) == "function\ncli\n"
 
 
-def test_type_f_skips_functions_and_restores_them():
+def test_type_f_skips_functions_without_touching_the_session():
     session = make_session()
-    session.functions["linear"] = []
+    body: list[str] = []
+    session.functions["linear"] = body
     assert _out(handle_type(["-f", "linear"], session,
                             make_registry(True))) == "linear is a mirage CLI\n"
-    assert "linear" in session.functions
+    assert session.functions["linear"] is body
+
+
+def test_type_f_on_a_function_only_name_is_not_found():
+    session = make_session()
+    session.functions["myfn"] = []
+    out, io, _ = handle_type(["-f", "myfn"], session, make_registry())
+    assert out is None
+    assert io.exit_code == 1
 
 
 def test_type_not_found_warns_and_exits_1():
