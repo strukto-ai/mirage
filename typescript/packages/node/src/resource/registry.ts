@@ -263,7 +263,7 @@ const REGISTRY: Record<string, ResourceFactory> = {
   },
   email: async (config) => {
     const { EmailResource } = await import('./email/email.ts')
-    const { normalizeEmailConfig } = await import('./email/config.ts')
+    const { normalizeEmailConfig } = await import('../core/email/config.ts')
     return new EmailResource(normalizeEmailConfig(config))
   },
 }

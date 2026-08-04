@@ -138,6 +138,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 
 load_dotenv(".env.development")
@@ -152,6 +153,7 @@ resource = GoogleDriveResource(config=config)
 
 async def main():
     ws = Workspace({"/gdrive": resource}, mode=MountMode.WRITE)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List root
     r = await ws.execute("ls /gdrive/ | head -n 10")

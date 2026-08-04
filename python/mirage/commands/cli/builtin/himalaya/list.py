@@ -17,10 +17,10 @@ import json
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_headers
+from mirage.core.email.config import EmailConfig
 from mirage.core.email.search import search_messages
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.resource.email.config import EmailConfig
 from mirage.types import PathSpec
 
 

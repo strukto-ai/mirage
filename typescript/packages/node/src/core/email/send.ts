@@ -14,7 +14,7 @@
 
 import { loadOptionalPeer } from '@struktoai/mirage-core'
 import type * as Nodemailer from 'nodemailer'
-import type { EmailConfig } from '../../resource/email/config.ts'
+import type { EmailConfig } from './config.ts'
 import type { FetchedMessage } from './_client.ts'
 
 const transporterCache = new WeakMap<EmailConfig, Nodemailer.Transporter>()

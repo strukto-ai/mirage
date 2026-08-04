@@ -23,7 +23,7 @@ import {
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage } from '../../../../core/email/_client.ts'
 import { forwardMessage } from '../../../../core/email/send.ts'
-import type { EmailConfig } from '../../../../resource/email/config.ts'
+import type { EmailConfig } from '../../../../core/email/config.ts'
 
 const ENC = new TextEncoder()
 

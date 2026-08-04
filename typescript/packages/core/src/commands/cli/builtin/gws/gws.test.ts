@@ -29,6 +29,7 @@ vi.mock('../../../../core/google/_client.ts', async () => {
 
 import * as client from '../../../../core/google/_client.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
+import { CLIRegistry } from '../../../../workspace/cli/registry.ts'
 import type { CLIVerbOpts } from '../../types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { fillPath, runGwsMethod } from './api.ts'
@@ -107,6 +108,16 @@ describe('gws tree', () => {
     expect(leaf('docs', 'write').write).toBe(true)
     expect(leaf('drive', 'files', 'list').write).toBe(false)
     expect(leaf('drive', 'files', 'delete').write).toBe(true)
+  })
+
+  it('accepts and preserves a refreshFn callback at install time', () => {
+    const refreshFn = () => Promise.resolve({ accessToken: 'a', expiresIn: 60 })
+    const install = new CLIRegistry().install('gws', GWS, {
+      clientId: 'cid',
+      refreshToken: 'rt',
+      refreshFn,
+    })
+    expect((install.config as GoogleConfig).refreshFn).toBe(refreshFn)
   })
 })
 

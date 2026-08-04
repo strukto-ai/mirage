@@ -17,8 +17,8 @@ import json
 import pytest
 
 from mirage.commands.cli.builtin.himalaya import forward
+from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
-from mirage.resource.email.config import EmailConfig
 
 CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
 

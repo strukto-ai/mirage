@@ -11,10 +11,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-from mirage.commands.cli.builtin.gws.gmail.forward import forward
-from mirage.commands.cli.builtin.gws.gmail.read import read
-from mirage.commands.cli.builtin.gws.gmail.reply import reply
-from mirage.commands.cli.builtin.gws.gmail.reply_all import reply_all
-from mirage.commands.cli.builtin.gws.gmail.send import send
-from mirage.commands.cli.builtin.gws.gmail.triage import triage

@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.email.find import find
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 from mirage.types import PathSpec
 
 

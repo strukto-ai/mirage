@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GoogleConfigSchema } from '../../../../core/google/config.ts'
+import { z } from 'zod'
+import { GoogleConfigSchema, type GoogleConfig } from '../../../../core/google/config.ts'
 import { registerCliSpec } from '../../specs.ts'
 import { CLISpec } from '../../types.ts'
 import { Option } from '../../../spec/types.ts'
@@ -28,6 +29,17 @@ import { append as sheetsAppend } from './sheets/append.ts'
 import { read as sheetsRead } from './sheets/read.ts'
 import { write as sheetsWrite } from './sheets/write.ts'
 
+// GoogleConfig.refreshFn is a callback (browser PKCE / secret-proxy
+// setups), so it cannot live in GoogleConfigSchema: the resource
+// redaction path parses with that schema and must stay JSON-shaped.
+// Extending here keeps the install-time unknown-key check while
+// preserving the callback for TokenManager.
+const GwsCliConfigSchema = GoogleConfigSchema.extend({
+  refreshFn: z
+    .custom<NonNullable<GoogleConfig['refreshFn']>>((v) => typeof v === 'function')
+    .optional(),
+})
+
 // The gws program tree, mirroring the official Google Workspace CLI:
 // one passthrough leaf per Discovery method (`gws drive files list`,
 // speaking --params/--json like the raw API) plus hand-written helper
@@ -37,7 +49,7 @@ import { write as sheetsWrite } from './sheets/write.ts'
 export const GWS = new CLISpec({
   name: 'gws',
   description: 'Google Workspace API commands',
-  configModel: GoogleConfigSchema,
+  configModel: GwsCliConfigSchema,
   subcommands: [
     new CLISpec({
       name: 'drive',

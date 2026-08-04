@@ -108,6 +108,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gmail import GmailConfig, GmailResource
 
 load_dotenv(".env.development")
@@ -122,6 +123,7 @@ resource = GmailResource(config=config)
 
 async def main():
     ws = Workspace({"/gmail": resource}, mode=MountMode.READ)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List labels
     r = await ws.execute("ls /gmail/")

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CLISpec, Option, registerCliSpec } from '@struktoai/mirage-core'
-import { EmailConfigSchema } from '../../../../resource/email/config.ts'
+import { EmailConfigSchema } from '../../../../core/email/config.ts'
 import { forward } from './forward.ts'
 import { listEnvelopes } from './list.ts'
 import { read } from './read.ts'

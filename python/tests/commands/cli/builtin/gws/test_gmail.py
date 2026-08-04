@@ -16,7 +16,8 @@ import json
 
 import pytest
 
-from mirage.commands.cli.builtin.gws.gmail import read, send
+from mirage.commands.cli.builtin.gws.gmail.read import read
+from mirage.commands.cli.builtin.gws.gmail.send import send
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
 

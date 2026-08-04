@@ -15,10 +15,10 @@
 import json
 
 from mirage.commands.spec.types import FlagView
+from mirage.core.email.config import EmailConfig
 from mirage.core.email.send import send_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.resource.email.config import EmailConfig
 from mirage.types import PathSpec
 
 

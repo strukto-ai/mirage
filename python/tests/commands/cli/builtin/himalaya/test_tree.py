@@ -18,8 +18,8 @@ import pytest
 
 from mirage import Workspace
 from mirage.commands.cli.builtin.himalaya import HIMALAYA, send
+from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
-from mirage.resource.email.config import EmailConfig
 
 CONFIG = {
     "imap_host": "h",

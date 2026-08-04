@@ -16,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from mirage.accessor.email import EmailAccessor
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 from mirage.types import ResourceName
 
 

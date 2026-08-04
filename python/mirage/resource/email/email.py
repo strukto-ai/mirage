@@ -15,9 +15,9 @@
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
+from mirage.core.email.config import EmailConfig
 from mirage.core.email.readdir import readdir
 from mirage.resource.base import BaseResource
-from mirage.resource.email.config import EmailConfig
 from mirage.resource.email.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
 from mirage.utils.glob_walk import make_resolve_glob

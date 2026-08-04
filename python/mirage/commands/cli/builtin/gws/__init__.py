@@ -13,12 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.gws.api import api_groups
-from mirage.commands.cli.builtin.gws.docs import write as docs_write
-from mirage.commands.cli.builtin.gws.gmail import (forward, read, reply,
-                                                   reply_all, send, triage)
-from mirage.commands.cli.builtin.gws.sheets import append as sheets_append
-from mirage.commands.cli.builtin.gws.sheets import read as sheets_read
-from mirage.commands.cli.builtin.gws.sheets import write as sheets_write
+from mirage.commands.cli.builtin.gws.docs.write import write as docs_write
+from mirage.commands.cli.builtin.gws.gmail.forward import forward
+from mirage.commands.cli.builtin.gws.gmail.read import read
+from mirage.commands.cli.builtin.gws.gmail.reply import reply
+from mirage.commands.cli.builtin.gws.gmail.reply_all import reply_all
+from mirage.commands.cli.builtin.gws.gmail.send import send
+from mirage.commands.cli.builtin.gws.gmail.triage import triage
+from mirage.commands.cli.builtin.gws.sheets.append import \
+    append as sheets_append
+from mirage.commands.cli.builtin.gws.sheets.read import read as sheets_read
+from mirage.commands.cli.builtin.gws.sheets.write import write as sheets_write
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Option
 from mirage.core.google.config import GoogleConfig

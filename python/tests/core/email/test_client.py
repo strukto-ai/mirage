@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email._client import list_folders, list_message_uids
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 
 
 @pytest.fixture

@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.email.config import EmailConfig
 from mirage.core.email.send import forward_message, reply_message, send_message
-from mirage.resource.email.config import EmailConfig
 
 
 @pytest.fixture

@@ -47,6 +47,7 @@ from mirage.accessor.sharepoint import SharePointConfig
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
+from mirage.core.email.config import EmailConfig
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.aliyun import AliyunConfig, AliyunResource
@@ -63,7 +64,6 @@ from mirage.resource.discord.config import DiscordConfig
 from mirage.resource.discord.discord import DiscordResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
-from mirage.resource.email.config import EmailConfig
 from mirage.resource.email.email import EmailResource
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.gdocs.config import GDocsConfig

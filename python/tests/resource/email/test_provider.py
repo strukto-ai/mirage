@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 from mirage.resource.email.email import EmailResource
 from mirage.types import ResourceName
 

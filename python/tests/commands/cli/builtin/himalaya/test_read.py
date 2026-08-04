@@ -18,8 +18,8 @@ import pytest
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import read
+from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
-from mirage.resource.email.config import EmailConfig
 
 CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
 

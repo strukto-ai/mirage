@@ -75,6 +75,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
 
 load_dotenv(".env.development")
@@ -89,6 +90,7 @@ resource = GSheetsResource(config=config)
 
 async def main():
     ws = Workspace({"/gsheets": resource}, mode=MountMode.READ)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List structure
     r = await ws.execute("ls /gsheets/")

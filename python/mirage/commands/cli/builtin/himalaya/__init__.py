@@ -19,7 +19,7 @@ from mirage.commands.cli.builtin.himalaya.reply import reply
 from mirage.commands.cli.builtin.himalaya.send import send
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Option
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 
 # The himalaya program tree (github.com/pimalaya/himalaya vocabulary):
 # `envelope list` to triage, `message read/send/reply/forward` to act.

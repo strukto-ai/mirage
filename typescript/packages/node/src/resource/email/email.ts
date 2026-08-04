@@ -30,7 +30,11 @@ import { read as emailRead } from '../../core/email/read.ts'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
 import { EMAIL_OPS } from '../../ops/email/index.ts'
-import { redactEmailConfig, type EmailConfig, type EmailConfigRedacted } from './config.ts'
+import {
+  redactEmailConfig,
+  type EmailConfig,
+  type EmailConfigRedacted,
+} from '../../core/email/config.ts'
 import { EMAIL_PROMPT } from './prompt.ts'
 
 const resolveGlob = makeResolveGlob(emailReaddir)
