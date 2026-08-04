@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { formatWcLines, type WcRow } from '../../wc.ts'
+import type { ByteSource } from '../../../../../io/types.ts'
+import { formatCountRows, parseFlags, type WcRow } from '../../wc.ts'
 import type { OperandRun } from '../types.ts'
 
-const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 function parseWcRow(line: string, columns: number): WcRow {
@@ -26,38 +26,36 @@ function parseWcRow(line: string, columns: number): WcRow {
 }
 
 // Re-total per-operand wc rows with one shared column width. Each native run
-// right-aligns its own rows, so the runs cannot simply concatenate: rows are
-// re-parsed and the whole report (plus the global `total` row, where max line
-// length maxes instead of summing) is reformatted by the same wc formatter
-// the single-mount command uses.
+// right-aligns its own rows against its own widest count, so the runs cannot
+// simply concatenate: rows are re-parsed and the whole report is reformatted
+// by the same formatter the single-mount command uses, which is also what
+// applies `--total`. `runFanout` forces the native runs to `--total=never`,
+// so every line read here is a file row and the grand total below is the only
+// one the report can carry.
 export function combineWc(
   results: OperandRun[],
   flagKwargs: Record<string, string | boolean | number | string[]>,
-): Uint8Array {
+): ByteSource | null {
+  const parsed = parseFlags(flagKwargs)
+  if (typeof parsed === 'string') return null
   const single =
-    flagKwargs.lines === true ||
-    flagKwargs.words === true ||
-    flagKwargs.bytes === true ||
-    flagKwargs.chars === true ||
-    flagKwargs.max_line_length === true
+    parsed.lines || parsed.words || parsed.bytes || parsed.chars || parsed.maxLineLength
   const columns = single ? 1 : 3
-  const maxMode = flagKwargs.max_line_length === true
   const rows: WcRow[] = []
-  for (const run of results) {
-    let body = DEC.decode(run.data)
-      .split('\n')
-      .filter((l) => l !== '')
-    if (body.length > 1) body = body.slice(0, -1)
-    for (const line of body) rows.push(parseWcRow(line, columns))
-  }
-  if (rows.length === 0) return new Uint8Array()
   const total: number[] = new Array<number>(columns).fill(0)
-  for (const row of rows) {
-    for (let i = 0; i < columns; i++) {
-      const v = row.values[i] ?? 0
-      total[i] = maxMode ? Math.max(total[i] ?? 0, v) : (total[i] ?? 0) + v
+  for (const run of results) {
+    for (const line of DEC.decode(run.data).split('\n')) {
+      if (line === '') continue
+      const row = parseWcRow(line, columns)
+      rows.push(row)
+      for (let i = 0; i < columns; i++) {
+        const v = row.values[i] ?? 0
+        total[i] = parsed.maxLineLength ? Math.max(total[i] ?? 0, v) : (total[i] ?? 0) + v
+      }
     }
   }
-  const lines = formatWcLines([...rows, { values: total, label: 'total' }])
-  return ENC.encode(lines.join('\n') + '\n')
+  // GNU decides the auto total on the operands *given*, not on the rows that
+  // resolved, so a missing operand still gets a total row. There are always at
+  // least two scopes here, and a glob operand can expand to more.
+  return formatCountRows(rows, total, Math.max(rows.length, results.length), parsed.total)
 }

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from mirage.commands.builtin.utils.constants import (DEFAULT_MODES,
                                                      EPOCH_LS_TIME, MONTHS,
                                                      NUMERIC_PREFIX,
-                                                     SIZE_UNITS, TYPE_CHARS)
+                                                     TYPE_CHARS)
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType
 
 
@@ -38,17 +38,6 @@ def _perm_triplet(bits: int, special: str | None = None) -> str:
     else:
         execbit = "x" if bits & 1 else "-"
     return ("r" if bits & 4 else "-") + ("w" if bits & 2 else "-") + execbit
-
-
-def parse_size(text: str) -> int:
-    """Invert ``_human_size``: ``4.0K`` -> 4096, plain digits pass through.
-
-    Args:
-        text (str): size text, optionally suffixed with B/K/M/G/T.
-    """
-    if text and text[-1] in SIZE_UNITS:
-        return round(float(text[:-1]) * SIZE_UNITS[text[-1]])
-    return int(text)
 
 
 def _ls_mode_string(s: FileStat) -> str:

@@ -36,3 +36,20 @@ def testdu_total_strips_per_run_totals_and_sums():
     ]
     out = du_total(runs, human=False).decode()
     assert out == "5\t/a/sub\n3\t/b/c.txt\n8\ttotal\n"
+
+
+def testdu_total_humanizes_from_exact_bytes_without_rounding_twice():
+    # run_fanout forces -h off on the native runs, so the rows arrive in
+    # bytes: 1500 + 1500 is 2.9K, not the 3.0K that summing two "1.5K"
+    # readings back through parse_size would give.
+    runs = [
+        _op(b"1500\t/a/x\n1500\ttotal\n"),
+        _op(b"1500\t/b/z\n1500\ttotal\n"),
+    ]
+    out = du_total(runs, human=True).decode()
+    assert out == "1.5K\t/a/x\n1.5K\t/b/z\n2.9K\ttotal\n"
+
+
+def testdu_total_leaves_a_row_without_a_tab_alone():
+    out = du_total([_op(b"odd-row\n0\ttotal\n")], human=True).decode()
+    assert out == "odd-row\n0B\ttotal\n"

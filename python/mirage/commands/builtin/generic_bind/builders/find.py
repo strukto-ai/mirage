@@ -71,6 +71,8 @@ async def find(
                               find_core=partial(ops.find, accessor),
                               stat=stat,
                               stat_path=stat_path,
+                              dir_empty=partial(_dir_is_empty, ops, accessor,
+                                                index),
                               name=name,
                               type=type,
                               size=size,
@@ -86,6 +88,24 @@ async def find(
 
 def _no_dir_hint(_name: str) -> bool | None:
     return None
+
+
+async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
+                        index: IndexCacheStore, search: PathSpec) -> bool:
+    """Whether a directory start point holds nothing, for ``-empty``.
+
+    Only the native-op path needs this: the walk answers the same
+    question with the readdir it already takes (``_is_empty_entry``).
+    Asked once, for the start point, and only when the expression
+    mentions ``-empty``.
+
+    Args:
+        ops (CommandIO): the backend's op table.
+        accessor (Accessor): the mounted backend.
+        index (IndexCacheStore): cache index threaded through reads.
+        search (PathSpec): the directory start point.
+    """
+    return not await ops.readdir(accessor, search, index=index)
 
 
 async def _find_walk(

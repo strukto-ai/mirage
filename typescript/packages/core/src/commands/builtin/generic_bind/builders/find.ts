@@ -14,6 +14,7 @@
 
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
 export const FIND_BUILDER: Builder = {
@@ -22,6 +23,10 @@ export const FIND_BUILDER: Builder = {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     const { find, isDirName } = ops
+    // Whether a directory start point holds nothing, for `-empty`. Asked
+    // once, for the start point, and only when the expression mentions it.
+    const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
+      (await ops.readdir(accessor, spec, idx)).length === 0
     if (find !== undefined) {
       // -mtime must see namespace times (touch results, observed
       // writes), so local backends post-filter through the overlay-
@@ -36,26 +41,36 @@ export const FIND_BUILDER: Builder = {
         opts,
         (root, options) => find(accessor, root, options),
         stat,
+        dirEmpty,
       )
     }
     // No backend find op: walk readdir/stat, classifying directories by the
     // isDirName hint when the backend provides one.
-    return findGeneric(resolved, texts, opts, (root, options) =>
-      walkFind(
-        root,
-        {
-          readdir: (spec, i) => ops.readdir(accessor, spec, i),
-          // -mtime must see namespace times (touch results, observed
-          // writes on mtime-less backends), same as ls.
-          stat: async (spec, i) => {
-            const st = await ops.stat(accessor, spec, i)
-            return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+    return findGeneric(
+      resolved,
+      texts,
+      opts,
+      (root, options) =>
+        walkFind(
+          root,
+          {
+            readdir: (spec, i) => ops.readdir(accessor, spec, i),
+            // -mtime must see namespace times (touch results, observed
+            // writes on mtime-less backends), same as ls.
+            stat: async (spec, i) => {
+              const st = await ops.stat(accessor, spec, i)
+              return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+            },
+            isDirName: isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
+            // A namespace symlink is an entry `-empty` must count and no
+            // backend readdir can see.
+            links: opts.links ?? null,
           },
-          isDirName: isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
-        },
-        options,
-        idx,
-      ),
+          options,
+          idx,
+        ),
+      undefined,
+      dirEmpty,
     )
   },
 }

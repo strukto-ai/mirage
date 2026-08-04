@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
+import { parseFlags as parseWcFlags } from '../../wc.ts'
 import { combinedExit } from './exit.ts'
 import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
@@ -84,6 +85,23 @@ export async function runFanout(
   if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[quietKey] !== true) {
     flags[verboseKey] = true
   }
+  // Both re-totalling combines below need raw per-file rows from every run:
+  // wc must not see a per-run total row it would have to guess at, and du
+  // must not sum sizes that were already rounded for -h.
+  if (cmdName === Cmd.WC) {
+    // The override would mask an invalid --total from every native run, so
+    // the user's value is diagnosed here first, as one mount would.
+    const checked = parseWcFlags(flagKwargs)
+    if (typeof checked === 'string') {
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(checked) })]
+    }
+    flags.total = 'never'
+  }
+  const duC = cmdName === Cmd.DU && flagKwargs.c === true
+  const duHuman = duC && flagKwargs.h === true
+  if (duHuman) {
+    flags.h = false
+  }
 
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
   const errored = results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null)
@@ -95,11 +113,11 @@ export async function runFanout(
     quiet,
   )
 
-  let body: Uint8Array
+  let body: ByteSource | null
   if (cmdName === Cmd.WC) {
     body = combineWc(results, flagKwargs)
-  } else if (cmdName === Cmd.DU && flagKwargs.c === true) {
-    body = duTotal(results, flagKwargs.h === true)
+  } else if (duC) {
+    body = duTotal(results, duHuman)
   } else if (cmdName === Cmd.TEE) {
     body = stdinBytes ?? new Uint8Array()
   } else if (

@@ -10,6 +10,7 @@ from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
                                                   apply_mtime_filter, find,
                                                   parse_find_args, walk_find)
 from mirage.commands.errors import FindParseError
+from mirage.ops.types import LinkView
 from mirage.resource.ram import RAMResource
 from mirage.types import FileStat, FileType, FindType, MountMode, PathSpec
 from mirage.workspace import Workspace
@@ -531,6 +532,18 @@ async def test_find_file_start_point_depth_and_size():
         ({
             "name": "nope"
         }, b""),
+        # The flag form passes the value through, so `-type l` (a namespace
+        # symlink, which no backend entry ever is) filters instead of
+        # reading as "no filter" and printing everything.
+        ({
+            "type": "f"
+        }, b"/mnt/a.txt\n"),
+        ({
+            "type": "d"
+        }, b""),
+        ({
+            "type": "l"
+        }, b""),
     ]
     for flags, expected in cases:
         stdout, io = await find([_file_spec()], (),
@@ -582,7 +595,9 @@ async def test_find_implicit_directory_start_point_is_walked():
         stat_path=_stat_path(FileStat(name="logs", type=FileType.DIRECTORY)),
     )
     assert io.exit_code == 0
-    assert stdout == b"/mnt/logs/child.txt\n"
+    # GNU lists the start point before descending, and this core reports
+    # descendants only, so the row comes from the generic.
+    assert stdout == b"/mnt/logs\n/mnt/logs/child.txt\n"
 
 
 @pytest.mark.asyncio
@@ -640,6 +655,160 @@ async def test_find_directory_start_point_still_walks():
     )
     assert io.exit_code == 0
     assert stdout == b"/mnt\n/mnt/a.txt\n"
+
+
+async def _dir_is_empty(_spec: PathSpec) -> bool:
+    return True
+
+
+async def _dir_has_entries(_spec: PathSpec) -> bool:
+    return False
+
+
+async def _link_exists(_virtual: str) -> bool:
+    return True
+
+
+async def _link_target_stat(_virtual: str) -> FileStat | None:
+    return None
+
+
+@pytest.mark.asyncio
+async def test_find_empty_directory_start_point_is_reported():
+    """GNU names a directory start point that holds nothing.
+
+    A prefix store answers an empty directory with an empty listing, so
+    every native find op that read existence off its own listing reported
+    nothing at all for a directory `test -d` and `tree` both saw.
+    """
+
+    async def core(*_a, **_kw) -> list[str]:
+        return []
+
+    stdout, io = await find(
+        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+    )
+    assert io.exit_code == 0
+    assert stdout == b"/mnt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_empty_directory_start_point_matches_empty():
+    """``-empty`` matches it, answered by a listing rather than a guess."""
+
+    async def core(*_a, **_kw) -> list[str]:
+        return []
+
+    stdout, io = await find(
+        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+        dir_empty=_dir_is_empty,
+        empty=True,
+    )
+    assert io.exit_code == 0
+    assert stdout == b"/mnt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_populated_directory_start_point_fails_empty():
+    """A directory with children is not empty, so ``-empty`` skips it."""
+
+    async def core(*_a, **_kw) -> list[str]:
+        return []
+
+    stdout, io = await find(
+        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+        dir_empty=_dir_has_entries,
+        empty=True,
+    )
+    assert io.exit_code == 0
+    assert stdout == b""
+
+
+@pytest.mark.asyncio
+async def test_find_keeps_the_backend_row_when_emptiness_cannot_be_asked():
+    """A caller with no emptiness probe keeps its own core's answer.
+
+    ``-empty`` on a directory needs a listing, which a bespoke wrapper
+    need not wire. Replacing the row there would trade a backend's
+    answer for "unknown", so the row is left alone.
+    """
+
+    async def core(*_a, **_kw) -> list[str]:
+        return ["/"]
+
+    stdout, io = await find(
+        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+        empty=True,
+    )
+    assert io.exit_code == 0
+    assert stdout == b"/mnt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_replaces_the_backend_row_for_the_start_point():
+    """The backend's own row for the start point is dropped, not merged.
+
+    ssh reports every directory as non-empty, so merging would keep its
+    row and print a directory that ``-not -empty`` must skip.
+    """
+
+    async def core(*_a, **_kw) -> list[str]:
+        return ["/"]
+
+    stdout, io = await find(
+        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        ("-not", "-empty"),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+        dir_empty=_dir_is_empty,
+    )
+    assert io.exit_code == 0
+    assert stdout == b""
+
+
+@pytest.mark.asyncio
+async def test_find_directory_holding_only_a_link_is_not_empty():
+    """A namespace symlink is an entry, so ``-empty`` must skip its parent.
+
+    No backend readdir can see a link, so the emptiness probe alone says
+    the directory holds nothing (``has_link_children`` is what corrects
+    it). GNU counts the link and prints nothing here.
+    """
+
+    async def core(*_a, **_kw) -> list[str]:
+        return []
+
+    links = LinkView(
+        stat_at=lambda _p: None,
+        children=lambda _p: [FileStat(name="lk", type=FileType.SYMLINK)],
+        subtree=lambda _p: [],
+        resolve=lambda p: p,
+        exists=_link_exists,
+        target_stat=_link_target_stat,
+    )
+    stdout, io = await find(
+        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        (),
+        find_core=core,
+        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
+        dir_empty=_dir_is_empty,
+        empty=True,
+        links=links,
+    )
+    assert io.exit_code == 0
+    assert stdout == b""
 
 
 @pytest.mark.asyncio

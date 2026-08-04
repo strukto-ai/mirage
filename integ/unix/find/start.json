@@ -409,6 +409,142 @@
    }
   },
   {
+   "id": "find_start_empty_mount",
+   "seq": 385,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data2",
+   "expect": {
+    "exit": 0,
+    "stdout": "/data2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "find_start_empty_mount_type_d",
+   "seq": 386,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data2 -type d",
+   "expect": {
+    "exit": 0,
+    "stdout": "/data2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "find_start_empty_mount_empty",
+   "seq": 387,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data2 -empty",
+   "expect": {
+    "exit": 0,
+    "stdout": "/data2\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "find_start_empty_mount_not_empty",
+   "seq": 388,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "find /data2 -not -empty",
+   "expect": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+   }
+  },
+  {
    "id": "find_start_missing",
    "seq": 389,
    "targets": [

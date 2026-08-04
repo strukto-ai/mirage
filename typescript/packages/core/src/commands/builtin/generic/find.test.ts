@@ -18,6 +18,7 @@ import type { IOResult } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
+import type { LinkView } from '../../../ops/types.ts'
 import { findGeneric } from './find.ts'
 
 const DEC = new TextDecoder()
@@ -42,6 +43,16 @@ function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
   return Promise.resolve(['/found.txt'])
 }
 
+function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): CommandOpts {
+  return {
+    stdin: null,
+    flags,
+    filetypeFns: null,
+    cwd: '/',
+    statPath: () => Promise.resolve(stat),
+  } as unknown as CommandOpts
+}
+
 describe('generic command find', () => {
   it('skips roots whose find raises ENOENT', async () => {
     const result = await findGeneric([spec('/missing'), spec('/')], [], makeOpts(), fakeFind)
@@ -56,16 +67,6 @@ describe('generic command find', () => {
   //   find <missing>          -> exit 1, find: '<path>': No such file or directory
   describe('start point that is not a directory', () => {
     const fileStat = { name: 'a.txt', size: 6, type: FileType.TEXT } as FileStat
-
-    function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): CommandOpts {
-      return {
-        stdin: null,
-        flags,
-        filetypeFns: null,
-        cwd: '/',
-        statPath: () => Promise.resolve(stat),
-      } as unknown as CommandOpts
-    }
 
     function unreachedFind(): Promise<string[]> {
       throw new Error('find op must not be called for a file start point')
@@ -98,6 +99,12 @@ describe('generic command find', () => {
       [{ size: '+99c' }, ''],
       [{ name: 'a.txt' }, '/mnt/a.txt\n'],
       [{ name: 'nope' }, ''],
+      // The flag form passes the value through, so `-type l` (a namespace
+      // symlink, which no backend entry ever is) filters instead of reading
+      // as "no filter" and printing everything.
+      [{ type: 'f' }, '/mnt/a.txt\n'],
+      [{ type: 'd' }, ''],
+      [{ type: 'l' }, ''],
     ])('honors %o', async (flags, expected) => {
       const result = await findGeneric(
         [spec('/mnt/a.txt')],
@@ -155,7 +162,9 @@ describe('generic command find', () => {
         Promise.resolve(['/logs/child.txt']),
       )
       expect(result?.[1].exitCode).toBe(0)
-      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/logs/child.txt\n')
+      // GNU lists the start point before descending, and this op reports
+      // descendants only, so the row comes from the generic.
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/logs\n/mnt/logs/child.txt\n')
     })
 
     it('still walks a directory start point', async () => {
@@ -169,7 +178,105 @@ describe('generic command find', () => {
       const result = await findGeneric([root], [], optsWith(dirStat), () =>
         Promise.resolve(['/a.txt']),
       )
-      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt/a.txt\n')
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt\n/mnt/a.txt\n')
+    })
+  })
+
+  // GNU findutils 4.10.0, pinned on debian:stable-slim:
+  //   find <empty dir>            -> <empty dir>
+  //   find <empty dir> -empty     -> <empty dir>
+  //   find <empty dir> -not -empty -> (empty)
+  describe('directory start point that holds nothing', () => {
+    const dirStat = { name: 'mnt', type: FileType.DIRECTORY } as FileStat
+
+    function root(): PathSpec {
+      return new PathSpec({
+        resourcePath: '',
+        virtual: '/mnt',
+        directory: '/',
+        resolved: false,
+      })
+    }
+
+    const noRows = (): Promise<string[]> => Promise.resolve([])
+
+    it('is reported even though the listing is empty', async () => {
+      const result = await findGeneric([root()], [], optsWith(dirStat), noRows)
+      expect(result?.[1].exitCode).toBe(0)
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt\n')
+    })
+
+    it('matches -empty, answered by a listing rather than a guess', async () => {
+      const result = await findGeneric(
+        [root()],
+        [],
+        optsWith(dirStat, { empty: true }),
+        noRows,
+        undefined,
+        () => Promise.resolve(true),
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt\n')
+    })
+
+    it('fails -empty when it has children', async () => {
+      const result = await findGeneric(
+        [root()],
+        [],
+        optsWith(dirStat, { empty: true }),
+        noRows,
+        undefined,
+        () => Promise.resolve(false),
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('')
+    })
+
+    it('keeps the backend row when emptiness cannot be asked', async () => {
+      // `-empty` on a directory needs a listing, which a bespoke wrapper need
+      // not wire. Replacing the row there would trade a backend's answer for
+      // "unknown", so the row is left alone.
+      const result = await findGeneric([root()], [], optsWith(dirStat, { empty: true }), () =>
+        Promise.resolve(['/']),
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/mnt\n')
+    })
+
+    it('is not empty when it holds only a namespace link', async () => {
+      // No backend readdir can see a link, so the probe alone says the
+      // directory holds nothing. GNU counts the link as an entry.
+      const links = {
+        statAt: () => null,
+        children: () => [{ name: 'lk', type: FileType.SYMLINK } as FileStat],
+        subtree: () => [],
+        resolve: (p: string) => p,
+        exists: () => Promise.resolve(true),
+        targetStat: () => Promise.resolve(null),
+      } as unknown as LinkView
+      const opts = {
+        stdin: null,
+        flags: { empty: true },
+        filetypeFns: null,
+        cwd: '/',
+        statPath: () => Promise.resolve(dirStat),
+        links,
+      } as unknown as CommandOpts
+      const result = await findGeneric([root()], [], opts, noRows, undefined, () =>
+        Promise.resolve(true),
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('')
+    })
+
+    it('replaces the backend row for the start point', async () => {
+      // ssh reports every directory as non-empty, so merging would keep its
+      // row and print a directory that `-not -empty` must skip.
+      const result = await findGeneric(
+        [root()],
+        ['-not', '-empty'],
+        optsWith(dirStat),
+        () => Promise.resolve(['/']),
+        undefined,
+        () => Promise.resolve(true),
+      )
+      expect(DEC.decode(result?.[0] as Uint8Array)).toBe('')
     })
   })
 

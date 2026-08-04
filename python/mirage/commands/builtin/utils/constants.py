@@ -21,14 +21,6 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 EPOCH_LS_TIME = "Jan  1 00:00"
 
-SIZE_UNITS = {
-    "B": 1,
-    "K": 1024,
-    "M": 1024**2,
-    "G": 1024**3,
-    "T": 1024**4,
-}
-
 TYPE_CHARS = {FileType.DIRECTORY: "d", FileType.SYMLINK: "l"}
 
 # A symlink has no permission bits of its own on Linux: the mode is

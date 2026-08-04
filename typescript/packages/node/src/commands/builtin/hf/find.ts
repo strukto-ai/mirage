@@ -15,12 +15,23 @@
 import { command, findGeneric, metadataProvision, specOf } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { find as hfFind } from '../../../core/hf/find.ts'
+import { readdir as hfReaddir } from '../../../core/hf/readdir.ts'
 
 export const HF_FIND = command({
   name: 'find',
   resource: [...HF_RESOURCES],
   spec: specOf('find'),
   provision: metadataProvision,
+  // The emptiness probe is wired like the generic builder does it, because
+  // a bucket start point that holds nothing is exactly what an object store
+  // cannot tell from a missing one, and `-empty` has to match it.
   fn: (accessor: HfAccessor, paths, texts, opts) =>
-    findGeneric(paths, texts, opts, (root, options) => hfFind(accessor, root, options)),
+    findGeneric(
+      paths,
+      texts,
+      opts,
+      (root, options) => hfFind(accessor, root, options),
+      undefined,
+      async (spec) => (await hfReaddir(accessor, spec, opts.index ?? undefined)).length === 0,
+    ),
 })
