@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
+import { parseFlags as parseWcFlags } from '../../wc.ts'
 import { combinedExit } from './exit.ts'
 import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
@@ -88,6 +89,12 @@ export async function runFanout(
   // wc must not see a per-run total row it would have to guess at, and du
   // must not sum sizes that were already rounded for -h.
   if (cmdName === Cmd.WC) {
+    // The override would mask an invalid --total from every native run, so
+    // the user's value is diagnosed here first, as one mount would.
+    const checked = parseWcFlags(flagKwargs)
+    if (typeof checked === 'string') {
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(checked) })]
+    }
     flags.total = 'never'
   }
   const duC = cmdName === Cmd.DU && flagKwargs.c === true

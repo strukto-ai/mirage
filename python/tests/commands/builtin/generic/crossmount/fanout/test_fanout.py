@@ -125,3 +125,25 @@ def test_run_fanout_partial_failure_keeps_output_and_stderr():
     assert _run(materialize(out)) == b"ok\n"
     assert io.exit_code == 1
     assert b"/a/x" in (io.stderr or b"")
+
+
+def test_run_fanout_forces_wc_total_never_on_native_runs():
+    rs = FakeRunSingle({
+        "/a/x": (b"1 1 1 /a/x\n", 0),
+        "/b/y": (b"2 2 2 /b/y\n", 0)
+    })
+    _run(run_fanout("wc", [_scope("/a/x"), _scope("/b/y")], [], {}, rs))
+    assert [c["flags"]["total"] for c in rs.calls] == ["never", "never"]
+
+
+def test_run_fanout_rejects_invalid_wc_total_before_running_operands():
+    # The forced override would otherwise hide the bad value from every
+    # native run, leaving exit 0 and no diagnostic.
+    rs = FakeRunSingle({"/a/x": (b"", 0), "/b/y": (b"", 0)})
+    body, io = _run(
+        run_fanout("wc", [_scope("/a/x"), _scope("/b/y")], [],
+                   {"total": "bogus"}, rs))
+    assert body is None
+    assert io.exit_code == 1
+    assert io.stderr == b"wc: invalid argument 'bogus' for '--total'\n"
+    assert rs.calls == []
