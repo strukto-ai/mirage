@@ -81,6 +81,27 @@ def test_classify_all_dedupes_one_kind_held_by_two_layers():
     assert classify_all("cd", session, registry) == [NameKind.BUILTIN]
 
 
+def test_classify_all_keeps_the_layers_under_a_keyword():
+    # bash: `function time { :; }; type -a time` prints the keyword line
+    # then the function line.
+    session = make_session()
+    session.functions["then"] = []
+    assert classify_all("then", session, make_registry()) == [
+        NameKind.KEYWORD, NameKind.FUNCTION
+    ]
+
+
+def test_time_and_coproc_are_not_keywords_here():
+    # mirage implements neither construct, so `time echo hi` reports
+    # command not found and type may not call it a keyword.
+    session = make_session()
+    registry = make_registry()
+    assert classify("time", session, registry) is None
+    assert classify("coproc", session, registry) is None
+    session.functions["time"] = []
+    assert classify("time", session, registry) is NameKind.FUNCTION
+
+
 def test_describe_lines():
     assert describe("if", NameKind.KEYWORD) == "if is a shell keyword"
     assert describe("myfn", NameKind.FUNCTION) == "myfn is a function"
@@ -97,6 +118,14 @@ def test_type_reports_builtin():
 def test_type_reports_keyword():
     assert _out(handle_type(["if"], make_session(),
                             make_registry())) == "if is a shell keyword\n"
+
+
+def test_type_a_prints_the_function_under_a_keyword():
+    session = make_session()
+    session.functions["then"] = []
+    assert _out(handle_type(
+        ["-a", "then"], session,
+        make_registry())) == ("then is a shell keyword\nthen is a function\n")
 
 
 def test_type_reports_installed_cli():
@@ -207,6 +236,16 @@ def test_which_does_not_resolve_a_keyword():
     out, io, _ = handle_which(["if"], make_session(), make_registry())
     assert out is None
     assert io.exit_code == 1
+
+
+def test_which_reports_the_layer_under_a_keyword():
+    # The keyword is filtered before the winner is picked, so the
+    # function below it is what `which` resolves.
+    session = make_session()
+    session.functions["then"] = []
+    out, io, _ = handle_which(["then"], session, make_registry())
+    assert out.decode() == "then\n"
+    assert io.exit_code == 0
 
 
 def test_which_all_found_exit_rule():

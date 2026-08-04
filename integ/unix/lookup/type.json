@@ -142,6 +142,32 @@
         "stdout": "builtin\nfunction\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "type_a_keeps_the_function_under_a_keyword",
+      "seq": 922,
+      "targets": [
+        "ram"
+      ],
+      "command": "then() { echo x; }; type -a then",
+      "expect": {
+        "exit": 0,
+        "stdout": "then is a shell keyword\nthen is a function\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "type_t_time_is_not_a_keyword_here",
+      "seq": 923,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -t time",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

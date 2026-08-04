@@ -77,6 +77,28 @@ describe('classify', () => {
     session.functions.linear = 'linear() { :; }'
     expect(classifyAll('linear', session, registry)).toEqual([NameKind.FUNCTION, NameKind.CLI])
   })
+
+  it('keeps the layers under a keyword', () => {
+    // bash: `function time { :; }; type -a time` prints the keyword line
+    // then the function line.
+    const session = makeSession()
+    session.functions.then = 'then() { :; }'
+    expect(classifyAll('then', session, makeRegistry())).toEqual([
+      NameKind.KEYWORD,
+      NameKind.FUNCTION,
+    ])
+  })
+
+  it('does not call time or coproc keywords', () => {
+    // mirage implements neither construct, so `time echo hi` reports
+    // command not found and type may not call it a keyword.
+    const session = makeSession()
+    const registry = makeRegistry()
+    expect(classify('time', session, registry)).toBeNull()
+    expect(classify('coproc', session, registry)).toBeNull()
+    session.functions.time = 'time() { :; }'
+    expect(classify('time', session, registry)).toBe(NameKind.FUNCTION)
+  })
 })
 
 describe('handleType', () => {
@@ -89,6 +111,13 @@ describe('handleType', () => {
   it('reports a keyword', async () => {
     const [out] = handleType(['if'], makeSession(), makeRegistry())
     expect(await body(out)).toBe('if is a shell keyword\n')
+  })
+
+  it('-a prints the function under a keyword', async () => {
+    const session = makeSession()
+    session.functions.then = 'then() { :; }'
+    const [out] = handleType(['-a', 'then'], session, makeRegistry())
+    expect(await body(out)).toBe('then is a shell keyword\nthen is a function\n')
   })
 
   it('reports an installed CLI as its own kind', async () => {
@@ -196,6 +225,16 @@ describe('handleWhich', () => {
     const [out, io] = handleWhich(['if'], makeSession(), makeRegistry())
     expect(out).toBeNull()
     expect(io.exitCode).toBe(1)
+  })
+
+  it('reports the layer under a keyword', async () => {
+    // The keyword is filtered before the winner is picked, so the
+    // function below it is what `which` resolves.
+    const session = makeSession()
+    session.functions.then = 'then() { :; }'
+    const [out, io] = handleWhich(['then'], session, makeRegistry())
+    expect(await body(out)).toBe('then\n')
+    expect(io.exitCode).toBe(0)
   })
 
   it('uses the all-found exit rule and exits 1 with no operands', async () => {

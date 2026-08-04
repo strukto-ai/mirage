@@ -25,8 +25,12 @@ from mirage.workspace.types import ExecutionNode
 _TYPE_USAGE = "type: usage: type [-afptP] name [name ...]\n"
 _WHICH_USAGE = "which: usage: which [-as] name [name ...]\n"
 
-# bash reserved words: reported by `command -v/-V` and `type` as
-# keywords even though the parser, not the executor, consumes them.
+# bash reserved words that mirage's grammar implements: reported by
+# `command -v/-V` and `type` as keywords even though the parser, not the
+# executor, consumes them. bash's `time` and `coproc` are left out on
+# purpose. mirage implements neither construct, so a line starting with
+# one reports `command not found`, and `type` may not contradict what
+# dispatch does. Add a word back when its construct lands.
 KEYWORDS = frozenset({
     "if",
     "then",
@@ -43,8 +47,6 @@ KEYWORDS = frozenset({
     "done",
     "in",
     "function",
-    "time",
-    "coproc",
     "{",
     "}",
     "!",
@@ -107,6 +109,14 @@ def classify_all(name: str, session: Session,
                  registry: MountRegistry) -> list[NameKind]:
     """Classify every layer holding the name, most-preferred first.
 
+    A reserved word goes first and does not end the walk: bash prints
+    both lines when a function shares a keyword's name (pinned:
+    ``function time { :; }; type -a time`` prints the keyword line then
+    the function line). mirage's parser is looser than bash's about
+    reserved words as function names, so the shadow is reachable here
+    for any of them, and hiding it would leave ``type -a`` claiming a
+    keyword while the line runs the function.
+
     Duplicate kinds are dropped, since the kinds are coarser than the
     layers: a shell builtin that a mount also registers is one
     ``builtin`` line, not two identical ones.
@@ -116,9 +126,7 @@ def classify_all(name: str, session: Session,
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry.
     """
-    if name in KEYWORDS:
-        return [NameKind.KEYWORD]
-    kinds: list[NameKind] = []
+    kinds: list[NameKind] = [NameKind.KEYWORD] if name in KEYWORDS else []
     for consumer in route_all(name, session, registry):
         kind = _KIND_BY_CONSUMER[consumer]
         if kind not in kinds:
@@ -130,23 +138,25 @@ def _locations(name: str,
                session: Session,
                registry: MountRegistry,
                all_mode: bool,
-               nofunc: bool = False) -> list[NameKind]:
-    """The kinds to report for one name, honoring ``-a`` and ``-f``.
+               drop: NameKind | None = None) -> list[NameKind]:
+    """The kinds to report for one name: hide a layer, then take the top.
 
-    Both flags are filters over the layer list, never edits to the
-    session: ``-f`` drops the function layer so the layer below it is
-    what remains, and ``-a`` keeps them all instead of the winner only.
+    Hiding is a filter over the layer list, never an edit to the
+    session, and it runs before the winner is picked. That order is
+    what keeps the winner honest: ``type -f`` reports the layer under a
+    shadowing function, and ``which`` the layer under a reserved word,
+    where filtering afterwards would report nothing at all.
 
     Args:
         name (str): the operand word.
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry.
         all_mode (bool): report every layer instead of the winner only.
-        nofunc (bool): ignore a shell function of this name.
+        drop (NameKind | None): a layer this caller does not resolve.
     """
     kinds = classify_all(name, session, registry)
-    if nofunc:
-        kinds = [kind for kind in kinds if kind is not NameKind.FUNCTION]
+    if drop is not None:
+        kinds = [kind for kind in kinds if kind is not drop]
     return kinds if all_mode else kinds[:1]
 
 
@@ -196,8 +206,9 @@ def handle_type(
     out_lines: list[str] = []
     err_lines: list[str] = []
     all_found = True
+    hidden = NameKind.FUNCTION if nofunc else None
     for name in rest:
-        kinds = _locations(name, session, registry, all_mode, nofunc)
+        kinds = _locations(name, session, registry, all_mode, hidden)
         if not kinds:
             all_found = False
             if mode is None:
@@ -256,10 +267,7 @@ def handle_which(
     out_lines: list[str] = []
     all_found = True
     for name in rest:
-        kinds = [
-            kind for kind in _locations(name, session, registry, all_mode)
-            if kind is not NameKind.KEYWORD
-        ]
+        kinds = _locations(name, session, registry, all_mode, NameKind.KEYWORD)
         if not kinds:
             all_found = False
             continue

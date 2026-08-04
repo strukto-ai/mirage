@@ -24,8 +24,12 @@ import type { Result } from './scope.ts'
 const TYPE_USAGE = 'type: usage: type [-afptP] name [name ...]\n'
 const WHICH_USAGE = 'which: usage: which [-as] name [name ...]\n'
 
-// bash reserved words: reported by `command -v/-V` and `type` as
-// keywords even though the parser, not the executor, consumes them.
+// bash reserved words that mirage's grammar implements: reported by
+// `command -v/-V` and `type` as keywords even though the parser, not the
+// executor, consumes them. bash's `time` and `coproc` are left out on
+// purpose. mirage implements neither construct, so a line starting with
+// one reports `command not found`, and `type` may not contradict what
+// dispatch does. Add a word back when its construct lands.
 const KEYWORDS: ReadonlySet<string> = new Set([
   'if',
   'then',
@@ -42,8 +46,6 @@ const KEYWORDS: ReadonlySet<string> = new Set([
   'done',
   'in',
   'function',
-  'time',
-  'coproc',
   '{',
   '}',
   '!',
@@ -98,13 +100,20 @@ export function classify(name: string, session: Session, registry: MountRegistry
 /**
  * Classify every layer holding the name, most-preferred first.
  *
+ * A reserved word goes first and does not end the walk: bash prints both
+ * lines when a function shares a keyword's name (pinned:
+ * `function time { :; }; type -a time` prints the keyword line then the
+ * function line). mirage's parser is looser than bash's about reserved
+ * words as function names, so the shadow is reachable here for any of
+ * them, and hiding it would leave `type -a` claiming a keyword while the
+ * line runs the function.
+ *
  * Duplicate kinds are dropped, since the kinds are coarser than the
  * layers: a shell builtin that a mount also registers is one `builtin`
  * line, not two identical ones.
  */
 export function classifyAll(name: string, session: Session, registry: MountRegistry): NameKind[] {
-  if (KEYWORDS.has(name)) return [NameKind.KEYWORD]
-  const kinds: NameKind[] = []
+  const kinds: NameKind[] = KEYWORDS.has(name) ? [NameKind.KEYWORD] : []
   for (const consumer of routeAll(name, session, registry)) {
     const kind = KIND_BY_CONSUMER[consumer]
     if (kind !== undefined && !kinds.includes(kind)) kinds.push(kind)
@@ -113,21 +122,23 @@ export function classifyAll(name: string, session: Session, registry: MountRegis
 }
 
 /**
- * The kinds to report for one name, honoring `-a` and `-f`.
+ * The kinds to report for one name: hide a layer, then take the top.
  *
- * Both flags are filters over the layer list, never edits to the
- * session: `-f` drops the function layer so the layer below it is what
- * remains, and `-a` keeps them all instead of the winner only.
+ * Hiding is a filter over the layer list, never an edit to the session,
+ * and it runs before the winner is picked. That order is what keeps the
+ * winner honest: `type -f` reports the layer under a shadowing function,
+ * and `which` the layer under a reserved word, where filtering
+ * afterwards would report nothing at all.
  */
 function locations(
   name: string,
   session: Session,
   registry: MountRegistry,
   allMode: boolean,
-  nofunc = false,
+  drop: NameKind | null = null,
 ): NameKind[] {
   let kinds = classifyAll(name, session, registry)
-  if (nofunc) kinds = kinds.filter((kind) => kind !== NameKind.FUNCTION)
+  if (drop !== null) kinds = kinds.filter((kind) => kind !== drop)
   return allMode ? kinds : kinds.slice(0, 1)
 }
 
@@ -169,9 +180,10 @@ export function handleType(
   const rest = scan.operands
   const outLines: string[] = []
   const errLines: string[] = []
+  const hidden = nofunc ? NameKind.FUNCTION : null
   let allFound = true
   for (const name of rest) {
-    const kinds = locations(name, session, registry, allMode, nofunc)
+    const kinds = locations(name, session, registry, allMode, hidden)
     if (kinds.length === 0) {
       allFound = false
       if (mode === null) errLines.push(`type: ${name}: not found`)
@@ -229,9 +241,7 @@ export function handleWhich(
   const outLines: string[] = []
   let allFound = true
   for (const name of rest) {
-    const kinds = locations(name, session, registry, allMode).filter(
-      (kind) => kind !== NameKind.KEYWORD,
-    )
+    const kinds = locations(name, session, registry, allMode, NameKind.KEYWORD)
     if (kinds.length === 0) {
       allFound = false
       continue
