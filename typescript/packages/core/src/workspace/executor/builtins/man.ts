@@ -26,6 +26,11 @@ import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
+/** A description, or man's placeholder when the spec carries none. */
+function described(text: string | null | undefined): string {
+  return text ?? '(no description)'
+}
+
 interface ManHit {
   mount: MountEntry
   cmd: RegisteredCommand
@@ -71,7 +76,7 @@ function renderManEntry(name: string, hits: ManHit[]): string {
   const spec = first.cmd.spec
   const lines: string[] = []
   lines.push(`# ${name}`, '')
-  lines.push(spec.description ?? '(no description)', '')
+  lines.push(described(spec.description), '')
   lines.push(...renderOptionsTable(spec))
   lines.push('## RESOURCES', '')
   const seen = new Set<string>()
@@ -115,7 +120,7 @@ function renderCliIndex(registry: MountRegistry): string[] {
   if (installs.length === 0) return []
   const lines = ['# clis', '']
   for (const [name, install] of installs) {
-    lines.push(`- ${name} — ${install.spec.description ?? '(no description)'}`)
+    lines.push(`- ${name} — ${described(install.spec.description)}`)
   }
   lines.push('')
   return lines
@@ -151,7 +156,7 @@ function renderManIndex(session: Session, registry: MountRegistry): string {
       .slice()
       .sort((a, b) => (a.name < b.name ? -1 : 1))
     for (const cmd of resourceCmds) {
-      lines.push(`- ${cmd.name} — ${cmd.spec.description ?? '(no description)'}`)
+      lines.push(`- ${cmd.name} — ${described(cmd.spec.description)}`)
     }
     for (const cmd of allCmds) {
       if (m.isGeneralCommand(cmd.name) && !generalSeen.has(cmd.name)) {
@@ -163,7 +168,7 @@ function renderManIndex(session: Session, registry: MountRegistry): string {
   lines.push(...renderCliIndex(registry))
   lines.push('# general', '')
   for (const [name, cmd] of [...generalSeen.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    lines.push(`- ${name} — ${cmd.spec.description ?? '(no description)'}`)
+    lines.push(`- ${name} — ${described(cmd.spec.description)}`)
   }
   return lines.join('\n') + '\n'
 }
@@ -179,7 +184,7 @@ function renderShellBuiltinMan(
 ): string {
   const lines: string[] = []
   lines.push(`# ${name}`, '')
-  lines.push(spec.description ?? '(no description)', '')
+  lines.push(described(spec.description), '')
   lines.push(...renderOptionsTable(spec))
   lines.push('## RESOURCES', '')
   lines.push('- shell builtin')

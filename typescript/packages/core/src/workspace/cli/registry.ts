@@ -14,7 +14,7 @@
 
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
-import { JOB_BUILTINS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../route/constants.ts'
+import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../route/constants.ts'
 import { z } from 'zod'
 
 import type { CLIInstall } from './types.ts'
@@ -56,6 +56,11 @@ export class CLIRegistry {
     }
     if (SHELL_NAMES.has(name) || JOB_BUILTINS.has(name)) {
       throw new Error(`CLI name '${name}' collides with a shell builtin`)
+    }
+    // A reserved word never reaches dispatch (the parser consumes it), so
+    // an install under one would be unreachable rather than wrong.
+    if (KEYWORDS.has(name)) {
+      throw new Error(`CLI name '${name}' is a shell keyword`)
     }
     if (NAMESPACE_COMMANDS.has(name) || name in BUILTIN_SPECS) {
       throw new Error(`CLI name '${name}' collides with a general command`)

@@ -74,6 +74,16 @@ def test_shell_builtin_collision_is_refused():
         reg.install("kill", tree())
 
 
+def test_shell_keyword_is_refused():
+    # The parser consumes a reserved word, so the install would never be
+    # reachable from a line.
+    reg = CLIRegistry()
+    with pytest.raises(ValueError, match="shell keyword"):
+        reg.install("if", tree())
+    with pytest.raises(ValueError, match="shell keyword"):
+        reg.install("select", tree())
+
+
 def test_general_command_collision_is_refused():
     reg = CLIRegistry()
     with pytest.raises(ValueError, match="general command"):

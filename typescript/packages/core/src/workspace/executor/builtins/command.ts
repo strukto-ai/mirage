@@ -19,7 +19,7 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { lastOf, scanOptions } from './getopt.ts'
-import { classify, describe } from './lookup.ts'
+import { classify, describe } from './lookup/index.ts'
 import type { Result, ExecuteStringFn } from './scope.ts'
 
 const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'

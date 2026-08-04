@@ -60,7 +60,10 @@ function* layers(name: string, session: Session, registry: MountRegistry): Gener
  *
  * This is the winner only. A name can sit in more than one layer at once
  * (a function shadowing an installed CLI); `routeAll` reports them all,
- * which is what `type -a` prints.
+ * which is what `type -a` prints. Reading one item off the generator is
+ * what makes that sharing free: the lookups after the winner never run,
+ * so dispatch pays exactly what it did when this was a chain of `if`
+ * arms.
  */
 export function route(name: string, session: Session, registry: MountRegistry): Consumer {
   for (const consumer of layers(name, session, registry)) return consumer

@@ -73,7 +73,10 @@ def route(name: str, session: Session, registry: MountRegistry) -> Consumer:
 
     This is the winner only. A name can sit in more than one layer at
     once (a function shadowing an installed CLI); ``route_all`` reports
-    them all, which is what ``type -a`` prints.
+    them all, which is what ``type -a`` prints. Reading one item off the
+    generator is what makes that sharing free: the lookups after the
+    winner never run, so dispatch pays exactly what it did when this was
+    a chain of ``if`` arms.
 
     Args:
         name (str): expanded command name.

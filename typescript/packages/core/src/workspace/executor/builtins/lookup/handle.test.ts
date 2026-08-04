@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CLISpec } from '../../../commands/cli/types.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
-import type { ByteSource } from '../../../io/types.ts'
-import { CLIRegistry } from '../../cli/registry.ts'
-import type { MountRegistry } from '../../mount/registry.ts'
-import { Session } from '../../session/session.ts'
-import { classify, classifyAll, handleType, handleWhich, NameKind } from './lookup.ts'
+import { CLISpec } from '../../../../commands/cli/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
+import type { ByteSource } from '../../../../io/types.ts'
+import { CLIRegistry } from '../../../cli/registry.ts'
+import type { MountRegistry } from '../../../mount/registry.ts'
+import { Session } from '../../../session/session.ts'
+import { handleType, handleWhich } from './handle.ts'
 
-// Mirrors python/tests/workspace/executor/builtins/test_lookup.py.
+// Mirrors python/tests/workspace/executor/builtins/lookup/test_handle.py.
 
 const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
 
@@ -56,50 +56,6 @@ async function body(out: ByteSource | null): Promise<string> {
 function decode(b: Uint8Array | null): string {
   return b === null ? '' : new TextDecoder().decode(b)
 }
-
-describe('classify', () => {
-  it('names each layer', () => {
-    const session = makeSession()
-    const registry = makeRegistry(true)
-    session.functions.deploy = 'deploy() { :; }'
-    expect(classify('if', session, registry)).toBe(NameKind.KEYWORD)
-    expect(classify('deploy', session, registry)).toBe(NameKind.FUNCTION)
-    expect(classify('linear', session, registry)).toBe(NameKind.CLI)
-    expect(classify('cd', session, registry)).toBe(NameKind.BUILTIN)
-    expect(classify('cat', session, registry)).toBe(NameKind.BUILTIN)
-    expect(classify('nope', session, registry)).toBeNull()
-  })
-
-  it('classifyAll reports a function shadowing a CLI, winner first', () => {
-    const session = makeSession()
-    const registry = makeRegistry(true)
-    expect(classifyAll('linear', session, registry)).toEqual([NameKind.CLI])
-    session.functions.linear = 'linear() { :; }'
-    expect(classifyAll('linear', session, registry)).toEqual([NameKind.FUNCTION, NameKind.CLI])
-  })
-
-  it('keeps the layers under a keyword', () => {
-    // bash: `function time { :; }; type -a time` prints the keyword line
-    // then the function line.
-    const session = makeSession()
-    session.functions.then = 'then() { :; }'
-    expect(classifyAll('then', session, makeRegistry())).toEqual([
-      NameKind.KEYWORD,
-      NameKind.FUNCTION,
-    ])
-  })
-
-  it('does not call time or coproc keywords', () => {
-    // mirage implements neither construct, so `time echo hi` reports
-    // command not found and type may not call it a keyword.
-    const session = makeSession()
-    const registry = makeRegistry()
-    expect(classify('time', session, registry)).toBeNull()
-    expect(classify('coproc', session, registry)).toBeNull()
-    session.functions.time = 'time() { :; }'
-    expect(classify('time', session, registry)).toBe(NameKind.FUNCTION)
-  })
-})
 
 describe('handleType', () => {
   it('reports a builtin', async () => {

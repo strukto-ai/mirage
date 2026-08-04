@@ -81,6 +81,14 @@ describe('CLIRegistry', () => {
     expect(() => reg.install('kill', tree())).toThrow(/shell builtin/)
   })
 
+  it('refuses a shell keyword', () => {
+    // The parser consumes a reserved word, so the install would never be
+    // reachable from a line.
+    const reg = new CLIRegistry()
+    expect(() => reg.install('if', tree())).toThrow(/shell keyword/)
+    expect(() => reg.install('select', tree())).toThrow(/shell keyword/)
+  })
+
   it('refuses general command collisions', () => {
     const reg = new CLIRegistry()
     expect(() => reg.install('grep', tree())).toThrow(/general command/)

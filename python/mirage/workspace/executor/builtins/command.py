@@ -16,20 +16,20 @@ import shlex
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup import classify, describe
+from mirage.workspace.executor.builtins.shared import Result, ok, result
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 _USAGE = "command: usage: command [-pVv] command [arg ...]\n"
+_OPTIONS = "pvV"
 
 
-def _probe(
-    mode: str, rest: Sequence[str], session: Session, registry: MountRegistry
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+def _probe(mode: str, rest: Sequence[str], session: Session,
+           registry: MountRegistry) -> Result:
     """Run the ``-v``/``-V`` introspection modes.
 
     The exit status is 0 when no names are given, otherwise 0 if any name
@@ -51,17 +51,15 @@ def _probe(
         kind = classify(name, session, registry)
         if kind is None:
             if mode == "V":
-                err_lines.append(f"command: {name}: not found")
+                err_lines.append(f"command: {name}: not found\n")
             continue
         any_found = True
-        out_lines.append(name if mode == "v" else describe(name, kind))
-    out = ("\n".join(out_lines) + "\n").encode() if out_lines else None
-    err = ("\n".join(err_lines) + "\n").encode() if err_lines else b""
-    code = 0 if (not rest or any_found) else 1
-    return out, IOResult(exit_code=code,
-                         stderr=err), ExecutionNode(command="command",
-                                                    exit_code=code,
-                                                    stderr=err)
+        line = name if mode == "v" else describe(name, kind)
+        out_lines.append(f"{line}\n")
+    out = "".join(out_lines).encode() if out_lines else None
+    if not rest or any_found:
+        return ok("command", out)
+    return result("command", out=out, exit_code=1, stderr="".join(err_lines))
 
 
 async def handle_command_builtin(
@@ -70,7 +68,7 @@ async def handle_command_builtin(
     session: Session,
     registry: MountRegistry,
     stdin: ByteSource | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+) -> Result:
     """Run the ``command`` builtin (``command [-pVv] name [arg ...]``).
 
     Without ``-v``/``-V`` it runs the target ignoring any shell function
@@ -88,19 +86,17 @@ async def handle_command_builtin(
         registry (MountRegistry): mount registry for name resolution.
         stdin (ByteSource | None): piped input for the inner run.
     """
-    scan = scan_options(args, "pvV")
+    scan = scan_options(args, _OPTIONS)
     if scan.bad is not None:
-        err = f"command: {scan.bad}: invalid option\n{_USAGE}".encode()
-        return None, IOResult(exit_code=2,
-                              stderr=err), ExecutionNode(command="command",
-                                                         exit_code=2,
-                                                         stderr=err)
+        return result("command",
+                      exit_code=2,
+                      stderr=f"command: {scan.bad}: invalid option\n{_USAGE}")
     mode = last_of(scan.letters, "vV")
     rest = scan.operands
     if mode is not None:
         return _probe(mode, rest, session, registry)
     if not rest:
-        return None, IOResult(), ExecutionNode(command="command", exit_code=0)
+        return ok("command")
 
     inner_name = rest[0]
     inner = shlex.join(rest)

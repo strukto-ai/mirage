@@ -28,6 +28,15 @@ from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 
+def _described(text: str | None) -> str:
+    """A description, or man's placeholder when the spec carries none.
+
+    Args:
+        text (str | None): the spec's description.
+    """
+    return text if text is not None else "(no description)"
+
+
 @dataclass
 class _ManHit:
     mount: MountEntry
@@ -73,8 +82,7 @@ def _render_man_entry(name: str, hits: list[_ManHit]) -> str:
     lines: list[str] = []
     lines.append(f"# {name}")
     lines.append("")
-    lines.append(spec.description if spec.
-                 description is not None else "(no description)")
+    lines.append(_described(spec.description))
     lines.append("")
     lines.extend(_render_options_table(spec))
     lines.append("## RESOURCES")
@@ -114,8 +122,7 @@ def _render_shell_builtin_man(name: str, spec: CommandSpec) -> str:
     lines: list[str] = []
     lines.append(f"# {name}")
     lines.append("")
-    lines.append(spec.description if spec.
-                 description is not None else "(no description)")
+    lines.append(_described(spec.description))
     lines.append("")
     lines.extend(_render_options_table(spec))
     lines.append("## RESOURCES")
@@ -158,9 +165,7 @@ def _render_cli_index(registry: MountRegistry) -> list[str]:
         return []
     lines = ["# clis", ""]
     for name, install in sorted(installs.items()):
-        spec = install.spec
-        desc = (spec.description
-                if spec.description is not None else "(no description)")
+        desc = _described(install.spec.description)
         lines.append(f"- {name} \u2014 {desc}")
     lines.append("")
     return lines
@@ -202,8 +207,7 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
             key=lambda c: c.name,
         )
         for cmd in resource_cmds:
-            desc = (cmd.spec.description if cmd.spec.description is not None
-                    else "(no description)")
+            desc = _described(cmd.spec.description)
             lines.append(f"- {cmd.name} \u2014 {desc}")
         for cmd in all_cmds:
             if (m.is_general_command(cmd.name)
@@ -214,9 +218,7 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
     lines.append("# general")
     lines.append("")
     for name in sorted(general_seen):
-        cmd = general_seen[name]
-        desc = (cmd.spec.description
-                if cmd.spec.description is not None else "(no description)")
+        desc = _described(general_seen[name].spec.description)
         lines.append(f"- {name} \u2014 {desc}")
     return "\n".join(lines) + "\n"
 

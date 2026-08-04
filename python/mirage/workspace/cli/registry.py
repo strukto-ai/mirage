@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec import SPECS
 from mirage.workspace.cli.types import CLIInstall
-from mirage.workspace.names import (JOB_BUILTINS, NAMESPACE_COMMANDS,
+from mirage.workspace.names import (JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS,
                                     SHELL_NAMES)
 
 
@@ -68,6 +68,10 @@ class CLIRegistry:
         if name in SHELL_NAMES or name in JOB_BUILTINS:
             raise ValueError(f"CLI name {name!r} collides with a shell "
                              f"builtin")
+        # A reserved word never reaches dispatch (the parser consumes it),
+        # so an install under one would be unreachable rather than wrong.
+        if name in KEYWORDS:
+            raise ValueError(f"CLI name {name!r} is a shell keyword")
         if name in NAMESPACE_COMMANDS or name in SPECS:
             raise ValueError(f"CLI name {name!r} collides with a general "
                              f"command")

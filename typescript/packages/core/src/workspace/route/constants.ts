@@ -28,6 +28,36 @@ export const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
 
 export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set(['ln', 'readlink'])
 
+// bash reserved words that mirage's grammar implements. The parser, not
+// the executor, consumes them, so they never reach route; `type` reports
+// them and the CLI registry refuses them as head words. bash's `time`
+// and `coproc` are left out on purpose: mirage implements neither
+// construct, so a line starting with one reports `command not found`,
+// and `type` may not contradict what dispatch does. Add a word back when
+// its construct lands.
+export const KEYWORDS: ReadonlySet<string> = new Set([
+  'if',
+  'then',
+  'else',
+  'elif',
+  'fi',
+  'case',
+  'esac',
+  'for',
+  'select',
+  'while',
+  'until',
+  'do',
+  'done',
+  'in',
+  'function',
+  '{',
+  '}',
+  '!',
+  '[[',
+  ']]',
+])
+
 // ShellBuiltin subset handled through the job table in the executor.
 export const JOB_BUILTINS: ReadonlySet<string> = new Set(['wait', 'fg', 'kill', 'jobs', 'ps'])
 
