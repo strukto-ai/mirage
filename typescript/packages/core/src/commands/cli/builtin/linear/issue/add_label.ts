@@ -19,7 +19,7 @@ import { IOResult } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIVerbOpts } from '../../../types.ts'
-import { firstText, linearTransport, resolveIssue } from '../util.ts'
+import { firstText, linearTransport, resolveIssue, resolveLabelId } from '../util.ts'
 
 export async function addLabel(
   config: unknown,
@@ -30,8 +30,12 @@ export async function addLabel(
   const fl = new FlagView(opts.flags)
   const transport = linearTransport(config)
   const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
-  const labelId = fl.asStr('label') ?? ''
   const issue = await getIssue(transport, issueId)
+  const team = issue.team
+  const rawTeamId =
+    team !== null && typeof team === 'object' ? (team as Record<string, unknown>).id : undefined
+  const teamId = typeof rawTeamId === 'string' ? rawTeamId : ''
+  const labelId = await resolveLabelId(transport, teamId, fl.asStr('label'), fl.asStr('label_name'))
   const labels = issue.labels
   const nodes =
     labels !== null && typeof labels === 'object'

@@ -61,8 +61,8 @@ linear issue update ENG-42 --title "New title"
 linear issue assign ENG-42 --assignee-email user@example.com
 linear issue transition ENG-42 --state-name "In Review"
 linear issue set-priority ENG-42 --priority 2
-linear issue set-project ENG-42 --project <project-id>
-linear issue add-label ENG-42 --label <label-id>
+linear issue set-project ENG-42 --project-name "Search"
+linear issue add-label ENG-42 --label-name "bug"
 linear comment add ENG-42 --body "comment"
 linear comment update --comment <comment-id> --body "edited"
 ```
@@ -74,7 +74,8 @@ linear comment update --comment <comment-id> --body "edited"
 | `issue assign`         | `--assignee-email` or `--assignee-id`          |
 | `issue transition`     | `--state-name` or `--state-id`                 |
 | `issue set-priority`   | `--priority 0..4` (0=none, 1=urgent, ... 4=low) |
-| `issue add-label`      | Appends to the issue's existing labels         |
+| `issue set-project`    | `--project-name` or `--project` (ID)           |
+| `issue add-label`      | `--label-name` or `--label` (ID); appends to the issue's existing labels |
 
 Descriptions and comment bodies also read from stdin:
 `echo "body" | linear comment add ENG-42`.

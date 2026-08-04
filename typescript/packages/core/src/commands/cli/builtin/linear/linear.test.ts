@@ -20,7 +20,9 @@ import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { CLIVerbOpts } from '../../types.ts'
 import { LINEAR } from './index.ts'
+import { addLabel } from './issue/add_label.ts'
 import { create } from './issue/create.ts'
+import { setProject } from './issue/set_project.ts'
 import * as reads from './reads.ts'
 
 const DEC = new TextDecoder()
@@ -143,6 +145,57 @@ describe('linear verbs', () => {
       input: { title: 'Title', teamId: 'team-1', description: 'body from stdin' },
     })
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toMatchObject({ issue_key: 'ENG-9' })
+  })
+
+  it('add-label resolves a label name on the issue team', async () => {
+    GRAPHQL.length = 0
+    RESPONDER = (query) => {
+      if (query.includes('issueUpdate')) return { issueUpdate: { success: true } }
+      if (query.includes('IssueLookup')) return { issues: { nodes: [{ id: 'i-1' }] } }
+      if (query.includes('TeamLabels')) {
+        return {
+          team: { labels: { nodes: [{ id: 'lbl-bug', name: 'bug' }], pageInfo: NO_MORE } },
+        }
+      }
+      return {
+        issue: {
+          id: 'i-1',
+          identifier: 'ENG-42',
+          team: { id: 'team-1' },
+          labels: { nodes: [{ id: 'lbl-old' }] },
+        },
+      }
+    }
+    await addLabel({ apiKey: 'k' }, [], ['ENG-42'], makeOpts({ label_name: 'bug' }))
+    const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
+    expect(update?.variables).toEqual({
+      id: 'i-1',
+      input: { labelIds: ['lbl-old', 'lbl-bug'] },
+    })
+    const labelsCall = GRAPHQL.find((c) => c.query.includes('TeamLabels'))
+    expect(labelsCall?.variables).toMatchObject({ teamId: 'team-1' })
+  })
+
+  it('set-project resolves a project name on the issue team', async () => {
+    GRAPHQL.length = 0
+    RESPONDER = (query) => {
+      if (query.includes('issueUpdate')) return { issueUpdate: { success: true } }
+      if (query.includes('IssueLookup')) return { issues: { nodes: [{ id: 'i-1' }] } }
+      if (query.includes('TeamProjects')) {
+        return {
+          team: {
+            projects: { nodes: [{ id: 'prj-search', name: 'Search' }], pageInfo: NO_MORE },
+          },
+        }
+      }
+      return { issue: { id: 'i-1', identifier: 'ENG-42', team: { id: 'team-1' } } }
+    }
+    await setProject({ apiKey: 'k' }, [], ['ENG-42'], makeOpts({ project_name: 'Search' }))
+    const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
+    expect(update?.variables).toEqual({
+      id: 'i-1',
+      input: { projectId: 'prj-search' },
+    })
   })
 
   it('search takes the flag or the operand', async () => {

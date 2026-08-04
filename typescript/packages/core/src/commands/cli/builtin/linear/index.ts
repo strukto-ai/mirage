@@ -154,7 +154,14 @@ export const LINEAR = new CLISpec({
           fn: setProject,
           write: true,
           rest: ARG,
-          options: [new Option({ long: '--project', type: 'str', required: true })],
+          options: [
+            new Option({ long: '--project', type: 'str', description: 'Project ID' }),
+            new Option({
+              long: '--project-name',
+              type: 'str',
+              description: "Project name, looked up on the issue's team",
+            }),
+          ],
         }),
         new CLISpec({
           name: 'add-label',
@@ -162,7 +169,14 @@ export const LINEAR = new CLISpec({
           fn: addLabel,
           write: true,
           rest: ARG,
-          options: [new Option({ long: '--label', type: 'str', required: true })],
+          options: [
+            new Option({ long: '--label', type: 'str', description: 'Label ID' }),
+            new Option({
+              long: '--label-name',
+              type: 'str',
+              description: "Label name, looked up on the issue's team",
+            }),
+          ],
         }),
       ],
     }),

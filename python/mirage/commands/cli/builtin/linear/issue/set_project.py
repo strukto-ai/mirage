@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.linear.util import first_text, resolve_issue
+from mirage.commands.cli.builtin.linear.util import (first_text, resolve_issue,
+                                                     resolve_project_id)
 from mirage.commands.spec.types import FlagView
-from mirage.core.linear._client import issue_update
+from mirage.core.linear._client import get_issue, issue_update
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_issue, to_json_bytes
 from mirage.io.stream import yield_bytes
@@ -30,9 +31,15 @@ async def set_project(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags)
     issue_id = await resolve_issue(config, first_text(texts, "issue key"))
-    issue = await issue_update(config,
-                               issue_id=issue_id,
-                               title=None,
-                               description=None,
-                               project_id=fl.as_str("project") or "")
-    return yield_bytes(to_json_bytes(normalize_issue(issue))), IOResult()
+    project_id = fl.as_str("project")
+    if not project_id:
+        issue = await get_issue(config, issue_id)
+        team_id = (issue.get("team") or {}).get("id") or ""
+        project_id = await resolve_project_id(config, team_id, None,
+                                              fl.as_str("project_name"))
+    updated = await issue_update(config,
+                                 issue_id=issue_id,
+                                 title=None,
+                                 description=None,
+                                 project_id=project_id)
+    return yield_bytes(to_json_bytes(normalize_issue(updated))), IOResult()

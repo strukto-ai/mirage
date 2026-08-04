@@ -376,6 +376,32 @@
         "stdout": "edited by cli\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ln_cli_issue_add_label_by_name",
+      "seq": 567112,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue add-label PLAT-1 --label-name bug | jq -r '.label_names | join(\",\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "feature,bug\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_set_project_by_name",
+      "seq": 567113,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue set-project PLAT-2 --project-name Search | jq -r '.project_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Search\n",
+        "stderr": ""
+      }
     }
   ]
 }

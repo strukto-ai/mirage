@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { issueUpdate } from '../../../../../core/linear/_client.ts'
+import { getIssue, issueUpdate } from '../../../../../core/linear/_client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/types.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIVerbOpts } from '../../../types.ts'
-import { firstText, linearTransport, resolveIssue } from '../util.ts'
+import { firstText, linearTransport, resolveIssue, resolveProjectId } from '../util.ts'
 
 export async function setProject(
   config: unknown,
@@ -30,9 +30,15 @@ export async function setProject(
   const fl = new FlagView(opts.flags)
   const transport = linearTransport(config)
   const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
-  const issue = await issueUpdate(transport, {
-    issueId,
-    projectId: fl.asStr('project') ?? '',
-  })
-  return [toJsonBytes(normalizeIssue(issue)), new IOResult()]
+  let projectId = fl.asStr('project')
+  if (projectId === undefined || projectId === '') {
+    const issue = await getIssue(transport, issueId)
+    const team = issue.team
+    const rawTeamId =
+      team !== null && typeof team === 'object' ? (team as Record<string, unknown>).id : undefined
+    const teamId = typeof rawTeamId === 'string' ? rawTeamId : ''
+    projectId = await resolveProjectId(transport, teamId, null, fl.asStr('project_name'))
+  }
+  const updated = await issueUpdate(transport, { issueId, projectId })
+  return [toJsonBytes(normalizeIssue(updated)), new IOResult()]
 }

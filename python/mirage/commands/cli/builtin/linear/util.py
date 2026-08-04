@@ -14,7 +14,8 @@
 
 import re
 
-from mirage.core.linear._client import list_teams, resolve_issue_id
+from mirage.core.linear._client import (list_team_labels, list_team_projects,
+                                        list_teams, resolve_issue_id)
 from mirage.core.linear.config import LinearConfig
 from mirage.io.types import ByteSource
 
@@ -67,6 +68,60 @@ async def resolve_state_id(
             if state.get("name") == state_name:
                 return state["id"]
     raise FileNotFoundError(state_name)
+
+
+async def resolve_label_id(
+    config: LinearConfig,
+    team_id: str,
+    label_id: str | None,
+    label_name: str | None,
+) -> str:
+    """Resolve a label from its ID or its display name.
+
+    Args:
+        config (LinearConfig): Linear credentials.
+        team_id (str): the issue's team, scoping the name lookup.
+        label_id (str | None): label ID, taken verbatim.
+        label_name (str | None): label name, looked up on the team.
+
+    Returns:
+        str: the label's ID.
+    """
+    if label_id:
+        return label_id
+    if not label_name:
+        raise ValueError("--label or --label-name is required")
+    for label in await list_team_labels(config, team_id):
+        if label.get("name") == label_name:
+            return label["id"]
+    raise FileNotFoundError(label_name)
+
+
+async def resolve_project_id(
+    config: LinearConfig,
+    team_id: str,
+    project_id: str | None,
+    project_name: str | None,
+) -> str:
+    """Resolve a project from its ID or its display name.
+
+    Args:
+        config (LinearConfig): Linear credentials.
+        team_id (str): the issue's team, scoping the name lookup.
+        project_id (str | None): project ID, taken verbatim.
+        project_name (str | None): project name, looked up on the team.
+
+    Returns:
+        str: the project's ID.
+    """
+    if project_id:
+        return project_id
+    if not project_name:
+        raise ValueError("--project or --project-name is required")
+    for project in await list_team_projects(config, team_id):
+        if project.get("name") == project_name:
+            return project["id"]
+    raise FileNotFoundError(project_name)
 
 
 async def text_or_stdin(

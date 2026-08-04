@@ -151,9 +151,15 @@ LINEAR = CLISpec(
                     fn=set_project,
                     write=True,
                     rest=ARG,
-                    options=(Option(long="--project",
-                                    type="str",
-                                    required=True), ),
+                    options=(
+                        Option(long="--project",
+                               type="str",
+                               description="Project ID"),
+                        Option(long="--project-name",
+                               type="str",
+                               description="Project name, looked up on "
+                               "the issue's team"),
+                    ),
                 ),
                 CLISpec(
                     name="add-label",
@@ -161,8 +167,15 @@ LINEAR = CLISpec(
                     fn=add_label,
                     write=True,
                     rest=ARG,
-                    options=(Option(long="--label", type="str",
-                                    required=True), ),
+                    options=(
+                        Option(long="--label",
+                               type="str",
+                               description="Label ID"),
+                        Option(long="--label-name",
+                               type="str",
+                               description="Label name, looked up on "
+                               "the issue's team"),
+                    ),
                 ),
             ),
         ),

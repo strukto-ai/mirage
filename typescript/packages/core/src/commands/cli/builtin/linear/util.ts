@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HttpLinearTransport, resolveIssueId, listTeams } from '../../../../core/linear/_client.ts'
+import {
+  HttpLinearTransport,
+  resolveIssueId,
+  listTeams,
+  listTeamLabels,
+  listTeamProjects,
+} from '../../../../core/linear/_client.ts'
 import type { LinearTransport } from '../../../../core/linear/_client.ts'
 import type { LinearConfig } from '../../../../core/linear/config.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
@@ -61,6 +67,38 @@ export async function resolveStateId(
     }
   }
   throw enoent(stateName)
+}
+
+export async function resolveLabelId(
+  transport: LinearTransport,
+  teamId: string,
+  labelId: string | null | undefined,
+  labelName: string | null | undefined,
+): Promise<string> {
+  if (labelId !== undefined && labelId !== null && labelId !== '') return labelId
+  if (labelName === undefined || labelName === null || labelName === '') {
+    throw new Error('--label or --label-name is required')
+  }
+  for (const label of await listTeamLabels(transport, teamId)) {
+    if (label.name === labelName && typeof label.id === 'string') return label.id
+  }
+  throw enoent(labelName)
+}
+
+export async function resolveProjectId(
+  transport: LinearTransport,
+  teamId: string,
+  projectId: string | null | undefined,
+  projectName: string | null | undefined,
+): Promise<string> {
+  if (projectId !== undefined && projectId !== null && projectId !== '') return projectId
+  if (projectName === undefined || projectName === null || projectName === '') {
+    throw new Error('--project or --project-name is required')
+  }
+  for (const project of await listTeamProjects(transport, teamId)) {
+    if (project.name === projectName && typeof project.id === 'string') return project.id
+  }
+  throw enoent(projectName)
 }
 
 export async function textOrStdin(
