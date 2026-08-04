@@ -14,13 +14,12 @@
 
 import {
   BaseResource,
-  DISCORD_API,
   DISCORD_COMMANDS,
   DISCORD_PROMPT,
   DISCORD_OPS,
   DISCORD_WRITE_PROMPT,
   DiscordAccessor,
-  HttpDiscordTransport,
+  NodeDiscordTransport,
   PathSpec,
   ResourceName,
   discordRead,
@@ -34,26 +33,13 @@ import {
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
-import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } from './config.ts'
+import {
+  redactDiscordConfig,
+  type DiscordConfig,
+  type DiscordConfigRedacted,
+} from '@struktoai/mirage-core'
 
 const resolveDiscordGlob = makeResolveGlob(discordReaddir)
-
-class NodeDiscordTransport extends HttpDiscordTransport {
-  constructor(
-    private readonly token: string,
-    private readonly base?: string,
-  ) {
-    super()
-  }
-  // base exists so the integ fake can stand in for discord.com; every
-  // request must go through it, not the module constant.
-  protected baseUrl(): string {
-    return this.base ?? DISCORD_API
-  }
-  protected authHeaders(): Record<string, string> {
-    return { Authorization: `Bot ${this.token}` }
-  }
-}
 
 export interface DiscordResourceState {
   type: string

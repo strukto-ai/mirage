@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   await show('man cat', 'man cat')
   await show('man find', 'man find')
   await show('man grep', 'man grep')
-  await show('man slack-post-message (slack-only)', 'man slack-post-message')
+  await show('man rg (slack override)', 'man rg')
   await show('man date (general only)', 'man date')
 
   await ws.close()

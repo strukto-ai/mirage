@@ -15,8 +15,8 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
-from mirage.resource.slack.config import SlackConfig
 
 
 def _channel_base_params(types: str, limit: int) -> dict[str, Any]:

@@ -1,0 +1,106 @@
+---
+title: himalaya
+description: IMAP/SMTP mail client following the pimalaya/himalaya vocabulary.
+icon: terminal
+---
+
+IMAP/SMTP mail client following the pimalaya/himalaya vocabulary. Install it on the workspace and the whole tree is
+discoverable with `himalaya --help`.
+
+## Install
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.himalaya import HIMALAYA
+from mirage.core.email.config import EmailConfig
+from mirage.resource.email import EmailResource
+
+config = EmailConfig(
+    imap_host="imap.example.com",
+    smtp_host="smtp.example.com",
+    username="agent@example.com",
+    password="app-password",
+)
+ws = Workspace({"/mail": EmailResource(config)})
+ws.register_cli("himalaya", HIMALAYA, config.model_dump())
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+
+## Verbs
+
+The verbs follow the [himalaya](https://github.com/pimalaya/himalaya)
+CLI structure (`himalaya envelope ...`, `himalaya message ...`) and
+return JSON rather than opening an interactive editor.
+
+### `himalaya envelope list`
+
+List and triage messages in a folder.
+
+```bash
+himalaya envelope list --folder INBOX --unseen --max 10
+```
+
+| Option      | Required | Description                       |
+| ----------- | -------- | --------------------------------- |
+| `--folder`  | no       | IMAP folder (default: INBOX)      |
+| `--max`     | no       | Max results (default: 20)         |
+| `--unseen`  | no       | Only show unread messages         |
+| `--subject` | no       | Filter by subject text            |
+| `--from`    | no       | Filter by sender                  |
+| `--to`      | no       | Filter by recipient               |
+| `--body`    | no       | Filter by body text               |
+| `--since`   | no       | Only messages since this date     |
+| `--before`  | no       | Only messages before this date    |
+
+### `himalaya message read`
+
+```bash
+himalaya message read --uid 12345 --folder INBOX
+```
+
+| Option     | Required | Description |
+| ---------- | -------- | ----------- |
+| `--uid`    | yes      | Message UID |
+| `--folder` | yes      | IMAP folder |
+
+### `himalaya message send`
+
+```bash
+himalaya message send --to "user@example.com" --subject "Hello" --body "Hi there"
+```
+
+| Option      | Required | Description             |
+| ----------- | -------- | ----------------------- |
+| `--to`      | yes      | Recipient email address |
+| `--subject` | yes      | Email subject line      |
+| `--body`    | yes      | Email body text         |
+
+### `himalaya message reply`
+
+Pass `--all` to reply to every recipient (To and CC).
+
+```bash
+himalaya message reply --uid 12345 --folder INBOX --body "Thanks for the update"
+himalaya message reply --uid 12345 --folder INBOX --body "Acknowledged" --all
+```
+
+| Option     | Required | Description                       |
+| ---------- | -------- | --------------------------------- |
+| `--uid`    | yes      | Message UID                       |
+| `--folder` | yes      | IMAP folder                       |
+| `--body`   | yes      | Reply body text                   |
+| `--all`    | no       | Reply to all recipients (To + CC) |
+
+### `himalaya message forward`
+
+```bash
+himalaya message forward --uid 12345 --folder INBOX --to "colleague@example.com"
+```
+
+| Option     | Required | Description             |
+| ---------- | -------- | ----------------------- |
+| `--uid`    | yes      | Message UID             |
+| `--folder` | yes      | IMAP folder             |
+| `--to`     | yes      | Recipient email address |

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.linear.config import LinearConfig
+from mirage.core.linear.config import LinearConfig
 
 __all__ = ["LinearConfig", "LinearResource"]
 

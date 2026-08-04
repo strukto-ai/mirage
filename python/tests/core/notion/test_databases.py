@@ -21,11 +21,11 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.notion import read as notion_read
 from mirage.core.notion import readdir as notion_readdir
 from mirage.core.notion import stat as notion_stat
+from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import normalize_database, to_json_bytes
 from mirage.core.notion.read import read
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
-from mirage.resource.notion.config import NotionConfig
 from mirage.types import FileType, PathSpec
 
 DATABASE_ID = "db123"

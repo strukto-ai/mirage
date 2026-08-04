@@ -230,6 +230,70 @@ export function startMockServer(): Promise<{ server: Server; port: number }> {
         req.method === "POST" &&
         parts.length === 2 &&
         parts[0] === "v1" &&
+        parts[1] === "pages"
+      ) {
+        // Echo-only create: stored state stays untouched so listing
+        // goldens elsewhere in the scenario are unaffected.
+        sendJson({
+          object: "page",
+          id: "page_cli_created",
+          parent: (body.parent as Json | undefined) ?? {},
+          properties: (body.properties as Json | undefined) ?? {},
+          archived: false,
+          in_trash: false,
+          url: "https://www.notion.so/page_cli_created",
+        });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        parts.length === 2 &&
+        parts[0] === "v1" &&
+        parts[1] === "comments"
+      ) {
+        sendJson({
+          object: "comment",
+          id: "comment_cli_created",
+          parent: (body.parent as Json | undefined) ?? {},
+          rich_text: (body.rich_text as unknown[] | undefined) ?? [],
+        });
+        return;
+      }
+      if (
+        req.method === "PATCH" &&
+        parts.length === 3 &&
+        parts[0] === "v1" &&
+        parts[1] === "pages"
+      ) {
+        const found = PAGES[parts[2] ?? ""] ?? ROW_PAGES[parts[2] ?? ""];
+        if (found !== undefined) {
+          const updated: Json = { ...found };
+          for (const key of ["archived", "in_trash", "properties", "icon"]) {
+            if (key in body) updated[key] = body[key];
+          }
+          sendJson(updated);
+          return;
+        }
+      }
+      if (
+        req.method === "PATCH" &&
+        parts.length === 4 &&
+        parts[0] === "v1" &&
+        parts[1] === "blocks" &&
+        parts[3] === "children"
+      ) {
+        sendJson({
+          object: "list",
+          results: (body.children as unknown[] | undefined) ?? [],
+          has_more: false,
+          next_cursor: null,
+        });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        parts.length === 2 &&
+        parts[0] === "v1" &&
         parts[1] === "search"
       ) {
         sendJson({

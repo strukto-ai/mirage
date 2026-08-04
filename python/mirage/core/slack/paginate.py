@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.core.slack._client import slack_get
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 
 
 async def cursor_pages(

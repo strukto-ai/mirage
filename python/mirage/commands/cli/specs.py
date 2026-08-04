@@ -25,8 +25,12 @@ CLI_SPECS: dict[str, CLISpec] = {}
 # the modules pull optional extras (himalaya needs the email stack), so
 # they must not import until the name is actually requested.
 BUILTIN_CLI_SPECS: dict[str, str] = {
+    "discord": "mirage.commands.cli.builtin.discord:DISCORD",
     "gws": "mirage.commands.cli.builtin.gws:GWS",
     "himalaya": "mirage.commands.cli.builtin.himalaya:HIMALAYA",
+    "linear": "mirage.commands.cli.builtin.linear:LINEAR",
+    "ntn": "mirage.commands.cli.builtin.ntn:NTN",
+    "slack": "mirage.commands.cli.builtin.slack:SLACK",
 }
 
 

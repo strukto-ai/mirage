@@ -17,7 +17,7 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.commands.builtin.slack.io import resolve_glob
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 

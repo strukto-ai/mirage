@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 from mirage.resource.slack.slack import SlackResource
 from mirage.types import ResourceName
 
@@ -42,6 +42,7 @@ def test_resource_accessor(config):
 
 def test_resource_commands_registered(config):
     resource = SlackResource(config)
-    # 58 native (generic factory read set incl. find and sed + bespoke
-    # grep/rg + slack_* writers + md5sum/sha1sum/sha384sum/sha512sum)
-    assert len(resource._commands) == 58
+    # 52 native (generic factory read set incl. find and sed + bespoke
+    # grep/rg + md5sum/sha1sum/sha384sum/sha512sum); acting on Slack
+    # moved to the slack CLI
+    assert len(resource._commands) == 52

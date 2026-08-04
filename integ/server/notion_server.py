@@ -260,6 +260,27 @@ class NotionMockHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parts = self.path.split("?")[0].strip("/").split("/")
         body = self._read_body()
+        if len(parts) == 2 and parts[0] == "v1" and parts[1] == "pages":
+            # Echo-only create: stored state stays untouched so listing
+            # goldens elsewhere in the scenario are unaffected.
+            self._send_json({
+                "object": "page",
+                "id": "page_cli_created",
+                "parent": body.get("parent", {}),
+                "properties": body.get("properties", {}),
+                "archived": False,
+                "in_trash": False,
+                "url": "https://www.notion.so/page_cli_created",
+            })
+            return
+        if len(parts) == 2 and parts[0] == "v1" and parts[1] == "comments":
+            self._send_json({
+                "object": "comment",
+                "id": "comment_cli_created",
+                "parent": body.get("parent", {}),
+                "rich_text": body.get("rich_text", []),
+            })
+            return
         if len(parts) == 2 and parts[0] == "v1" and parts[1] == "search":
             is_database = body.get("filter", {}).get("value") == "database"
             results = (list(DATABASES.values())
@@ -276,6 +297,30 @@ class NotionMockHandler(BaseHTTPRequestHandler):
             self._send_json({
                 "object": "list",
                 "results": DB_ROWS.get(parts[2], []),
+                "has_more": False,
+                "next_cursor": None,
+            })
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_PATCH(self) -> None:
+        parts = self.path.split("?")[0].strip("/").split("/")
+        body = self._read_body()
+        if len(parts) == 3 and parts[0] == "v1" and parts[1] == "pages":
+            page = PAGES.get(parts[2]) or ROW_PAGES.get(parts[2])
+            if page is not None:
+                updated = dict(page)
+                for key in ("archived", "in_trash", "properties", "icon"):
+                    if key in body:
+                        updated[key] = body[key]
+                self._send_json(updated)
+                return
+        if (len(parts) == 4 and parts[0] == "v1" and parts[1] == "blocks"
+                and parts[3] == "children"):
+            self._send_json({
+                "object": "list",
+                "results": body.get("children", []),
                 "has_more": False,
                 "next_cursor": None,
             })

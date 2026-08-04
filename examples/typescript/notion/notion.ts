@@ -15,6 +15,7 @@
 import { basename, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
+import { NTN } from '@struktoai/mirage-core'
 import { MountMode, NotionResource, Workspace, type FileStat, type NotionConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
@@ -136,7 +137,7 @@ async function exploreCrossCutting(ws: Workspace): Promise<void> {
   console.log('\n########## CROSS-CUTTING ##########\n')
   await run(ws, 'ls /notion/')
   await run(ws, 'tree -L 2 /notion/')
-  await run(ws, 'notion-search --query a', 800)
+  await run(ws, 'ntn search --query a', 800)
   await run(ws, 'grep -rl "page_id" /notion/pages/', 800)
   await run(ws, 'rg -c "title" /notion/databases/', 800)
 }
@@ -146,6 +147,7 @@ async function main(): Promise<void> {
     { '/notion': new NotionResource(buildConfig()) },
     { mode: MountMode.READ },
   )
+  ws.registerCli('ntn', NTN, buildConfig() as unknown as Record<string, unknown>)
   try {
     await explorePages(ws)
     await exploreDatabases(ws)

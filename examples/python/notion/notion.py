@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.ntn import NTN
 from mirage.resource.notion import NotionConfig, NotionResource
 from mirage.types import PathSpec
 
@@ -135,13 +136,14 @@ async def explore_cross_cutting(ws: Workspace) -> None:
     print("\n########## CROSS-CUTTING ##########\n")
     await run(ws, "ls /notion/")
     await run(ws, "tree -L 2 /notion/")
-    await run(ws, "notion-search --query a", limit=800)
+    await run(ws, "ntn search --query a", limit=800)
     await run(ws, 'grep -rl "page_id" /notion/pages/', limit=800)
     await run(ws, 'rg -c "title" /notion/databases/', limit=800)
 
 
 async def main() -> None:
     ws = Workspace({"/notion": resource}, mode=MountMode.READ)
+    ws.register_cli("ntn", NTN, config.model_dump())
     await explore_pages(ws)
     await explore_databases(ws)
     await explore_cross_cutting(ws)

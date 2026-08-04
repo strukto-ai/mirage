@@ -16,8 +16,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.core.discord._client import discord_get
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
-from mirage.resource.discord.config import DiscordConfig
 
 
 def _member_user_id(m: dict[str, Any]) -> str:

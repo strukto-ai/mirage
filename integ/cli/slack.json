@@ -1,0 +1,202 @@
+{
+  "cases": [
+    {
+      "id": "sl_help_head",
+      "seq": 564000,
+      "targets": ["cli-slack"],
+      "command": "slack --help | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "slack: Slack Web API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_unknown_verb",
+      "seq": 564001,
+      "targets": ["cli-slack"],
+      "command": "slack frobnicate",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "slack: 'frobnicate' is not a slack command. See 'slack --help'.\n"
+      }
+    },
+    {
+      "id": "sl_missing_required",
+      "seq": 564002,
+      "targets": ["cli-slack"],
+      "command": "slack send-message --text hi",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "slack send-message: option '--channel' is required\nTry 'slack send-message --help' for more information.\n"
+      }
+    },
+    {
+      "id": "sl_member_info",
+      "seq": 564003,
+      "targets": ["cli-slack"],
+      "command": "slack member-info --user U8",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":\"U8\",\"name\":\"marcus\",\"real_name\":\"Marcus Webb\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Marcus Webb\",\"display_name\":\"marcus\",\"email\":\"marcus@kestrel.example.com\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_list_members_query",
+      "seq": 564004,
+      "targets": ["cli-slack"],
+      "command": "slack list-members --query priya",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"id\":\"U7\",\"name\":\"priya\",\"real_name\":\"Priya Nair\",\"is_bot\":false,\"deleted\":false,\"profile\":{\"real_name\":\"Priya Nair\",\"display_name\":\"priya\",\"email\":\"priya@kestrel.example.com\"}}]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_list_members_deleted",
+      "seq": 564005,
+      "targets": ["cli-slack"],
+      "command": "slack list-members --query iris",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_read_messages",
+      "seq": 564006,
+      "targets": ["cli-slack"],
+      "command": "slack read-messages --channel C1 --limit 2 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_reactions",
+      "seq": 564007,
+      "targets": ["cli-slack"],
+      "command": "slack reactions --channel C1 --ts 1763394838.000142 | jq -c '[.reactions[].name]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"tada\",\"clap\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_react",
+      "seq": 564008,
+      "targets": ["cli-slack"],
+      "command": "slack react --channel C1 --ts 1766165985.000426 --emoji eyes",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_react_missing",
+      "seq": 564009,
+      "targets": ["cli-slack"],
+      "command": "slack react --channel C1 --ts 9999.9999 --emoji shrug 2>/dev/null; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_pin_message",
+      "seq": 564010,
+      "targets": ["cli-slack"],
+      "command": "slack pin-message --channel C1 --ts 1766165985.000426",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_list_pins",
+      "seq": 564011,
+      "targets": ["cli-slack"],
+      "command": "slack list-pins --channel C1 | jq -r '.[0].message.ts'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1766165985.000426\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_unpin_message",
+      "seq": 564012,
+      "targets": ["cli-slack"],
+      "command": "slack unpin-message --channel C1 --ts 1766165985.000426 && slack list-pins --channel C1",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}[]",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_emoji_list",
+      "seq": 564013,
+      "targets": ["cli-slack"],
+      "command": "slack emoji-list",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"shipit\":\"https://emoji.example/shipit.png\",\"partyparrot\":\"alias:parrot\"}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_send_message",
+      "seq": 564014,
+      "targets": ["cli-slack"],
+      "command": "slack send-message --channel C1 --text shipping",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000001\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"shipping\",\"ts\":\"1775000000.000001\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_send_thread_reply",
+      "seq": 564015,
+      "targets": ["cli-slack"],
+      "command": "slack send-message --channel C1 --thread-ts 1766165985.000426 --text acknowledged",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true,\"channel\":\"C1\",\"ts\":\"1775000000.000002\",\"message\":{\"type\":\"message\",\"user\":\"UBOT\",\"text\":\"acknowledged\",\"ts\":\"1775000000.000002\",\"thread_ts\":\"1766165985.000426\"}}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_search",
+      "seq": 564016,
+      "targets": ["cli-slack"],
+      "command": "slack search --query 'from:@priya Quokka' | jq -r '.messages.matches[].ts'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1767691369.000536\n1767888155.000553\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_search_total",
+      "seq": 564017,
+      "targets": ["cli-slack"],
+      "command": "slack search --query Quokka | jq -r '.messages.total'",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

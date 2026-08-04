@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from mirage.resource.notion.config import NotionConfig
+from mirage.core.notion.config import NotionConfig
 from mirage.resource.notion.notion import NotionResource
 from mirage.types import PathSpec
 

@@ -85,7 +85,7 @@ export function pageSegmentName(page: Json): string {
   return formatSegment({ id: strOf(page, 'id'), title: pageContentTitle(page) })
 }
 
-export function pageContentTitle(page: Json): string {
+function pageContentTitle(page: Json): string {
   const properties = asObject(page.properties)
   for (const value of Object.values(properties)) {
     const prop = asObject(value)

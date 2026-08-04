@@ -17,8 +17,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.core.slack._client import slack_get
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
-from mirage.resource.slack.config import SlackConfig
 
 
 def _is_real_user(m: dict[str, Any]) -> bool:

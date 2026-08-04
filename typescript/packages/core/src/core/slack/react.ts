@@ -27,3 +27,18 @@ export async function addReaction(
     name: reaction,
   })
 }
+
+export async function getReactions(
+  accessor: SlackAccessor,
+  channelId: string,
+  timestamp: string,
+): Promise<Record<string, unknown>> {
+  const data = await accessor.transport.call('reactions.get', {
+    channel: channelId,
+    timestamp,
+  })
+  const message = data.message
+  return message !== null && typeof message === 'object' && !Array.isArray(message)
+    ? (message as Record<string, unknown>)
+    : {}
+}

@@ -15,9 +15,9 @@
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.readdir import readdir
 from mirage.resource.base import BaseResource
-from mirage.resource.discord.config import DiscordConfig
 from mirage.resource.discord.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
 from mirage.utils.glob_walk import make_resolve_glob

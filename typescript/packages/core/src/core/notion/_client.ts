@@ -175,6 +175,10 @@ function restCallFor(name: string, args: Record<string, unknown>): RestCall {
     const { block_id, ...rest } = args
     return { method: 'PATCH', path: `/blocks/${String(block_id)}/children`, body: rest }
   }
+  if (name === 'API-patch-page') {
+    const { page_id, ...rest } = args
+    return { method: 'PATCH', path: `/pages/${String(page_id)}`, body: rest }
+  }
   if (name === 'API-create-a-comment') {
     return { method: 'POST', path: '/comments', body: args }
   }

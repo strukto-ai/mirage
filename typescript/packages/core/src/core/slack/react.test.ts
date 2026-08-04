@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
-import { addReaction } from './react.ts'
+import { addReaction, getReactions } from './react.ts'
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string>; body?: unknown }[] =
@@ -38,5 +38,26 @@ describe('addReaction', () => {
     expect(t.calls[0]?.params).toBeUndefined()
     expect(t.calls[0]?.body).toEqual({ channel: 'C1', timestamp: '1.0', name: 'thumbsup' })
     expect(out).toMatchObject({ ok: true })
+  })
+})
+
+class ReactionsFake {
+  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
+  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
+    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
+    return Promise.resolve({
+      ok: true,
+      message: { ts: '1.0', reactions: [{ name: 'shipit', count: 2 }] },
+    })
+  }
+}
+
+describe('getReactions', () => {
+  it('GETs reactions.get and returns the message item', async () => {
+    const t = new ReactionsFake()
+    const message = await getReactions(new SlackAccessor(t as SlackTransport), 'C1', '1.0')
+    expect(t.calls[0]?.endpoint).toBe('reactions.get')
+    expect(t.calls[0]?.params).toEqual({ channel: 'C1', timestamp: '1.0' })
+    expect(message).toEqual({ ts: '1.0', reactions: [{ name: 'shipit', count: 2 }] })
   })
 })

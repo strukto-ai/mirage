@@ -19,8 +19,8 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.readdir import _date_range, readdir
-from mirage.resource.slack.config import SlackConfig
 from mirage.types import PathSpec
 
 

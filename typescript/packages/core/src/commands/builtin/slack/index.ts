@@ -20,12 +20,6 @@ import { metadataProvision } from './_provision.ts'
 import { SLACK_GREP } from './grep.ts'
 import { SLACK_IO } from './io.ts'
 import { SLACK_RG } from './rg.ts'
-import { SLACK_ADD_REACTION } from './slack_add_reaction.ts'
-import { SLACK_GET_USER_PROFILE } from './slack_get_user_profile.ts'
-import { SLACK_GET_USERS } from './slack_get_users.ts'
-import { SLACK_POST_MESSAGE } from './slack_post_message.ts'
-import { SLACK_REPLY_TO_THREAD } from './slack_reply_to_thread.ts'
-import { SLACK_SEARCH } from './slack_search.ts'
 
 const SLACK_OVERRIDES = new Set(['grep', 'rg'])
 
@@ -38,10 +32,4 @@ export const SLACK_COMMANDS: readonly RegisteredCommand[] = [
   }),
   ...SLACK_GREP,
   ...SLACK_RG,
-  ...SLACK_POST_MESSAGE,
-  ...SLACK_REPLY_TO_THREAD,
-  ...SLACK_ADD_REACTION,
-  ...SLACK_GET_USERS,
-  ...SLACK_GET_USER_PROFILE,
-  ...SLACK_SEARCH,
 ]

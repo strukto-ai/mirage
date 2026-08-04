@@ -15,7 +15,7 @@
 from urllib.parse import quote
 
 from mirage.core.discord._client import discord_put
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 
 
 async def add_reaction(

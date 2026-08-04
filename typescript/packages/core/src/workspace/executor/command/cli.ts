@@ -17,10 +17,15 @@ import { walk } from '../../../commands/cli/walk.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
+import { UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { wordText, type PathSpec } from '../../../types.ts'
 import { concatBytes } from '../../../core/jq/format.ts'
-import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
+import {
+  CommandTimeoutError,
+  maybeWithTimeout,
+  runWithTimeout,
+} from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -53,7 +58,11 @@ export async function handleCli(
   session: Session,
   stdin: ByteSource | null = null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
-  const words = parts.map((p) => (p instanceof PathSpec ? p.virtual : p))
+  // Words re-enter string space as typed (wordText): the walk owns
+  // interpretation, so a quoted "Lunch?" must not arrive as the
+  // glob-classified absolute /Lunch?. Leaf path operands are resolved
+  // later by parseFlags against the session cwd.
+  const words = parts.map((p) => wordText(p))
   const cmdStr = words.join(' ')
   const argv = words.slice(1)
 
@@ -124,15 +133,41 @@ export async function handleCli(
   // limits.
   const limit = resolveLimit(prog, [], leaf.limit)
   const timeout = limit?.timeoutSeconds ?? null
-  const out = await runWithTimeout(
-    Promise.resolve(fn(install.config, paths, texts, { stdin, flags })),
-    timeout,
-    prog,
-  )
   let stdout: ByteSource | null = null
   let io = new IOResult()
-  if (out !== null) {
-    ;[stdout, io] = out
+  try {
+    const out = await runWithTimeout(
+      Promise.resolve(fn(install.config, paths, texts, { stdin, flags })),
+      timeout,
+      prog,
+    )
+    if (out !== null) {
+      ;[stdout, io] = out
+    }
+  } catch (err) {
+    // Leaf-raised usage errors (a malformed --json) keep the bare
+    // message and exit 2, matching the refusal branch above.
+    if (err instanceof UsageError) {
+      const stderr = new TextEncoder().encode(`${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: err.exitCode, stderr }),
+        new ExecutionNode({ command: cmdStr, exitCode: err.exitCode, stderr }),
+      ]
+    }
+    // A limit timeout is answered by the workspace-level handler
+    // (exit 124), not here.
+    if (err instanceof CommandTimeoutError) throw err
+    // Any other thrown leaf error (an API error, a TypeError) becomes
+    // this command's IOResult, prefixed like GNU (prog: message), so
+    // the rest of the line keeps running.
+    const message = err instanceof Error ? err.message : String(err)
+    const stderr = new TextEncoder().encode(`${prog}: ${message}\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr }),
+      new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
+    ]
   }
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 

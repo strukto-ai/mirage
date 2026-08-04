@@ -76,7 +76,7 @@ Example:
 ```
 
 Directory names embed the Slack ID so that write commands
-(`slack-post-message --channel_id`, etc.) can reference the correct
+(`slack send-message --channel`, etc.) can reference the correct
 resource without extra lookups.
 
 ### Channels
@@ -201,8 +201,8 @@ jq -r '.[] | "\(.ts) [\(.user)] \(.text)"' \
 jq -r '.[] | select(.text | test("hello")) | .ts' \
   "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
 # → 1712345678.123456
-slack-reply-to-thread --channel_id C04KEPWF6V7 \
-  --ts 1712345678.123456 --text "Reply to hello"
+slack send-message --channel C04KEPWF6V7 \
+  --thread-ts 1712345678.123456 --text "Reply to hello"
 ```
 
 ## Working with Large Channels
@@ -245,96 +245,7 @@ Standard commands available on the mounted Slack tree:
 | `find`          | Recursive search with `-name`, `-maxdepth` |
 | `tree`          | Directory tree view                        |
 
-Resource-specific commands:
-
-### `slack-post-message`
-
-Post a message to a channel.
-
-```bash
-slack-post-message --channel_id C04KEPWF6V7 --text "Hello from MIRAGE"
-```
-
-| Option         | Required | Description          |
-| -------------- | -------- | -------------------- |
-| `--channel_id` | yes      | Slack channel ID     |
-| `--text`       | yes      | Message text to send |
-
-Returns the posted message JSON.
-
-### `slack-reply-to-thread`
-
-Reply to a specific thread.
-
-```bash
-slack-reply-to-thread --channel_id C04KEPWF6V7 --ts 1712345678.123456 --text "Thread reply"
-```
-
-| Option         | Required | Description             |
-| -------------- | -------- | ----------------------- |
-| `--channel_id` | yes      | Slack channel ID        |
-| `--ts`         | yes      | Thread parent timestamp |
-| `--text`       | yes      | Reply text              |
-
-The `--ts` value is the message timestamp (e.g., from a `.jsonl`
-entry's `ts` field). Returns the posted reply JSON.
-
-### `slack-add-reaction`
-
-Add an emoji reaction to a message.
-
-```bash
-slack-add-reaction --channel_id C04KEPWF6V7 --ts 1712345678.123456 --reaction thumbsup
-```
-
-| Option         | Required | Description                   |
-| -------------- | -------- | ----------------------------- |
-| `--channel_id` | yes      | Slack channel ID              |
-| `--ts`         | yes      | Message timestamp to react to |
-| `--reaction`   | yes      | Emoji name (without colons)   |
-
-### `slack-get-users`
-
-Search for users by name, real name, or email.
-
-```bash
-slack-get-users --query "alice"
-```
-
-| Option    | Required | Description  |
-| --------- | -------- | ------------ |
-| `--query` | yes      | Search query |
-
-Returns matching users as JSON array.
-
-### `slack-get-user-profile`
-
-Get a single user's full profile.
-
-```bash
-slack-get-user-profile --user_id U04K21SEVR9
-```
-
-| Option      | Required | Description   |
-| ----------- | -------- | ------------- |
-| `--user_id` | yes      | Slack user ID |
-
-Returns the user profile JSON. The user ID can be found in
-filenames under `/slack/users/` (e.g., `alice__U04K21SEVR9.json`).
-
-### `slack-search`
-
-Search messages across the workspace.
-
-This command requires `search_token`, a Slack User OAuth Token (`xoxp-...`)
-with the `search:read` scope. Bot tokens cannot call `search.messages`.
-
-```bash
-slack-search --query "incident report"
-```
-
-| Option    | Required | Description  |
-| --------- | -------- | ------------ |
-| `--query` | yes      | Search query |
-
-Returns search results as JSON.
+Acting on Slack (sending, reacting, pins, member info, search) goes
+through the [slack CLI](/python/cli/slack) when installed; the mounted
+tree stays read-oriented. The `<name>__<id>` path segments supply the
+channel and user IDs the CLI flags take.

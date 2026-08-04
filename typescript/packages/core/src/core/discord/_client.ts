@@ -15,7 +15,7 @@
 export const DISCORD_API = 'https://discord.com/api/v10'
 const MAX_RETRIES = 3
 
-export type DiscordMethod = 'GET' | 'POST' | 'PUT'
+export type DiscordMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type DiscordResponse = unknown
 
 export class DiscordApiError extends Error {
@@ -86,5 +86,22 @@ export abstract class HttpDiscordTransport implements DiscordTransport {
       return parsed
     }
     throw new DiscordApiError(endpoint, 429, 'rate_limited', last429Payload)
+  }
+}
+
+export class NodeDiscordTransport extends HttpDiscordTransport {
+  constructor(
+    private readonly token: string,
+    private readonly base?: string,
+  ) {
+    super()
+  }
+  // base exists so the integ fake can stand in for discord.com; every
+  // request must go through it, not the module constant.
+  protected baseUrl(): string {
+    return this.base ?? DISCORD_API
+  }
+  protected authHeaders(): Record<string, string> {
+    return { Authorization: `Bot ${this.token}` }
   }
 }

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 
 
 class SlackAccessor(Accessor):

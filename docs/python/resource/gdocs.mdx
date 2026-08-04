@@ -168,48 +168,5 @@ Standard commands available on the mounted Google Docs tree:
 | `basename` / `dirname` / `realpath` | Path utilities              |
 | `nl`                                | Number lines                |
 
-Resource-specific commands:
-
-### `gws docs documents create`
-
-Create a new Google Docs document.
-
-```bash
-gws docs documents create --json '{"title":"MIRAGE Example Doc"}'
-```
-
-| Option   | Required | Description                  |
-| -------- | -------- | ---------------------------- |
-| `--json` | yes      | JSON body with `title` field |
-
-Returns the created document JSON.
-
-### `gws docs documents batchUpdate`
-
-Batch update a document.
-
-```bash
-gws docs documents batchUpdate --params '{"documentId":"1AbCdEf"}' --json '{"requests":[]}'
-```
-
-| Option     | Required | Description                |
-| ---------- | -------- | -------------------------- |
-| `--params` | yes      | JSON with `documentId`     |
-| `--json`   | yes      | JSON with `requests` array |
-
-Returns the batch update response JSON.
-
-### `gws docs write`
-
-Append text to a document.
-
-```bash
-gws docs write --document 1AbCdEf --text "Appended via MIRAGE."
-```
-
-| Option       | Required | Description        |
-| ------------ | -------- | ------------------ |
-| `--document` | yes      | Google document ID |
-| `--text`     | yes      | Text to append     |
-
-Returns the update response JSON.
+Acting on documents (appending text, raw API calls) goes through
+the [gws CLI](/python/cli/gws) when installed.

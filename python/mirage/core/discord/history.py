@@ -16,9 +16,10 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
+from mirage.core.discord._client import discord_get
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
 from mirage.core.discord.render import history_jsonl_bytes
-from mirage.resource.discord.config import DiscordConfig
 
 DISCORD_EPOCH = 1420070400000
 
@@ -121,3 +122,26 @@ async def get_history_jsonl(
     """
     messages = await list_messages_for_day(config, channel_id, date_str)
     return history_jsonl_bytes(messages)
+
+
+async def fetch_recent_messages(
+    config: DiscordConfig,
+    channel_id: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Fetch the most recent messages of a channel (one API page).
+
+    Args:
+        config (DiscordConfig): Discord credentials.
+        channel_id (str): channel ID.
+        limit (int): maximum number of messages (Discord caps at 100).
+
+    Returns:
+        list[dict]: messages sorted oldest-first.
+    """
+    page = await discord_get(config, f"/channels/{channel_id}/messages",
+                             {"limit": limit})
+    items = [m for m in page
+             if isinstance(m, dict)] if isinstance(page, list) else []
+    items.sort(key=lambda m: int(m["id"]))
+    return items

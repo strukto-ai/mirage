@@ -17,7 +17,7 @@ from typing import Any
 
 import aiohttp
 
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 from mirage.resource.secrets import reveal_secret
 
 DISCORD_API = "https://discord.com/api/v10"
@@ -83,6 +83,39 @@ async def discord_put(
     headers = discord_headers(config)
     async with aiohttp.ClientSession() as session:
         async with session.put(url, headers=headers) as resp:
+            if resp.status == 429:
+                data = await resp.json()
+                retry = data.get("retry_after", 1)
+                raise RuntimeError(f"Rate limited, retry after {retry}s")
+            resp.raise_for_status()
+
+
+async def discord_patch(
+    config: DiscordConfig,
+    endpoint: str,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    url = f"{discord_base(config)}{endpoint}"
+    headers = discord_headers(config)
+    async with aiohttp.ClientSession() as session:
+        async with session.patch(url, headers=headers, json=body
+                                 or {}) as resp:
+            if resp.status == 429:
+                data = await resp.json()
+                retry = data.get("retry_after", 1)
+                raise RuntimeError(f"Rate limited, retry after {retry}s")
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def discord_delete(
+    config: DiscordConfig,
+    endpoint: str,
+) -> None:
+    url = f"{discord_base(config)}{endpoint}"
+    headers = discord_headers(config)
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(url, headers=headers) as resp:
             if resp.status == 429:
                 data = await resp.json()
                 retry = data.get("retry_after", 1)

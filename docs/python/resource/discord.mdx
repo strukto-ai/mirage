@@ -236,8 +236,8 @@ jq -r '.[] | "\(.id) [\(.author.username)] \(.content)"' \
 jq -r '.[] | select(.content | test("hello")) | .id' \
   "/discord/My Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 # → 1489887688978075769
-discord-send-message --channel_id 1256522563555819574 \
-  --text "Reply" --message_id 1489887688978075769
+discord send --channel 1256522563555819574 \
+  --text "Reply" --reply-to 1489887688978075769
 ```
 
 ## Working with Large Channels
@@ -283,66 +283,8 @@ Standard commands available on the mounted Discord tree:
 | `find`          | Recursive search with `-name`, `-maxdepth`                     |
 | `tree`          | Directory tree view                                            |
 
-Resource-specific commands:
-
-### `discord-send-message`
-
-Post a message to a channel, optionally as a reply.
-
-```bash
-discord-send-message --channel_id 1256522563555819574 --text "Hello from MIRAGE"
-discord-send-message --channel_id 1256522563555819574 --text "Reply" --message_id 1489887688978075769
-```
-
-| Option         | Required | Description                  |
-| -------------- | -------- | ---------------------------- |
-| `--channel_id` | yes      | Discord channel snowflake ID |
-| `--text`       | yes      | Message text to send         |
-| `--message_id` | no       | Message ID to reply to       |
-
-The channel ID can be found in directory names under
-`/discord/<guild>/channels/` or via `stat`. Returns the
-posted message JSON.
-
-### `discord-add-reaction`
-
-Add an emoji reaction to a message.
-
-```bash
-discord-add-reaction --channel_id 1256522563555819574 --message_id 1489887688978075769 --reaction 👍
-```
-
-| Option         | Required | Description                  |
-| -------------- | -------- | ---------------------------- |
-| `--channel_id` | yes      | Discord channel snowflake ID |
-| `--message_id` | yes      | Message snowflake ID         |
-| `--reaction`   | yes      | Emoji (unicode or name)      |
-
-### `discord-list-members`
-
-Search guild members by name.
-
-```bash
-discord-list-members --guild_id 1256522563555819574 --query "alice"
-```
-
-| Option       | Required | Description             |
-| ------------ | -------- | ----------------------- |
-| `--guild_id` | yes      | Discord guild snowflake |
-| `--query`    | yes      | Username search query   |
-
-Returns matching members as JSON array.
-
-### `discord-get-server-info`
-
-Get full guild metadata from the Discord API.
-
-```bash
-discord-get-server-info --guild_id 1256522563555819574
-```
-
-| Option       | Required | Description             |
-| ------------ | -------- | ----------------------- |
-| `--guild_id` | yes      | Discord guild snowflake |
-
-Returns the guild object JSON (name, icon, member count, etc.).
+Acting on Discord (sending, editing, reactions, threads, polls,
+member and guild info, search) goes through the
+[discord CLI](/python/cli/discord) when installed; the mounted tree
+stays read-oriented. The `<name>__<id>` path segments supply the
+snowflake IDs the CLI flags take.

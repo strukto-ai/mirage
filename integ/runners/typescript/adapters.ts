@@ -46,8 +46,12 @@ import {
   GridFSResource,
   GSheetsResource,
   GSlidesResource,
+  DISCORD,
   GWS,
   HIMALAYA,
+  LINEAR,
+  NTN,
+  SLACK,
   HfBucketsResource,
   JaegerResource,
   LanceDBResource,
@@ -694,8 +698,12 @@ async function openGraphConsistency(
 
 async function openNotion(target: Target): Promise<Open> {
   const { server, port } = await startNotionMock()
-  const mounts: Record<string, NotionResource | [NotionResource, MountMode]> = {}
+  const mounts: Record<string, NotionResource | RAMResource | [NotionResource, MountMode]> = {}
   for (const mount of target.mounts) {
+    if (mount.resource === 'ram') {
+      mounts[mount.path] = new RAMResource()
+      continue
+    }
     const resource = new NotionResource({
       apiKey: 'integ-test',
       baseUrl: `http://127.0.0.1:${String(port)}/v1`,
@@ -703,6 +711,12 @@ async function openNotion(target: Target): Promise<Open> {
     mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('ntn') === true) {
+    ws.registerCli('ntn', NTN, {
+      apiKey: 'integ-test',
+      baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+    })
+  }
   const cleanup = async (): Promise<void> => {
     await ws.close()
     server.close()
@@ -1264,8 +1278,12 @@ async function openSlack(target: Target): Promise<Open> {
   if (base === '') throw new Error('slack target requires SLACK_URL')
   const reset = await fetch(`${base}/reset`, { method: 'POST' })
   if (!reset.ok) throw new Error(`slack /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, SlackResource> = {}
+  const mounts: Record<string, SlackResource | RAMResource> = {}
   for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
     mounts[m.path] = new SlackResource({
       token: 'xoxb-integ',
       searchToken: 'xoxp-integ-search',
@@ -1273,6 +1291,13 @@ async function openSlack(target: Target): Promise<Open> {
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('slack') === true) {
+    ws.registerCli('slack', SLACK, {
+      token: 'xoxb-integ',
+      searchToken: 'xoxp-integ-search',
+      baseUrl: `${base}/api`,
+    })
+  }
   const cleanup = async (): Promise<void> => {
     await ws.close()
   }
@@ -1376,12 +1401,24 @@ async function openDiscord(target: Target): Promise<Open> {
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('discord') === true) {
+    ws.registerCli('discord', DISCORD, {
+      token: 'integ-bot-token',
+      baseUrl: `${endpoint}/api/v10`,
+    })
+  }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
 async function openLinear(target: Target): Promise<Open> {
   const endpoint = process.env.LINEAR_ENDPOINT
   if (!endpoint) throw new Error('linear target requires LINEAR_ENDPOINT')
+  // The server outlives a single run here, so mutations from the CLI
+  // write cases have to be rolled back to the fixture before the read
+  // goldens run again.
+  const resetUrl = `${endpoint.replace(/\/graphql$/, '')}/reset`
+  const reset = await fetch(resetUrl, { method: 'POST' })
+  if (!reset.ok) throw new Error(`linear /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, LinearResource | RAMResource> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
@@ -1394,6 +1431,9 @@ async function openLinear(target: Target): Promise<Open> {
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('linear') === true) {
+    ws.registerCli('linear', LINEAR, { apiKey: 'integ-key', baseUrl: endpoint })
+  }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 

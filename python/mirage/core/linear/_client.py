@@ -16,7 +16,7 @@ from typing import Any
 
 import aiohttp
 
-from mirage.resource.linear.config import LinearConfig
+from mirage.core.linear.config import LinearConfig
 from mirage.resource.secrets import reveal_secret
 
 from mirage.core.linear.queries import (  # isort: skip

@@ -12,14 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.discord.discord_add_reaction import \
-    discord_add_reaction
-from mirage.commands.builtin.discord.discord_get_server_info import \
-    discord_get_server_info
-from mirage.commands.builtin.discord.discord_list_members import \
-    discord_list_members
-from mirage.commands.builtin.discord.discord_send_message import \
-    discord_send_message
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
 from mirage.commands.builtin.discord.io import IO as _IO
@@ -35,8 +27,4 @@ COMMANDS = [
     grep,
     rg,
     head,
-    discord_send_message,
-    discord_add_reaction,
-    discord_list_members,
-    discord_get_server_info,
 ]

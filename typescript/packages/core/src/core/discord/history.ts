@@ -85,3 +85,20 @@ export async function getHistoryJsonl(
   const messages = await listMessagesForDay(accessor, channelId, dateStr)
   return historyJsonlBytes(messages)
 }
+
+export async function fetchRecentMessages(
+  accessor: DiscordAccessor,
+  channelId: string,
+  limit = 20,
+): Promise<Record<string, unknown>[]> {
+  const page = await accessor.transport.call('GET', `/channels/${channelId}/messages`, { limit })
+  const items = Array.isArray(page)
+    ? page.filter((m): m is Record<string, unknown> => m !== null && typeof m === 'object')
+    : []
+  items.sort((a, b) => {
+    const ai = BigInt(typeof a.id === 'string' ? a.id : '0')
+    const bi = BigInt(typeof b.id === 'string' ? b.id : '0')
+    return ai < bi ? -1 : ai > bi ? 1 : 0
+  })
+  return items
+}

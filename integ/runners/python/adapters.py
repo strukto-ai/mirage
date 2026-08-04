@@ -47,6 +47,7 @@ from mirage.accessor.sharepoint import SharePointConfig
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.email.config import EmailConfig
 from mirage.core.google import _client as google_client
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
@@ -60,7 +61,6 @@ from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
 from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.digitalocean import (DigitalOceanConfig,
                                           DigitalOceanResource)
-from mirage.resource.discord.config import DiscordConfig
 from mirage.resource.discord.discord import DiscordResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
@@ -984,6 +984,15 @@ class SlackService:
                         search_token="xoxp-integ-search",
                         base_url=f"{self.url}/api"))
 
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "slack": (cli_spec_for("slack"), {
+                "token": "xoxb-integ",
+                "search_token": "xoxp-integ-search",
+                "base_url": f"{self.url}/api",
+            }),
+        }
+
     async def teardown(self) -> None:
         return None
 
@@ -1119,6 +1128,14 @@ class DiscordService:
             DiscordConfig(token="integ-bot-token",
                           base_url=f"{self.base}/api/v10"))
 
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "discord": (cli_spec_for("discord"), {
+                "token": "integ-bot-token",
+                "base_url": f"{self.base}/api/v10",
+            }),
+        }
+
     async def teardown(self) -> None:
         await self.runner.cleanup()
 
@@ -1139,6 +1156,14 @@ class LinearService:
     def resource(self, mount: dict) -> LinearResource:
         return LinearResource(
             LinearConfig(api_key="integ-key", base_url=self.base))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "linear": (cli_spec_for("linear"), {
+                "api_key": "integ-key",
+                "base_url": self.base,
+            }),
+        }
 
     async def teardown(self) -> None:
         await self.runner.cleanup()
@@ -1251,6 +1276,14 @@ class NotionService:
     def resource(self, mount: dict) -> NotionResource:
         return NotionResource(config=NotionConfig(
             api_key="integ-test", base_url=f"http://127.0.0.1:{self.port}/v1"))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "ntn": (cli_spec_for("ntn"), {
+                "api_key": "integ-test",
+                "base_url": f"http://127.0.0.1:{self.port}/v1",
+            }),
+        }
 
     async def teardown(self) -> None:
         self.server.shutdown()
@@ -2118,9 +2151,10 @@ async def open_target(
     else:
         ws = Workspace(mounts, mode=MountMode.WRITE, agent_id=agent_id)
     for cli_name in target.get("clis", []):
-        # Only the email and gws services install CLIs today; widen the
-        # assert when another service grows one.
-        assert isinstance(service, (EmailService, GwsService))
+        # Widen the assert when another service grows a CLI.
+        assert isinstance(service,
+                          (DiscordService, EmailService, GwsService,
+                           LinearService, NotionService, SlackService))
         spec, config = service.cli_installs()[cli_name]
         ws.register_cli(cli_name, spec, config)
     return ws, functools.partial(teardown_target, [ws], cleanups, service)

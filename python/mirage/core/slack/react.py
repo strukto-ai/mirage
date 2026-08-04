@@ -14,8 +14,8 @@
 
 from typing import Any
 
-from mirage.core.slack._client import slack_post
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack._client import slack_get, slack_post
+from mirage.core.slack.config import SlackConfig
 
 
 async def add_reaction(
@@ -40,3 +40,26 @@ async def add_reaction(
         "timestamp": timestamp,
         "name": reaction,
     })
+
+
+async def get_reactions(
+    config: SlackConfig,
+    channel_id: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Get the reactions on a message.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        channel_id (str): channel ID.
+        timestamp (str): message ts.
+
+    Returns:
+        dict: the message item with its reactions array.
+    """
+    data = await slack_get(config, "reactions.get", {
+        "channel": channel_id,
+        "timestamp": timestamp,
+    })
+    message = data.get("message")
+    return message if isinstance(message, dict) else {}

@@ -1170,9 +1170,9 @@ jobs:
           echo "TRELLO_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
           echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
 
-      # The cli facet drives the builtin CLIs (himalaya, gws) end to end
-      # against the same mocks the email facet uses: GreenMail for IMAP/SMTP
-      # and the fake Google Workspace server for every gws service.
+      # The cli facet drives the builtin CLIs (himalaya, gws, slack, discord,
+      # ntn, linear) end to end against the same mocks the email, chat and
+      # project facets use.
       - name: Start GreenMail and the fake Google Workspace server
         if: matrix.facet == 'email' || matrix.facet == 'cli'
         run: |
@@ -1191,7 +1191,7 @@ jobs:
           echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
 
       - name: Start fake Slack Web API
-        if: matrix.facet == 'chat'
+        if: matrix.facet == 'chat' || matrix.facet == 'cli'
         working-directory: integ
         env:
           SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
@@ -1203,12 +1203,23 @@ jobs:
           echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
 
       - name: Start fake Discord API
-        if: matrix.facet == 'chat'
+        if: matrix.facet == 'chat' || matrix.facet == 'cli'
         run: |
           nohup ./python/.venv/bin/python integ/server/discord_server.py --port 5099 > /tmp/discord.log 2>&1 &
           for i in $(seq 1 30); do grep -q "DISCORD_ENDPOINT=" /tmp/discord.log && break; sleep 1; done
           cat /tmp/discord.log
           echo "DISCORD_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
+      # The ntn and linear CLIs ride the notion mock (self-started by each
+      # runner under NOTION_ENABLED) and the fake Linear GraphQL server.
+      - name: Start fake Linear API and enable the Notion mock
+        if: matrix.facet == 'cli'
+        run: |
+          nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/linear.log && break; sleep 1; done
+          cat /tmp/linear.log
+          echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+          echo "NOTION_ENABLED=1" >> "$GITHUB_ENV"
 
       - name: Start fake Dify API
         if: matrix.facet == 'dify'

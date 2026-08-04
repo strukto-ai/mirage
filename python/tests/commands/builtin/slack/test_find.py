@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.slack import COMMANDS
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 from mirage.types import PathSpec
 
 CHANNELS = [

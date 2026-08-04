@@ -14,21 +14,10 @@
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.notion.io import IO as _IO
-from mirage.commands.builtin.notion.notion_block_append import \
-    notion_block_append
-from mirage.commands.builtin.notion.notion_comment_add import \
-    notion_comment_add
-from mirage.commands.builtin.notion.notion_page_create import \
-    notion_page_create
-from mirage.commands.builtin.notion.notion_search import notion_search
 
 COMMANDS = [
     *make_generic_commands(
         "notion",
         _IO,
     ),
-    notion_block_append,
-    notion_comment_add,
-    notion_page_create,
-    notion_search,
 ]

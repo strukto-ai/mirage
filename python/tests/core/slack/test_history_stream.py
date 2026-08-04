@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.history import (fetch_messages_for_day,
                                        stream_messages_for_day)
-from mirage.resource.slack.config import SlackConfig
 
 
 @pytest.mark.asyncio

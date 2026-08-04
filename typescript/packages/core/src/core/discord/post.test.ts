@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './_client.ts'
-import { sendMessage } from './post.ts'
+import { deleteMessage, editMessage, sendMessage, sendPoll } from './post.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -67,5 +67,35 @@ describe('sendMessage', () => {
     const t = new FakeDiscordTransport()
     await sendMessage(new DiscordAccessor(t), 'C1', 'hi', '')
     expect(t.calls[0]?.body).toEqual({ content: 'hi' })
+  })
+})
+
+describe('editMessage / deleteMessage / sendPoll', () => {
+  it('editMessage PATCHes the message content', async () => {
+    const t = new FakeDiscordTransport()
+    await editMessage(new DiscordAccessor(t), 'C1', 'M1', 'edited')
+    expect(t.calls[0]?.method).toBe('PATCH')
+    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages/M1')
+    expect(t.calls[0]?.body).toEqual({ content: 'edited' })
+  })
+
+  it('deleteMessage DELETEs the message', async () => {
+    const t = new FakeDiscordTransport()
+    await deleteMessage(new DiscordAccessor(t), 'C1', 'M1')
+    expect(t.calls[0]?.method).toBe('DELETE')
+    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages/M1')
+  })
+
+  it('sendPoll shapes the poll object', async () => {
+    const t = new FakeDiscordTransport()
+    await sendPoll(new DiscordAccessor(t), 'C1', 'Lunch?', ['Pizza', 'Sushi'], 48, true)
+    expect(t.calls[0]?.body).toEqual({
+      poll: {
+        question: { text: 'Lunch?' },
+        answers: [{ poll_media: { text: 'Pizza' } }, { poll_media: { text: 'Sushi' } }],
+        duration: 48,
+        allow_multiselect: true,
+      },
+    })
   })
 })

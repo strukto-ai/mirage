@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.linear import COMMANDS
-from mirage.resource.linear.config import LinearConfig
+from mirage.core.linear.config import LinearConfig
 from mirage.types import PathSpec
 
 TEAMS = [{

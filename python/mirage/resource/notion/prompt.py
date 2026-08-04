@@ -31,15 +31,13 @@ PROMPT = """\
   list row pages.
 
   Titles are sanitized; don't construct paths, ls the parent dir.
-  Use the <page-id>/<database-id> from a path segment as
-  page_id/database_id/block_id in write commands."""
+  Use the <page-id>/<database-id> from a path segment as the --page,
+  --block, or --datasource value in ntn CLI commands (ntn --help)."""
 
 WRITE_PROMPT = """\
-  Write commands:
-    notion-page-create --json \
+  Writes go through the ntn CLI if installed:
+    ntn pages create --json \
 '{"parent":{"page_id":"..."},\
 "properties":{"title":[{"text":{"content":"Title"}}]}}'
-    notion-block-append --params '{"block_id":"..."}' --json \
-'{"children":[...]}'
-    notion-comment-add --json '{"parent":{"page_id":"..."},\
-"rich_text":[{"text":{"content":"Comment"}}]}'"""
+    ntn blocks append --block <block-id> --json '{"children":[...]}'
+  See ntn --help for every verb (pages, blocks, comments, search)."""

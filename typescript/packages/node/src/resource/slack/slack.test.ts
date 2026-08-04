@@ -15,7 +15,7 @@
 import { PathSpec, ResourceName, SLACK_COMMANDS, SLACK_OPS, mountKey } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildResource } from '../registry.ts'
-import { normalizeSlackConfig, redactSlackConfig } from './config.ts'
+import { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core'
 import { SlackResource } from './slack.ts'
 
 function jsonResponse(body: unknown): Response {

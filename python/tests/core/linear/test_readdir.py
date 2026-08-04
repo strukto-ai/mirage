@@ -19,11 +19,11 @@ import pytest
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import (normalize_comment, normalize_issue,
                                           normalize_team, normalize_user,
                                           to_json_bytes, to_jsonl_bytes)
 from mirage.core.linear.readdir import readdir
-from mirage.resource.linear.config import LinearConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 

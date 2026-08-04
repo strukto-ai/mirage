@@ -21,7 +21,7 @@ import {
 } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildResource } from '../registry.ts'
-import { normalizeDiscordConfig, redactDiscordConfig } from './config.ts'
+import { normalizeDiscordConfig, redactDiscordConfig } from '@struktoai/mirage-core'
 import { DiscordResource } from './discord.ts'
 
 function jsonResponse(body: unknown): Response {

@@ -18,8 +18,8 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.stat import stat
-from mirage.resource.slack.config import SlackConfig
 from mirage.types import FileType, PathSpec
 
 

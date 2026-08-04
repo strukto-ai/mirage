@@ -19,9 +19,9 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.readdir import is_dir_name, readdir
 from mirage.core.discord.render import history_jsonl_bytes, member_json_bytes
-from mirage.resource.discord.config import DiscordConfig
 from mirage.types import PathSpec
 
 

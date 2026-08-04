@@ -52,16 +52,11 @@ await ws.execute('ls /notion/')
 
 `read`, `write` (page edits via the MCP server in the browser SDK).
 
-## Resource commands
+## Acting on Notion
 
-`notion-search` works on read mounts; the rest require a write mount:
-
-```text
-notion-search --query "Roadmap" [--limit 20]
-notion-page-create --parent <parent-path> --title "title"
-notion-block-append --params '{"block_id":"..."}' --json '{"children":[...]}'
-notion-comment-add --json '{"parent":{"page_id":"..."},"rich_text":[{"text":{"content":"Comment"}}]}'
-```
+Acting on Notion (creating and editing pages, appending blocks,
+comments, search) goes through the [ntn CLI](/typescript/cli/ntn)
+when installed.
 
 ## Layout
 

@@ -115,7 +115,7 @@ enumerate row pages:
 }
 ```
 
-To create a row, `notion-page-create` with a `database_id` parent and a
+To create a row, `ntn pages create` with a `database_id` parent and a
 `properties` object whose keys match this schema.
 
 ### page.json
@@ -189,19 +189,19 @@ async def main():
     print(await r.stdout_str())
 
     # Search pages with the Notion search API
-    r = await ws.execute('notion-search --query "Roadmap" --limit 5')
+    r = await ws.execute('ntn search --query "Roadmap" --limit 5')
     print(await r.stdout_str())
 
     # Create a new page
     r = await ws.execute(
-        'notion-page-create --json \'{"parent":{"page_id":"a1b2c3d4"},'
+        'ntn pages create --json \'{"parent":{"page_id":"a1b2c3d4"},'
         '"properties":{"title":[{"text":{"content":"New Page"}}]}}\''
     )
     print(await r.stdout_str())
 
     # Append content to an existing page
     r = await ws.execute(
-        'notion-block-append --params \'{"block_id":"a1b2c3d4"}\''
+        'ntn blocks append --block a1b2c3d4'
         ' --json \'{"children":[{"type":"paragraph","paragraph":'
         '{"rich_text":[{"text":{"content":"Appended paragraph"}}]}}]}\''
     )
@@ -228,41 +228,7 @@ Standard commands available on the mounted Notion tree:
 | `find`          | Recursive search with `-name`, `-maxdepth` |
 | `tree`          | Directory tree view                        |
 
-Resource-specific commands:
-
-### `notion-page-create`
-
-Create a new page under a parent page. Prints the new page normalized as JSON.
-
-| Option   | Required | Description                                                            |
-| -------- | -------- | ---------------------------------------------------------------------- |
-| `--json` | yes      | Page body with `parent` (required) and `properties`, per the Notion API |
-
-In the TypeScript SDK this command takes `--parent <parent-path>` and
-`--title "title"` instead of a raw `--json` body.
-
-### `notion-block-append`
-
-Append content blocks to an existing page. Prints the refreshed page as JSON.
-
-| Option     | Required | Description                                       |
-| ---------- | -------- | ------------------------------------------------- |
-| `--params` | yes      | JSON object with the target `block_id` (page ID)  |
-| `--json`   | yes      | JSON object with the `children` blocks to append  |
-
-### `notion-comment-add`
-
-Add a comment to a page. Prints the created comment as JSON.
-
-| Option   | Required | Description                                          |
-| -------- | -------- | ---------------------------------------------------- |
-| `--json` | yes      | Comment body with `parent` (required) and `rich_text` |
-
-### `notion-search`
-
-Search pages with the Notion search API.
-
-| Option    | Required | Description                  |
-| --------- | -------- | ---------------------------- |
-| `--query` | yes      | Search query                 |
-| `--limit` | no       | Max results (default 20)     |
+Acting on Notion (creating and editing pages, appending blocks,
+comments, search) goes through the [ntn CLI](/python/cli/ntn) when
+installed. Use the `<page-id>`/`<database-id>` from a path segment as
+the `--page`, `--block`, or `--datasource` value.

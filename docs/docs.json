@@ -49,7 +49,7 @@
       "twitter:site": "@struktoai",
       "twitter:creator": "@struktoai",
       "twitter:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light.png",
-      "twitter:image:alt": "Mirage · Unified Virtual Filesystem for AI Agents | Strukto"
+      "twitter:image:alt": "Mirage \u00b7 Unified Virtual Filesystem for AI Agents | Strukto"
     }
   },
   "navigation": {
@@ -383,6 +383,18 @@
             ]
           },
           {
+            "group": "CLIs",
+            "pages": [
+              "python/cli/index",
+              "python/cli/himalaya",
+              "python/cli/gws",
+              "python/cli/slack",
+              "python/cli/discord",
+              "python/cli/ntn",
+              "python/cli/linear"
+            ]
+          },
+          {
             "group": "Watch",
             "icon": "bell",
             "pages": [
@@ -557,6 +569,18 @@
                   "typescript/setup/trello"
                 ]
               }
+            ]
+          },
+          {
+            "group": "CLIs",
+            "pages": [
+              "typescript/cli/index",
+              "typescript/cli/himalaya",
+              "typescript/cli/gws",
+              "typescript/cli/slack",
+              "typescript/cli/discord",
+              "typescript/cli/ntn",
+              "typescript/cli/linear"
             ]
           },
           {

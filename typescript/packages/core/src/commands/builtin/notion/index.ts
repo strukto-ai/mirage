@@ -16,11 +16,7 @@ import type { NotionAccessor } from '../../../accessor/notion.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { NOTION_BLOCK_APPEND } from './notion_block_append.ts'
-import { NOTION_COMMENT_ADD } from './notion_comment_add.ts'
 import { NOTION_FIND } from './find.ts'
-import { NOTION_PAGE_CREATE } from './notion_page_create.ts'
-import { NOTION_SEARCH } from './notion_search.ts'
 import { NOTION_IO } from './io.ts'
 
 const NOTION_OVERRIDES = new Set(['find'])
@@ -30,8 +26,4 @@ export const NOTION_COMMANDS: readonly RegisteredCommand[] = [
     overrides: NOTION_OVERRIDES,
   }),
   ...NOTION_FIND,
-  ...NOTION_BLOCK_APPEND,
-  ...NOTION_COMMENT_ADD,
-  ...NOTION_PAGE_CREATE,
-  ...NOTION_SEARCH,
 ]

@@ -16,7 +16,7 @@ from typing import Any
 
 import aiohttp
 
-from mirage.resource.notion.config import NotionConfig
+from mirage.core.notion.config import NotionConfig
 from mirage.resource.secrets import reveal_secret
 
 API_VERSION = "2022-06-28"

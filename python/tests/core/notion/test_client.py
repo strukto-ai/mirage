@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.notion._client import NotionAPIError, notion_headers
-from mirage.resource.notion.config import NotionConfig
+from mirage.core.notion.config import NotionConfig
 
 
 def test_notion_headers():

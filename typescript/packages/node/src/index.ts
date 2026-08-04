@@ -253,7 +253,7 @@ export {
   redactSlackConfig,
   type SlackConfig,
   type SlackConfigRedacted,
-} from './resource/slack/config.ts'
+} from '@struktoai/mirage-core'
 export { SSHResource, type SSHResourceState } from './resource/ssh/ssh.ts'
 export {
   normalizeSshConfig,
@@ -283,7 +283,7 @@ export {
   redactDiscordConfig,
   type DiscordConfig,
   type DiscordConfigRedacted,
-} from './resource/discord/config.ts'
+} from '@struktoai/mirage-core'
 export { TrelloResource, type TrelloResourceState } from './resource/trello/trello.ts'
 export {
   normalizeTrelloConfig,
@@ -297,14 +297,14 @@ export {
   redactLinearConfig,
   type LinearConfig,
   type LinearConfigRedacted,
-} from './resource/linear/config.ts'
+} from '@struktoai/mirage-core'
 export { NotionResource, type NotionResourceState } from './resource/notion/notion.ts'
 export {
   normalizeNotionConfig,
   redactNotionConfig,
   type NotionConfig,
   type NotionConfigRedacted,
-} from './resource/notion/config.ts'
+} from '@struktoai/mirage-core'
 export { LangfuseResource, type LangfuseResourceState } from './resource/langfuse/langfuse.ts'
 export { JaegerResource, type JaegerResourceState } from './resource/jaeger/jaeger.ts'
 export {

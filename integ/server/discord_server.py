@@ -192,6 +192,23 @@ class FakeDiscord:
         self.channel_messages.setdefault(channel_id, []).append(message)
         return message
 
+    def next_thread(self, channel_id: str, name: str,
+                    message_id: str | None) -> dict[str, Any]:
+        self._post_seq += 1
+        thread = {
+            "id": snowflake_at(POST_SNOWFLAKE_BASE + self._post_seq * 1000),
+            "type": 11,
+            "guild_id": self.channel_guild.get(channel_id, ""),
+            "parent_id": channel_id,
+            "owner_id": self.bot_user.get("id", ""),
+            "name": name,
+            "message_count": 0,
+            "member_count": 1,
+        }
+        if message_id is not None:
+            thread["last_message_id"] = message_id
+        return thread
+
 
 def unauthorized() -> web.Response:
     return web.json_response({
@@ -314,7 +331,93 @@ class DiscordServer:
             return not_found()
         body = await request.json()
         message = self.state.next_post(cid, str(body.get("content", "")))
+        if isinstance(body.get("poll"), dict):
+            # Discord echoes the poll object (with defaults resolved) on the
+            # created message; the fake echoes it verbatim.
+            message["poll"] = body["poll"]
         return web.json_response(message)
+
+    async def edit_message(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return unauthorized()
+        cid = request.match_info["channel_id"]
+        mid = request.match_info["message_id"]
+        body = await request.json()
+        for message in self.state.channel_messages.get(cid, []):
+            if message["id"] == mid:
+                message["content"] = str(body.get("content", ""))
+                message["edited_timestamp"] = (
+                    "2026-06-03T00:05:00.000000+00:00")
+                return web.json_response(message)
+        return web.json_response({
+            "message": "Unknown Message",
+            "code": 10008
+        },
+                                 status=404)
+
+    async def delete_message(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return unauthorized()
+        cid = request.match_info["channel_id"]
+        mid = request.match_info["message_id"]
+        messages = self.state.channel_messages.get(cid, [])
+        for message in messages:
+            if message["id"] == mid:
+                messages.remove(message)
+                return web.Response(status=204)
+        return web.json_response({
+            "message": "Unknown Message",
+            "code": 10008
+        },
+                                 status=404)
+
+    async def create_thread(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return unauthorized()
+        cid = request.match_info["channel_id"]
+        if cid not in self.state.channel_messages:
+            return not_found()
+        mid = request.match_info.get("message_id")
+        if mid is not None and not any(
+                m["id"] == mid
+                for m in self.state.channel_messages.get(cid, [])):
+            return web.json_response(
+                {
+                    "message": "Unknown Message",
+                    "code": 10008
+                }, status=404)
+        body = await request.json()
+        thread = self.state.next_thread(cid, str(body.get("name", "")), mid)
+        return web.json_response(thread)
+
+    async def guild_info(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return unauthorized()
+        gid = request.match_info["guild_id"]
+        for guild in self.state.guilds:
+            if guild.get("id") == gid:
+                return web.json_response(guild)
+        return not_found()
+
+    async def search_messages(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return unauthorized()
+        gid = request.match_info["guild_id"]
+        content = request.query.get("content", "")
+        channel_filter = request.query.get("channel_id")
+        contexts = []
+        for channel in self.state.guild_channels.get(gid, []):
+            cid = channel["id"]
+            if channel_filter is not None and cid != channel_filter:
+                continue
+            for message in self.state.channel_messages.get(cid, []):
+                if content and content not in message.get("content", ""):
+                    continue
+                contexts.append([self.state.resolve([message])[0]])
+        return web.json_response({
+            "total_results": len(contexts),
+            "messages": contexts,
+        })
 
     async def add_reaction(self, request: web.Request) -> web.Response:
         if not self._authed(request):
@@ -357,6 +460,20 @@ def build_app(server: DiscordServer) -> web.Application:
                        server.channel_messages)
     app.router.add_post("/api/v10/channels/{channel_id}/messages",
                         server.create_message)
+    app.router.add_patch(
+        "/api/v10/channels/{channel_id}/messages/{message_id}",
+        server.edit_message)
+    app.router.add_delete(
+        "/api/v10/channels/{channel_id}/messages/{message_id}",
+        server.delete_message)
+    app.router.add_post(
+        "/api/v10/channels/{channel_id}/messages/{message_id}/threads",
+        server.create_thread)
+    app.router.add_post("/api/v10/channels/{channel_id}/threads",
+                        server.create_thread)
+    app.router.add_get("/api/v10/guilds/{guild_id}", server.guild_info)
+    app.router.add_get("/api/v10/guilds/{guild_id}/messages/search",
+                       server.search_messages)
     app.router.add_put(
         "/api/v10/channels/{channel_id}/messages/{message_id}"
         "/reactions/{emoji}/@me", server.add_reaction)

@@ -21,10 +21,10 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear import read as linear_read
 from mirage.core.linear import readdir as linear_readdir
+from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.read import read_bytes
 from mirage.core.linear.readdir import readdir
 from mirage.core.linear.stat import stat
-from mirage.resource.linear.config import LinearConfig
 from mirage.types import FileType, PathSpec
 
 _COMMENTS_PATH = ("/teams/ENG__Engineering__TEAM1/issues"

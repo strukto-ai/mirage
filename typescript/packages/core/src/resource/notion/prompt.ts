@@ -31,7 +31,7 @@ export const NOTION_PROMPT = `{prefix}
 
   Titles are sanitized; don't construct paths, ls the parent dir.`
 
-export const NOTION_WRITE_PROMPT = `  Write commands:
-    notion-page-create --parent <parent-path> --title "title"
-    notion-block-append --params '{"block_id":"..."}' --json '{"children":[...]}'
-    notion-comment-add --json '{"parent":{"page_id":"..."},"rich_text":[{"text":{"content":"Comment"}}]}'`
+export const NOTION_WRITE_PROMPT = `  Writes go through the ntn CLI if installed:
+    ntn pages create --json '{"parent":{"page_id":"..."},"properties":{"title":[{"text":{"content":"Title"}}]}}'
+    ntn blocks append --block <block-id> --json '{"children":[...]}'
+  See ntn --help for every verb (pages, blocks, comments, search).`

@@ -364,6 +364,15 @@ function bearer(req: http.IncomingMessage): string {
 
 type Reply = { status: number; json?: unknown; buffer?: Buffer; contentType?: string }
 
+// Pins live in memory: the CLI facet pins and unpins within one scenario,
+// and /reset clears them along with the reseeded rows.
+const PINS = new Map<string, Set<string>>()
+
+const CUSTOM_EMOJI: Record<string, string> = {
+  shipit: 'https://emoji.example/shipit.png',
+  partyparrot: 'alias:parrot',
+}
+
 async function handle(
   db: PrismaClient,
   req: http.IncomingMessage,
@@ -376,6 +385,7 @@ async function handle(
 
   if (req.method === 'POST' && path === '/reset') {
     await seed(db, loadFixture())
+    PINS.clear()
     return { status: 200, json: { ok: true } }
   }
 
@@ -402,6 +412,74 @@ async function handle(
     const msg = await db.message.findFirst({ where: { channelId: channel, ts: timestamp } })
     if (msg === null) return { status: 200, json: { ok: false, error: 'message_not_found' } }
     return { status: 200, json: { ok: true } }
+  }
+
+  if (req.method === 'POST' && (path === '/api/pins.add' || path === '/api/pins.remove')) {
+    if (bearer(req) === '') return { status: 200, json: { ok: false, error: 'not_authed' } }
+    const payload = parseJsonBody(body)
+    const channel = typeof payload.channel === 'string' ? payload.channel : ''
+    const timestamp = typeof payload.timestamp === 'string' ? payload.timestamp : ''
+    const msg = await db.message.findFirst({ where: { channelId: channel, ts: timestamp } })
+    if (msg === null) return { status: 200, json: { ok: false, error: 'message_not_found' } }
+    const pinned = PINS.get(channel) ?? new Set<string>()
+    if (path === '/api/pins.add') {
+      if (pinned.has(timestamp)) return { status: 200, json: { ok: false, error: 'already_pinned' } }
+      pinned.add(timestamp)
+      PINS.set(channel, pinned)
+      return { status: 200, json: { ok: true } }
+    }
+    if (!pinned.has(timestamp)) return { status: 200, json: { ok: false, error: 'no_pin' } }
+    pinned.delete(timestamp)
+    return { status: 200, json: { ok: true } }
+  }
+
+  if (path === '/api/pins.list') {
+    const channel = q.get('channel') ?? ''
+    const pinned = [...(PINS.get(channel) ?? new Set<string>())].sort()
+    const items = []
+    for (const ts of pinned) {
+      const m = (await db.message.findFirst({ where: { channelId: channel, ts } })) as {
+        ts: string
+        userId: string
+        text: string
+        type: string
+      } | null
+      if (m === null) continue
+      items.push({
+        type: 'message',
+        channel,
+        message: { type: m.type, user: m.userId, text: m.text, ts: m.ts },
+      })
+    }
+    return { status: 200, json: { ok: true, items } }
+  }
+
+  if (path === '/api/reactions.get') {
+    const channel = q.get('channel') ?? ''
+    const timestamp = q.get('timestamp') ?? ''
+    const m = (await db.message.findFirst({ where: { channelId: channel, ts: timestamp } })) as {
+      ts: string
+      userId: string
+      text: string
+      type: string
+      reactionsJson: string | null
+    } | null
+    if (m === null) return { status: 200, json: { ok: false, error: 'message_not_found' } }
+    const message: Record<string, unknown> = {
+      type: m.type,
+      user: m.userId,
+      text: m.text,
+      ts: m.ts,
+    }
+    if (m.reactionsJson !== null && m.reactionsJson !== '') {
+      const rs = JSON.parse(m.reactionsJson) as Reaction[]
+      message.reactions = rs.map((r) => ({ name: r.name, users: r.users, count: r.count }))
+    }
+    return { status: 200, json: { ok: true, message, type: 'message', channel } }
+  }
+
+  if (path === '/api/emoji.list') {
+    return { status: 200, json: { ok: true, emoji: CUSTOM_EMOJI } }
   }
 
   if (path.startsWith('/files/download/')) {

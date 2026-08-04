@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.resource.notion.config import NotionConfig
+from mirage.core.notion.config import NotionConfig
 
 
 class NotionAccessor(Accessor):

@@ -1,0 +1,130 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import json
+
+import pytest
+
+from mirage.commands.cli.builtin.linear.comment.add import add as comment_add
+from mirage.commands.cli.builtin.linear.issue.create import create
+from mirage.commands.cli.builtin.linear.issue.set_priority import set_priority
+from mirage.commands.cli.builtin.linear.issue.transition import transition
+from mirage.core.linear.config import LinearConfig
+from mirage.io.types import materialize
+
+CONFIG = LinearConfig(api_key="lin_api_test")
+
+
+async def _json(out):
+    return json.loads(await materialize(out))
+
+
+@pytest.mark.asyncio
+async def test_create_resolves_team_and_reads_stdin(monkeypatch):
+
+    async def fake_resolve_team(config, token):
+        return {"id": "team-1", "key": token}
+
+    async def fake_issue_create(config, *, team_id, title, description):
+        return {
+            "id": "i1",
+            "team_id": team_id,
+            "title": title,
+            "description": description
+        }
+
+    def fake_normalize(issue):
+        return issue
+
+    monkeypatch.setitem(create.__globals__, "resolve_team", fake_resolve_team)
+    monkeypatch.setitem(create.__globals__, "issue_create", fake_issue_create)
+    monkeypatch.setitem(create.__globals__, "normalize_issue", fake_normalize)
+    out, _io = await create(CONFIG, [],
+                            stdin=b"body from stdin",
+                            team="ENG",
+                            title="Title")
+    data = await _json(out)
+    assert data["team_id"] == "team-1"
+    assert data["description"] == "body from stdin"
+
+
+@pytest.mark.asyncio
+async def test_transition_resolves_state_name(monkeypatch):
+
+    async def fake_resolve_issue(config, token):
+        return "issue-uuid"
+
+    async def fake_list_teams(config):
+        return [{
+            "states": {
+                "nodes": [{
+                    "id": "state-2",
+                    "name": "In Review"
+                }]
+            }
+        }]
+
+    async def fake_issue_update(config, *, issue_id, title, description,
+                                state_id):
+        return {"id": issue_id, "state_id": state_id}
+
+    def fake_normalize(issue):
+        return issue
+
+    monkeypatch.setitem(transition.__globals__, "resolve_issue",
+                        fake_resolve_issue)
+    monkeypatch.setitem(transition.__globals__, "issue_update",
+                        fake_issue_update)
+    monkeypatch.setitem(transition.__globals__, "normalize_issue",
+                        fake_normalize)
+    resolve_state = transition.__globals__["resolve_state_id"]
+    monkeypatch.setitem(resolve_state.__globals__, "list_teams",
+                        fake_list_teams)
+    out, _io = await transition(CONFIG, [], "ENG-42", state_name="In Review")
+    assert (await _json(out))["state_id"] == "state-2"
+
+
+@pytest.mark.asyncio
+async def test_set_priority_forwards_int(monkeypatch):
+
+    async def fake_resolve_issue(config, token):
+        return "issue-uuid"
+
+    async def fake_issue_update(config, *, issue_id, title, description,
+                                priority):
+        return {"id": issue_id, "priority": priority}
+
+    def fake_normalize(issue):
+        return issue
+
+    monkeypatch.setitem(set_priority.__globals__, "resolve_issue",
+                        fake_resolve_issue)
+    monkeypatch.setitem(set_priority.__globals__, "issue_update",
+                        fake_issue_update)
+    monkeypatch.setitem(set_priority.__globals__, "normalize_issue",
+                        fake_normalize)
+    out, _io = await set_priority(CONFIG, [], "ENG-42", priority="2")
+    assert (await _json(out))["priority"] == 2
+
+
+@pytest.mark.asyncio
+async def test_comment_add_requires_body(monkeypatch):
+
+    async def fake_resolve_issue(config, token):
+        return "issue-uuid"
+
+    monkeypatch.setitem(comment_add.__globals__, "resolve_issue",
+                        fake_resolve_issue)
+    with pytest.raises(ValueError, match="comment body is required"):
+        await comment_add(CONFIG, [], "ENG-42")

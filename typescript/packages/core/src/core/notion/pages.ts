@@ -71,8 +71,10 @@ export async function getDatabase(transport: NotionTransport, databaseId: string
 export async function queryDatabase(
   transport: NotionTransport,
   databaseId: string,
+  body: Json = {},
 ): Promise<Json[]> {
   return paginateTool(transport, 'API-post-database-query', {
+    ...body,
     database_id: databaseId,
     page_size: 100,
   })
@@ -181,4 +183,16 @@ export async function createPage(
     },
   }
   return transport.callTool('API-post-page', body)
+}
+
+export async function createPageRaw(transport: NotionTransport, body: Json): Promise<Json> {
+  return transport.callTool('API-post-page', body)
+}
+
+export async function updatePage(
+  transport: NotionTransport,
+  pageId: string,
+  body: Json,
+): Promise<Json> {
+  return transport.callTool('API-patch-page', { ...body, page_id: pageId })
 }

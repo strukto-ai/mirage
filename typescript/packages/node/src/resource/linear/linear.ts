@@ -35,7 +35,11 @@ import {
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
-import { redactLinearConfig, type LinearConfig, type LinearConfigRedacted } from './config.ts'
+import {
+  redactLinearConfig,
+  type LinearConfig,
+  type LinearConfigRedacted,
+} from '@struktoai/mirage-core'
 
 const resolveLinearGlob = (
   accessor: LinearAccessor,

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './_client.ts'
-import { dateToSnowflake, DISCORD_EPOCH, getHistoryJsonl } from './history.ts'
+import { dateToSnowflake, DISCORD_EPOCH, fetchRecentMessages, getHistoryJsonl } from './history.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -137,5 +137,13 @@ describe('getHistoryJsonl', () => {
     const t = new FakeDiscordTransport(() => null)
     const out = await getHistoryJsonl(new DiscordAccessor(t), 'C1', '2026-04-25')
     expect(out.length).toBe(0)
+  })
+})
+
+describe('fetchRecentMessages', () => {
+  it('fetches one page and sorts oldest-first', async () => {
+    const t = new FakeDiscordTransport(() => [{ id: '30' }, { id: '10' }, { id: '20' }])
+    const messages = await fetchRecentMessages(new DiscordAccessor(t), 'C1', 3)
+    expect(messages.map((m) => m.id)).toEqual(['10', '20', '30'])
   })
 })

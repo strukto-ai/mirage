@@ -16,13 +16,6 @@ from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.io import IO as _IO
 from mirage.commands.builtin.slack.rg import rg
-from mirage.commands.builtin.slack.slack_add_reaction import slack_react
-from mirage.commands.builtin.slack.slack_get_user_profile import \
-    slack_get_user_profile_cmd
-from mirage.commands.builtin.slack.slack_get_users import slack_get_users
-from mirage.commands.builtin.slack.slack_post_message import slack_post_message
-from mirage.commands.builtin.slack.slack_reply_to_thread import slack_reply
-from mirage.commands.builtin.slack.slack_search import slack_search
 
 COMMANDS = [
     *make_generic_commands(
@@ -32,10 +25,4 @@ COMMANDS = [
     ),
     grep,
     rg,
-    slack_post_message,
-    slack_reply,
-    slack_react,
-    slack_get_users,
-    slack_get_user_profile_cmd,
-    slack_search,
 ]

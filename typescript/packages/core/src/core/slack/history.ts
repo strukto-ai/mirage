@@ -96,3 +96,21 @@ export async function getHistoryJsonl(
   const messages = await fetchMessagesForDay(accessor, channelId, dateStr)
   return messagesToJsonl(messages)
 }
+
+export async function fetchRecentMessages(
+  accessor: SlackAccessor,
+  channelId: string,
+  limit = 20,
+): Promise<Record<string, unknown>[]> {
+  const data = await accessor.transport.call('conversations.history', {
+    channel: channelId,
+    limit: String(limit),
+  })
+  const messages = Array.isArray(data.messages) ? (data.messages as Record<string, unknown>[]) : []
+  messages.sort(
+    (a, b) =>
+      parseFloat(typeof a.ts === 'string' ? a.ts : '0') -
+      parseFloat(typeof b.ts === 'string' ? b.ts : '0'),
+  )
+  return messages
+}

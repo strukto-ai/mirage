@@ -15,7 +15,7 @@
 from typing import Any
 
 from mirage.core.slack._client import slack_post
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 
 
 async def post_message(

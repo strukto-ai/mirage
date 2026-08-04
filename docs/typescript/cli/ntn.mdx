@@ -1,0 +1,68 @@
+---
+title: ntn
+description: Notion API client following the official Notion CLI grammar.
+icon: terminal
+---
+
+Notion API client following the official Notion CLI grammar. Install it on the workspace and the whole tree is
+discoverable with `ntn --help`.
+
+## Install
+
+```typescript
+import { NTN } from '@struktoai/mirage-core'
+import { NotionResource, Workspace } from '@struktoai/mirage-node'
+
+const config = { apiKey: 'secret_...' }
+const ws = new Workspace({ '/notion': new NotionResource(config) })
+ws.registerCli('ntn', NTN, config)
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
+
+## Verbs
+
+The grammar follows the official
+[Notion CLI](https://developers.notion.com/cli) (`ntn pages
+get/create/edit/trash`, `ntn datasources query`); `blocks`, `comments`
+and `search` are mirage extensions spelled with the REST API's nouns.
+JSON bodies are the raw Notion API resources.
+
+### Pages
+
+```bash
+ntn pages get --page a1b2c3d4-...
+ntn pages create --json '{"parent":{"page_id":"a1b2c3d4"},"properties":{"title":[{"text":{"content":"Title"}}]}}'
+ntn pages edit --page a1b2c3d4-... --json '{"properties":{"title":[{"text":{"content":"Renamed"}}]}}'
+ntn pages trash --page a1b2c3d4-...
+```
+
+| Verb     | Flags             | Writes |
+| -------- | ----------------- | ------ |
+| `get`    | `--page`          | no     |
+| `create` | `--json`          | yes    |
+| `edit`   | `--page --json`   | yes    |
+| `trash`  | `--page`          | yes    |
+
+`create` requires a `parent` key in the body; `edit` sends the body as
+a `PATCH /pages` request; `trash` sets `in_trash`.
+
+### Blocks and comments
+
+```bash
+ntn blocks append --block a1b2c3d4-... --json '{"children":[{"type":"paragraph","paragraph":{"rich_text":[{"text":{"content":"Hello"}}]}}]}'
+ntn comments create --json '{"parent":{"page_id":"a1b2c3d4"},"rich_text":[{"text":{"content":"Comment"}}]}'
+```
+
+### Data sources and search
+
+```bash
+ntn datasources query --datasource e5f6a7b8-... --json '{"filter":{"property":"Status","select":{"equals":"Done"}}}'
+ntn search --query "Roadmap" --limit 5
+```
+
+`datasources query` returns the database's row pages; `search` returns
+compact rows (`title`, `page_id`, `url`, `last_edited`, `parent_type`).
+Use the `<page-id>` / `<database-id>` from a mounted path segment as
+the `--page`, `--block`, or `--datasource` value.

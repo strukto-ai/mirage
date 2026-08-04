@@ -14,17 +14,19 @@
 
 from dataclasses import replace
 
-from mirage.commands.builtin.utils.limit import (maybe_with_timeout,
+from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
+                                                 maybe_with_timeout,
                                                  run_with_timeout)
 from mirage.commands.cli.walk import walk
 from mirage.commands.config import HELP_OPTION
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.help import render_help
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit
-from mirage.types import PathSpec, Producer
+from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
@@ -58,9 +60,12 @@ async def handle_cli(
         stdin (ByteSource | None): stdin data, injected as a kwarg the
             way mount command handlers receive it.
     """
-    cmd_str = " ".join(p.virtual if isinstance(p, PathSpec) else p
-                       for p in parts)
-    argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
+    # Words re-enter string space as typed (word_text): the walk owns
+    # interpretation, so a quoted "Lunch?" must not arrive as the
+    # glob-classified absolute /Lunch?. Leaf path operands are resolved
+    # later by parse_flags against the session cwd.
+    cmd_str = " ".join(word_text(p) for p in parts)
+    argv = [word_text(p) for p in parts[1:]]
     stdout: ByteSource | None
 
     result = walk(install.name, install.spec, argv)
@@ -120,8 +125,31 @@ async def handle_cli(
     # limits.
     limit = resolve_limit(prog, command_default=leaf.limit)
     timeout = limit.timeout_seconds if limit is not None else None
-    out = await run_with_timeout(
-        fn(install.config, parsed.paths, *parsed.texts, **kw), timeout, prog)
+    try:
+        out = await run_with_timeout(
+            fn(install.config, parsed.paths, *parsed.texts, **kw), timeout,
+            prog)
+    except UsageError as exc:
+        # Leaf-raised usage errors (a malformed --json) keep the bare
+        # message and exit 2, matching the refusal branch above.
+        usage_stderr = f"{exc}\n".encode()
+        usage_io = IOResult(exit_code=exc.exit_code, stderr=usage_stderr)
+        return None, usage_io, ExecutionNode(command=cmd_str,
+                                             exit_code=exc.exit_code,
+                                             stderr=usage_stderr)
+    except CommandTimeoutError:
+        # A limit timeout is answered by the workspace-level handler
+        # (exit 124), not here.
+        raise
+    except Exception as exc:
+        # Any other thrown leaf error (an API RuntimeError, a ValueError)
+        # becomes this command's IOResult, prefixed like GNU
+        # (prog: message), so the rest of the line keeps running.
+        err_stderr = f"{prog}: {exc}\n".encode()
+        err_io = IOResult(exit_code=1, stderr=err_stderr)
+        return None, err_io, ExecutionNode(command=cmd_str,
+                                           exit_code=1,
+                                           stderr=err_stderr)
     if out is None:
         stdout, io = None, IOResult()
     else:

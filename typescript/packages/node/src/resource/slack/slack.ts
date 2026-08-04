@@ -33,7 +33,11 @@ import {
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
-import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
+import {
+  redactSlackConfig,
+  type SlackConfig,
+  type SlackConfigRedacted,
+} from '@struktoai/mirage-core'
 
 const resolveSlackGlob = makeResolveGlob(slackReaddir)
 

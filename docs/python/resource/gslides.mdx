@@ -169,33 +169,5 @@ Standard commands available on the mounted Google Slides tree:
 | `basename` / `dirname` / `realpath` | Path utilities                  |
 | `nl`                                | Number lines                    |
 
-Resource-specific commands:
-
-### `gws slides presentations create`
-
-Create a new presentation.
-
-```bash
-gws slides presentations create --json '{"title":"MIRAGE Deck"}'
-```
-
-| Option   | Required | Description                  |
-| -------- | -------- | ---------------------------- |
-| `--json` | yes      | JSON body with `title` field |
-
-Returns the created presentation JSON.
-
-### `gws slides presentations batchUpdate`
-
-Batch update a presentation.
-
-```bash
-gws slides presentations batchUpdate --params '{"presentationId":"1AbCdEf"}' --json '{"requests":[]}'
-```
-
-| Option     | Required | Description                |
-| ---------- | -------- | -------------------------- |
-| `--params` | yes      | JSON with `presentationId` |
-| `--json`   | yes      | JSON with `requests` array |
-
-Returns the batch update response JSON.
+Acting on presentations (create, batchUpdate, raw API calls) goes
+through the [gws CLI](/python/cli/gws) when installed.
