@@ -25,6 +25,7 @@ import { respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import {
   emitStartPath,
+  hasLinkChildren,
   keep,
   optionsTree,
   prefixPathNodes,
@@ -250,12 +251,63 @@ function startPointResults(
   return results
 }
 
+// Results for the directory start point itself, at depth 0.
+//
+// GNU lists a directory start point before descending into it, so
+// `find <dir>` names the directory even when it holds nothing. The generic
+// already statted the start point to get here, so it decides this row and
+// the backend only has to answer for descendants (see withRootRow for why
+// the backend's own row is dropped).
+//
+// -mtime is deliberately not applied here: the caller either filters every
+// row against namespace-aware times afterwards, or pushed the window into
+// the backend, and re-testing it against the probe's own stat would drop
+// rows a touch had just matched.
+function rootDirResults(
+  root: PathSpec,
+  options: FindOptions,
+  tree: PredNode,
+  isEmpty: boolean | null,
+): string[] {
+  const results: string[] = []
+  emitStartPath(results, rstripSlash(root.mountPath) || '/', startBasename(root.virtual), {
+    kind: 'd',
+    isEmpty,
+    exists: true,
+    tree,
+    maxDepth: options.maxDepth ?? null,
+    minDepth: options.minDepth ?? null,
+    minSize: options.minSize ?? null,
+    maxSize: options.maxSize ?? null,
+  })
+  return results
+}
+
+// Replace the backend's row for the start point with the generic's.
+//
+// Most native find ops emit the start path themselves, and each judged it
+// on the only facts it had: ssh calls every directory non-empty, an object
+// store calls one empty only when its own listing was empty, and a store
+// holding no directory marker reported nothing at all. Merging instead of
+// replacing would keep whichever of those a backend happened to say, so the
+// row is dropped and the generic's takes its place. Descendants are still
+// entirely the backend's answer.
+//
+// Compared with trailing slashes stripped, because a directory key is
+// spelled both ways across backends (chroma reports the root as `<root>/`).
+function withRootRow(rows: string[], display: string, root: string[]): string[] {
+  return rows
+    .filter((r) => (rstripSlash(r) || '/') !== display)
+    .concat(root.length > 0 ? [display] : [])
+}
+
 export async function findGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   find: (root: PathSpec, options: FindOptions) => Promise<string[]>,
   stat?: (spec: PathSpec) => Promise<FileStat>,
+  dirEmpty?: (spec: PathSpec) => Promise<boolean>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('find'))
   const nameFlag = fl.asStr('name') ?? null
@@ -277,7 +329,10 @@ export async function findGeneric(
             resolved: false,
           }),
         ]
-  const findType: 'f' | 'd' | null = typeFlag === 'f' ? 'f' : typeFlag === 'd' ? 'd' : null
+  // Passed through rather than narrowed to f/d: `-type l` is a real value
+  // (namespace symlinks), and collapsing anything else to "no filter" would
+  // make the flag form print every entry where python prints none.
+  const findType: string | null = typeFlag
   const maxDepth = maxDepthFlag !== null ? Number.parseInt(maxDepthFlag, 10) : null
   const minDepth = minDepthFlag !== null ? Number.parseInt(minDepthFlag, 10) : null
   const [minSize, maxSize] = sizeFlag !== null ? parseSize(sizeFlag) : [null, null]
@@ -352,6 +407,7 @@ export async function findGeneric(
     // missing case answerable above every backend rather than only where
     // one wires a stat.
     const startStat = opts.statPath
+    let startIsDir = false
     if (startStat !== undefined && !rootIsLink) {
       const start = await startStat(root.virtual)
       if (start === null) {
@@ -380,6 +436,7 @@ export async function findGeneric(
         }
         continue
       }
+      startIsDir = true
     }
     let keys: string[]
     try {
@@ -401,10 +458,35 @@ export async function findGeneric(
             : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
+    // GNU lists a directory start point itself before descending into it, so
+    // it is named even when it holds nothing. Decided here rather than by
+    // each backend, which read existence off its own listing. A pushed-down
+    // mtime window is the one case left to the backend: this row never
+    // passed through it.
+    const mtimePushed = pushMtime && (effMtimeMin !== null || effMtimeMax !== null)
+    // Emptiness is the one fact this row needs that a caller can decline to
+    // offer (a bespoke wrapper wires no readdir), and that caller's op may
+    // know it. Left alone in that case, so a backend's answer is never
+    // traded for "unknown".
+    const usesEmpty = expr !== null ? expr.usesEmpty : emptyFlag
+    const canProbe = !usesEmpty || dirEmpty !== undefined
+    let rows = rootMatches
+    if (startIsDir && !mtimePushed && canProbe) {
+      let rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
+      // A symlink is namespace state no backend readdir can see, so a
+      // directory holding only one would read as empty. GNU counts the
+      // link as an entry.
+      if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.links, root.virtual)
+      rows = withRootRow(
+        rootMatches,
+        root.virtual === '/' ? '/' : rstripSlash(root.virtual),
+        rootDirResults(root, rootOptions, optionsTree(rootOptions), rootEmpty),
+      )
+    }
     const filtered =
       stat !== undefined
-        ? await applyMtimeFilter(rootMatches, effMtimeMin, effMtimeMax, stat, prefix)
-        : rootMatches
+        ? await applyMtimeFilter(rows, effMtimeMin, effMtimeMax, stat, prefix)
+        : rows
     const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
     const withLinks = filtered.concat(
       await linkResults(

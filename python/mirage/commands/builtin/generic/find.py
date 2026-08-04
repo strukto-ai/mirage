@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindArgs, FindEntry, PredNode,
                                                args_to_tree, emit_start_path,
-                                               keep, prefix_path_nodes,
+                                               has_link_children, keep,
+                                               prefix_path_nodes,
                                                start_basename, tree_has_empty)
 from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
                                                  _parse_size)
@@ -154,12 +155,15 @@ class StartPoint:
     """What a start point makes ``find`` do with one operand.
 
     One of three things: the subtree is walked, these rows are the whole
-    answer, or nothing is there and GNU's diagnostic is.
+    answer, or nothing is there and GNU's diagnostic is. ``stat`` carries
+    the start point's own stat when a directory was walked, which is what
+    lets the caller report the root itself without statting it twice.
     """
 
     walk: bool
     results: list[str]
     missing: bool = False
+    stat: FileStat | None = None
 
 
 WALK_START = StartPoint(walk=True, results=[])
@@ -203,7 +207,7 @@ async def resolve_start(
     if start is None:
         return MISSING_START
     if start.type == FileType.DIRECTORY:
-        return WALK_START
+        return StartPoint(walk=True, results=[], stat=start)
     prefix = mount_prefix_of(search.virtual, search.resource_path)
     # `-path` matches the display path, so Path nodes carry the mount
     # prefix. Built here rather than read off args.tree: only the
@@ -264,6 +268,74 @@ def start_point_results(
     return results
 
 
+def root_dir_results(
+    search_path: PathSpec,
+    args: FindArgs,
+    tree: PredNode,
+    *,
+    is_empty: bool | None,
+) -> list[str]:
+    """Results for the directory start point itself, at depth 0.
+
+    GNU lists a directory start point before descending into it, so
+    ``find <dir>`` names the directory even when it holds nothing. The
+    generic already statted the start point to get here, so it decides
+    this row and the backend only has to answer for descendants (see
+    ``with_root_row`` for why the backend's own row is dropped).
+
+    ``-mtime`` is deliberately not applied here: the caller either
+    filters every row against namespace-aware times afterwards, or
+    pushed the window into the backend, and re-testing it against the
+    probe's own stat would drop rows a ``touch`` had just matched.
+
+    Args:
+        search_path (PathSpec): the start point, as the operand named it.
+        args (FindArgs): parsed find expression.
+        tree (PredNode): the prefix-stamped predicate tree.
+        is_empty (bool | None): whether the directory holds nothing, None
+            when no listing was taken (``-empty`` then cannot match it).
+    """
+    results: list[str] = []
+    emit_start_path(results,
+                    search_path.mount_path,
+                    start_basename(search_path),
+                    kind="d",
+                    is_empty=is_empty,
+                    exists=True,
+                    tree=tree,
+                    maxdepth=args.maxdepth,
+                    mindepth=args.mindepth,
+                    min_size=args.min_size,
+                    max_size=args.max_size)
+    return results
+
+
+def with_root_row(results: list[str], search_path: PathSpec,
+                  root: list[str]) -> list[str]:
+    """Replace the backend's row for the start point with the generic's.
+
+    Most native find ops emit the start path themselves, and each judged
+    it on the only facts it had: ssh calls every directory non-empty, an
+    object store calls one empty only when its own listing was empty, and
+    a store holding no directory marker reported nothing at all for a
+    directory that ``test -d`` and ``tree`` both saw. Merging instead of
+    replacing would keep whichever of those a backend happened to say, so
+    the row is dropped and the generic's takes its place. Descendants are
+    still entirely the backend's answer.
+
+    Compared with trailing slashes stripped, because a directory key is
+    spelled both ways across backends.
+
+    Args:
+        results (list[str]): mount-relative rows the backend returned.
+        search_path (PathSpec): the start point, as the operand named it.
+        root (list[str]): the generic's row for the start point, empty if
+            it did not match the expression.
+    """
+    key = search_path.mount_path.rstrip("/") or "/"
+    return [r for r in results if (r.rstrip("/") or "/") != key] + root
+
+
 async def find(
     paths: list[PathSpec],
     texts: tuple[str, ...],
@@ -271,6 +343,7 @@ async def find(
     find_core: Callable[..., Awaitable[list[str]]],
     stat_path: StatPath | None = None,
     stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
+    dir_empty: Callable[[PathSpec], Awaitable[bool]] | None = None,
     name: str | None = None,
     type: str | None = None,
     size: str | None = None,
@@ -351,6 +424,31 @@ async def find(
         empty=args.empty,
         tree=args.tree,
     )
+    # GNU lists a directory start point itself before descending into it,
+    # so it is named even when it holds nothing. Decided here rather than
+    # by each native find op, which read existence off its own listing and
+    # so said nothing at all for an empty directory that `test -d` and
+    # `tree` both saw. A pushed-down mtime window is the one case left to
+    # the backend: this row never passed through it.
+    mtime_pushed = push_mtime and (args.mtime_min is not None
+                                   or args.mtime_max is not None)
+    # Emptiness is the one fact this row needs that a caller can decline to
+    # offer (a bespoke wrapper wires no readdir), and that caller's core may
+    # know it. Left alone in that case, so a backend's answer is never
+    # traded for "unknown".
+    can_probe = dir_empty is not None or not args.empty
+    if start.stat is not None and not mtime_pushed and can_probe:
+        root_empty = (await dir_empty(search_path)
+                      if args.empty and dir_empty is not None else None)
+        if root_empty:
+            # A symlink is namespace state no backend readdir can see, so a
+            # directory holding only one would read as empty. GNU counts the
+            # link as an entry.
+            root_empty = not has_link_children(links, search_path.virtual)
+        results = with_root_row(
+            results, search_path,
+            root_dir_results(search_path, args, args.tree,
+                             is_empty=root_empty))
     if stat is not None:
         results = await apply_mtime_filter(results,
                                            mtime_min=args.mtime_min,
@@ -404,8 +502,11 @@ async def _is_empty_entry(
     is_dir: bool,
     prefix: str,
     index: IndexCacheStore,
+    links: LinkView | None = None,
 ) -> bool:
     if is_dir:
+        if has_link_children(links, path):
+            return False
         spec = PathSpec(virtual=path,
                         directory=path,
                         resolved=False,
@@ -588,7 +689,7 @@ async def walk_find(
         is_empty = None
         if need_empty:
             is_empty = await _is_empty_entry(readdir, stat, p, is_dir, prefix,
-                                             index)
+                                             index, links)
         entry = FindEntry(key=key,
                           name=entry_name,
                           kind=kind,

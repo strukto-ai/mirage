@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fnmatch } from '../../utils/fnmatch.ts'
+import type { LinkView } from '../../ops/types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export interface FindEntry {
@@ -175,10 +176,22 @@ export interface BuildTreeOptions {
   name?: string | null | undefined
   iname?: string | null | undefined
   pathPattern?: string | null | undefined
-  type?: 'f' | 'd' | null | undefined
+  type?: string | null | undefined
   nameExclude?: string | null | undefined
   orNames?: string[] | null | undefined
   empty?: boolean | null | undefined
+}
+
+// Whether a directory holds namespace symlinks directly under it.
+//
+// `-empty` asks whether a directory has entries, and a symlink is one of
+// them. No backend readdir can see a namespace link, so every emptiness
+// probe has to add this or a directory holding only a link reads as empty.
+// Shared because find asks it in two places: the start point's row and
+// each directory the walk reaches.
+export function hasLinkChildren(links: LinkView | null | undefined, virtual: string): boolean {
+  if (links === null || links === undefined) return false
+  return links.children(rstripSlash(virtual) || '/').length > 0
 }
 
 export function buildTree(opts: BuildTreeOptions): PredNode {
@@ -219,7 +232,7 @@ export function optionsTree(options: {
   name?: string | null
   iname?: string | null
   pathPattern?: string | null
-  type?: 'f' | 'd' | null
+  type?: string | null
   nameExclude?: string | null
   orNames?: string[] | null
   empty?: boolean | null

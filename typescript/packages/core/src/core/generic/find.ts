@@ -16,6 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import {
+  hasLinkChildren,
   optionsTree,
   prefixPathNodes,
   treeHasEmpty,
@@ -23,12 +24,17 @@ import {
   keep,
 } from '../../commands/builtin/findEval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
+import type { LinkView } from '../../ops/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
   stat: (spec: PathSpec, index?: IndexCacheStore) => Promise<FileStat>
   isDirName: (child: string) => boolean | null
+  // `-empty` asks whether a directory has entries, and a namespace symlink
+  // is one that no backend readdir can see. Without this a directory
+  // holding only a link reads as empty.
+  links?: LinkView | null
 }
 
 interface WalkEntry {
@@ -79,6 +85,7 @@ async function isEmptyEntry(
   index: IndexCacheStore | undefined,
 ): Promise<boolean> {
   if (isDir) {
+    if (hasLinkChildren(deps.links, path)) return false
     const spec = new PathSpec({
       virtual: path,
       directory: path,

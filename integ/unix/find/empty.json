@@ -34,6 +34,38 @@
       "flags": [
         "empty"
       ]
+    },
+    {
+      "id": "find_empty_dir_holding_only_a_link",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/sle/lonly && mkdir -p /data/sle/vac && ln -s /data/a.txt /data/sle/lonly/lk && find /data/sle/vac -empty && find /data/sle/lonly -empty && rm /data/sle/lonly/lk && rm -r /data/sle",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sle/vac\n",
+        "stderr": ""
+      }
     }
   ]
 }
