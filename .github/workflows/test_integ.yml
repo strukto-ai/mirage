@@ -216,7 +216,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 10.32.1
 
@@ -512,7 +512,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 10.32.1
 
@@ -683,7 +683,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 10.32.1
 
@@ -928,7 +928,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 10.32.1
 
@@ -1030,7 +1030,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 10.32.1
 
@@ -1136,7 +1136,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.9
         with:
           version: 10.32.1
 
