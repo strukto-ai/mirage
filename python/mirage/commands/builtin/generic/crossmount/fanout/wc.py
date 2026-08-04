@@ -13,9 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
-from mirage.commands.builtin.generic.wc import WCCounts, format_wc_lines
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
+                                                parse_flags)
 
 
 def _parse_wc_row(line: str, columns: int) -> tuple[list[int], str]:
@@ -44,34 +43,33 @@ def combine_wc(results: list[OperandRun], flag_kwargs: dict[str,
                                                             object]) -> bytes:
     """Re-total per-operand wc rows with one shared column width.
 
-    Each native run right-aligns its own rows, so the runs cannot simply
-    concatenate: rows are re-parsed and the whole report (plus the global
-    ``total`` row, where max line length maxes instead of summing) is
-    reformatted by the same wc formatter the single-mount command uses.
+    Each native run right-aligns its own rows against its own widest count,
+    so the runs cannot simply concatenate: rows are re-parsed and the whole
+    report is reformatted by the same formatter the single-mount command
+    uses, which is also what applies ``--total``. ``run_fanout`` forces the
+    native runs to ``--total=never``, so every line read here is a file row
+    and the grand total below is the only one the report can carry.
 
     Args:
         results (list[OperandRun]): Per-operand native wc runs.
         flag_kwargs (dict): Flags parsed against the shared wc spec.
     """
-    fl = FlagView(flag_kwargs, spec=SPECS["wc"])
-    sel = dict(lines=fl.as_bool("lines"),
-               words=fl.as_bool("words"),
-               bytes_=fl.as_bool("bytes"),
-               chars=fl.as_bool("chars"),
-               max_line_length=fl.as_bool("max_line_length"))
+    flags = parse_flags(flag_kwargs)
+    sel = dict(lines=flags.lines,
+               words=flags.words,
+               bytes_=flags.bytes_,
+               chars=flags.chars,
+               max_line_length=flags.max_line_length)
     columns = 1 if any(sel.values()) else 3
     rows: list[tuple[WCCounts, str | None]] = []
+    totals = WCCounts()
     for run in results:
-        body = run.data.decode(errors="replace").splitlines()
-        if len(body) > 1:
-            body = body[:-1]
-        for line in body:
+        for line in run.data.decode(errors="replace").splitlines():
             values, label = _parse_wc_row(line, columns)
-            rows.append((_wc_counts(values, **sel), label or None))
-    if not rows:
-        return b""
-    total = WCCounts()
-    for counts, _ in rows:
-        total.merge(counts)
-    lines = format_wc_lines(rows + [(total, "total")], **sel)
-    return ("\n".join(lines) + "\n").encode()
+            counts = _wc_counts(values, **sel)
+            rows.append((counts, label or None))
+            totals.merge(counts)
+    # GNU decides the auto total on the operands *given*, not on the rows
+    # that resolved, so a missing operand still gets a total row. There are
+    # always at least two scopes here, and a glob operand can expand to more.
+    return format_count_rows(rows, totals, max(len(rows), len(results)), flags)

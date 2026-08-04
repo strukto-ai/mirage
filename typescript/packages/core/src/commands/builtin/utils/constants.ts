@@ -31,14 +31,6 @@ export const MONTHS = [
 
 export const EPOCH_LS_TIME = 'Jan  1 00:00'
 
-export const SIZE_UNITS: Record<string, number> = {
-  B: 1,
-  K: 1024,
-  M: 1024 ** 2,
-  G: 1024 ** 3,
-  T: 1024 ** 4,
-}
-
 export const TYPE_CHARS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'd',
   [FileType.SYMLINK]: 'l',

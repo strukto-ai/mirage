@@ -12,21 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.utils.formatting import (_human_size,
-                                                      format_number,
-                                                      parse_size, to_number)
-
-
-def testparse_size_plain_and_human():
-    assert parse_size("123") == 123
-    assert parse_size("4.0K") == 4096
-    assert parse_size("2.5M") == 2621440
-    assert parse_size("7B") == 7
-
-
-def testparse_size_inverts_human_size():
-    for n in (0, 512, 4096, 1024**2, 3 * 1024**3):
-        assert parse_size(_human_size(n)) == n
+from mirage.commands.builtin.utils.formatting import format_number, to_number
 
 
 def test_to_number_gnu_awk_coercion():

@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileType, LINK_TARGET_KEY, type FileStat } from '../../../types.ts'
-import {
-  DEFAULT_MODES,
-  EPOCH_LS_TIME,
-  MONTHS,
-  NUMERIC_PREFIX,
-  SIZE_UNITS,
-  TYPE_CHARS,
-} from './constants.ts'
+import { DEFAULT_MODES, EPOCH_LS_TIME, MONTHS, NUMERIC_PREFIX, TYPE_CHARS } from './constants.ts'
 
 export function humanSize(n: number): string {
   const units = ['B', 'K', 'M', 'G', 'T']
@@ -32,14 +25,6 @@ export function humanSize(n: number): string {
   }
   const s = i === 0 ? Math.round(value).toString() : value.toFixed(1)
   return `${s}${units[i] ?? ''}`
-}
-
-// Invert humanSize: `4.0K` -> 4096, plain digits pass through.
-export function parseSize(text: string): number {
-  const last = text.at(-1) ?? ''
-  const unit = SIZE_UNITS[last]
-  if (unit !== undefined) return Math.round(parseFloat(text.slice(0, -1)) * unit)
-  return parseInt(text, 10)
 }
 
 function permTriplet(bits: number, special?: string): string {

@@ -40,9 +40,11 @@ def testcombine_wc_uses_one_global_width():
                    "105 105 420 total\n")
 
 
-def testcombine_wc_drops_per_run_totals_from_glob_operands():
+def testcombine_wc_keeps_every_row_of_a_glob_operand():
+    # run_fanout forces --total=never, so a glob operand's run is all file
+    # rows; the combine must not treat the last one as a per-run total.
     runs = [
-        _op(b"2 /a/one.txt\n1 /a/two.txt\n3 total\n"),
+        _op(b"2 /a/one.txt\n1 /a/two.txt\n"),
         _op(b"1 /b/three.txt\n"),
     ]
     out = combine_wc(runs, {"lines": True}).decode()
@@ -56,3 +58,43 @@ def testcombine_wc_max_line_length_maxes_instead_of_summing():
     runs = [_op(b"9 /a/x\n"), _op(b"4 /b/y\n")]
     out = combine_wc(runs, {"max_line_length": True}).decode()
     assert out.endswith("9 total\n")
+
+
+def testcombine_wc_total_never_prints_no_total_row():
+    runs = [_op(b"2 3 14 /a/x.txt\n"), _op(b"1 3 15 /b/z.txt\n")]
+    out = combine_wc(runs, {"total": "never"}).decode()
+    assert out == (" 2  3 14 /a/x.txt\n"
+                   " 1  3 15 /b/z.txt\n")
+
+
+def testcombine_wc_total_only_prints_the_grand_total_alone():
+    runs = [_op(b"2 3 14 /a/x.txt\n"), _op(b"1 3 15 /b/z.txt\n")]
+    out = combine_wc(runs, {"total": "only"}).decode()
+    assert out == "3 6 29\n"
+
+
+def testcombine_wc_total_always_prints_a_total_for_one_row():
+    out = combine_wc([_op(b"2 3 14 /a/x.txt\n")], {"total": "always"}).decode()
+    assert out == " 2  3 14 /a/x.txt\n 2  3 14 total\n"
+
+
+def testcombine_wc_auto_omits_the_total_for_one_row():
+    out = combine_wc([_op(b"2 3 14 /a/x.txt\n")], {}).decode()
+    assert out == " 2  3 14 /a/x.txt\n"
+
+
+def testcombine_wc_failed_operand_still_gets_a_total_row():
+    # Two operands were given, so GNU prints the total even though only one
+    # of them resolved into a row.
+    runs = [_op(b"1 /a/f.txt\n"), _op(b"", exit_code=1)]
+    out = combine_wc(runs, {"lines": True}).decode()
+    assert out == "1 /a/f.txt\n1 total\n"
+
+
+def testcombine_wc_all_operands_failed_prints_nothing():
+    assert combine_wc([_op(b"", exit_code=1)], {}) == b""
+
+
+def testcombine_wc_total_only_zeroes_when_every_operand_failed():
+    out = combine_wc([_op(b"", exit_code=1)], {"total": "only"}).decode()
+    assert out == "0 0 0\n"

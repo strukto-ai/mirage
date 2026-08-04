@@ -13,11 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
-from mirage.commands.builtin.utils.formatting import _human_size, parse_size
+from mirage.commands.builtin.utils.formatting import _human_size
 
 
 def _format_size(size: int, human: bool) -> str:
     return _human_size(size) if human else str(size)
+
+
+def _humanize_row(line: str) -> str:
+    size_text, tab, label = line.partition("\t")
+    if not tab:
+        return line
+    return _human_size(int(size_text)) + "\t" + label
 
 
 def du_total(results: list[OperandRun], human: bool) -> bytes:
@@ -26,18 +33,24 @@ def du_total(results: list[OperandRun], human: bool) -> bytes:
     Every native run receives ``-c`` so glob operands total natively; the
     per-run totals (always the last row) are removed and re-summed.
 
+    ``run_fanout`` forces the native runs to report exact bytes even under
+    ``-h``, and the sizes are humanized here instead. Summing each run's
+    already-humanized total would round twice, so two 1500-byte operands
+    read back as 1536 each and report ``3.0K`` where one mount says
+    ``2.9K``. Per-run totals cannot be replaced by summing the rows either:
+    without ``-a`` a run prints a row per directory, and those nest.
+
     Args:
         results (list[OperandRun]): Per-operand native du runs.
-        human (bool): Format the total like ``du -h`` does.
+        human (bool): Format the sizes like ``du -h`` does.
     """
-    kept: list[bytes] = []
+    kept: list[str] = []
     total = 0
     for run in results:
         body = run.data.decode(errors="replace").splitlines()
         if body and body[-1].endswith("\ttotal"):
-            total += parse_size(body[-1].rsplit("\t", 1)[0])
+            total += int(body[-1].rsplit("\t", 1)[0])
             body = body[:-1]
-        if body:
-            kept.append(("\n".join(body) + "\n").encode())
-    kept.append((_format_size(total, human) + "\ttotal\n").encode())
-    return b"".join(kept)
+        kept.extend(_humanize_row(line) if human else line for line in body)
+    kept.append(_format_size(total, human) + "\ttotal")
+    return ("\n".join(kept) + "\n").encode()

@@ -67,6 +67,16 @@ async def run_fanout(cmd_name: str,
     if cmd_name in (Cmd.HEAD, Cmd.TAIL) and not FlagView(
             flags, spec=SPECS[cmd_name]).as_bool(quiet_key):
         flags[verbose_key] = True
+    # Both re-totalling combines below need raw per-file rows from every
+    # run: wc must not see a per-run total row it would have to guess at,
+    # and du must not sum sizes that were already rounded for -h.
+    if cmd_name == Cmd.WC:
+        flags["total"] = "never"
+    du_c = cmd_name == Cmd.DU and FlagView(flag_kwargs,
+                                           spec=SPECS[Cmd.DU]).as_bool("c")
+    du_human = du_c and FlagView(flag_kwargs, spec=SPECS[Cmd.DU]).as_bool("h")
+    if du_human:
+        flags["h"] = False
 
     results = await run_operands(run_single,
                                  cmd_name,
@@ -84,10 +94,8 @@ async def run_fanout(cmd_name: str,
 
     if cmd_name == Cmd.WC:
         body = combine_wc(results, flag_kwargs)
-    elif cmd_name == Cmd.DU and FlagView(flag_kwargs,
-                                         spec=SPECS[Cmd.DU]).as_bool("c"):
-        body = du_total(results,
-                        FlagView(flag_kwargs, spec=SPECS[Cmd.DU]).as_bool("h"))
+    elif du_c:
+        body = du_total(results, du_human)
     elif cmd_name == Cmd.TEE:
         body = stdin_bytes or b""
     elif (cmd_name in (Cmd.HEAD, Cmd.TAIL)

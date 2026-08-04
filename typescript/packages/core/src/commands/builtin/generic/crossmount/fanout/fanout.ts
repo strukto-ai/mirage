@@ -84,6 +84,17 @@ export async function runFanout(
   if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[quietKey] !== true) {
     flags[verboseKey] = true
   }
+  // Both re-totalling combines below need raw per-file rows from every run:
+  // wc must not see a per-run total row it would have to guess at, and du
+  // must not sum sizes that were already rounded for -h.
+  if (cmdName === Cmd.WC) {
+    flags.total = 'never'
+  }
+  const duC = cmdName === Cmd.DU && flagKwargs.c === true
+  const duHuman = duC && flagKwargs.h === true
+  if (duHuman) {
+    flags.h = false
+  }
 
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
   const errored = results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null)
@@ -95,11 +106,11 @@ export async function runFanout(
     quiet,
   )
 
-  let body: Uint8Array
+  let body: ByteSource | null
   if (cmdName === Cmd.WC) {
     body = combineWc(results, flagKwargs)
-  } else if (cmdName === Cmd.DU && flagKwargs.c === true) {
-    body = duTotal(results, flagKwargs.h === true)
+  } else if (duC) {
+    body = duTotal(results, duHuman)
   } else if (cmdName === Cmd.TEE) {
     body = stdinBytes ?? new Uint8Array()
   } else if (

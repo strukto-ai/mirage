@@ -44,7 +44,7 @@ interface WcCounts {
   maxLineLength: number
 }
 
-interface WcFlags {
+export interface WcFlags {
   lines: boolean
   words: boolean
   bytes: boolean
@@ -53,7 +53,9 @@ interface WcFlags {
   total: 'auto' | 'always' | 'only' | 'never'
 }
 
-function parseFlags(flags: Record<string, string | boolean | number | string[]>): WcFlags | string {
+export function parseFlags(
+  flags: Record<string, string | boolean | number | string[]>,
+): WcFlags | string {
   const rawTotal = typeof flags.total === 'string' ? flags.total : 'auto'
   if (!['auto', 'always', 'only', 'never'].includes(rawTotal)) {
     return `wc: invalid argument '${rawTotal}' for '--total'\n`
@@ -127,6 +129,24 @@ export function formatWcLines(rows: WcRow[]): string[] {
   })
 }
 
+// Append the `total` row --total asks for and render the report. `only`
+// prints the grand total alone and unlabeled; `auto` prints one when more
+// than one operand was counted. Returns null when there is nothing to print.
+export function formatCountRows(
+  rows: WcRow[],
+  totalValues: number[],
+  operandCount: number,
+  total: WcFlags['total'],
+): ByteSource | null {
+  if (total === 'only') return ENC.encode(`${totalValues.join(' ')}\n`)
+  const out = [...rows]
+  if (total === 'always' || (total === 'auto' && operandCount > 1)) {
+    out.push({ values: totalValues, label: 'total' })
+  }
+  if (out.length === 0) return null
+  return formatRecords(formatWcLines(out))
+}
+
 export async function wcGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -155,21 +175,11 @@ export async function wcGeneric(
       rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
       addCounts(total, counts)
     }
-    const includeTotal = parsed.total === 'always' || (parsed.total === 'auto' && paths.length > 1)
-    if (includeTotal || parsed.total === 'only') {
-      rows.push({ values: selectedValues(total, parsed), label: 'total' })
-    }
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
       stderr: err === '' ? null : ENC.encode(err),
     })
-    if (parsed.total === 'only') {
-      const out = ENC.encode(`${selectedValues(total, parsed).join(' ')}\n`)
-      return [out, io]
-    }
-    if (rows.length === 0) return [null, io]
-    const out: ByteSource = formatRecords(formatWcLines(rows))
-    return [out, io]
+    return [formatCountRows(rows, selectedValues(total, parsed), paths.length, parsed.total), io]
   }
   let source: AsyncIterable<Uint8Array>
   try {
