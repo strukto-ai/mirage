@@ -6,7 +6,7 @@ from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive_ops import DriveLoc
 from mirage.core.sharepoint._client import (drive_ref_path, graph_api,
-                                            graph_list, item_url)
+                                            graph_list, id_segment, item_url)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -40,7 +40,7 @@ async def _list_sites(accessor: SharePointAccessor) -> list[dict[str, Any]]:
 
 async def _list_drives(accessor: SharePointAccessor,
                        site_id: str) -> list[dict[str, Any]]:
-    url = f"{graph_api(accessor.config)}/sites/{site_id}/drives"
+    url = f"{graph_api(accessor.config)}/sites/{id_segment(site_id)}/drives"
     params = {"$select": "id,name"}
     return await graph_list(accessor.config, url, params=params)
 

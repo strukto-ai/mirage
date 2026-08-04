@@ -995,11 +995,9 @@ export { readdir as gdriveReaddir } from './core/gdrive/readdir.ts'
 export { stat as gdriveStat } from './core/gdrive/stat.ts'
 export { GDRIVE_PROMPT } from './resource/gdrive/prompt.ts'
 export {
-  GRAPH_CLOUDS,
-  GRAPH_CLOUD_HOSTS,
+  DEFAULT_GRAPH_API,
   GRAPH_VERSION,
   type AccessTokenProvider,
-  type GraphCloud,
   type MsGraphConfig,
   type MsGraphConfigResolved,
   graphApi,

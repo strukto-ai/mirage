@@ -19,7 +19,6 @@ import {
   MSGRAPH_CONFIG_SHAPE,
   graphApi,
   resolveMsGraphConfig,
-  type GraphCloud,
   type MsGraphConfig,
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
@@ -38,7 +37,6 @@ export interface SharePointConfig extends MsGraphConfig {
 export interface SharePointConfigRedacted {
   accessToken: '<REDACTED>'
   tenantHost?: string
-  cloud?: GraphCloud
   graphBaseUrl?: string
   timeout?: number
   maxRetries?: number

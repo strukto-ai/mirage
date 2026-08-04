@@ -20,21 +20,7 @@ export type AccessTokenProvider = () => string | Promise<string>
 
 export const GRAPH_VERSION = 'v1.0'
 
-// A Microsoft Graph national cloud deployment. Each is a network-isolated
-// instance with its own service root, and a token minted for one is not
-// accepted by another. Microsoft 365 GCC (moderate) is served by the
-// worldwide endpoint, so it is 'global'; only GCC High and DoD have their
-// own hosts.
-export const GRAPH_CLOUDS = ['global', 'usgovhigh', 'usgovdod', 'china'] as const
-
-export type GraphCloud = (typeof GRAPH_CLOUDS)[number]
-
-export const GRAPH_CLOUD_HOSTS: Record<GraphCloud, string> = {
-  global: 'https://graph.microsoft.com',
-  usgovhigh: 'https://graph.microsoft.us',
-  usgovdod: 'https://dod-graph.microsoft.us',
-  china: 'https://microsoftgraph.chinacloudapi.cn',
-}
+export const DEFAULT_GRAPH_API = `https://graph.microsoft.com/${GRAPH_VERSION}`
 
 // Shared by the OneDrive and SharePoint config schemas, mirroring Python's
 // MsGraphConfig base model. `accessToken` accepts a provider callable as well
@@ -45,7 +31,6 @@ export const MSGRAPH_CONFIG_SHAPE = {
     z.union([z.string(), z.custom<AccessTokenProvider>((value) => typeof value === 'function')]),
   ),
   tenantHost: z.string().optional(),
-  cloud: z.enum(GRAPH_CLOUDS).optional(),
   graphBaseUrl: z.string().optional(),
   timeout: z.number().optional(),
   maxRetries: z.number().optional(),
@@ -54,10 +39,9 @@ export const MSGRAPH_CONFIG_SHAPE = {
 export interface MsGraphConfig {
   accessToken: string | AccessTokenProvider
   tenantHost?: string
-  cloud?: GraphCloud
-  // Full service root, version segment included, for a deployment the
-  // `cloud` table cannot name: a private endpoint or a test server. Wins
-  // over `cloud` when set.
+  // Full service root, version segment included, for any deployment other
+  // than the worldwide one: a sovereign cloud, a private endpoint, or a
+  // test server.
   graphBaseUrl?: string
   timeout?: number
   maxRetries?: number
@@ -66,7 +50,6 @@ export interface MsGraphConfig {
 export interface MsGraphConfigResolved {
   accessToken: string | AccessTokenProvider
   tenantHost: string | null
-  cloud: GraphCloud
   graphBaseUrl: string | null
   timeout: number
   maxRetries: number
@@ -87,7 +70,6 @@ export function resolveMsGraphConfig(config: MsGraphConfig): MsGraphConfigResolv
   return {
     accessToken: config.accessToken,
     tenantHost: optionalText(config.tenantHost),
-    cloud: config.cloud ?? 'global',
     graphBaseUrl: optionalText(config.graphBaseUrl),
     timeout,
     maxRetries,
@@ -101,5 +83,5 @@ export function resolveMsGraphConfig(config: MsGraphConfig): MsGraphConfigResolv
 // spells a URL.
 export function graphApi(config: MsGraphConfigResolved): string {
   if (config.graphBaseUrl !== null) return rstripSlash(config.graphBaseUrl)
-  return `${GRAPH_CLOUD_HOSTS[config.cloud]}/${GRAPH_VERSION}`
+  return DEFAULT_GRAPH_API
 }

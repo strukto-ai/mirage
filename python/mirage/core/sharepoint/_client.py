@@ -6,8 +6,8 @@ from mirage.core.msgraph._client import (MAX_BACKOFF, RETRY_STATUSES,
                                          graph_get_bytes, graph_list,
                                          graph_patch, graph_post,
                                          graph_post_monitor, graph_put_bytes,
-                                         graph_stream, headers, new_session,
-                                         poll_monitor, split_path,
+                                         graph_stream, headers, id_segment,
+                                         new_session, poll_monitor, split_path,
                                          upload_chunk)
 # yapf: enable
 from mirage.core.msgraph.config import MsGraphConfig, graph_api
@@ -28,6 +28,7 @@ __all__ = [
     "graph_put_bytes",
     "graph_stream",
     "headers",
+    "id_segment",
     "item_url",
     "new_session",
     "poll_monitor",
@@ -52,7 +53,7 @@ def item_url(config: MsGraphConfig,
         path (str): drive-relative item path.
         action (str): optional trailing Graph action, e.g. ``/content``.
     """
-    base = f"{graph_api(config)}/drives/{drive_id}"
+    base = f"{graph_api(config)}/drives/{id_segment(drive_id)}"
     p = path.strip("/")
     if not p:
         return f"{base}/root{action}"

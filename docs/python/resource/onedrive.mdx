@@ -30,7 +30,7 @@ config = OneDriveConfig(
     # site_id="contoso.sharepoint.com,...",  # a SharePoint site's default drive
     # group_id="...",          # a Teams / Microsoft 365 group's library
     # user_id="user@contoso.com",  # another user's drive (app-only)
-    # cloud=GraphCloud.US_GOV_HIGH,  # a national cloud (default: global)
+    # graph_base_url="https://graph.microsoft.us/v1.0",  # non-worldwide root
     # key_prefix="Documents/",  # mount a sub-folder as the root
     # timeout=30,
 )
@@ -52,8 +52,7 @@ modes are supported.
 | `site_id`        | No       | A SharePoint site's default drive                                      |
 | `group_id`       | No       | A Teams / Microsoft 365 group's document library                       |
 | `user_id`        | No       | Another user's drive, by id or UPN (app-only auth)                     |
-| `cloud`          | No       | National cloud deployment (default `GraphCloud.GLOBAL`)                |
-| `graph_base_url` | No       | Full service root, overriding `cloud`                                  |
+| `graph_base_url` | No       | Full service root, for any deployment but the worldwide one            |
 | `key_prefix`     | No       | Mount a sub-folder of the drive as the root                            |
 | `timeout`        | No       | Request timeout in seconds (default `30`)                              |
 
@@ -66,27 +65,22 @@ much later as an unexplained 404. Setting none means `/me/drive`, the
 signed-in user's own drive, which is the only form that needs no extra
 identifier and the only one unavailable to an app-only token.
 
-### National clouds
+### The service root
 
-`cloud` selects the Graph deployment. Each is network-isolated with its own
-service root, and a token minted for one is rejected by the others, so this is
-not a performance knob: pointing a GCC High tenant at the global host fails
-outright.
+Mounts address `https://graph.microsoft.com/v1.0` unless `graph_base_url` says
+otherwise. Set it to reach anything else: a sovereign cloud, a private
+endpoint, or a test server. Give the full root including the version segment,
+for example `https://graph.microsoft.us/v1.0`.
 
-| `GraphCloud` | Service root                             | Microsoft 365 environment |
-| ------------ | ---------------------------------------- | ------------------------- |
-| `GLOBAL`     | `https://graph.microsoft.com`            | Commercial, and GCC       |
-| `US_GOV_HIGH`| `https://graph.microsoft.us`             | GCC High (L4)             |
-| `US_GOV_DOD` | `https://dod-graph.microsoft.us`         | DoD (L5)                  |
-| `CHINA`      | `https://microsoftgraph.chinacloudapi.cn`| 21Vianet                  |
+This matters most for the sovereign deployments, which are network-isolated
+instances rather than regions: a token minted for one is rejected by the
+others, so a mount pointed at the wrong root fails outright rather than
+degrading. mirage does not ship a table of their hostnames, since it has no
+way to verify one; take the root from Microsoft's national cloud
+documentation for your tenant.
 
-GCC (moderate) is served by the worldwide endpoint, so it uses `GLOBAL`.
-
-`graph_base_url` is the escape hatch for a root this table cannot name (a
-private endpoint, or a test server). It is the full root including the version
-segment, for example `https://graph.microsoft.us/v1.0`, and it wins over
-`cloud`. Because the root is read from the config rather than a module
-constant, two mounts in one process can address different deployments.
+Because the root is read from the config rather than a module constant, two
+mounts in one process can address different deployments.
 
 ## Filesystem Layout
 

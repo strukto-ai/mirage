@@ -22,8 +22,9 @@ from mirage.core.msgraph._client import (MAX_BACKOFF, RETRY_STATUSES,
                                          graph_get_bytes, graph_list,
                                          graph_patch, graph_post,
                                          graph_post_monitor, graph_put_bytes,
-                                         graph_stream, headers, new_session,
-                                         poll_monitor, upload_chunk)
+                                         graph_stream, headers, id_segment,
+                                         new_session, poll_monitor,
+                                         upload_chunk)
 # yapf: enable
 from mirage.core.msgraph.config import graph_api
 from mirage.core.msgraph.drive_ops import DriveLoc
@@ -48,6 +49,7 @@ __all__ = [
     "graph_put_bytes",
     "graph_stream",
     "headers",
+    "id_segment",
     "item_url",
     "new_session",
     "poll_monitor",
@@ -69,18 +71,22 @@ def drive_base(config: OneDriveConfig) -> str:
     means the signed-in user's own drive, which is the only form that
     works under delegated auth with no extra identifiers.
 
+    Each identifier is escaped as a single path segment. A guest user's
+    UPN carries ``#EXT#``, and interpolated raw that ``#`` would open a
+    URL fragment and send a truncated path.
+
     Args:
         config (OneDriveConfig): mount config.
     """
     api = graph_api(config)
     if config.drive_id:
-        return f"{api}/drives/{config.drive_id}"
+        return f"{api}/drives/{id_segment(config.drive_id)}"
     if config.site_id:
-        return f"{api}/sites/{config.site_id}/drive"
+        return f"{api}/sites/{id_segment(config.site_id)}/drive"
     if config.group_id:
-        return f"{api}/groups/{config.group_id}/drive"
+        return f"{api}/groups/{id_segment(config.group_id)}/drive"
     if config.user_id:
-        return f"{api}/users/{config.user_id}/drive"
+        return f"{api}/users/{id_segment(config.user_id)}/drive"
     return f"{api}/me/drive"
 
 

@@ -3,7 +3,6 @@ from aioresponses import aioresponses
 from pydantic import ValidationError
 
 from mirage.accessor.onedrive import OneDriveConfig
-from mirage.core.msgraph.config import GraphCloud
 from mirage.core.onedrive._client import (GraphError, drive_base,
                                           drive_ref_path, graph_get,
                                           graph_get_bytes, graph_list, headers,
@@ -59,29 +58,29 @@ def test_drive_base_uses_group_drive():
 def test_drive_base_uses_user_drive():
     base = drive_base(_cfg(user_id="usr@example.com"))
     assert base == ("https://graph.microsoft.com/v1.0/users/"
-                    "usr@example.com/drive")
+                    "usr%40example.com/drive")
 
 
-@pytest.mark.parametrize("cloud,host", [
-    (GraphCloud.GLOBAL, "https://graph.microsoft.com"),
-    (GraphCloud.US_GOV_HIGH, "https://graph.microsoft.us"),
-    (GraphCloud.US_GOV_DOD, "https://dod-graph.microsoft.us"),
-    (GraphCloud.CHINA, "https://microsoftgraph.chinacloudapi.cn"),
-])
-def test_drive_base_follows_the_national_cloud(cloud, host):
-    """Each deployment is network-isolated with its own service root.
-
-    A token minted for one is rejected by the others, so addressing the
-    global host from a GCC High tenant does not degrade, it fails.
-    """
-    assert drive_base(_cfg(cloud=cloud)) == f"{host}/v1.0/me/drive"
+def test_drive_base_escapes_a_guest_upn():
+    # A guest's UPN carries `#EXT#`. Interpolated raw, that `#` opens a
+    # URL fragment, so Graph receives `/users/guest_contoso.com` and
+    # answers 404 for a user that exists.
+    base = drive_base(_cfg(user_id="guest_contoso.com#EXT#@fabrikam.com"))
+    assert base == ("https://graph.microsoft.com/v1.0/users/"
+                    "guest_contoso.com%23EXT%23%40fabrikam.com/drive")
 
 
-def test_graph_base_url_overrides_the_cloud():
-    # The escape hatch for a deployment the cloud table cannot name, and
-    # what points a mount at a test server.
-    cfg = _cfg(cloud=GraphCloud.CHINA,
-               graph_base_url="http://127.0.0.1:8080/v1.0/")
+def test_drive_base_leaves_a_drive_id_bang_alone():
+    # `quote` would escape `!`, `encodeURIComponent` does not, and drive
+    # ids start `b!`. The ref path built off this base goes into a JSON
+    # body Graph reads literally, so the two languages must agree.
+    assert "b!" in drive_base(_cfg(drive_id="b!abc-_x"))
+
+
+def test_graph_base_url_replaces_the_service_root():
+    # How a mount reaches a sovereign cloud, a private endpoint, or a
+    # test server. The trailing slash must not survive into the URL.
+    cfg = _cfg(graph_base_url="http://127.0.0.1:8080/v1.0/")
     assert drive_base(cfg) == "http://127.0.0.1:8080/v1.0/me/drive"
 
 

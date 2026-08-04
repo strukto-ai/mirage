@@ -18,7 +18,6 @@ import {
   MSGRAPH_CONFIG_SHAPE,
   graphApi,
   resolveMsGraphConfig,
-  type GraphCloud,
   type MsGraphConfig,
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
@@ -41,7 +40,6 @@ export interface OneDriveConfig extends MsGraphConfig {
 export interface OneDriveConfigRedacted {
   accessToken: '<REDACTED>'
   tenantHost?: string
-  cloud?: GraphCloud
   graphBaseUrl?: string
   timeout?: number
   maxRetries?: number

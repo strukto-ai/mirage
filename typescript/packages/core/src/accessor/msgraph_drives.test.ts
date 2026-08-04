@@ -48,25 +48,11 @@ describe('OneDrive addressing', () => {
     )
   })
 
-  // Each deployment is network-isolated with its own service root. A token
-  // minted for one is rejected by the others, so addressing the global host
-  // from a GCC High tenant does not degrade, it fails.
-  it.each([
-    ['global', 'https://graph.microsoft.com'],
-    ['usgovhigh', 'https://graph.microsoft.us'],
-    ['usgovdod', 'https://dod-graph.microsoft.us'],
-    ['china', 'https://microsoftgraph.chinacloudapi.cn'],
-  ] as const)('follows the %s national cloud', (cloud, host) => {
-    const accessor = new OneDriveAccessor({ accessToken: 'token', cloud })
-    expect(oneDriveBase(accessor.config)).toBe(`${host}/v1.0/me/drive`)
-  })
-
-  it('lets graphBaseUrl override the cloud', () => {
-    // The escape hatch for a deployment the cloud table cannot name, and
-    // what points a mount at a test server.
+  it('lets graphBaseUrl replace the service root', () => {
+    // How a mount reaches a sovereign cloud, a private endpoint, or a test
+    // server. The trailing slash must not survive into the URL.
     const accessor = new OneDriveAccessor({
       accessToken: 'token',
-      cloud: 'china',
       graphBaseUrl: 'http://127.0.0.1:8080/v1.0/',
     })
     expect(oneDriveBase(accessor.config)).toBe('http://127.0.0.1:8080/v1.0/me/drive')

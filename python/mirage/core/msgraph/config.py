@@ -13,33 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
-from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 GRAPH_VERSION = "v1.0"
-
-
-class GraphCloud(str, Enum):
-    """A Microsoft Graph national cloud deployment.
-
-    Each is a network-isolated instance with its own service root, and a
-    token minted for one is not accepted by another. Microsoft 365 GCC
-    (moderate) is served by the worldwide endpoint, so it is ``GLOBAL``;
-    only GCC High and DoD have their own hosts.
-    """
-    GLOBAL = "global"
-    US_GOV_HIGH = "usgovhigh"
-    US_GOV_DOD = "usgovdod"
-    CHINA = "china"
-
-
-GRAPH_CLOUD_HOSTS = {
-    GraphCloud.GLOBAL: "https://graph.microsoft.com",
-    GraphCloud.US_GOV_HIGH: "https://graph.microsoft.us",
-    GraphCloud.US_GOV_DOD: "https://dod-graph.microsoft.us",
-    GraphCloud.CHINA: "https://microsoftgraph.chinacloudapi.cn",
-}
+DEFAULT_GRAPH_API = f"https://graph.microsoft.com/{GRAPH_VERSION}"
 
 
 class MsGraphConfig(BaseModel):
@@ -47,10 +25,9 @@ class MsGraphConfig(BaseModel):
 
     access_token: SecretStr | Callable[[], str | SecretStr]
     tenant_host: str | None = None
-    cloud: GraphCloud = GraphCloud.GLOBAL
-    # Full service root, version segment included, for a deployment the
-    # `cloud` table cannot name: a private endpoint or a test server. Wins
-    # over `cloud` when set.
+    # Full service root, version segment included, for any deployment
+    # other than the worldwide one: a sovereign cloud, a private
+    # endpoint, or a test server.
     graph_base_url: str | None = None
     timeout: int = 30
     max_retries: int = 5
@@ -65,8 +42,8 @@ def graph_api(config: MsGraphConfig) -> str:
     every module that spells a URL.
 
     Args:
-        config (MsGraphConfig): mount config carrying the deployment.
+        config (MsGraphConfig): mount config carrying the service root.
     """
     if config.graph_base_url:
         return config.graph_base_url.rstrip("/")
-    return f"{GRAPH_CLOUD_HOSTS[config.cloud]}/{GRAPH_VERSION}"
+    return DEFAULT_GRAPH_API
