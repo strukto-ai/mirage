@@ -348,6 +348,12 @@ async function runCommandBody(
     timeout,
     argv.name !== '' ? argv.name : '?',
   )
+  if (io.producer === null && argv.name !== '') {
+    // Builtins and other non-mount routes return no rider; stamp the
+    // expanded name here so postExecute policies keyed on a command
+    // (echo, printf, ...) still see it.
+    io.producer = { command: argv.name, prefixes: [], declared: null }
+  }
   if (procSubStderr.length > 0) {
     const stderr = await materialize(io.stderr)
     io.stderr = concatBytes([...procSubStderr, stderr])

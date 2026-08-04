@@ -371,6 +371,9 @@ async def test_post_execute_sees_the_rightmost_producer():
         await ws.execute("cat /data/f.txt | wc -l")
         await ws.execute("cat /data/f.txt ; head -n 1 /data/f.txt")
         await ws.execute("false || cat /data/f.txt")
-        assert spy.seen == ["wc", "head", "cat"]
+        # Builtins carry provenance too: a policy keyed on echo sees it.
+        await ws.execute("echo hi")
+        await ws.execute("cat /data/f.txt ; echo done")
+        assert spy.seen == ["wc", "head", "cat", "echo", "echo"]
     finally:
         await ws.close()

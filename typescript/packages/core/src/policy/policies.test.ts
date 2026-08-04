@@ -570,7 +570,10 @@ describe('Limit end to end', () => {
       await ws.execute('cat /data/f.txt | wc -l')
       await ws.execute('cat /data/f.txt ; head -n 1 /data/f.txt')
       await ws.execute('false || cat /data/f.txt')
-      expect(spy.seen).toEqual(['wc', 'head', 'cat'])
+      // Builtins carry provenance too: a policy keyed on echo sees it.
+      await ws.execute('echo hi')
+      await ws.execute('cat /data/f.txt ; echo done')
+      expect(spy.seen).toEqual(['wc', 'head', 'cat', 'echo', 'echo'])
     } finally {
       await ws.close()
     }

@@ -23,7 +23,7 @@ from mirage.runtime.policy import PolicyDecision
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command
-from mirage.types import PathSpec, word_text
+from mirage.types import PathSpec, Producer, word_text
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.command.routing import path_flag_scopes
@@ -236,6 +236,11 @@ async def _dispatch_command_body(
     xtrace = bool(session.shell_options.get("xtrace"))
     stdout, io, exec_node = await run_with_timeout(body, timeout, argv.name
                                                    or "?")
+    if io.producer is None and argv.name:
+        # Builtins and other non-mount routes return no rider; stamp the
+        # expanded name here so post_execute policies keyed on a command
+        # (echo, printf, ...) still see it.
+        io.producer = Producer(command=argv.name)
     if proc_sub_stderr:
         io.stderr = b"".join(proc_sub_stderr) + await materialize(io.stderr)
         exec_node.stderr = io.stderr

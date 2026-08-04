@@ -90,12 +90,12 @@ register your own command, pass `provision:` to `command({...})`
 reports `unknown`. Full semantics live in the
 [CLI provision docs](/home/cli#5-dry-run-with-provision).
 
-## Output Safeguards
+## Output Limits
 
 To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`,
 and `tail` cap their **final** output at 2000 lines by default. When a
 cap fires, the agent sees the truncated bytes plus a stderr notice
-(`output truncated at safeguard limit (2000 lines); ...`); the exit code
+(`output truncated at limit (2000 lines); ...`); the exit code
 stays 0.
 
 Caps fire only on the **terminal** command of a pipeline, so
@@ -103,14 +103,14 @@ Caps fire only on the **terminal** command of a pipeline, so
 
 ### Configure per mount
 
-Pass a `commandSafeguards` option keyed by mount prefix, then command.
-Each `CommandSafeguard` sets `maxLines` / `maxBytes` (output cap) and/or
+Pass a `commandLimits` option keyed by mount prefix, then command.
+Each `Limit` sets `maxLines` / `maxBytes` (output cap) and/or
 `timeoutSeconds` (deadline); `onExceed` is `TRUNCATE` (default, exit 0
 plus notice) or `ERROR` (exit 1 plus notice):
 
 ```ts
 import {
-  CommandSafeguard,
+  Limit,
   MountMode,
   OnExceed,
   RAMResource,
@@ -121,18 +121,18 @@ const ws = new Workspace(
   { '/data': new RAMResource() },
   {
     mode: MountMode.WRITE,
-    commandSafeguards: {
+    commandLimits: {
       '/data': {
-        head: new CommandSafeguard({ maxLines: 100 }), // cap, keep going
-        grep: new CommandSafeguard({ maxLines: 50, onExceed: OnExceed.ERROR }),
-        rg: new CommandSafeguard({ timeoutSeconds: 30 }), // deadline
+        head: new Limit({ maxLines: 100 }), // cap, keep going
+        grep: new Limit({ maxLines: 50, onExceed: OnExceed.ERROR }),
+        rg: new Limit({ timeoutSeconds: 30 }), // deadline
       },
     },
   },
 )
 ```
 
-The same limits are available to the CLI as a `command_safeguards` block in the workspace YAML.
+The same limits are available to the CLI as a `command_limits` block in the workspace YAML.
 
 ## Next Steps
 

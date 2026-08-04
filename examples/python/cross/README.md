@@ -135,9 +135,9 @@ Each entry sets `max_lines` / `max_bytes` (output cap) and/or
 `timeout_seconds` (deadline), with `on_exceed: truncate` (stop, exit 0,
 add a notice) or `on_exceed: error` (stop, exit 1, add a notice).
 
-This section is **Python-only**: the TS config schema does not yet carry
-`command_limits`. It runs against its own workspace
-(`cross_sg`) from [workspace_limits.yaml](workspace_limits.yaml),
+Both CLIs parse and apply the same `command_limits` block (the cross
+harness pins this). This walkthrough uses the Python CLI against its own
+workspace (`cross_sg`) from [workspace_limits.yaml](workspace_limits.yaml),
 so the steps above are untouched. That file guards `/s3` with:
 `head` → 10 lines / truncate, `grep` → 20 lines / error, `rg` → a 1 ms
 timeout.

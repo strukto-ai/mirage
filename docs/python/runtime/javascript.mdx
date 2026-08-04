@@ -66,10 +66,10 @@ so `std.open` returns `null` instead of writing.
 
 This is capability isolation, not a resource sandbox: the sandboxed code
 cannot reach your files or the network, but its CPU and memory are bounded
-only by `command_safeguards` timeouts. For untrusted code or hard resource
+only by `command_limits` timeouts. For untrusted code or hard resource
 limits, run behind a sandboxed deployment.
 
-Each run gets its own epoch-interruption engine, so a `command_safeguards`
+Each run gets its own epoch-interruption engine, so a `command_limits`
 timeout traps the run and reclaims the thread instead of leaking it.
 
 ## Setup
@@ -107,7 +107,7 @@ The first run compiles `qjs-wasi.wasm` and caches the compilation as
 
 ## Resource limits
 
-`node`/`js` is a command like any other: the same `command_safeguards`
+`node`/`js` is a command like any other: the same `command_limits`
 that guard `cat` or `python3` guard it, enforced at the same central
 point. A run that exceeds `timeout_seconds` answers with exit 124, and
 `max_bytes`/`max_lines` cap its output. Firing the guard also cancels

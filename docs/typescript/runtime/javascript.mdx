@@ -69,7 +69,7 @@ while a mount read or write awaits the dispatch, matching the Python
 
 This is capability isolation, not a resource sandbox: the sandboxed code
 cannot reach your files or the network, but CPU and memory are bounded only
-by soft engine caps and `command_safeguards` timeouts. For untrusted code or
+by soft engine caps and `command_limits` timeouts. For untrusted code or
 hard resource limits, run behind a sandboxed deployment.
 
 ## Setup
@@ -104,14 +104,14 @@ runtimes:
 mounts:
   /data:
     resource: ram
-    command_safeguards:
+    command_limits:
       js:
         timeout_seconds: 30
 ```
 
 ## Resource limits
 
-`node`/`js` is a command like any other: the same `command_safeguards`
+`node`/`js` is a command like any other: the same `command_limits`
 that guard `cat` or `python3` guard it, enforced at the same central
 point. A run that exceeds `timeout_seconds` answers with exit 124, and
 `max_bytes`/`max_lines` cap its output.

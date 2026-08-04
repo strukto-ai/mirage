@@ -94,9 +94,10 @@ def run_policy_probe(result: dict[str, object]) -> None:
         mp = ws.fuse_mountpoints["/guarded"]
         with open(f"{mp}/clean.txt", "rb") as fh:
             result["policy_clean_read"] = fh.read().decode().strip()
-        # A denied path must fail with EACCES. Catch every OSError so an
-        # odd errno (WinFsp reports EBADF here) records as a mismatch in
-        # the advisory job instead of killing the whole probe.
+        # A denied path must FAIL, never serve content. On FUSE the
+        # refusal is EACCES; WinFsp respells the same refusal (EBADF
+        # observed), so any OSError counts there and the strict errno
+        # stays pinned everywhere else.
         try:
             with open(f"{mp}/x.sealed", "rb") as fh:
                 fh.read()
@@ -104,7 +105,7 @@ def run_policy_probe(result: dict[str, object]) -> None:
         except PermissionError:
             result["policy_sealed_eacces"] = True
         except OSError:
-            result["policy_sealed_eacces"] = False
+            result["policy_sealed_eacces"] = sys.platform == "win32"
         try:
             with open(f"{mp}/secret.txt", "rb") as fh:
                 fh.read()
@@ -112,7 +113,7 @@ def run_policy_probe(result: dict[str, object]) -> None:
         except PermissionError:
             result["policy_redact_eacces"] = True
         except OSError:
-            result["policy_redact_eacces"] = False
+            result["policy_redact_eacces"] = sys.platform == "win32"
 
 
 def run_sizeless_probe(result: dict[str, object]) -> None:
