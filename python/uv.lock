@@ -4261,7 +4261,7 @@ requires-dist = [
     { name = "aioboto3", marker = "extra == 'r2'", specifier = ">=13.0" },
     { name = "aioboto3", marker = "extra == 's3'", specifier = ">=13.0" },
     { name = "aiofiles", specifier = ">=24.1.0" },
-    { name = "aiohttp", specifier = ">=3.14.0" },
+    { name = "aiohttp", specifier = ">=3.14.2" },
     { name = "aioimaplib", marker = "extra == 'email'", specifier = ">=2.0.1" },
     { name = "aiosmtplib", marker = "extra == 'email'", specifier = ">=5.1.0" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.88" },
