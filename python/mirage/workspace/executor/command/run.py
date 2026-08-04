@@ -23,7 +23,7 @@ from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.ops.types import LinkView
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.route import PolicyDecision
 from mirage.runtime.table import VfsRuntime
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import format_fs_error

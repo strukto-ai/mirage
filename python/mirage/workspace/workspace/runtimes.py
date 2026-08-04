@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import PolicyDecision, parsed_commands
+from mirage.runtime.route import PolicyDecision, parsed_commands
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)

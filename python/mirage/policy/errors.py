@@ -13,13 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-class PolicyError(Exception):
-    """A policy returned something a hook may not return.
+class PolicyError(ValueError):
+    """A policy is misconfigured or answered with an illegal shape.
 
-    Raised loudly at the seam (never silently dropped): an illegal
-    Action kind for the hook, or a value that is not an Action at all,
-    is a programming error in the policy, not a refusal.
+    The programming-error class, never a refusal: an illegal Action
+    kind for the hook, a value that is not an Action at all, an unknown
+    runtime name from a Route, or a routing script that does not parse.
+    Raised loud at the seam and propagated to the caller instead of
+    folding into the line's IOResult like a command failure; a hook
+    that raises it is reporting a caller-fixable mistake, so the
+    fail-closed conversion does not apply.
     """
+
+
+class PolicyDeny(Exception):
+    """The policy refused the line before anything ran.
+
+    A legitimate policy outcome, not a mistake: execute() folds it into
+    the line's IOResult (exit 126, the reason on stderr) instead of
+    propagating like PolicyError.
+
+    Args:
+        reason (str): why the line was denied, shown on stderr.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class PolicyDenied(PermissionError):

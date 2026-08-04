@@ -557,6 +557,82 @@
       ]
     },
     {
+      "id": "hook_pre_execute_deny",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "deny_line",
+            "marker": "secret",
+            "message": "secrets stay put"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo secret stuff",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "echo: policy denied: secrets stay put\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_execute_route",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "route_command",
+            "command": "python3",
+            "runtime": "local"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('went-local')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "went-local\n"
+          }
+        },
+        {
+          "command": "echo untouched",
+          "expect": {
+            "exit": 0,
+            "stdout": "untouched\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "hook_pre_ops_write_lock",
       "world": {
         "mounts": {

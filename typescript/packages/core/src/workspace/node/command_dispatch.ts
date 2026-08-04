@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../executor/runtime.ts'
-import type { PolicyDecision } from '../executor/policy/index.ts'
+import type { PolicyDecision } from '../executor/route/index.ts'
 import { mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'

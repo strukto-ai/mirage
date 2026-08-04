@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SPECS } from '../../../commands/spec/index.ts'
+import type { ParsedCommand } from '../../../policy/types.ts'
 import type { TSNodeLike } from '../../expand/variable.ts'
-import type { ParsedCommand } from './types.ts'
 
 const WORD_TYPES: ReadonlySet<string> = new Set([
   'command_name',

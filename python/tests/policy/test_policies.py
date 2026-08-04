@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-
 import pytest
 
-from mirage.policy import (Action, CommandContext, Deny, ExecuteResultContext,
-                           GuardSpec, MountRootPolicy, OpsContext,
-                           OpsResultContext, Policies, Policy, PolicyError,
-                           post_execute_gate, post_ops_gate, pre_ops_gate)
+from mirage.policy import (Action, CommandContext, Deny, ExecuteContext,
+                           ExecuteResultContext, GuardSpec, MountRootPolicy,
+                           OpsContext, OpsResultContext, ParsedCommand,
+                           Policies, Policy, PolicyError, Route)
 from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountMode, PathSpec, Producer
 from mirage.workspace.mount import MountRegistry
@@ -139,14 +137,6 @@ class DenyReadOps(Policy):
         return None
 
 
-class DenyBigResults(Policy):
-
-    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
-        if isinstance(ctx.result, bytes) and len(ctx.result) > 8:
-            return Deny("result too large\n")
-        return None
-
-
 @pytest.mark.asyncio
 async def test_pre_ops_first_deny_wins_and_wants_gates():
     policies = Policies()
@@ -166,31 +156,6 @@ async def test_pre_ops_first_deny_wins_and_wants_gates():
                            write=True,
                            prefix="/data/")
     assert await policies.pre_ops(write_ctx) is None
-
-
-@pytest.mark.asyncio
-async def test_pre_ops_gate_raises_eacces():
-    policies = Policies()
-    policies.add(DenyReadOps())
-    with pytest.raises(PermissionError) as excinfo:
-        await pre_ops_gate(policies, "read", _path("/data/x"), False, "/data/")
-    assert excinfo.value.errno == errno.EACCES
-    assert excinfo.value.filename == "/data/x"
-    assert "no reads" in str(excinfo.value)
-    # No opinion on writes: the gate passes silently.
-    await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
-
-
-@pytest.mark.asyncio
-async def test_post_ops_gate_suppresses_the_result():
-    policies = Policies()
-    policies.add(DenyBigResults())
-    await post_ops_gate(policies, "read", _path("/data/x"), False, "/data/",
-                        b"tiny")
-    with pytest.raises(PermissionError) as excinfo:
-        await post_ops_gate(policies, "read", _path("/data/x"), False,
-                            "/data/", b"a long secret payload")
-    assert excinfo.value.errno == errno.EACCES
 
 
 class CapFour(Policy):
@@ -237,16 +202,6 @@ async def test_post_ops_limits_merge_to_the_tightest():
 
 
 @pytest.mark.asyncio
-async def test_post_ops_gate_returns_the_merged_bound():
-    policies = Policies()
-    policies.add(CapFour())
-    bound = await post_ops_gate(policies, "read", _path("/data/x"), False,
-                                "/data/", b"payload")
-    assert bound is not None
-    assert bound.max_bytes == 4
-
-
-@pytest.mark.asyncio
 async def test_a_limit_is_illegal_on_pre_command():
     policies = Policies()
     policies.add(LimitOnPre())
@@ -255,12 +210,90 @@ async def test_a_limit_is_illegal_on_pre_command():
 
 
 @pytest.mark.asyncio
-async def test_post_execute_gate_merges_user_limits():
+async def test_post_execute_limits_merge_to_the_boundary_bound():
     policies = Policies()
     policies.add(CapLines())
-    deny, bound = await post_execute_gate(
-        policies,
+    deny, bound = await policies.post_execute(
         ExecuteResultContext(producer=Producer(command="echo"), exit_code=0))
     assert deny is None
     assert bound is not None
     assert bound.max_lines == 2
+
+
+class RouteAll(Policy):
+
+    def __init__(self, runtime: str) -> None:
+        self._runtime = runtime
+
+    async def pre_execute(self, ctx: ExecuteContext) -> Action | None:
+        return Route(self._runtime)
+
+
+class DenyExecute(Policy):
+
+    async def pre_execute(self, ctx: ExecuteContext) -> Action | None:
+        return Deny("no lines\n", 126)
+
+
+class RouteOnPre(Policy):
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        return Route("monty")
+
+
+class RaisingPolicyError(Policy):
+
+    async def pre_execute(self, ctx: ExecuteContext) -> Action | None:
+        raise PolicyError("policy script does not parse")
+
+
+def _exec_ctx(command: str) -> ExecuteContext:
+    return ExecuteContext(line=command,
+                          commands=(ParsedCommand(command=command,
+                                                  words=(command, ),
+                                                  builtin=True,
+                                                  paths=()), ),
+                          command=command,
+                          builtin=True,
+                          cwd="/",
+                          env={},
+                          session_id="s",
+                          agent_id="a",
+                          mounts=("/data/", ))
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_first_route_wins():
+    policies = Policies()
+    policies.add(RouteAll("monty"))
+    policies.add(RouteAll("local"))
+    deny, route = await policies.pre_execute(_exec_ctx("python3"))
+    assert deny is None
+    assert route == Route("monty")
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_a_later_deny_beats_an_earlier_route():
+    policies = Policies()
+    policies.add(RouteAll("monty"))
+    policies.add(DenyExecute())
+    deny, route = await policies.pre_execute(_exec_ctx("python3"))
+    assert deny is not None
+    assert deny.exit_code == 126
+    assert route is None
+
+
+@pytest.mark.asyncio
+async def test_a_route_is_illegal_on_pre_command():
+    policies = Policies()
+    policies.add(RouteOnPre())
+    with pytest.raises(PolicyError, match="RouteOnPre"):
+        await policies.pre_command(_ctx("ls"))
+
+
+@pytest.mark.asyncio
+async def test_a_policy_error_propagates_instead_of_failing_closed():
+    policies = Policies()
+    policies.add(RaisingPolicyError())
+    with pytest.raises(PolicyError, match="does not parse"):
+        await policies.pre_execute(_exec_ctx("ls"))

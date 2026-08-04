@@ -18,7 +18,8 @@ from mirage.resource.ram import RAMResource
 from mirage.commands.registry import command
 from mirage.commands.cli import CLISpec, register_cli_spec
 from mirage.types import FileStat, MountBackend, MountMode
-from mirage.policy import (Action, CommandContext, Deny, GuardSpec, Policy)
+from mirage.policy import (Action, CommandContext, Deny, ExecuteContext,
+                           GuardSpec, Policy, Route)
 from mirage.workspace import (ExecutionNode, Workspace, WorkspaceRunner)
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount.spec import Mount
@@ -36,7 +37,9 @@ __all__ = [
     "CommandContext",
     "ConsistencyPolicy",
     "Deny",
+    "ExecuteContext",
     "ExecutionNode",
+    "Route",
     "FileStat",
     "FuseManager",
     "GuardSpec",

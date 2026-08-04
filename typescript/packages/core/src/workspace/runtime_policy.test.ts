@@ -16,17 +16,11 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import { EVALUATOR, type Evaluator } from './executor/runtime_mixin.ts'
 import type { EvalResult } from './executor/runtime_types.ts'
-import { POLICY_EVAL_TIMEOUT, evaluatorOf } from './executor/policy/index.ts'
+import { POLICY_EVAL_TIMEOUT, evaluatorOf } from './executor/route/index.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
 import { QuickJsRuntime } from './executor/js/quickjs.ts'
-import {
-  DenyResult,
-  parseVerdict,
-  PolicyDeny,
-  RouteResult,
-  ScriptSource,
-} from './executor/policy/index.ts'
+import { parseVerdict, ScriptSource } from './executor/route/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -407,9 +401,16 @@ describe('routing ladder', () => {
     }
   })
 
-  it('the typed arms parse like their wire dicts', async () => {
-    expect(parseVerdict(new RouteResult('beta'))).toBe('beta')
-    expect(() => parseVerdict(new DenyResult('not here'))).toThrow(PolicyDeny)
+  it('the Action arms parse like their wire dicts', async () => {
+    expect(parseVerdict({ kind: 'route', runtime: 'beta' })).toEqual({
+      kind: 'route',
+      runtime: 'beta',
+    })
+    expect(parseVerdict({ kind: 'deny', message: 'not here', exitCode: 126 })).toEqual({
+      kind: 'deny',
+      message: 'not here',
+      exitCode: 126,
+    })
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMResource() },
@@ -419,8 +420,8 @@ describe('routing ladder', () => {
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'vfs'],
         policy: (ctx) =>
           ctx.line.includes('secret')
-            ? new DenyResult('secrets stay put')
-            : new RouteResult('beta'),
+            ? { kind: 'deny', message: 'secrets stay put', exitCode: 126 }
+            : { kind: 'route', runtime: 'beta' },
       },
     )
     try {
@@ -454,8 +455,15 @@ describe('routing ladder', () => {
   })
 
   it('parseVerdict folds a Map verdict into the wire object', () => {
-    expect(parseVerdict(new Map([['runtime', 'beta']]))).toBe('beta')
-    expect(() => parseVerdict(new Map([['deny', 'nope']]))).toThrow(PolicyDeny)
+    expect(parseVerdict(new Map([['runtime', 'beta']]))).toEqual({
+      kind: 'route',
+      runtime: 'beta',
+    })
+    expect(parseVerdict(new Map([['deny', 'nope']]))).toEqual({
+      kind: 'deny',
+      message: 'nope',
+      exitCode: 126,
+    })
   })
 
   it('parseVerdict fails loud on bad verdict objects', () => {

@@ -15,8 +15,10 @@
 from collections.abc import Callable
 from typing import Any
 
-from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyError,
-                                   PolicyFn, decide_line, parsed_commands)
+from mirage.policy import (ExecuteContext, PolicyDeny, PolicyError,
+                           pre_execute_gate)
+from mirage.runtime.base import Runtime
+from mirage.runtime.route import PolicyDecision, decide_line, parsed_commands
 from mirage.runtime.table import catch_all, runtime_bindings_for
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -29,14 +31,16 @@ class PolicyRouter:
     """Decides which runtime a typed line routes to.
 
     The order is: an inherited decision, then the ``execute()`` runtime
-    argument, then the configured policy and any entry scripts. It
-    reads the runtime entries and the registry's static bindings but
-    owns no mutable workspace state, so the volatile parts (the policy
-    callable, the current agent) arrive per call and a new step is
-    added here rather than in the workspace.
+    argument, then the pre_execute policies (the ``policy=`` script
+    rides the chain as the RoutingPolicy built-in) and any entry
+    scripts. It reads the runtime entries and the registry's static
+    bindings but owns no mutable workspace state, so the volatile parts
+    (the current agent) arrive per call and a new step is added here
+    rather than in the workspace.
 
     Args:
-        registry (MountRegistry): carries the resolved static bindings.
+        registry (MountRegistry): carries the resolved static bindings
+            and the policies chain.
         runtimes (Runtimes): the ordered runtime entries.
         mount_prefixes (PrefixFn): mount prefixes for the policy context.
     """
@@ -47,6 +51,30 @@ class PolicyRouter:
         self._runtimes = runtimes
         self._mount_prefixes = mount_prefixes
 
+    def _place(self, entries: list[Runtime], name: str) -> PolicyDecision:
+        """Overlay one named runtime's captures on the static bindings.
+
+        The shared tail of the two affirmative placements (the
+        ``runtime=`` argument and a Route from pre_execute), so both
+        spell an unknown name identically.
+
+        Args:
+            entries (list[Runtime]): the workspace's ordered world.
+            name (str): the runtime to place the line on.
+
+        Raises:
+            PolicyError: no entry has that name.
+        """
+        try:
+            overlay = runtime_bindings_for(entries, name)
+        except ValueError as exc:
+            raise PolicyError(str(exc)) from exc
+        return PolicyDecision(bindings={
+            **self._registry.runtime_bindings,
+            **overlay
+        },
+                              fallback=catch_all(entries))
+
     async def decide(
         self,
         ast: Any,
@@ -56,53 +84,45 @@ class PolicyRouter:
         session: Session,
         session_id: str,
         agent_id: str,
-        policy: PolicyFn | None,
         inherited: PolicyDecision | None,
     ) -> PolicyDecision | None:
         """Resolve the routing decision for one typed line.
 
         Returns None when nothing decides (no runtime argument, no
-        policy configured) so dispatch falls to the static bindings. A
-        nested eval passes its typed line's decision as ``inherited``
-        and keeps it: nested lines never re-route. Provision never
-        routes.
+        pre_execute policy, no entry scripts) so dispatch falls to the
+        static bindings. A nested eval passes its typed line's decision
+        as ``inherited`` and keeps it: nested lines never re-route.
+        Provision never routes.
 
         Args:
             ast: the parsed tree-sitter root node.
             command (str): the raw command line.
             runtime (str | None): the execute() runtime argument, which
-                wins over the policy.
+                wins over the policies.
             provision (bool): whether this is a provision run.
             session (Session): the effective session (cwd, env).
             session_id (str): session hosting the line.
             agent_id (str): agent the line runs as.
-            policy (PolicyFn | None): the workspace policy, if any.
             inherited (PolicyDecision | None): the calling line's
                 decision, for nested evals.
 
         Raises:
+            PolicyDeny: a pre_execute policy refused the line.
             PolicyError: an unknown runtime name or a failing policy.
         """
         if inherited is not None:
             return inherited
         entries = self._runtimes.entries
         if runtime is not None:
-            try:
-                overlay = runtime_bindings_for(entries, runtime)
-            except ValueError as exc:
-                raise PolicyError(str(exc)) from exc
-            return PolicyDecision(bindings={
-                **self._registry.runtime_bindings,
-                **overlay
-            },
-                                  fallback=catch_all(entries))
+            return self._place(entries, runtime)
         if provision:
             return None
+        policies = self._registry.policies
         has_scripts = any(entry.script is not None for entry in entries)
-        if policy is None and not has_scripts:
+        if not policies.wants("pre_execute") and not has_scripts:
             return None
         commands = parsed_commands(ast, self._registry.clis.names())
-        ctx = PolicyContext(
+        ctx = ExecuteContext(
             line=command,
             commands=commands,
             command=commands[0].command if commands else "",
@@ -113,9 +133,13 @@ class PolicyRouter:
             agent_id=agent_id,
             mounts=tuple(self._mount_prefixes()),
         )
+        deny, route = await pre_execute_gate(policies, ctx)
+        if deny is not None:
+            raise PolicyDeny(deny.message.rstrip("\n"))
+        if route is not None:
+            return self._place(entries, route.runtime)
         try:
-            return await decide_line(entries, policy, ctx,
-                                     self._registry.runtime_bindings)
+            return await decide_line(entries, ctx)
         except PolicyError:
             raise
         except (ValueError, ImportError) as exc:

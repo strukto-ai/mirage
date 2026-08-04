@@ -18,8 +18,8 @@ import pytest_asyncio
 from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
+from mirage.policy import Deny, Route
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import DenyResult, RouteResult
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
@@ -369,8 +369,8 @@ async def test_policy_result_arms_route_and_deny():
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
                              BetaRuntime(), "vfs"],
-                   policy=lambda ctx: DenyResult("secrets stay put")
-                   if "secret" in ctx.line else RouteResult("beta"))
+                   policy=lambda ctx: Deny("secrets stay put", 126)
+                   if "secret" in ctx.line else Route("beta"))
     try:
         io = await ws.execute("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-beta\n"

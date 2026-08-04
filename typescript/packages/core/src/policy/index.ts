@@ -13,19 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export type { Policy } from './base.ts'
-export { PolicyDenied } from './errors.ts'
+export { PolicyDenied, PolicyDeny, PolicyError } from './errors.ts'
 export { MountRootPolicy, hasParentsFlag } from './builtin/mount_root.ts'
 export { OutputCapPolicy, resolveProducer, resolveLimit } from './builtin/output_cap.ts'
-export { Policies, postExecuteGate, postOpsGate, preOpsGate } from './policies.ts'
+export { postExecuteGate, postOpsGate, preExecuteGate, preOpsGate } from './gates.ts'
+export { Policies } from './policies.ts'
 export { SpecPolicy, wildcardRegex } from './spec.ts'
 export {
   VALIDITY,
+  ctxForRuntime,
+  executeContextFromPayload,
+  executeContextPayload,
   type Action,
   type CommandContext,
   type Deny,
+  type ExecuteContext,
   type ExecuteResultContext,
   type GuardSpec,
   type MountRootQuery,
   type OpsContext,
   type OpsResultContext,
+  type ParsedCommand,
+  type Route,
+  type RuntimeIdentity,
 } from './types.ts'

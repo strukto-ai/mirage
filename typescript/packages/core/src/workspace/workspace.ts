@@ -47,7 +47,7 @@ import {
   PathSpec,
 } from '../types.ts'
 import type { Policies } from '../policy/index.ts'
-import type { PolicyFn } from './executor/policy/index.ts'
+import { RoutingPolicy } from './executor/route/index.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
 import type { ProvisionResult } from '../provision/types.ts'
@@ -113,7 +113,6 @@ export class Workspace {
   private readonly watchManager: WatchManager
   private readonly runtimes: Runtimes
   private readonly policyRouter: PolicyRouter
-  private readonly policy: PolicyFn | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -167,14 +166,16 @@ export class Workspace {
       },
     })
     if (typeof options.policy === 'string') throw scriptStringError('policy')
-    this.policy = options.policy ?? null
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: declarative guards first, then
     // Policy instances, then anything added later through
-    // ws.policies.add(). The runtime policy (policy option) is the
-    // line-level counterpart until it is absorbed as a hook.
+    // ws.policies.add(). The routing script (policy option) joins the
+    // same chain as the RoutingPolicy built-in.
     for (const guard of options.guards ?? []) this.registry.policies.add(guard)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
+    if (options.policy !== undefined) {
+      this.registry.policies.add(new RoutingPolicy(options.policy, this.runtimes))
+    }
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the
     // same fail-loud path as registerCli.
@@ -185,7 +186,6 @@ export class Workspace {
     this.policyRouter = new PolicyRouter(
       this.registry,
       this.runtimes,
-      this.policy,
       this.sessionManager,
       this.agentId,
       () => this.sandboxVisibleMounts(),

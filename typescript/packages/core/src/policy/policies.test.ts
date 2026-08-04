@@ -25,7 +25,8 @@ import { Workspace } from '../workspace/workspace.ts'
 import type { Policy } from './base.ts'
 import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PolicyDenied } from './errors.ts'
-import { Policies, postExecuteGate, postOpsGate, preOpsGate } from './policies.ts'
+import { postExecuteGate, postOpsGate, preOpsGate } from './gates.ts'
+import { Policies } from './policies.ts'
 import type {
   Action,
   CommandContext,

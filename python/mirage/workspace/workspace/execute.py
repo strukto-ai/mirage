@@ -22,9 +22,9 @@ from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
-from mirage.policy import resolve_limit
+from mirage.policy import PolicyDeny, PolicyError, resolve_limit
 from mirage.provision import ProvisionResult
-from mirage.runtime.policy import PolicyDecision, PolicyDeny, PolicyError
+from mirage.runtime.route import PolicyDecision
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse)
 from mirage.workspace.abort import MirageAbortError
@@ -171,7 +171,7 @@ async def execute_line(
                                                   provision, effective_session,
                                                   session_id,
                                                   ws._current_agent_id or "",
-                                                  ws._policy, routing_decision)
+                                                  routing_decision)
         exec_recursion = partial(recurse, ws, cancel, decision)
         if provision:
             name = command_name(command)

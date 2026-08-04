@@ -34,7 +34,7 @@ from mirage.policy import GuardSpec, Policies, Policy
 from mirage.provision import ProvisionResult
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy import PolicyDecision, PolicyFn
+from mirage.runtime.route import PolicyDecision, PolicyFn, RoutingPolicy
 from mirage.runtime.types import RunResult
 from mirage.shell.job_table import JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
@@ -110,8 +110,9 @@ class Workspace:
         # Admission policies, consulted in registration order after the
         # built-ins the registry seeds: declarative guards first, then
         # Policy instances, then anything added later through
-        # ws.policies.add(). The runtime policy (policy=) is the
-        # line-level counterpart until it is absorbed as a hook.
+        # ws.policies.add(). The routing script (policy=) joins the
+        # same chain below as the RoutingPolicy built-in, once the
+        # runtime world exists.
         for spec in guards or []:
             self._registry.policies.add(spec)
         for entry in policies or []:
@@ -182,7 +183,8 @@ class Workspace:
             self._registry, self.dispatch, self._ops.mount_prefixes, runtimes,
             self._execute_line_for_vfs)
         reject_config_script("policy", policy)
-        self._policy = policy
+        if policy is not None:
+            self._registry.policies.add(RoutingPolicy(policy, self._runtimes))
 
         # Installed CLIs, fully separate from mounts: the YAML `clis:`
         # section arrives as {head: (spec key or tree, config)}; a spec

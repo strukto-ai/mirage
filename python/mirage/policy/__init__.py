@@ -17,19 +17,23 @@ from mirage.policy.builtin import (DEFAULT_COMMAND_LIMITS, FALLBACK_LIMIT,
                                    MountRootPolicy, OutputCapPolicy,
                                    resolve_across_mounts, resolve_limit,
                                    resolve_producer)
-from mirage.policy.errors import PolicyDenied, PolicyError
-from mirage.policy.policies import (Policies, post_execute_gate, post_ops_gate,
-                                    pre_ops_gate)
+from mirage.policy.errors import PolicyDenied, PolicyDeny, PolicyError
+from mirage.policy.gates import (post_execute_gate, post_ops_gate,
+                                 pre_execute_gate, pre_ops_gate)
+from mirage.policy.policies import Policies
 from mirage.policy.spec import SpecPolicy, wildcard_regex
 from mirage.policy.types import (VALIDITY, Action, CommandContext, Deny,
-                                 ExecuteResultContext, GuardSpec, Limit,
-                                 MountRootQuery, OpsContext, OpsResultContext)
+                                 ExecuteContext, ExecuteResultContext,
+                                 GuardSpec, Limit, MountRootQuery, OpsContext,
+                                 OpsResultContext, ParsedCommand, Route,
+                                 RuntimeIdentity)
 
 __all__ = [
     "Action",
     "CommandContext",
     "DEFAULT_COMMAND_LIMITS",
     "Deny",
+    "ExecuteContext",
     "ExecuteResultContext",
     "FALLBACK_LIMIT",
     "GuardSpec",
@@ -39,14 +43,19 @@ __all__ = [
     "OpsContext",
     "OpsResultContext",
     "OutputCapPolicy",
+    "ParsedCommand",
     "Policies",
     "Policy",
     "PolicyDenied",
+    "PolicyDeny",
     "PolicyError",
+    "Route",
+    "RuntimeIdentity",
     "SpecPolicy",
     "VALIDITY",
     "post_execute_gate",
     "post_ops_gate",
+    "pre_execute_gate",
     "pre_ops_gate",
     "resolve_across_mounts",
     "resolve_producer",

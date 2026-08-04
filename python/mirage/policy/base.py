@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.types import (Action, CommandContext, ExecuteResultContext,
-                                 OpsContext, OpsResultContext)
+from mirage.policy.types import (Action, CommandContext, ExecuteContext,
+                                 ExecuteResultContext, OpsContext,
+                                 OpsResultContext)
 
 
 class Policy:
@@ -31,6 +32,19 @@ class Policy:
 
         Args:
             ctx (CommandContext): the classified command.
+        """
+        return None
+
+    async def pre_execute(self, ctx: ExecuteContext) -> Action | None:
+        """Steer or refuse one typed line before anything runs.
+
+        Fires parse-before-dispatch, once per top-level line. A Deny
+        refuses the line (exit 126, policy-denied wording); a Route
+        places it on a named runtime, overriding the static bindings
+        the way the ``runtime=`` argument does. The first Route wins.
+
+        Args:
+            ctx (ExecuteContext): the parsed line's facts.
         """
         return None
 

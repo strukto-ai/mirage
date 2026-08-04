@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PolicyScript } from './policy/types.ts'
+import type { PolicyScript } from './route/types.ts'
 
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {

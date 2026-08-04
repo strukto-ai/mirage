@@ -13,15 +13,34 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * A policy returned something a hook may not return. Raised loudly at
- * the seam (never silently dropped): an illegal Action kind for the
- * hook, or a value that is not an Action at all, is a programming
- * error in the policy, not a refusal.
+ * A policy is misconfigured or answered with an illegal shape.
+ *
+ * The programming-error class, never a refusal: an illegal Action
+ * kind for the hook, a value that is not an Action at all, an unknown
+ * runtime name from a Route, or a routing script that does not parse.
+ * Raised loud at the seam and propagated to the caller instead of
+ * folding into the line's result like a command failure; a hook that
+ * throws it is reporting a caller-fixable mistake, so the fail-closed
+ * conversion does not apply.
  */
 export class PolicyError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
     this.name = 'PolicyError'
+  }
+}
+
+/**
+ * The policy refused the line before anything ran.
+ *
+ * A legitimate policy outcome, not a mistake: execute() folds it into
+ * the line's result (exit 126, the reason on stderr) instead of
+ * propagating like PolicyError.
+ */
+export class PolicyDeny extends Error {
+  constructor(readonly reason: string) {
+    super(reason)
+    this.name = 'PolicyDeny'
   }
 }
 
