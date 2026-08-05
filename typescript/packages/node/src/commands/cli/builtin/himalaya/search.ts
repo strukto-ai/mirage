@@ -24,7 +24,7 @@ import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { DEFAULT_PAGE_SIZE } from './list.ts'
-import { pageSlice, parseQuery, sortHeaders } from './query.ts'
+import { pageSlice, parseQuery, sortHeaders, uidBudget } from './query.ts'
 
 const ENC = new TextEncoder()
 
@@ -41,10 +41,12 @@ export async function searchEnvelopes(
   // The shell already split the query; upstream joins argv the same way
   // before parsing, so a pattern with spaces needs literal quotes.
   const query = parseQuery(texts.join(' '))
-  const accessor = new EmailAccessor(config as EmailConfig)
+  const account = config as EmailConfig
+  const budget = uidBudget(page, pageSize, query.sorters, account.maxMessages)
+  const accessor = new EmailAccessor(account)
   let headers
   try {
-    const uids = await listMessageUids(accessor, mailbox, query.criteria)
+    const uids = await listMessageUids(accessor, mailbox, query.criteria, budget)
     headers = uids.length > 0 ? await fetchHeaders(accessor, mailbox, uids) : []
   } finally {
     await accessor.close()

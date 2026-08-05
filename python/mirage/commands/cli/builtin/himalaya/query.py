@@ -17,11 +17,15 @@ from datetime import date, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
-# himalaya's search DSL: 3 operators (and, or, not) and 7 conditions
-# (date, after, from, to, subject, body, flag), optionally followed by
-# `order by <kind> [asc|desc]` sorters. Date conditions anchor on the
-# `Date:` header, never on the server's received-at timestamp.
-CONDITIONS = ("date", "after", "from", "to", "subject", "body", "flag")
+# himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
+# (date, before, after, from, to, subject, body, flag), optionally
+# followed by `order by <kind> [asc|desc]` sorters. Date conditions
+# anchor on the `Date:` header, never on the server's received-at
+# timestamp, which is why they emit SENTON/SENTBEFORE/SENTSINCE rather
+# than ON/BEFORE/SINCE: imported or delayed mail would otherwise land on
+# the wrong day.
+CONDITIONS = ("date", "before", "after", "from", "to", "subject", "body",
+              "flag")
 SORT_KINDS = ("date", "from", "to", "subject")
 FLAGS = {
     "seen": "SEEN",
@@ -200,12 +204,14 @@ class _Parser:
                              f"but found {token.text!r}")
         value = self.take().text
         if word == "date":
-            return f"ON {_format_date(_imap_date(value))}"
+            return f"SENTON {_format_date(_imap_date(value))}"
+        if word == "before":
+            return f"SENTBEFORE {_format_date(_imap_date(value))}"
         if word == "after":
-            # Strictly greater than the given day; IMAP SINCE is
+            # Strictly greater than the given day; IMAP SENTSINCE is
             # inclusive, so ask for the day after.
             after = _imap_date(value) + timedelta(days=1)
-            return f"SINCE {_format_date(after)}"
+            return f"SENTSINCE {_format_date(after)}"
         if word == "flag":
             key = FLAGS.get(value.lower())
             if key is None:
@@ -302,6 +308,31 @@ def sort_headers(headers: list[dict[str, Any]],
     for sorter in reversed(sorters):
         ordered.sort(key=SORT_KEYS[sorter.kind], reverse=sorter.descending)
     return ordered
+
+
+def uid_budget(page: int, page_size: int, sorters: tuple[Sorter, ...],
+               max_messages: int) -> int:
+    """How many of the newest matching UIDs to fetch headers for.
+
+    Sorting happens client-side, so a page cannot be served without
+    holding the candidate headers. Under the default order (date
+    descending) the newest `page * page_size` messages are the only ones
+    that can appear, so ask for exactly those. An explicit `order by` is
+    unrelated to arrival order, so the whole account window has to be
+    considered, capped by `max_messages` either way: that is the account
+    knob for how far back mirage looks, and without it one `envelope
+    list` would fetch every message in the mailbox.
+
+    Args:
+        page (int): 1-based page number.
+        page_size (int): maximum entries per page.
+        sorters (tuple[Sorter, ...]): the query's sorters, empty for the
+            default order.
+        max_messages (int): the account's message window.
+    """
+    if sorters:
+        return max_messages
+    return min(max(page, 1) * page_size, max_messages)
 
 
 def page_slice(items: list[Any], page: int, page_size: int) -> list[Any]:

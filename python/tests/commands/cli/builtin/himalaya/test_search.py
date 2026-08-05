@@ -41,9 +41,10 @@ HEADERS = {
 def patched(monkeypatch):
     seen: dict = {}
 
-    async def fake_uids(accessor, folder, criteria):
+    async def fake_uids(accessor, folder, criteria, budget=None):
         seen["folder"] = folder
         seen["criteria"] = criteria
+        seen["budget"] = budget
         return ["1", "2"]
 
     async def fake_headers(accessor, folder, uids):
@@ -93,3 +94,22 @@ async def test_a_bad_query_never_reaches_the_server(patched):
     with pytest.raises(QueryError):
         await search_envelopes(CONFIG, [], "sender", "alice")
     assert "criteria" not in patched
+
+
+@pytest.mark.asyncio
+async def test_the_default_order_only_fetches_the_pages_asked_for(patched):
+    await search_envelopes(CONFIG, [],
+                           "subject",
+                           "alpha",
+                           page=2,
+                           page_size=10)
+    assert patched["budget"] == 20
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_sort_widens_the_fetch_to_the_account_window(
+        patched):
+    # `order by` is unrelated to arrival order, so the newest N is not
+    # enough to know what belongs on page one.
+    await search_envelopes(CONFIG, [], "order", "by", "subject")
+    assert patched["budget"] == CONFIG.max_messages

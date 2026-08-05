@@ -15,7 +15,9 @@
 import json
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.cli.builtin.himalaya.query import page_slice, sort_headers
+from mirage.commands.cli.builtin.himalaya.query import (page_slice,
+                                                        sort_headers,
+                                                        uid_budget)
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.config import EmailConfig
@@ -36,9 +38,10 @@ async def list_envelopes(
     mailbox = fl.as_str("mailbox") or "INBOX"
     page = fl.as_int("page") or 1
     page_size = fl.as_int("page_size") or DEFAULT_PAGE_SIZE
+    budget = uid_budget(page, page_size, (), config.max_messages)
     accessor = EmailAccessor(config)
     try:
-        uids = await list_message_uids(accessor, mailbox, "ALL")
+        uids = await list_message_uids(accessor, mailbox, "ALL", budget)
         headers = await fetch_headers(accessor, mailbox, uids) if uids else []
     finally:
         await accessor.close()

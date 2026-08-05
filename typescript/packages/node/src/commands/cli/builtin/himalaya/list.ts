@@ -23,7 +23,7 @@ import {
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-import { pageSlice, sortHeaders } from './query.ts'
+import { pageSlice, sortHeaders, uidBudget } from './query.ts'
 
 export const DEFAULT_PAGE_SIZE = 25
 
@@ -39,10 +39,12 @@ export async function listEnvelopes(
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
   const page = fl.asInt('page') ?? 1
   const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
-  const accessor = new EmailAccessor(config as EmailConfig)
+  const account = config as EmailConfig
+  const budget = uidBudget(page, pageSize, [], account.maxMessages)
+  const accessor = new EmailAccessor(account)
   let headers
   try {
-    const uids = await listMessageUids(accessor, mailbox, 'ALL')
+    const uids = await listMessageUids(accessor, mailbox, 'ALL', budget)
     headers = uids.length > 0 ? await fetchHeaders(accessor, mailbox, uids) : []
   } finally {
     await accessor.close()

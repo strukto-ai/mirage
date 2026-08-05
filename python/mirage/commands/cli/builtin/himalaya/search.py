@@ -18,7 +18,8 @@ from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.list import DEFAULT_PAGE_SIZE
 from mirage.commands.cli.builtin.himalaya.query import (page_slice,
                                                         parse_query,
-                                                        sort_headers)
+                                                        sort_headers,
+                                                        uid_budget)
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.config import EmailConfig
@@ -40,9 +41,11 @@ async def search_envelopes(
     # The shell already split the query; upstream joins argv the same
     # way before parsing, so a pattern with spaces needs literal quotes.
     query = parse_query(" ".join(texts))
+    budget = uid_budget(page, page_size, query.sorters, config.max_messages)
     accessor = EmailAccessor(config)
     try:
-        uids = await list_message_uids(accessor, mailbox, query.criteria)
+        uids = await list_message_uids(accessor, mailbox, query.criteria,
+                                       budget)
         headers = await fetch_headers(accessor, mailbox, uids) if uids else []
     finally:
         await accessor.close()

@@ -14,11 +14,14 @@
 
 import type { FetchedMessage } from '../../../../core/email/_client.ts'
 
-// himalaya's search DSL: 3 operators (and, or, not) and 7 conditions
-// (date, after, from, to, subject, body, flag), optionally followed by
-// `order by <kind> [asc|desc]` sorters. Date conditions anchor on the
-// `Date:` header, never on the server's received-at timestamp.
-const CONDITIONS = ['date', 'after', 'from', 'to', 'subject', 'body', 'flag'] as const
+// himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
+// (date, before, after, from, to, subject, body, flag), optionally
+// followed by `order by <kind> [asc|desc]` sorters. Date conditions
+// anchor on the `Date:` header, never on the server's received-at
+// timestamp, which is why they emit SENTON/SENTBEFORE/SENTSINCE rather
+// than ON/BEFORE/SINCE: imported or delayed mail would otherwise land on
+// the wrong day.
+const CONDITIONS = ['date', 'before', 'after', 'from', 'to', 'subject', 'body', 'flag'] as const
 const SORT_KINDS = ['date', 'from', 'to', 'subject'] as const
 const FLAGS: Record<string, string> = {
   seen: 'SEEN',
@@ -203,12 +206,13 @@ class Parser {
       )
     }
     const value = this.take().text
-    if (word === 'date') return `ON ${formatDate(imapDate(value))}`
+    if (word === 'date') return `SENTON ${formatDate(imapDate(value))}`
+    if (word === 'before') return `SENTBEFORE ${formatDate(imapDate(value))}`
     if (word === 'after') {
-      // Strictly greater than the given day; IMAP SINCE is inclusive,
-      // so ask for the day after.
+      // Strictly greater than the given day; IMAP SENTSINCE is
+      // inclusive, so ask for the day after.
       const next = new Date(imapDate(value).getTime() + 86400000)
-      return `SINCE ${formatDate(next)}`
+      return `SENTSINCE ${formatDate(next)}`
     }
     if (word === 'flag') {
       const key = FLAGS[value.toLowerCase()]
@@ -300,6 +304,28 @@ export function sortHeaders(
 }
 
 /** Takes one page of results, counting from 1. */
+/**
+ * How many of the newest matching UIDs to fetch headers for.
+ *
+ * Sorting happens client-side, so a page cannot be served without
+ * holding the candidate headers. Under the default order (date
+ * descending) the newest `page * pageSize` messages are the only ones
+ * that can appear, so ask for exactly those. An explicit `order by` is
+ * unrelated to arrival order, so the whole account window has to be
+ * considered, capped by `maxMessages` either way: that is the account
+ * knob for how far back mirage looks, and without it one `envelope list`
+ * would fetch every message in the mailbox.
+ */
+export function uidBudget(
+  page: number,
+  pageSize: number,
+  sorters: readonly Sorter[],
+  maxMessages: number,
+): number {
+  if (sorters.length > 0) return maxMessages
+  return Math.min(Math.max(page, 1) * pageSize, maxMessages)
+}
+
 export function pageSlice<T>(items: readonly T[], page: number, pageSize: number): T[] {
   const start = Math.max(page - 1, 0) * pageSize
   return items.slice(start, start + pageSize)

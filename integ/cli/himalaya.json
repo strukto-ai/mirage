@@ -127,7 +127,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "himalaya envelope search: expected a condition (date, after, from, to, subject, body, flag) but found 'sender'\n"
+        "stderr": "himalaya envelope search: expected a condition (date, before, after, from, to, subject, body, flag) but found 'sender'\n"
       }
     },
     {
@@ -309,6 +309,19 @@
       "expect": {
         "exit": 0,
         "stdout": "Server alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_before_is_exclusive",
+      "seq": 562024,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search before 2026-01-06 | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\nQ2 Budget Review\n",
         "stderr": ""
       }
     },

@@ -17,7 +17,8 @@ import pytest
 from mirage.commands.cli.builtin.himalaya.query import (QueryError, Sorter,
                                                         page_slice,
                                                         parse_query,
-                                                        sort_headers)
+                                                        sort_headers,
+                                                        uid_budget)
 
 
 def criteria(source: str) -> str:
@@ -67,12 +68,23 @@ def test_unknown_flag_is_a_query_error():
 
 
 def test_date_condition_is_an_exact_day():
-    assert criteria("date 2026-02-03") == "ON 03-Feb-2026"
+    assert criteria("date 2026-02-03") == "SENTON 03-Feb-2026"
+
+
+def test_before_condition_is_exclusive_like_imap():
+    assert criteria("before 2026-02-03") == "SENTBEFORE 03-Feb-2026"
 
 
 def test_after_is_strictly_greater_so_it_asks_for_the_next_day():
-    # IMAP SINCE is inclusive; himalaya's `after` is not.
-    assert criteria("after 2026-01-01") == "SINCE 02-Jan-2026"
+    # IMAP SENTSINCE is inclusive; himalaya's `after` is not.
+    assert criteria("after 2026-01-01") == "SENTSINCE 02-Jan-2026"
+
+
+def test_dates_search_the_header_not_the_received_at_timestamp():
+    # ON/BEFORE/SINCE would match the mailbox internal date, which is
+    # the wrong day for imported or delayed mail.
+    for source in ("date 2026-02-03", "before 2026-02-03", "after 2026-02-03"):
+        assert criteria(source).startswith("SENT")
 
 
 def test_bad_date_is_a_query_error():
@@ -161,3 +173,20 @@ def test_pages_count_from_one():
     assert page_slice(items, 1, 2) == [1, 2]
     assert page_slice(items, 3, 2) == [5]
     assert page_slice(items, 9, 2) == []
+
+
+def test_default_order_only_needs_the_pages_asked_for():
+    assert uid_budget(1, 25, (), 200) == 25
+    assert uid_budget(3, 25, (), 200) == 75
+
+
+def test_the_account_window_caps_deep_paging():
+    assert uid_budget(40, 25, (), 200) == 200
+
+
+def test_an_explicit_sort_has_to_consider_the_whole_window():
+    assert uid_budget(1, 25, (Sorter("subject", False), ), 200) == 200
+
+
+def test_page_zero_still_costs_one_page():
+    assert uid_budget(0, 25, (), 200) == 25

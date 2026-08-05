@@ -35,10 +35,12 @@ def envelope(uid: str, day: int) -> dict:
 def patched(monkeypatch):
     seen: dict = {"uids": ["1", "2", "3"]}
 
-    async def fake_uids(accessor, folder, criteria):
+    async def fake_uids(accessor, folder, criteria, budget=None):
         seen["folder"] = folder
         seen["criteria"] = criteria
-        return seen["uids"]
+        seen["budget"] = budget
+        # The real client takes the newest `budget` uids, not the oldest.
+        return seen["uids"][-budget:] if budget else seen["uids"]
 
     async def fake_headers(accessor, folder, uids):
         return [envelope(uid, index + 1) for index, uid in enumerate(uids)]
@@ -85,3 +87,16 @@ async def test_empty_result_skips_the_header_fetch(patched, monkeypatch):
     out, io = await list_envelopes(CONFIG, [])
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == []
+
+
+@pytest.mark.asyncio
+async def test_only_the_pages_asked_for_are_fetched(patched):
+    await list_envelopes(CONFIG, [], page=2, page_size=2)
+    # Not the whole mailbox: one page-worth of headers per page asked for.
+    assert patched["budget"] == 4
+
+
+@pytest.mark.asyncio
+async def test_the_account_window_caps_the_fetch(patched):
+    await list_envelopes(CONFIG, [], page=100, page_size=25)
+    assert patched["budget"] == CONFIG.max_messages

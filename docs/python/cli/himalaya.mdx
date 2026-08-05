@@ -53,6 +53,12 @@ himalaya envelope list -m INBOX --page 2 --page-size 10
 | `-p, --page`      | no       | Page number, starting from 1  |
 | `-s, --page-size` | no       | Max envelopes per page (25)   |
 
+Only the newest `page * page_size` messages are fetched, so listing the
+first page costs one page of header fetches rather than a scan of the
+whole mailbox. The account's `max_messages` (default 200) bounds how far
+back paging can reach; an `order by` is unrelated to arrival order, so a
+sorted search considers that whole window.
+
 ### `himalaya envelope search`
 
 Filter and sort with himalaya's own query DSL. The query is the trailing
@@ -64,17 +70,21 @@ himalaya envelope search after 2026-01-01 order by subject asc
 himalaya envelope search subject '"quarterly review"'
 ```
 
-Conditions: `date <yyyy-mm-dd>`, `after <yyyy-mm-dd>`, `from <pattern>`,
-`to <pattern>`, `subject <pattern>`, `body <pattern>`, and
+Conditions: `date <yyyy-mm-dd>`, `before <yyyy-mm-dd>`,
+`after <yyyy-mm-dd>`, `from <pattern>`, `to <pattern>`,
+`subject <pattern>`, `body <pattern>`, and
 `flag <seen|answered|flagged|draft|deleted>`. Combine them with `and`,
 `or` and `not`, group with parentheses, and sort with
 `order by <date|from|to|subject> [asc|desc]`.
 
-Two things to know about the grammar. `after` is strictly greater than
-the given day, unlike IMAP's inclusive `SINCE`. And a pattern containing
-spaces needs *literal* double quotes inside the shell's quoting
-(`'"quarterly review"'`), because the shell's own quotes are gone by the
-time the query reaches the parser, exactly as upstream behaves.
+Three things to know about the grammar. The date conditions read the
+message's own `Date:` header, not the mailbox's received-at timestamp, so
+imported or delayed mail lands on the day it was sent. `after` is
+strictly greater than the given day, unlike IMAP's inclusive `SENTSINCE`.
+And a pattern containing spaces needs *literal* double quotes inside the
+shell's quoting (`'"quarterly review"'`), because the shell's own quotes
+are gone by the time the query reaches the parser, exactly as upstream
+behaves.
 
 The same paging flags as `envelope list` apply. A query that does not
 parse exits 1 without contacting the server.

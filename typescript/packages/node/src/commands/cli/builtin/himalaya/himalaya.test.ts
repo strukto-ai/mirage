@@ -20,7 +20,7 @@ import { build, composeBody, hasPrefix, quoteText, splitAddresses } from './buil
 import { forward } from './forward.ts'
 import { HIMALAYA } from './index.ts'
 import { listEnvelopes } from './list.ts'
-import { pageSlice, parseQuery, QueryError, sortHeaders } from './query.ts'
+import { pageSlice, parseQuery, QueryError, sortHeaders, uidBudget } from './query.ts'
 import { reply } from './reply.ts'
 import { searchEnvelopes } from './search.ts'
 import { send } from './send.ts'
@@ -164,8 +164,28 @@ describe('search query DSL', () => {
   })
 
   it('asks for the next day since after is strictly greater', () => {
-    expect(parseQuery('date 2026-02-03').criteria).toBe('ON 03-Feb-2026')
-    expect(parseQuery('after 2026-01-01').criteria).toBe('SINCE 02-Jan-2026')
+    expect(parseQuery('date 2026-02-03').criteria).toBe('SENTON 03-Feb-2026')
+    expect(parseQuery('before 2026-02-03').criteria).toBe('SENTBEFORE 03-Feb-2026')
+    expect(parseQuery('after 2026-01-01').criteria).toBe('SENTSINCE 02-Jan-2026')
+  })
+
+  it('searches the Date header rather than the received-at timestamp', () => {
+    // ON/BEFORE/SINCE would match the mailbox internal date, which is
+    // the wrong day for imported or delayed mail.
+    for (const source of ['date 2026-02-03', 'before 2026-02-03', 'after 2026-02-03']) {
+      expect(parseQuery(source).criteria.startsWith('SENT')).toBe(true)
+    }
+  })
+
+  it('only fetches the pages asked for under the default order', () => {
+    expect(uidBudget(1, 25, [], 200)).toBe(25)
+    expect(uidBudget(3, 25, [], 200)).toBe(75)
+    expect(uidBudget(0, 25, [], 200)).toBe(25)
+  })
+
+  it('caps deep paging and sorted searches at the account window', () => {
+    expect(uidBudget(40, 25, [], 200)).toBe(200)
+    expect(uidBudget(1, 25, [{ kind: 'subject', descending: false }], 200)).toBe(200)
   })
 
   it('keeps spaces in a quoted pattern and defuses its keywords', () => {

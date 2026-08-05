@@ -80,6 +80,20 @@ describe('parseSearchCriteria', () => {
     })
   })
 
+  it('keeps the sent-date keys distinct from the internal-date ones', () => {
+    // The himalaya DSL searches the `Date:` header, so SENT* must not
+    // collapse onto the mailbox's received-at keys.
+    expect(parseSearchCriteria('SENTON 03-Feb-2026')).toEqual({
+      sentOn: new Date(Date.UTC(2026, 1, 3)),
+    })
+    expect(parseSearchCriteria('SENTSINCE 02-Jan-2026')).toEqual({
+      sentSince: new Date(Date.UTC(2026, 0, 2)),
+    })
+    expect(parseSearchCriteria('SENTBEFORE 02-Jan-2026')).toEqual({
+      sentBefore: new Date(Date.UTC(2026, 0, 2)),
+    })
+  })
+
   it('parses the three date keys into UTC dates', () => {
     expect(parseSearchCriteria('ON 03-Feb-2026')).toEqual({ on: new Date(Date.UTC(2026, 1, 3)) })
     expect(parseSearchCriteria('SINCE 02-Jan-2026')).toEqual({

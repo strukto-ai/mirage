@@ -67,6 +67,9 @@ export interface SearchQuery {
   on?: Date
   since?: Date
   before?: Date
+  sentOn?: Date
+  sentSince?: Date
+  sentBefore?: Date
   not?: SearchQuery
   or?: SearchQuery[]
 }
@@ -87,11 +90,17 @@ const TEXT_KEYS: Record<string, 'body' | 'text' | 'subject' | 'from' | 'to'> = {
   TO: 'to',
 }
 
-const DATE_KEYS: Record<string, 'on' | 'since' | 'before'> = {
-  ON: 'on',
-  SINCE: 'since',
-  BEFORE: 'before',
-}
+// ON/SINCE/BEFORE match the mailbox's internal date, SENT* the `Date:`
+// header. They are different searches, so both spellings map through.
+const DATE_KEYS: Record<string, 'on' | 'since' | 'before' | 'sentOn' | 'sentSince' | 'sentBefore'> =
+  {
+    ON: 'on',
+    SINCE: 'since',
+    BEFORE: 'before',
+    SENTON: 'sentOn',
+    SENTSINCE: 'sentSince',
+    SENTBEFORE: 'sentBefore',
+  }
 
 /**
  * ANDs two search objects.

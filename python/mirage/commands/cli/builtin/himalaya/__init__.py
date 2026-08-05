@@ -109,9 +109,10 @@ HIMALAYA = CLISpec(
                     fn=search_envelopes,
                     options=(MAILBOX, PAGE, PAGE_SIZE),
                     rest=ID,
-                    epilog=("Conditions: date <yyyy-mm-dd>, after "
-                            "<yyyy-mm-dd>, from <pattern>, to <pattern>, "
-                            "subject <pattern>, body <pattern>, flag "
+                    epilog=("Conditions: date <yyyy-mm-dd>, before "
+                            "<yyyy-mm-dd>, after <yyyy-mm-dd>, from "
+                            "<pattern>, to <pattern>, subject <pattern>, "
+                            "body <pattern>, flag "
                             "<seen|answered|flagged|draft|deleted>. Combine "
                             "with and, or, not; group with parentheses. Sort "
                             "with order by <date|from|to|subject> "
