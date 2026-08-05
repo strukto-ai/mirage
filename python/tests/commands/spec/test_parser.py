@@ -531,3 +531,66 @@ def test_float_typed_value_is_reported_not_raised():
     for bad in ("inf", "nan", "1_000", "5x", "."):
         refused = parse_command(spec, ["--ratio", bad], "/")
         assert refused.invalid_float_options == [("--ratio", bad)]
+
+
+def test_pair_option_consumes_two_tokens():
+    parsed = parse_command(SPECS["jq"], ["--arg", "v", "hello", "-n", "$v"],
+                           "/")
+    assert parsed.flags["--arg"] == ["v", "hello"]
+    assert parsed.texts() == ["$v"]
+    assert parsed.paths() == []
+
+
+def test_pair_option_accumulates_flattened_across_occurrences():
+    parsed = parse_command(SPECS["jq"],
+                           ["--arg", "a", "1", "--argjson", "b", "2", "."],
+                           "/")
+    assert parsed.flags["--arg"] == ["a", "1"]
+    assert parsed.flags["--argjson"] == ["b", "2"]
+    assert parsed.texts() == ["."]
+
+
+def test_pair_option_value_is_never_taken_as_a_path():
+    parsed = parse_command(SPECS["jq"],
+                           ["--arg", "v", "/etc/passwd", ".", "/d/a.json"],
+                           "/")
+    assert parsed.flags["--arg"] == ["v", "/etc/passwd"]
+    assert parsed.paths() == ["/d/a.json"]
+
+
+def test_pair_option_short_of_a_token_needs_a_value():
+    parsed = parse_command(SPECS["jq"], ["--arg", "v"], "/")
+    assert parsed.needs_value_options == ["--arg"]
+
+
+def test_pair_option_has_no_equals_form():
+    parsed = parse_command(SPECS["jq"], ["--arg=v", "hello", "."], "/")
+    assert parsed.invalid_options == ["--arg=v"]
+
+
+def test_pair_option_can_carry_a_path_value():
+    parsed = parse_command(SPECS["jq"],
+                           ["--rawfile", "body", "f.txt", "-n", "$body"],
+                           "/data")
+    # Only the value resolves: the name is not a path.
+    assert parsed.flags["--rawfile"] == ["body", "/data/f.txt"]
+    assert parsed.path_flag_values == ["/data/f.txt"]
+
+
+def test_args_turns_later_operands_into_text():
+    parsed = parse_command(SPECS["jq"], ["--args", ".", "a", "/etc/passwd"],
+                           "/")
+    assert parsed.texts() == [".", "a", "/etc/passwd"]
+    assert parsed.paths() == []
+
+
+def test_jsonargs_turns_later_operands_into_text():
+    parsed = parse_command(SPECS["jq"], ["--jsonargs", ".", "1"], "/")
+    assert parsed.texts() == [".", "1"]
+    assert parsed.paths() == []
+
+
+def test_operands_stay_paths_without_the_args_flags():
+    parsed = parse_command(SPECS["jq"], [".", "/d/a.json"], "/")
+    assert parsed.texts() == ["."]
+    assert parsed.paths() == ["/d/a.json"]

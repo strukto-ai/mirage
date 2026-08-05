@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import { formatOne } from './format.ts'
+import { RS, type JqOptions } from './types.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 const WHITESPACE = /\s/
-const ENC = new TextEncoder()
 
 function parseSafe(text: string): unknown {
   return JSON.parse(text) as unknown
@@ -76,9 +77,15 @@ function documentEnd(text: string, start: number): number {
   return text.length
 }
 
+/**
+ * Parse a whitespace-separated stream of JSON values.
+ *
+ * Empty input holds no documents at all, which is why jq prints nothing
+ * and exits 0 for an empty file.
+ */
 export function parseJsonDocs(raw: Uint8Array): unknown[] {
   const text = DEC.decode(raw).trim()
-  if (text === '') throw new Error('jq: empty input')
+  if (text === '') return []
   try {
     return [parseSafe(text)]
   } catch (singleDocError) {
@@ -107,7 +114,39 @@ export function parseJsonDocs(raw: Uint8Array): unknown[] {
 
 export function parseJsonAuto(raw: Uint8Array): unknown {
   const docs = parseJsonDocs(raw)
+  if (docs.length === 0) throw new Error('jq: empty input')
   return docs.length === 1 ? docs[0] : docs
+}
+
+/**
+ * Parse an RFC 7464 JSON text sequence (`--seq`).
+ *
+ * Every value is introduced by RS, so anything before the first one is
+ * text the sequence never claimed. jq reports that as an ignored parse
+ * error and prints nothing for it; mirage drops it just as silently,
+ * which is the one divergence here.
+ */
+export function parseSeqDocs(raw: Uint8Array): unknown[] {
+  return DEC.decode(raw)
+    .split(RS)
+    .slice(1)
+    .filter((part) => part.trim() !== '')
+    .map((part) => parseSafe(part))
+}
+
+/**
+ * Split one input into the strings `jq -R` reads it as.
+ *
+ * jq breaks on newlines only (never on the other separators a Unicode
+ * line splitter honors) and a trailing newline ends the last line rather
+ * than starting an empty one.
+ */
+export function splitRawLines(raw: Uint8Array): string[] {
+  const text = DEC.decode(raw)
+  if (text === '') return []
+  const lines = text.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines
 }
 
 export function parseJsonPath(raw: Uint8Array, path: string): unknown {
@@ -123,12 +162,18 @@ export function isStreamableJsonlExpr(expression: string): boolean {
   return expression.trim().startsWith('.[]')
 }
 
+/**
+ * Evaluate a per-element program over a JSONL file, line by line.
+ *
+ * Only output options reach here, since the caller keeps this path off
+ * for anything that changes input assembly.
+ */
 export async function* evalJsonlStream(
   source: AsyncIterable<Uint8Array>,
   expression: string,
-  raw = false,
+  opts: JqOptions,
 ): AsyncIterable<Uint8Array> {
-  const { jqEval } = await import('./eval.ts')
+  const { argsObject, jqEval, referencesArgs } = await import('./eval.ts')
   const expr = expression.trim()
   let perItem: string
   if (expr === '.[]') perItem = '.'
@@ -136,14 +181,14 @@ export async function* evalJsonlStream(
   else if (expr.startsWith('.[].')) perItem = expr.slice(3)
   else perItem = expr
 
+  const argsValue = referencesArgs(perItem) ? argsObject(opts) : null
   const iter = new AsyncLineIterator(source)
   for await (const lineBytes of iter) {
     const text = DEC.decode(lineBytes).trim()
     if (text === '') continue
     const obj: unknown = JSON.parse(text)
-    for (const value of await jqEval(obj, perItem)) {
-      const line = raw && typeof value === 'string' ? value : JSON.stringify(value)
-      yield ENC.encode(line + '\n')
+    for (const value of await jqEval(obj, perItem, opts.namedArgs, null, argsValue)) {
+      yield formatOne(value, opts)
     }
   }
 }

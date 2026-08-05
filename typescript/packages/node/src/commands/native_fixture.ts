@@ -44,6 +44,13 @@ function runNative(cwd: string, cmd: string, stdin: Uint8Array | null): Promise<
     child.on('close', () => {
       resolve(Buffer.concat(out).toString('utf8'))
     })
+    // A program that never reads its stdin (`jq -n`) can exit before the
+    // write below lands, and a pipe with no reader left answers EPIPE.
+    // That is the program's own behavior, not a failed run; anything else
+    // still fails the test.
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE') reject(err)
+    })
     if (stdin !== null) child.stdin.write(Buffer.from(stdin))
     child.stdin.end()
   })

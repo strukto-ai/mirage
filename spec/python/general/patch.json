@@ -119,6 +119,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-p",
       "short_value": true,
@@ -133,6 +134,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-R",
       "short_value": true,
@@ -147,6 +149,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-i",
       "short_value": true,
@@ -161,6 +164,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-N",
       "short_value": true,
@@ -171,10 +175,12 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     },
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     }
   ],

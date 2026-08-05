@@ -84,6 +84,7 @@
       "long": "--parents",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-p",
       "short_value": true,
@@ -98,6 +99,7 @@
       "long": "--verbose",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-v",
       "short_value": true,
@@ -112,6 +114,7 @@
       "long": "--mode",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-m",
       "short_value": true,
@@ -126,6 +129,7 @@
       "long": "--context",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-Z",
       "short_value": true,
@@ -136,6 +140,7 @@
   "positional": [],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

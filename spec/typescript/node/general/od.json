@@ -287,6 +287,7 @@
       "long": "--address-radix",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-A",
       "short_value": true,
@@ -301,6 +302,7 @@
       "long": "--skip-bytes",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-j",
       "short_value": true,
@@ -315,6 +317,7 @@
       "long": "--read-bytes",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-N",
       "short_value": true,
@@ -329,6 +332,7 @@
       "long": "--format",
       "multiple": true,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-t",
       "short_value": true,
@@ -339,6 +343,7 @@
   "positional": [],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

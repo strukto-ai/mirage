@@ -65,6 +65,9 @@ export class CompiledSpec {
   readonly dest: ReadonlyMap<string, string>
   /** Canonical spellings that accumulate repeated values into a list. */
   readonly multipleDests: ReadonlySet<string>
+  /** Canonical spellings that consume two tokens per occurrence and
+   * accumulate both, flattened. */
+  readonly pairDests: ReadonlySet<string>
   /** Canonical spellings of boolean flags whose occurrences accumulate
    * into a number (click count, `-vvv`). */
   readonly countDests: ReadonlySet<string>
@@ -98,6 +101,7 @@ export class CompiledSpec {
     kindByDest: ReadonlyMap<string, ValueType>
     dest: ReadonlyMap<string, string>
     multipleDests: ReadonlySet<string>
+    pairDests: ReadonlySet<string>
     countDests: ReadonlySet<string>
     choicesByDest: ReadonlyMap<string, readonly string[]>
     requiredDests: readonly string[]
@@ -119,6 +123,7 @@ export class CompiledSpec {
     this.kindByDest = fields.kindByDest
     this.dest = fields.dest
     this.multipleDests = fields.multipleDests
+    this.pairDests = fields.pairDests
     this.countDests = fields.countDests
     this.choicesByDest = fields.choicesByDest
     this.requiredDests = fields.requiredDests
@@ -154,6 +159,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const kindByDest = new Map<string, ValueType>()
   const dest = new Map<string, string>()
   const multipleDests = new Set<string>()
+  const pairDests = new Set<string>()
   const countDests = new Set<string>()
   const choicesByDest = new Map<string, readonly string[]>()
   const requiredDests: string[] = []
@@ -165,6 +171,20 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     if (canonical === null) continue
     if (opt.count && opt.type !== 'bool') {
       throw new Error(`option '${canonical}': count requires a boolean flag (valueKind NONE)`)
+    }
+    if (opt.pair && opt.type === 'bool') {
+      throw new Error(
+        `option '${canonical}': pair requires a value flag (a boolean consumes no token)`,
+      )
+    }
+    if (opt.pair && opt.valueOptional) {
+      throw new Error(`option '${canonical}': pair and valueOptional are mutually exclusive`)
+    }
+    if (opt.pair && opt.short !== null) {
+      // A short spelling clusters and takes an attached value, both of
+      // which are single-token rules; jq's own two-token options are
+      // long-only for the same reason.
+      throw new Error(`option '${canonical}': pair requires a long spelling only`)
     }
     if (opt.type === 'bool' && (opt.choices.length > 0 || opt.default !== null)) {
       throw new Error(`option '${canonical}': choices and default require a value flag`)
@@ -187,7 +207,8 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     if (opt.short !== null) dest.set(opt.short, canonical)
     if (opt.long !== null) dest.set(opt.long, canonical)
     if (opt.type !== 'bool') kindByDest.set(canonical, opt.type)
-    if (opt.multiple) multipleDests.add(canonical)
+    if (opt.multiple || opt.pair) multipleDests.add(canonical)
+    if (opt.pair) pairDests.add(canonical)
     if (opt.count) countDests.add(canonical)
     if (opt.choices.length > 0) choicesByDest.set(canonical, opt.choices)
     if (opt.required) requiredDests.push(canonical)
@@ -218,6 +239,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
           opt.type,
           String(opt.valueOptional),
           String(opt.multiple),
+          String(opt.pair),
           String(opt.count),
           opt.choices.join(','),
           String(opt.required),
@@ -259,6 +281,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     kindByDest,
     dest,
     multipleDests,
+    pairDests,
     countDests,
     choicesByDest,
     requiredDests,

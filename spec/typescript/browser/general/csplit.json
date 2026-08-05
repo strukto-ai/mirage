@@ -84,6 +84,7 @@
       "long": "--prefix",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-f",
       "short_value": true,
@@ -98,6 +99,7 @@
       "long": "--digits",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-n",
       "short_value": true,
@@ -112,6 +114,7 @@
       "long": "--suffix-format",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-b",
       "short_value": true,
@@ -126,6 +129,7 @@
       "long": "--keep-files",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-k",
       "short_value": true,
@@ -140,6 +144,7 @@
       "long": "--quiet",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-s",
       "short_value": true,
@@ -154,6 +159,7 @@
       "long": "--silent",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -168,6 +174,7 @@
       "long": "--suppress-matched",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -182,6 +189,7 @@
       "long": "--elide-empty-files",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-z",
       "short_value": true,
@@ -192,11 +200,13 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     }
   ],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "str"
   }
 }

@@ -224,6 +224,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-i",
       "short_value": true,
@@ -238,6 +239,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-w",
       "short_value": true,
@@ -252,6 +254,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-b",
       "short_value": true,
@@ -266,6 +269,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-e",
       "short_value": true,
@@ -280,6 +284,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-u",
       "short_value": true,
@@ -294,6 +299,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-q",
       "short_value": true,
@@ -308,6 +314,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-r",
       "short_value": true,
@@ -318,10 +325,12 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     },
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     }
   ],

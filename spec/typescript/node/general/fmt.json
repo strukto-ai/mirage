@@ -287,6 +287,7 @@
       "long": "--width",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-w",
       "short_value": true,
@@ -301,6 +302,7 @@
       "long": "--goal",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-g",
       "short_value": true,
@@ -315,6 +317,7 @@
       "long": "--crown-margin",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-c",
       "short_value": true,
@@ -329,6 +332,7 @@
       "long": "--prefix",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-p",
       "short_value": true,
@@ -343,6 +347,7 @@
       "long": "--split-only",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-s",
       "short_value": true,
@@ -357,6 +362,7 @@
       "long": "--tagged-paragraph",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-t",
       "short_value": true,
@@ -371,6 +377,7 @@
       "long": "--uniform-spacing",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-u",
       "short_value": true,
@@ -381,6 +388,7 @@
   "positional": [],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

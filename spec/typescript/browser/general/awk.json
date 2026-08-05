@@ -224,6 +224,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-F",
       "short_value": true,
@@ -238,6 +239,7 @@
       "long": null,
       "multiple": true,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-v",
       "short_value": true,
@@ -252,6 +254,7 @@
       "long": null,
       "multiple": true,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-f",
       "short_value": true,
@@ -264,11 +267,13 @@
       "provided_by": [
         "-f"
       ],
+      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

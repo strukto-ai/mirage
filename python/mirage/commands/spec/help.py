@@ -20,10 +20,14 @@ from mirage.commands.spec.types import CommandSpec, Option
 SubcommandRows = Sequence[tuple[str, str]]
 
 
-def _value_label(value_type: str) -> str:
-    if value_type == "bool":
+def _value_label(opt: Option) -> str:
+    if opt.type == "bool":
         return ""
-    return " <path>" if value_type == "path" else " <text>"
+    # A pair option takes two tokens, and the first one names the value.
+    value = "<path>" if opt.type == "path" else "<text>"
+    if opt.pair:
+        return f" <name> {value}"
+    return f" {value}"
 
 
 def _flag_display(opt: Option) -> str:
@@ -32,7 +36,7 @@ def _flag_display(opt: Option) -> str:
         parts.append(opt.short)
     if opt.long is not None:
         parts.append(opt.long)
-    return ", ".join(parts) + _value_label(opt.type)
+    return ", ".join(parts) + _value_label(opt)
 
 
 def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
