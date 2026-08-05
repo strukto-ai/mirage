@@ -161,6 +161,47 @@ async def test_deleting_says_what_it_removed(git_rw):
 
 
 @pytest.mark.asyncio
+async def test_deleting_an_unmerged_branch_is_refused(git_rw):
+    # The branch name is the only thing pointing at that commit, so -d
+    # would be the command that loses it.
+    await _run(git_rw, "checkout -b topic")
+    await git_rw.execute("echo sideways > /repo/a.txt")
+    await _run(git_rw, "add -A")
+    await _run(git_rw, "commit -m sideways")
+    await _run(git_rw, "checkout main")
+    code, out, err = await _run(git_rw, "branch -d topic")
+    assert code == 1
+    assert out == b""
+    assert err == (b"error: the branch 'topic' is not fully merged\n"
+                   b"hint: If you are sure you want to delete it, run "
+                   b"'git branch -D topic'\n")
+    assert (await _run(git_rw, "branch"))[1] == b"* main\n  topic\n"
+
+
+@pytest.mark.asyncio
+async def test_force_deleting_an_unmerged_branch_removes_it(git_rw):
+    await _run(git_rw, "checkout -b topic")
+    await git_rw.execute("echo sideways > /repo/a.txt")
+    await _run(git_rw, "add -A")
+    await _run(git_rw, "commit -m sideways")
+    await _run(git_rw, "checkout main")
+    code, out, _err = await _run(git_rw, "branch -D topic")
+    assert code == 0
+    assert out.startswith(b"Deleted branch topic (was ")
+    assert (await _run(git_rw, "branch"))[1] == b"* main\n"
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_branch_behind_head_is_allowed(git_rw):
+    # Merged does not mean equal: an ancestor of HEAD is contained in
+    # it, so nothing is lost by dropping the name.
+    await _run(git_rw, "branch older HEAD~1")
+    code, out, _err = await _run(git_rw, "branch -d older")
+    assert code == 0
+    assert out.startswith(b"Deleted branch older (was ")
+
+
+@pytest.mark.asyncio
 async def test_deleting_a_branch_that_is_not_there(git_rw):
     code, _out, err = await _run(git_rw, "branch -d nosuch")
     assert code == 1

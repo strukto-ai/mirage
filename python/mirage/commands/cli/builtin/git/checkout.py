@@ -43,7 +43,7 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import check_operands, fatal
-from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NORMAL, scan
+from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -134,6 +134,22 @@ def _conflicts(before: Tree, after: Tree, dirty: set[str]) -> list[str]:
                   if before.get(path.encode()) != after.get(path.encode()))
 
 
+def _overwritten(after: Tree, untracked: list[str]) -> list[str]:
+    """Which untracked files the tree being switched to would write over.
+
+    An untracked file is in neither tree and neither index, so the
+    comparison above cannot see it, and writing the target branch's blob
+    over it destroys the only copy there is. git refuses and names each
+    one. An ignored file is not in this list and git overwrites it
+    silently, which is the same split. Pinned against git 2.50.
+
+    Args:
+        after (Tree): the tree being switched to.
+        untracked (list[str]): every untracked path the walk found.
+    """
+    return sorted(path for path in untracked if path.encode() in after)
+
+
 async def _switch(dispatch: Callable[..., Any], repo: BaseRepo,
                   location: RepoLocation, before: Tree, after: Tree,
                   keep: set[str], staged: dict[bytes, IndexEntry]) -> None:
@@ -193,11 +209,12 @@ async def checkout(
 ) -> tuple[ByteSource | None, IOResult]:
     """Switch the working tree to another branch or commit.
 
-    Refuses rather than overwriting when the switch would destroy an
-    uncommitted edit. That check is the whole reason this verb is safe
-    to offer: without it a branch switch silently throws away whatever
-    was changed and not staged, and there is no reflog here to get it
-    back from.
+    Refuses rather than overwriting when the switch would destroy work
+    that is not committed, whether that is an edit to a tracked file or
+    an untracked file the target branch happens to hold. That check is
+    the whole reason this verb is safe to offer: without it a branch
+    switch silently throws away whatever was changed and not staged, and
+    there is no reflog here to get it back from.
 
     Args:
         config (None): git declares no config_model.
@@ -237,8 +254,12 @@ async def checkout(
             path.decode("utf-8", errors="replace")
             for path in state.entries
         }
+        # UNTRACKED_ALL, not the mode status uses: "normal" collapses a
+        # wholly untracked directory to one ``dir/`` entry, and a
+        # collision has to be decided per file. git names the file
+        # inside such a directory, so the list has to hold it.
         found = await scan(dispatch, stat_path, location, tracked,
-                           UNTRACKED_NORMAL)
+                           UNTRACKED_ALL)
         unstaged = await work_changes(dispatch, location.worktree,
                                       state.entries, found)
         # Both kinds of uncommitted change count: an edit in the working
@@ -251,8 +272,9 @@ async def checkout(
         }
         dirty = set(unstaged) | staged
         blocked = _conflicts(before, after, dirty)
-        if blocked:
-            raise CheckoutConflictError(blocked)
+        overwritten = _overwritten(after, found.untracked)
+        if blocked or overwritten:
+            raise CheckoutConflictError(blocked, overwritten)
         await _switch(dispatch, repo, location, before, after, dirty,
                       state.entries)
         attached = creating or ref in known

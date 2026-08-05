@@ -39,7 +39,7 @@ import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { Dispatch, IndexEntry } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
-import { scan, UNTRACKED_NORMAL } from './worktree.ts'
+import { scan, UNTRACKED_ALL } from './worktree.ts'
 
 const ENC = new TextEncoder()
 
@@ -96,6 +96,22 @@ function conflicts(
 }
 
 /**
+ * Which untracked files the tree being switched to would write over.
+ *
+ * An untracked file is in neither tree and neither index, so the comparison
+ * above cannot see it, and writing the target branch's blob over it destroys
+ * the only copy there is. git refuses and names each one. An ignored file is
+ * not in this list and git overwrites it silently, which is the same split.
+ * Pinned against git 2.50.
+ */
+function overwritten(
+  after: ReadonlyMap<string, TreeEntry>,
+  untracked: readonly string[],
+): string[] {
+  return untracked.filter((path) => after.has(path)).sort()
+}
+
+/**
  * Make the working tree and index match the tree being switched to.
  *
  * Only paths whose recorded content differs are touched, so a file that is the
@@ -141,10 +157,11 @@ async function switchTo(
 /**
  * Switch the working tree to another branch or commit.
  *
- * Refuses rather than overwriting when the switch would destroy an uncommitted
- * edit. That check is the whole reason this verb is safe to offer: without it a
- * branch switch silently throws away whatever was changed and not staged, and
- * there is no reflog here to get it back from.
+ * Refuses rather than overwriting when the switch would destroy work that is not
+ * committed, whether that is an edit to a tracked file or an untracked file the
+ * target branch happens to hold. That check is the whole reason this verb is
+ * safe to offer: without it a branch switch silently throws away whatever was
+ * changed and not staged, and there is no reflog here to get it back from.
  */
 export async function checkout(
   _config: unknown,
@@ -185,7 +202,11 @@ export async function checkout(
     const after = await commitEntries(repo, oid)
     const state = await readIndex(repo, dispatch)
     const tracked = new Set(state.entries.keys())
-    const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_NORMAL)
+    // UNTRACKED_ALL, not the mode status uses: "normal" collapses a wholly
+    // untracked directory to one `dir/` entry, and a collision has to be
+    // decided per file. git names the file inside such a directory, so the
+    // list has to hold it.
+    const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_ALL)
     const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
     // Both kinds of uncommitted change count: an edit in the working tree, and
     // one already staged. Leaving the staged ones out is what silently threw
@@ -198,7 +219,10 @@ export async function checkout(
       .map(([path]) => path)
     const dirty = new Set([...unstaged.keys(), ...stagedPaths])
     const blocked = conflicts(before, after, dirty)
-    if (blocked.length > 0) throw new CheckoutConflictError(blocked)
+    const clobbered = overwritten(after, found.untracked)
+    if (blocked.length > 0 || clobbered.length > 0) {
+      throw new CheckoutConflictError(blocked, clobbered)
+    }
     await switchTo(repo, dispatch, before, after, dirty, state.entries)
     const attached = creating || known.has(ref)
     if (creating) await writeRef(dispatch, repo.location.commondir, ref, oid)

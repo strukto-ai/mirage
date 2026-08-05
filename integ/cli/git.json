@@ -657,6 +657,104 @@
         "stdout": "",
         "stderr": "fatal: cannot change to '/repo/nowhere': No such file or directory\n"
       }
+    },
+    {
+      "id": "git_branch_d_refuses_an_unmerged_branch",
+      "seq": 568209,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b side > /dev/null 2>&1 && printf 'sideways\\n' > /repo/letters.txt && git -C /repo add -A && git -C /repo commit -m sideways > /dev/null && git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -d side",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: the branch 'side' is not fully merged\nhint: If you are sure you want to delete it, run 'git branch -D side'\n"
+      }
+    },
+    {
+      "id": "git_branch_force_delete_removes_an_unmerged_branch",
+      "seq": 568210,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch -D side | cut -d' ' -f1-3",
+      "expect": {
+        "exit": 0,
+        "stdout": "Deleted branch side\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_refuses_to_overwrite_an_untracked_file",
+      "seq": 568211,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b holder > /dev/null 2>&1 && printf 'branch\\n' > /repo/fresh.txt && git -C /repo add -A && git -C /repo commit -m fresh > /dev/null && git -C /repo checkout main > /dev/null 2>&1 && printf 'mine\\n' > /repo/fresh.txt && git -C /repo checkout holder",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: The following untracked working tree files would be overwritten by checkout:\n\tfresh.txt\nPlease move or remove them before you switch branches.\nAborting\n"
+      }
+    },
+    {
+      "id": "git_checkout_untracked_conflict_cleanup",
+      "seq": 568212,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/fresh.txt && git -C /repo branch -D holder > /dev/null && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_update_stages_only_the_named_pathspec",
+      "seq": 568213,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'edited\\n' > /repo/numbers.txt && printf 'edited\\n' > /repo/docs/readme.md && git -C /repo add -u docs && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "M  docs/readme.md\n M numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_update_refuses_an_untracked_pathspec",
+      "seq": 568214,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'z\\n' > /repo/loose.txt && git -C /repo add -u loose.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "error: pathspec 'loose.txt' did not match any file(s) known to git\n"
+      }
+    },
+    {
+      "id": "git_add_update_cleanup",
+      "seq": 568215,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/loose.txt && git -C /repo reset > /dev/null && printf 'one\\ntwo\\n' > /repo/numbers.txt && printf 'notes\\n' > /repo/docs/readme.md && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

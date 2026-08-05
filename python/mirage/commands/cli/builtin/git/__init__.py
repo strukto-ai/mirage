@@ -60,7 +60,10 @@ LOG_OPTIONS = (
 BRANCH_OPTIONS = (
     Option(short="-a", description="List local and remote-tracking branches"),
     Option(short="-r", description="List remote-tracking branches"),
-    Option(short="-d", long="--delete", description="Delete a branch"),
+    Option(short="-d",
+           long="--delete",
+           description="Delete a fully merged branch"),
+    Option(short="-D", description="Delete a branch even if not merged"),
 )
 
 PATHSPEC = Operand(type="str")

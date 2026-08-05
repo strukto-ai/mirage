@@ -26,6 +26,13 @@ mkdir -p "$DEST"
 # fixture whose branch depends on the host is not a fixture.
 git -C "$DEST" init -q -b main
 
+# The exports above only reach this script's own commits. Record the same
+# identity in the repository so a caller that commits into the fixture
+# afterwards works on a machine with no global identity, which is every CI
+# runner: git refuses with "Author identity unknown" and exits 128.
+git -C "$DEST" config user.name "$GIT_AUTHOR_NAME"
+git -C "$DEST" config user.email "$GIT_AUTHOR_EMAIL"
+
 commit() {
   local when="$1" message="$2"
   GIT_AUTHOR_DATE="$when" GIT_COMMITTER_DATE="$when" \

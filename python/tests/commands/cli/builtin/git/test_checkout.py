@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,41 @@ def head_ref(repo_path: Path) -> bytes:
         repo_path (Path): the repository's working tree.
     """
     return (repo_path / ".git" / "HEAD").read_bytes().strip()
+
+
+async def write(ws, name: str, text: str) -> None:
+    """Create a file through the mount rather than behind its back.
+
+    A mount caches its listings, so a file dropped straight onto disk
+    after a command has already walked the tree stays invisible to every
+    command after it, and a test written that way passes for the wrong
+    reason.
+
+    Args:
+        ws (Workspace): the writable workspace.
+        name (str): repository-relative path to write.
+        text (str): one word of content; a newline is appended.
+    """
+    parent = posixpath.dirname(name)
+    if parent:
+        await ws.execute(f"mkdir -p /repo/{parent}")
+    await ws.execute(f"echo {text} > /repo/{name}")
+
+
+async def branch_holding(ws, name: str, path: str, text: str) -> None:
+    """Make a branch that holds one file main does not, then leave it.
+
+    Args:
+        ws (Workspace): the writable workspace.
+        name (str): the branch to create.
+        path (str): repository-relative path only the branch holds.
+        text (str): the content the branch records for it.
+    """
+    await run(ws, f"checkout -b {name}")
+    await write(ws, path, text)
+    await run(ws, "add -A")
+    await run(ws, f"commit -m {name}")
+    await run(ws, "checkout main")
 
 
 async def branch_at(ws, repo_path: Path, name: str) -> None:
@@ -160,6 +196,75 @@ async def test_an_untracked_file_is_left_alone(git_rw, repo_path: Path):
     (repo_path / "mine.txt").write_text("untracked\n", encoding="utf-8")
     assert (await run(git_rw, "checkout topic"))[0] == 0
     assert (repo_path / "mine.txt").read_text() == "untracked\n"
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_file_the_branch_holds_blocks_the_switch(
+        git_rw, repo_path: Path):
+    # The dangerous one: the file is in no index and no tree, so the
+    # tracked comparison cannot see it, and writing the branch's blob
+    # over it destroys the only copy there is.
+    await branch_holding(git_rw, "topic", "fresh.txt", "branch")
+    await write(git_rw, "fresh.txt", "mine")
+    code, _out, err = await run(git_rw, "checkout topic")
+    assert code == 1
+    assert err == (b"error: The following untracked working tree files would "
+                   b"be overwritten by checkout:\n\tfresh.txt\nPlease move or "
+                   b"remove them before you switch branches.\nAborting\n")
+    assert (repo_path / "fresh.txt").read_text() == "mine\n"
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_file_inside_an_untracked_directory_blocks(
+        git_rw, repo_path: Path):
+    # Status collapses a wholly untracked directory to one `dir/` row,
+    # and a collision has to be decided per file. git names the file.
+    await branch_holding(git_rw, "topic", "nd/file.txt", "branch")
+    await write(git_rw, "nd/file.txt", "mine")
+    await write(git_rw, "nd/other.txt", "also")
+    code, _out, err = await run(git_rw, "checkout topic")
+    assert code == 1
+    assert b"\tnd/file.txt" in err
+    assert (repo_path / "nd" / "file.txt").read_text() == "mine\n"
+
+
+@pytest.mark.asyncio
+async def test_an_ignored_file_is_overwritten_without_a_word(
+        git_rw, repo_path: Path):
+    # git's own split: an ignored file is not work the caller is keeping.
+    await run(git_rw, "checkout -b topic")
+    await write(git_rw, "ig.txt", "branch")
+    await run(git_rw, "add -f ig.txt")
+    await run(git_rw, "commit -m ignored")
+    await run(git_rw, "checkout main")
+    await write(git_rw, ".gitignore", "ig.txt")
+    await write(git_rw, "ig.txt", "mine")
+    code, _out, _err = await run(git_rw, "checkout topic")
+    assert code == 0
+    assert (repo_path / "ig.txt").read_text() == "branch\n"
+
+
+@pytest.mark.asyncio
+async def test_both_kinds_of_conflict_are_reported_together(git_rw):
+    await run(git_rw, "checkout -b topic")
+    await write(git_rw, "a.txt", "onthebranch")
+    await write(git_rw, "fresh.txt", "branch")
+    await run(git_rw, "add -A")
+    await run(git_rw, "commit -m both")
+    await run(git_rw, "checkout main")
+    await write(git_rw, "a.txt", "precious")
+    await write(git_rw, "fresh.txt", "mine")
+    code, _out, err = await run(git_rw, "checkout topic")
+    assert code == 1
+    # One aborting line at the end, and the second paragraph carries its
+    # own prefix, which is how git prints two errors before one abort.
+    assert err == (b"error: Your local changes to the following files would "
+                   b"be overwritten by checkout:\n\ta.txt\nPlease commit your "
+                   b"changes or stash them before you switch branches.\n"
+                   b"error: The following untracked working tree files would "
+                   b"be overwritten by checkout:\n\tfresh.txt\nPlease move or "
+                   b"remove them before you switch branches.\nAborting\n")
 
 
 @pytest.mark.asyncio

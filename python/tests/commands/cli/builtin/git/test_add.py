@@ -141,6 +141,50 @@ async def test_update_leaves_a_new_file_alone(git_rw, repo_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_update_stages_only_what_the_pathspec_covers(
+        git_rw, repo_path: Path):
+    # Without the pathspec this restages every tracked file, which is
+    # how an unrelated edit ends up in the next commit.
+    (repo_path / "a.txt").write_text("edited a\n", encoding="utf-8")
+    (repo_path / "b.txt").write_text("edited b\n", encoding="utf-8")
+    assert await run(git_rw, "add -u a.txt") == (0, b"", b"")
+    index = staged(repo_path)
+    assert index[b"a.txt"] == Blob.from_string(b"edited a\n").id
+    assert index[b"b.txt"] != Blob.from_string(b"edited b\n").id
+
+
+@pytest.mark.asyncio
+async def test_update_stages_a_removal_only_under_the_pathspec(
+        git_rw, repo_path: Path):
+    (repo_path / "a.txt").unlink()
+    (repo_path / "b.txt").unlink()
+    await run(git_rw, "add -u b.txt")
+    index = staged(repo_path)
+    assert b"a.txt" in index
+    assert b"b.txt" not in index
+
+
+@pytest.mark.asyncio
+async def test_update_with_a_pathspec_that_names_nothing(git_rw):
+    code, _out, err = await run(git_rw, "add -u nosuch")
+    assert code == 128
+    assert err == b"fatal: pathspec 'nosuch' did not match any files\n"
+
+
+@pytest.mark.asyncio
+async def test_update_naming_an_untracked_file_is_refused(
+        git_rw, repo_path: Path):
+    # It is there, so the pathspec is not the problem: -u restages what
+    # the index holds, and the index has never heard of this one.
+    (repo_path / "fresh.txt").write_text("x\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "add -u fresh.txt")
+    assert code == 128
+    assert err == (b"error: pathspec 'fresh.txt' did not match any file(s) "
+                   b"known to git\n")
+    assert b"fresh.txt" not in staged(repo_path)
+
+
+@pytest.mark.asyncio
 async def test_a_directory_operand_stages_what_is_under_it(
         git_rw, repo_path: Path):
     (repo_path / "sub").mkdir()

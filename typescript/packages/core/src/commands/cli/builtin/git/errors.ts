@@ -249,6 +249,30 @@ export class CheckedOutBranchError extends GitError {
   }
 }
 
+/**
+ * `-d` naming a branch whose commits HEAD does not already hold.
+ *
+ * The branch name is the only thing pointing at those commits, so deleting it
+ * leaves them unreachable and there is no reflog here to find them again. git
+ * refuses for that reason and reserves `-D` for a caller who means it, which is
+ * why `-d` alone would be the wrong shape to ship: it would be a delete with no
+ * way to say no.
+ *
+ * Only the first of git's two hint lines is kept. The second names the config
+ * knob that silences the advice, and there is no git config here to set.
+ */
+export class UnmergedBranchError extends GitError {
+  override readonly prefix = 'error'
+  override readonly code = 1
+
+  constructor(name: string) {
+    super(
+      `the branch '${name}' is not fully merged\nhint: If you are sure you ` +
+        `want to delete it, run 'git branch -D ${name}'`,
+    )
+  }
+}
+
 /** A branch name that resolves to nothing. */
 export class NoBranchError extends GitError {
   override readonly prefix = 'error'
@@ -259,37 +283,74 @@ export class NoBranchError extends GitError {
   }
 }
 
-/** `checkout` naming something that is neither a ref nor a path. */
+/**
+ * An operand that is neither a ref nor a path git has heard of.
+ *
+ * One sentence, two exit codes, which is git's own split rather than ours:
+ * `checkout` refuses with 1, and `add -u` treats the same sentence as a fatal
+ * and exits 128. Measured one verb at a time on git 2.50.1.
+ */
 export class UnknownPathspecError extends GitError {
   override readonly prefix = 'error'
-  override readonly code = 1
+  override readonly code: number
 
-  constructor(target: string) {
+  constructor(target: string, fatal = false) {
     super(`pathspec '${target}' did not match any file(s) known to git`)
+    this.code = fatal ? FATAL_EXIT : 1
   }
 }
 
 /**
- * A checkout that would throw away uncommitted work.
+ * One named-files paragraph of a checkout refusal.
+ */
+function conflictBlock(header: string, paths: readonly string[], advice: string): string {
+  const listed = [...paths]
+    .sort()
+    .map((path) => `\t${path}`)
+    .join('\n')
+  return `${header}\n${listed}\n${advice}`
+}
+
+/**
+ * A checkout that would throw away work that is not committed.
  *
  * git refuses and names every file rather than overwriting, which is the one
  * safety check that makes checkout usable at all: without it a branch switch
  * silently destroys whatever was edited and not staged.
+ *
+ * Two kinds of work are at risk and git words them differently: a tracked file
+ * carrying uncommitted changes, and an untracked file the target branch would
+ * write over. Both are carried here rather than thrown separately because when
+ * both apply git prints both paragraphs and aborts once, pinned against git
+ * 2.50.
  */
 export class CheckoutConflictError extends GitError {
   override readonly prefix = 'error'
   override readonly code = 1
 
-  constructor(paths: readonly string[]) {
-    const listed = [...paths]
-      .sort()
-      .map((path) => `\t${path}`)
-      .join('\n')
-    super(
-      `Your local changes to the following files would be overwritten by ` +
-        `checkout:\n${listed}\nPlease commit your changes or stash them before ` +
-        `you switch branches.\nAborting`,
-    )
+  constructor(local: readonly string[], untracked: readonly string[]) {
+    const blocks: string[] = []
+    if (local.length > 0) {
+      blocks.push(
+        conflictBlock(
+          'Your local changes to the following files would be overwritten by checkout:',
+          local,
+          'Please commit your changes or stash them before you switch branches.',
+        ),
+      )
+    }
+    if (untracked.length > 0) {
+      blocks.push(
+        conflictBlock(
+          'The following untracked working tree files would be overwritten by checkout:',
+          untracked,
+          'Please move or remove them before you switch branches.',
+        ),
+      )
+    }
+    // git emits each paragraph as its own error, so the second one carries the
+    // prefix inline: the renderer only writes the first.
+    super(`${blocks.map((block) => `${block}\n`).join('error: ')}Aborting`)
   }
 }
 

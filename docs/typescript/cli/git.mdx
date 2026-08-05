@@ -72,6 +72,7 @@ git -C /repo reset src/main.ts
 git -C /repo commit -m "message"
 git -C /repo branch topic
 git -C /repo branch -d topic
+git -C /repo branch -D topic
 git -C /repo checkout topic
 ```
 
@@ -80,8 +81,8 @@ git -C /repo checkout topic
 | `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path |
 | `reset`    | mixed only; a pathspec limits it to those paths                   |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                 |
-| `branch`   | `-d` deletes; refuses the checked-out branch                      |
-| `checkout` | refuses rather than overwrite a change you would lose             |
+| `branch`   | `-d` deletes a merged branch, `-D` any branch                     |
+| `checkout` | refuses rather than overwrite work you have not committed         |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not

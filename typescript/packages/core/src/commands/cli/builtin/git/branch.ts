@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import git from 'isomorphic-git'
+
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
@@ -25,10 +27,11 @@ import {
   NoBranchError,
   NoWorkspaceError,
   UnknownSwitchError,
+  UnmergedBranchError,
 } from './errors.ts'
 import { short } from './format.ts'
 import { deleteRef, loadRefs, readHead, writeRef, SYMREF_PREFIX } from './refs.ts'
-import { opened, type Repo } from './repo.ts'
+import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
@@ -69,18 +72,51 @@ async function create(
   await writeRef(dispatch, repo.location.commondir, ref, oid)
 }
 
-/** Remove a branch, refusing to remove the one that is checked out. */
+/**
+ * The commit HEAD resolves to, null on an unborn branch.
+ *
+ * HEAD carries an object id only when detached; attached it names a ref, which
+ * is unset until the first commit.
+ */
+function headCommit(refs: ReadonlyMap<string, string>, head: HeadRef): string | null {
+  if (head.commit !== null) return head.commit
+  if (head.ref === null) return null
+  return refs.get(head.ref) ?? null
+}
+
+/**
+ * Whether HEAD already holds every commit a branch points at.
+ *
+ * An unborn HEAD holds nothing, which is git's answer too: on an orphan branch
+ * every other branch reads as unmerged. The equality case is handled here
+ * because isomorphic-git's `isDescendent` answers false for a commit compared
+ * with itself, by its own documented choice.
+ *
+ * Only HEAD is consulted. git also accepts a branch contained in its own
+ * upstream, and there are no remotes here to have one.
+ */
+async function merged(repo: Repo, tip: string, head: string | null): Promise<boolean> {
+  if (head === null) return false
+  if (head === tip) return true
+  return await git.isDescendent({ ...repoArgs(repo), oid: head, ancestor: tip, depth: -1 })
+}
+
+/** Remove a branch, refusing when the removal would lose commits. */
 async function remove(
   dispatch: Dispatch,
   repo: Repo,
   refs: ReadonlyMap<string, string>,
   head: HeadRef,
   name: string,
+  force: boolean,
 ): Promise<string> {
   const ref = `${HEADS_PREFIX}${name}`
   const sha = refs.get(ref)
   if (sha === undefined) throw new NoBranchError(name)
   if (name === head.branch) throw new CheckedOutBranchError(name, repo.location.worktree)
+  if (!force && !(await merged(repo, sha, headCommit(refs, head)))) {
+    throw new UnmergedBranchError(name)
+  }
   await deleteRef(dispatch, repo.location.commondir, ref)
   return `Deleted branch ${name} (was ${short(sha, repo.abbrev)}).\n`
 }
@@ -89,9 +125,11 @@ async function remove(
  * List, create or delete branches.
  *
  * A name operand creates a branch, `-d` deletes one, and neither lists them with
- * the checked-out one marked. `-r` lists remote-tracking branches instead of
- * local ones and `-a` lists both, which is git's own split; local names sort
- * together and remotes follow.
+ * the checked-out one marked. `-d` deletes only a branch HEAD already contains,
+ * and `-D` deletes one regardless, which is git's own split and the reason both
+ * are here: without `-D` there is nothing `-d` can refuse to do. `-r` lists
+ * remote-tracking branches instead of local ones and `-a` lists both; local
+ * names sort together and remotes follow.
  */
 export async function branch(
   _config: unknown,
@@ -111,10 +149,11 @@ export async function branch(
     const repo = await opened(fl, opts.statPath, opts.mountRoot, dispatch)
     refs = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
     head = await readHead(dispatch, repo.location.gitdir)
-    if (fl.asBool('delete')) {
+    const force = fl.asBool('D')
+    if (fl.asBool('delete') || force) {
       if (texts.length === 0) throw new BranchNameRequiredError()
       const parts: string[] = []
-      for (const name of texts) parts.push(await remove(dispatch, repo, refs, head, name))
+      for (const name of texts) parts.push(await remove(dispatch, repo, refs, head, name, force))
       return [ENC.encode(parts.join('')), new IOResult()]
     }
     const first = texts[0]

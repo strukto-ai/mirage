@@ -153,6 +153,15 @@ async function write(h: Harness, path: string, text: string): Promise<void> {
   await h.ws.dispatch('write', target, [new TextEncoder().encode(text)])
 }
 
+/** Make a branch that holds one file main does not, then leave it. */
+async function branchHolding(h: Harness, name: string, path: string, text: string): Promise<void> {
+  await h.run(`checkout -b ${name}`)
+  await write(h, path, text)
+  await h.run('add -A')
+  await h.run(`commit -m ${name}`)
+  await h.run('checkout main')
+}
+
 describe('git add', () => {
   it('stages an edit, and the real binary agrees', async () => {
     const h = await harness()
@@ -197,6 +206,43 @@ describe('git add', () => {
     const [code, , err] = await h.run('add')
     expect(code).toBe(0)
     expect(err.startsWith('Nothing specified, nothing added.')).toBe(true)
+  })
+
+  it('under -u stages only what the pathspec covers', async () => {
+    // Without the pathspec this restages every tracked file, which is how
+    // an unrelated edit ends up in the next commit.
+    const h = await harness()
+    await write(h, 'letters.txt', 'edited\n')
+    await write(h, 'docs/readme.md', 'edited\n')
+    expect(await h.run('add -u docs')).toEqual([0, '', ''])
+    const drained = await h.drain()
+    expect(git(drained, ['diff', '--cached', '--name-only'])).toBe('docs/readme.md\n')
+  })
+
+  it('under -u stages a removal only under the pathspec', async () => {
+    const h = await harness()
+    await h.ws.dispatch('unlink', '/repo/letters.txt')
+    await h.ws.dispatch('unlink', '/repo/docs/readme.md')
+    await h.run('add -u docs')
+    const drained = await h.drain()
+    expect(git(drained, ['diff', '--cached', '--name-only'])).toBe('docs/readme.md\n')
+  })
+
+  it('under -u refuses a pathspec that names nothing', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('add -u nosuch')
+    expect(code).toBe(128)
+    expect(err).toBe("fatal: pathspec 'nosuch' did not match any files\n")
+  })
+
+  it('under -u refuses a pathspec that names only an untracked file', async () => {
+    // It is there, so the pathspec is not the problem: -u restages what the
+    // index holds, and the index has never heard of this one.
+    const h = await harness()
+    await write(h, 'fresh.txt', 'x\n')
+    const [code, , err] = await h.run('add -u fresh.txt')
+    expect(code).toBe(128)
+    expect(err).toBe("error: pathspec 'fresh.txt' did not match any file(s) known to git\n")
   })
 
   it('refuses a pathspec that matches nothing', async () => {
@@ -379,6 +425,109 @@ describe('git checkout', () => {
     await write(h, 'mine.txt', 'untracked\n')
     expect((await h.run('checkout topic'))[0]).toBe(0)
     expect(readFileSync(join(await h.drain(), 'mine.txt'), 'utf8')).toBe('untracked\n')
+  })
+
+  it('refuses a switch that would overwrite an untracked file', async () => {
+    // The dangerous one: the file is in no index and no tree, so the tracked
+    // comparison cannot see it, and writing the branch's blob over it
+    // destroys the only copy there is.
+    const h = await harness()
+    await branchHolding(h, 'side', 'fresh.txt', 'branch\n')
+    await write(h, 'fresh.txt', 'mine\n')
+    const [code, , err] = await h.run('checkout side')
+    expect(code).toBe(1)
+    expect(err).toBe(
+      'error: The following untracked working tree files would be overwritten ' +
+        'by checkout:\n\tfresh.txt\nPlease move or remove them before you ' +
+        'switch branches.\nAborting\n',
+    )
+    const drained = await h.drain()
+    expect(readFileSync(join(drained, 'fresh.txt'), 'utf8')).toBe('mine\n')
+    expect(git(drained, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('main\n')
+  })
+
+  it('names the untracked file inside a wholly untracked directory', async () => {
+    // Status collapses such a directory to one `dir/` row, and a collision
+    // has to be decided per file. git names the file.
+    const h = await harness()
+    await branchHolding(h, 'side', 'nd/file.txt', 'branch\n')
+    await write(h, 'nd/file.txt', 'mine\n')
+    await write(h, 'nd/other.txt', 'also\n')
+    const [code, , err] = await h.run('checkout side')
+    expect(code).toBe(1)
+    expect(err).toContain('\tnd/file.txt')
+    expect(readFileSync(join(await h.drain(), 'nd/file.txt'), 'utf8')).toBe('mine\n')
+  })
+
+  it('overwrites an ignored file without a word', async () => {
+    // git's own split: an ignored file is not work the caller is keeping.
+    const h = await harness()
+    await h.run('checkout -b side')
+    await write(h, 'ig.txt', 'branch\n')
+    await h.run('add -f ig.txt')
+    await h.run('commit -m ignored')
+    await h.run('checkout main')
+    await write(h, '.gitignore', 'ig.txt\n')
+    await write(h, 'ig.txt', 'mine\n')
+    expect((await h.run('checkout side'))[0]).toBe(0)
+    expect(readFileSync(join(await h.drain(), 'ig.txt'), 'utf8')).toBe('branch\n')
+  })
+
+  it('reports both kinds of conflict before one abort', async () => {
+    const h = await harness()
+    await h.run('checkout -b side')
+    await write(h, 'letters.txt', 'onthebranch\n')
+    await write(h, 'fresh.txt', 'branch\n')
+    await h.run('add -A')
+    await h.run('commit -m both')
+    await h.run('checkout main')
+    await write(h, 'letters.txt', 'precious\n')
+    await write(h, 'fresh.txt', 'mine\n')
+    const [code, , err] = await h.run('checkout side')
+    expect(code).toBe(1)
+    expect(err).toBe(
+      'error: Your local changes to the following files would be overwritten ' +
+        'by checkout:\n\tletters.txt\nPlease commit your changes or stash them ' +
+        'before you switch branches.\n' +
+        'error: The following untracked working tree files would be overwritten ' +
+        'by checkout:\n\tfresh.txt\nPlease move or remove them before you ' +
+        'switch branches.\nAborting\n',
+    )
+  })
+})
+
+describe('git branch -d', () => {
+  it('refuses a branch HEAD does not contain', async () => {
+    // The branch name is the only thing pointing at that commit, so -d
+    // would be the command that loses it.
+    const h = await harness()
+    await branchHolding(h, 'side', 'fresh.txt', 'branch\n')
+    const [code, out, err] = await h.run('branch -d side')
+    expect(code).toBe(1)
+    expect(out).toBe('')
+    expect(err).toBe(
+      "error: the branch 'side' is not fully merged\nhint: If you are sure " +
+        "you want to delete it, run 'git branch -D side'\n",
+    )
+    expect(git(await h.drain(), ['branch'])).toContain('side')
+  })
+
+  it('deletes it under -D', async () => {
+    const h = await harness()
+    await branchHolding(h, 'side', 'fresh.txt', 'branch\n')
+    const [code, out] = await h.run('branch -D side')
+    expect(code).toBe(0)
+    expect(out.startsWith('Deleted branch side (was ')).toBe(true)
+    expect(git(await h.drain(), ['branch'])).not.toContain('side')
+  })
+
+  it('allows a branch behind HEAD', async () => {
+    // Merged does not mean equal: an ancestor of HEAD is contained in it,
+    // so nothing is lost by dropping the name. `topic` is HEAD~1.
+    const h = await harness()
+    const [code, out] = await h.run('branch -d topic')
+    expect(code).toBe(0)
+    expect(out.startsWith('Deleted branch topic (was ')).toBe(true)
   })
 })
 

@@ -20,11 +20,9 @@ from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
 
 from mirage.commands.cli.builtin.git.errors import GitError  # yapf: disable
-from mirage.commands.cli.builtin.git.errors import (IgnoredPathsError,
-                                                    NothingSpecifiedError,
-                                                    NoWorkspaceError,
-                                                    PathspecError,
-                                                    UnknownSwitchError)
+from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
+    IgnoredPathsError, NothingSpecifiedError, NoWorkspaceError, PathspecError,
+    UnknownPathspecError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import read_file
@@ -128,6 +126,36 @@ def keep_addable(paths: set[str], tracked: set[str],
     }
 
 
+def _update_scope(location: RepoLocation, start: str, tracked: set[str],
+                  present: set[str], operands: tuple[str, ...]) -> set[str]:
+    """Which tracked paths ``-u`` operands select.
+
+    ``-u`` restages what the index already holds, so an operand narrows
+    that set rather than adding to it: an untracked file under one is
+    still not staged. git tells two misses apart and so does this. An
+    operand naming nothing at all is a fatal about the pathspec, and one
+    naming something the working tree has but the index does not is a
+    fatal about git not knowing it. Pinned against git 2.50.1.
+
+    Args:
+        location (RepoLocation): the discovered repository.
+        start (str): absolute virtual path git is running in.
+        tracked (set[str]): repository-relative paths the index holds.
+        present (set[str]): repository-relative paths the walk found.
+        operands (tuple[str, ...]): the pathspecs as typed.
+    """
+    selected: set[str] = set()
+    for operand in operands:
+        target = repo_relative(location, start, operand)
+        hits = matched(tracked, target)
+        if not hits and not matched(present, target):
+            raise PathspecError(operand)
+        if not hits:
+            raise UnknownPathspecError(operand, fatal=True)
+        selected |= hits
+    return selected
+
+
 async def _resolve(stat_path: StatPath, location: RepoLocation, start: str,
                    operands: tuple[str, ...], found: WorkTree,
                    tracked: set[str], ignores: IgnoreStack,
@@ -194,6 +222,10 @@ async def add(
     which is what makes ``git add <deleted>`` and ``git add -A`` stage a
     deletion without a separate verb.
 
+    ``-A`` and ``-u`` both narrow to the pathspecs when any are given,
+    and differ in what they will stage: ``-A`` takes untracked files
+    too, ``-u`` only what the index already holds.
+
     Args:
         config (None): git declares no config_model.
         paths (list[PathSpec]): path operands, unused; pathspecs arrive
@@ -222,8 +254,11 @@ async def add(
         ignores = await load_ignores(dispatch, location.gitdir,
                                      location.worktree)
         if parsed.update:
-            stage = tracked & set(found.files)
-            remove = tracked - set(found.files)
+            scope = (_update_scope(location, start_point(fl), tracked,
+                                   set(found.files), texts)
+                     if texts else tracked)
+            stage = scope & set(found.files)
+            remove = scope - set(found.files)
         elif parsed.every and not texts:
             stage = keep_addable(set(found.files), tracked, ignores)
             remove = tracked - set(found.files)

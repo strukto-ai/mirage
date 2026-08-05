@@ -308,6 +308,32 @@ class CheckedOutBranchError(GitError):
                          f"'{worktree}'")
 
 
+class UnmergedBranchError(GitError):
+    """``-d`` naming a branch whose commits HEAD does not already hold.
+
+    The branch name is the only thing pointing at those commits, so
+    deleting it leaves them unreachable and there is no reflog here to
+    find them again. git refuses for that reason and reserves ``-D`` for
+    a caller who means it, which is why ``-d`` alone would be the wrong
+    shape to ship: it would be a delete with no way to say no.
+
+    Only the first of git's two hint lines is kept. The second names the
+    config knob that silences the advice, and there is no git config
+    here to set.
+
+    Args:
+        name (str): the branch name.
+    """
+
+    prefix = "error"
+    code = 1
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"the branch '{name}' is not fully merged\n"
+                         f"hint: If you are sure you want to delete it, run "
+                         f"'git branch -D {name}'")
+
+
 class NoBranchError(GitError):
     """A branch name that resolves to nothing.
 
@@ -323,40 +349,78 @@ class NoBranchError(GitError):
 
 
 class UnknownPathspecError(GitError):
-    """``checkout`` naming something that is neither a ref nor a path.
+    """An operand that is neither a ref nor a path git has heard of.
+
+    One sentence, two exit codes, which is git's own split rather than
+    ours: ``checkout`` refuses with 1, and ``add -u`` treats the same
+    sentence as a fatal and exits 128. Measured one verb at a time on
+    git 2.50.1.
 
     Args:
         target (str): the operand as the user spelled it.
+        fatal (bool): whether to exit as a fatal rather than with 1.
     """
 
     prefix = "error"
-    code = 1
 
-    def __init__(self, target: str) -> None:
+    def __init__(self, target: str, fatal: bool = False) -> None:
+        self.code = FATAL_EXIT if fatal else 1
         super().__init__(f"pathspec '{target}' did not match any file(s) "
                          f"known to git")
 
 
+def _conflict_block(header: str, paths: list[str], advice: str) -> str:
+    """One named-files paragraph of a checkout refusal.
+
+    Args:
+        header (str): the line that introduces the list.
+        paths (list[str]): the files to name, one per tab-indented line.
+        advice (str): the line telling the caller what to do about them.
+    """
+    listed = "\n".join(f"\t{path}" for path in sorted(paths))
+    return f"{header}\n{listed}\n{advice}"
+
+
 class CheckoutConflictError(GitError):
-    """A checkout that would throw away uncommitted work.
+    """A checkout that would throw away work that is not committed.
 
     git refuses and names every file rather than overwriting, which is
     the one safety check that makes checkout usable at all: without it a
     branch switch silently destroys whatever was edited and not staged.
 
+    Two kinds of work are at risk and git words them differently: a
+    tracked file carrying uncommitted changes, and an untracked file the
+    target branch would write over. Both are carried here rather than
+    raised separately because when both apply git prints both
+    paragraphs and aborts once, pinned against git 2.50.
+
     Args:
-        paths (list[str]): the files that would be lost.
+        local (list[str]): tracked files with uncommitted changes.
+        untracked (list[str]): untracked files the target branch holds.
     """
 
     prefix = "error"
     code = 1
 
-    def __init__(self, paths: list[str]) -> None:
-        listed = "\n".join(f"\t{path}" for path in sorted(paths))
-        super().__init__(
-            f"Your local changes to the following files would be "
-            f"overwritten by checkout:\n{listed}\nPlease commit your changes "
-            f"or stash them before you switch branches.\nAborting")
+    def __init__(self, local: list[str], untracked: list[str]) -> None:
+        blocks: list[str] = []
+        if local:
+            blocks.append(
+                _conflict_block(
+                    "Your local changes to the following files would be "
+                    "overwritten by checkout:", local,
+                    "Please commit your changes or stash them before you "
+                    "switch branches."))
+        if untracked:
+            blocks.append(
+                _conflict_block(
+                    "The following untracked working tree files would be "
+                    "overwritten by checkout:", untracked,
+                    "Please move or remove them before you switch branches."))
+        # git emits each paragraph as its own error, so the second one
+        # carries the prefix inline: the renderer only writes the first.
+        joined = "error: ".join(f"{block}\n" for block in blocks)
+        super().__init__(f"{joined}Aborting")
 
 
 class UnknownSwitchError(GitError):

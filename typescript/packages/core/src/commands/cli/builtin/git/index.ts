@@ -117,7 +117,8 @@ const CHECKOUT_OPTIONS = [
 const BRANCH_OPTIONS = [
   new Option({ short: '-a', description: 'List local and remote-tracking branches' }),
   new Option({ short: '-r', description: 'List remote-tracking branches' }),
-  new Option({ short: '-d', long: '--delete', description: 'Delete a branch' }),
+  new Option({ short: '-d', long: '--delete', description: 'Delete a fully merged branch' }),
+  new Option({ short: '-D', description: 'Delete a branch even if not merged' }),
 ]
 
 /**

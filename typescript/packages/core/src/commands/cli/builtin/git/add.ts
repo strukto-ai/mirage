@@ -26,6 +26,7 @@ import {
   NothingSpecifiedError,
   NoWorkspaceError,
   PathspecError,
+  UnknownPathspecError,
   UnknownSwitchError,
 } from './errors.ts'
 import type { IgnoreStack } from './ignore.ts'
@@ -93,6 +94,36 @@ function keepAddable(
 }
 
 /**
+ * Which tracked paths `-u` operands select.
+ *
+ * `-u` restages what the index already holds, so an operand narrows that set
+ * rather than adding to it: an untracked file under one is still not staged. git
+ * tells two misses apart and so does this. An operand naming nothing at all is a
+ * fatal about the pathspec, and one naming something the working tree has but
+ * the index does not is a fatal about git not knowing it. Pinned against git
+ * 2.50.1.
+ */
+function updateScope(
+  location: RepoLocation,
+  start: string,
+  operands: readonly string[],
+  tracked: ReadonlySet<string>,
+  present: ReadonlySet<string>,
+): Set<string> {
+  const selected = new Set<string>()
+  for (const operand of operands) {
+    const target = repoRelative(location, start, operand)
+    const hits = matched(tracked, target)
+    if (hits.size === 0 && matched(present, target).size === 0) {
+      throw new PathspecError(operand)
+    }
+    if (hits.size === 0) throw new UnknownPathspecError(operand, true)
+    for (const path of hits) selected.add(path)
+  }
+  return selected
+}
+
+/**
  * Turn path operands into the paths to stage and to unstage.
  *
  * An operand that names nothing in either the working tree or the index is git's
@@ -145,6 +176,10 @@ async function resolve(
  * index. Staging a path that is gone records the removal instead, which is what
  * makes `git add <deleted>` and `git add -A` stage a deletion without a separate
  * verb.
+ *
+ * `-A` and `-u` both narrow to the pathspecs when any are given, and differ in
+ * what they will stage: `-A` takes untracked files too, `-u` only what the index
+ * already holds.
  */
 export async function add(
   _config: unknown,
@@ -171,8 +206,12 @@ export async function add(
     let stage: Set<string>
     let remove: Set<string>
     if (parsed.update) {
-      stage = new Set([...tracked].filter((path) => present.has(path)))
-      remove = new Set([...tracked].filter((path) => !present.has(path)))
+      const scope =
+        texts.length > 0
+          ? updateScope(repo.location, startPoint(fl), texts, tracked, present)
+          : tracked
+      stage = new Set([...scope].filter((path) => present.has(path)))
+      remove = new Set([...scope].filter((path) => !present.has(path)))
     } else if (parsed.every && texts.length === 0) {
       stage = keepAddable(present, tracked, ignores)
       remove = new Set([...tracked].filter((path) => !present.has(path)))
