@@ -116,19 +116,22 @@ def _select_runtime(
 
 
 async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
-                         runtime: Runtime) -> CommandOutput:
+                         runtime: Runtime, prog: str) -> CommandOutput:
     """Render the invocation onto the selected runtime as one RunArgs.
 
     The script tier's whole contract, the one a native binary could
-    also honor: the program re-parses ``argv`` (the verbatim tokens
-    after the head), reads piped stdin, and finds the install's config
-    as ``MIRAGE_CLI_CONFIG`` (JSON) in its environment. The outcome
-    converts through the interpreter commands' one mapping (run_output).
+    also honor: the program is named (argv slot 0, so its own messages
+    read ``pager:`` and a renamed install names itself), re-parses
+    ``argv`` (the verbatim tokens after the head), reads piped stdin,
+    and finds the install's config as ``MIRAGE_CLI_CONFIG`` (JSON) in
+    its environment. The outcome converts through the interpreter
+    commands' one mapping (run_output).
 
     Args:
         inv (CLIInvocation): the line's one invocation record.
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
+        prog (str): the installed head word, the program's own name.
     """
     env = dict(inv.env)
     if inv.config is not None:
@@ -140,6 +143,7 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
     result = await runtime.run(
         RunArgs(code=script.source,
                 args=list(inv.argv),
+                prog=prog,
                 env=env,
                 stdin=stdin,
                 flags=flags))
@@ -251,7 +255,7 @@ async def handle_cli(
             return None, sel_io, ExecutionNode(command=cmd_str,
                                                exit_code=127,
                                                stderr=sel_stderr)
-        body = _script_output(inv, leaf.script, runtime)
+        body = _script_output(inv, leaf.script, runtime, prog)
     else:
         fn = leaf.fn
         if fn is None:

@@ -375,7 +375,9 @@ export class MontyRuntime extends Runtime implements Evaluator {
     const out: string[] = []
     const err: string[] = []
     const options: Record<string, unknown> = {
-      inputs: { argv: ['main.py', ...args.args], stdin: args.stdin },
+      // argv[0] is the program's own name when the caller has one (a
+      // CLI install's head word), else the interpreter's placeholder.
+      inputs: { argv: [args.prog ?? 'main.py', ...args.args], stdin: args.stdin },
       printCallback: (stream: 'stdout' | 'stderr', text: string) => {
         if (stream === 'stderr') err.push(text)
         else out.push(text)

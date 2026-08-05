@@ -135,6 +135,21 @@ describe('MontyRuntime', () => {
     expect(text(result.stdout)).toBe("['a', 'b']\n")
   }, 30_000)
 
+  it('argv[0] is prog when the caller names the program', async () => {
+    // A named caller (a CLI install) owns argv[0]; without one the
+    // interpreter's own placeholder stands, as `python3 -c` expects.
+    const named = await make().run({
+      code: 'print(argv[0])',
+      args: ['a'],
+      prog: 'pager',
+      env: {},
+      stdin: null,
+    })
+    expect([named.exitCode, text(named.stdout)]).toEqual([0, 'pager\n'])
+    const plain = await run(make(), 'print(argv[0])')
+    expect(text(plain.stdout)).toBe('main.py\n')
+  }, 30_000)
+
   it('exposes piped input as the stdin global', async () => {
     const result = await make().run({
       code: 'print(stdin.decode())',

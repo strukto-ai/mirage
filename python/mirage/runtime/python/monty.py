@@ -286,7 +286,9 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         except pydantic_monty.MontySyntaxError as exc:
             trace = exc.display(format="traceback") + "\n"
             return RunResult(stdout=b"", stderr=trace.encode(), exit_code=1)
-        argv = ["main.py", *args.args]
+        # argv[0] is the program's own name when the caller has one (a
+        # CLI install's head word), else the interpreter's placeholder.
+        argv = [args.prog or "main.py", *args.args]
         try:
             await monty.run_async(inputs={
                 "argv": argv,

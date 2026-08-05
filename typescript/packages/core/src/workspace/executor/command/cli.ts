@@ -109,15 +109,18 @@ function selectRuntime(
  * Render the invocation onto the selected runtime as one RunArgs.
  *
  * The script tier's whole contract, the one a native binary could also
- * honor: the program re-parses `argv` (the verbatim tokens after the
- * head), reads piped stdin, and finds the install's config as
- * `MIRAGE_CLI_CONFIG` (JSON) in its environment. The outcome converts
- * through the interpreter handlers' one mapping (runOutput).
+ * honor: the program is named (argv slot 0, so its own messages read
+ * `pager:` and a renamed install names itself), re-parses `argv` (the
+ * verbatim tokens after the head), reads piped stdin, and finds the
+ * install's config as `MIRAGE_CLI_CONFIG` (JSON) in its environment.
+ * The outcome converts through the interpreter handlers' one mapping
+ * (runOutput). `prog` is the installed head word.
  */
 async function scriptOutput(
   inv: CLIInvocation,
   script: ScriptSource,
   runtime: Runtime,
+  prog: string,
 ): Promise<[Uint8Array | null, IOResult]> {
   const env: Record<string, string> = { ...inv.env }
   if (inv.config !== null && inv.config !== undefined) {
@@ -129,6 +132,7 @@ async function scriptOutput(
   const result = await runtime.run({
     code: script.source,
     args: [...inv.argv],
+    prog,
     env,
     stdin,
     ...(script.module ? { flags: { module: true } } : {}),
@@ -247,7 +251,7 @@ export async function handleCli(
         new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
       ]
     }
-    body = scriptOutput(inv, leaf.script, runtime)
+    body = scriptOutput(inv, leaf.script, runtime, prog)
   } else {
     const fn = leaf.fn
     if (fn === null) {

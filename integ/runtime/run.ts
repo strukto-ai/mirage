@@ -19,6 +19,7 @@ import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client
 import { MongoClient } from "mongodb";
 import {
   buildRuntime,
+  CLISpec,
   Limit,
   MongoDBResource,
   MountMode,
@@ -78,11 +79,19 @@ interface MountSpecJson {
   limits?: Record<string, Record<string, unknown>>;
 }
 
+interface CliSpecJson {
+  script: string;
+  language?: string;
+  runtime?: string;
+  config?: Record<string, unknown>;
+}
+
 interface World {
   runtimes?: (string | Record<string, unknown>)[];
   policy?: string;
   policies?: PolicySpec[];
   mounts?: Record<string, MountSpecJson>;
+  clis?: Record<string, CliSpecJson>;
 }
 
 interface PolicySpec {
@@ -379,6 +388,18 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   if (world.policy !== undefined) options.policy = new ScriptSource(world.policy);
   if (world.policies !== undefined) options.policies = world.policies.map(buildPolicy);
   const ws = new Workspace(mounts, options);
+  // The world's script CLIs, the yaml `clis:` shape inline: each entry
+  // embeds its program instead of naming a file, the same way a runtime
+  // entry embeds a policy script here; cli.sh writes them back out to
+  // files to drive the yaml path.
+  for (const [name, entry] of Object.entries(world.clis ?? {})) {
+    const spec = new CLISpec({
+      name,
+      script: new ScriptSource(entry.script, entry.language ?? "python"),
+      ...(entry.runtime !== undefined ? { runtime: entry.runtime } : {}),
+    });
+    ws.registerCli(name, spec, entry.config ?? null);
+  }
   for (const [prefix, name, content] of seeds) {
     await ws.dispatch("write", `${prefix}/${name}`, [ENC.encode(content)]);
   }

@@ -98,8 +98,13 @@ same one the `python3` and `node` commands follow:
 | wasi, local       | `sys.argv`            | `sys.stdin`         |
 | quickjs           | `scriptArgs`          | `std.in`            |
 
-On monty `argv[0]` is the program name, so arguments start at `argv[1]`;
-`scriptArgs[0]` is already the first argument.
+Slot 0 is the installed name, so `pager --width 80` reads as
+`['pager', '--width', '80']` and a program's own messages can say
+`pager:` like any other tool. Two installs of one program are told apart
+the same way. Arguments therefore start at index 1 on monty and quickjs.
+The exception is `wasi` and `local`, where a real CPython runs the code
+as `-c` and defines `sys.argv[0]` itself; mirage cannot fill that slot,
+so it stays `-c` and arguments start at index 1 there too.
 
 A script CLI is one program rather than a verb tree, so it parses its
 own arguments, and mirage stays out of the way: it recognizes no flags

@@ -91,6 +91,17 @@ def test_monty_argv_global():
     assert result.stdout == b"['a', 'b']\n"
 
 
+def test_monty_argv0_is_prog_when_named():
+    # A named caller (a CLI install) owns argv[0]; without one the
+    # interpreter's own placeholder stands, as `python3 -c` expects.
+    runtime = MontyRuntime()
+    result = asyncio.run(
+        runtime.run(RunArgs(code="print(argv[0])", args=["a"], prog="pager")))
+    assert (result.exit_code, result.stdout) == (0, b"pager\n")
+    plain = asyncio.run(runtime.run(RunArgs(code="print(argv[0])")))
+    assert plain.stdout == b"main.py\n"
+
+
 def test_monty_stdin_global():
     runtime = MontyRuntime()
     result = asyncio.run(

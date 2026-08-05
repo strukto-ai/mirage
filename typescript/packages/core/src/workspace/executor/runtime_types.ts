@@ -18,6 +18,15 @@ import type { PolicyScript } from './policy/types.ts'
 export interface RunArgs {
   code: string
   args: string[]
+  /**
+   * The program's own name, for the argv slot a program reads to prefix
+   * its messages. Set by the CLI script tier (the installed head word,
+   * so a renamed install names itself), absent for the interpreter
+   * commands, which keep their engine's own spelling. A runtime that
+   * assembles argv itself fills slot 0 with it; where a real
+   * interpreter defines that slot (CPython under `-c`) it cannot apply.
+   */
+  prog?: string
   env: Record<string, string>
   stdin: Uint8Array | null
   /**

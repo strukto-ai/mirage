@@ -390,7 +390,11 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
     const stdin = args.stdin !== null ? DEC.decode(args.stdin) : ''
     setGlobal('__mirage_stdin', ctx.newString(stdin))
     const argv = ctx.newArray()
-    args.args.forEach((a, i) => {
+    // A named program takes scriptArgs[0], the slot qjs fills with a
+    // script's path when it runs a file; an unnamed run leaves the args
+    // alone, so the js command keeps its spelling.
+    const scriptArgs = args.prog !== undefined ? [args.prog, ...args.args] : args.args
+    scriptArgs.forEach((a, i) => {
       const s = ctx.newString(a)
       ctx.setProp(argv, i, s)
       s.dispose()

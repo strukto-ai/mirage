@@ -326,7 +326,9 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     const pyodide = await this.ensureLoaded()
     await this.loadImports(pyodide, args.code)
     const mergedEnv = { ...runtimeEnv(), ...args.env }
-    const argv = ['-c', ...args.args]
+    // sys.argv[0] is the program's own name when the caller has one (a
+    // CLI install's head word), else CPython's own -c spelling.
+    const argv = [args.prog ?? '-c', ...args.args]
     const stdinBytes = args.stdin ?? new Uint8Array()
 
     const mergedEnvPy = pyodide.toPy(mergedEnv)

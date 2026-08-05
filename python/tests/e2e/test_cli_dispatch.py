@@ -318,10 +318,13 @@ async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
 @pytest.mark.asyncio
 @live_quickjs
 async def test_script_cli_js_runs_on_quickjs(ws):
-    ws.register_cli("pager",
-                    pager_spec("console.log('paged-js', scriptArgs[0])", "js"))
+    # scriptArgs[0] is the installed name, like a qjs script's path.
+    ws.register_cli(
+        "pager",
+        pager_spec("console.log('paged-js', scriptArgs[0], scriptArgs[1])",
+                   "js"))
     code, out, _ = await run(ws, "pager report.txt")
-    assert (code, out) == (0, b"paged-js report.txt\n")
+    assert (code, out) == (0, b"paged-js pager report.txt\n")
 
 
 @pytest.mark.asyncio

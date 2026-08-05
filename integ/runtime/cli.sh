@@ -74,12 +74,26 @@ write_world_yaml() {
     printf '%s' "$policy" > "$work/policy.py"
     world_json=$(jq --arg p "$work/policy.py" '.policy = $p' <<<"$world_json")
   fi
+  # A script CLI's program becomes a file the yaml `clis:` block points
+  # at, the same build-context shape a deployment writes by hand; the
+  # extension carries the language the runner passed inline.
+  local cli ext
+  while IFS= read -r cli; do
+    [ -n "$cli" ] || continue
+    src=$(jq -r --arg n "$cli" '.clis[$n].script' <<<"$world_json")
+    ext=$([ "$(jq -r --arg n "$cli" '.clis[$n].language // "python"' <<<"$world_json")" = "js" ] && echo js || echo py)
+    printf '%s' "$src" > "$work/cli_$cli.$ext"
+    world_json=$(jq --arg n "$cli" --arg p "$work/cli_$cli.$ext" \
+      '.clis[$n] = ((.clis[$n] | del(.script, .language)) + {script: $p})' \
+      <<<"$world_json")
+  done < <(jq -r '(.clis // {}) | keys[]' <<<"$world_json")
   jq '{mode: "EXEC",
        mounts: ((.mounts // {"/ram": {"resource": "ram"}})
          | map_values({resource: .resource}
              + (if .limits then {command_limits: .limits} else {} end)))}
       + (if .runtimes then {runtimes: .runtimes} else {} end)
-      + (if .policy then {policy: .policy} else {} end)' \
+      + (if .policy then {policy: .policy} else {} end)
+      + (if .clis then {clis: .clis} else {} end)' \
     <<<"$world_json" > "$work/ws.yaml"
 }
 

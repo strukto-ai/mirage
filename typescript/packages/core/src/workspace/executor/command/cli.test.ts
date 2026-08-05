@@ -330,6 +330,17 @@ describe('handleCli script arm', () => {
     expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CLI_CONFIG')
   })
 
+  it('is named by its installed head word', async () => {
+    // The program's own name rides argv slot 0, so its messages read
+    // 'pager:' and two installs of one program are distinguishable.
+    const py = new FakePyRuntime()
+    const install: CLIInstall = { name: 'renamed', spec: scriptInstall().spec, config: null }
+    await handleCli(install, ['renamed', 'report.txt'], new Session({ sessionId: 't' }), null, [py])
+    const run = py.seen.pop()
+    expect(run?.prog).toBe('renamed')
+    expect(run?.args).toEqual(['report.txt'])
+  })
+
   it('stdin materializes to bytes', async () => {
     const py = new FakePyRuntime()
     const stdin = new TextEncoder().encode('body')

@@ -262,9 +262,13 @@ describe('script CLI e2e', () => {
   it('a js script CLI runs on quickjs', async () => {
     const ws = buildScriptWorkspace()
     try {
-      ws.registerCli('pager', pagerSpec("console.log('paged-js', scriptArgs[0])", 'js'))
+      // scriptArgs[0] is the installed name, like a qjs script's path.
+      ws.registerCli(
+        'pager',
+        pagerSpec("console.log('paged-js', scriptArgs[0], scriptArgs[1])", 'js'),
+      )
       const res = await ws.execute('pager report.txt')
-      expect([res.exitCode, dec.decode(res.stdout)]).toEqual([0, 'paged-js report.txt\n'])
+      expect([res.exitCode, dec.decode(res.stdout)]).toEqual([0, 'paged-js pager report.txt\n'])
     } finally {
       await ws.close()
     }

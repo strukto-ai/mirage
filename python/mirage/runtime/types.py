@@ -62,6 +62,13 @@ class RunArgs:
     Args:
         code (str): the source to run (script body or -c/-e payload).
         args (list[str]): argv exposed to the script.
+        prog (str | None): the program's own name, for the argv slot a
+            program reads to prefix its messages. Set by the CLI script
+            tier (the installed head word, so a renamed install names
+            itself), None for the interpreter commands, which keep
+            their engine's own spelling. A runtime that assembles argv
+            itself fills slot 0 with it; where a real interpreter
+            defines that slot (CPython under ``-c``) it cannot apply.
         env (dict[str, str]): extra environment merged over the
             runtime's own.
         stdin (bytes | None): bytes fed to the interpreter's stdin.
@@ -72,6 +79,7 @@ class RunArgs:
 
     code: str
     args: list[str] = field(default_factory=list)
+    prog: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     stdin: bytes | None = None
     flags: dict[str, Any] = field(default_factory=dict)

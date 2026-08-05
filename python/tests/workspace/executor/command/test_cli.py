@@ -308,6 +308,22 @@ async def test_script_env_omits_mirage_config_without_config():
 
 
 @pytest.mark.asyncio
+async def test_script_is_named_by_its_installed_head_word():
+    # The program's own name rides argv slot 0, so its messages read
+    # 'pager:' and two installs of one program are distinguishable.
+    py = FakePyRuntime()
+    install = CLIInstall(name="renamed",
+                         spec=script_install().spec,
+                         config=None)
+    await handle_cli(install, ["renamed", "report.txt"],
+                     Session("t"),
+                     entries=[py])
+    run = py.seen.pop()
+    assert run.prog == "renamed"
+    assert run.args == ["report.txt"]
+
+
+@pytest.mark.asyncio
 async def test_script_stdin_materializes_to_bytes():
     py = FakePyRuntime()
     await handle_cli(script_install(), ["pager"],
