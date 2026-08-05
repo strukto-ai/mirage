@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.gsheets.read import read
+from mirage.core.gsheets.read import read, read_spreadsheet
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -88,3 +89,18 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
         )
         with pytest.raises(FileNotFoundError):
             await read(accessor, path, index)
+
+
+@pytest.mark.asyncio
+async def test_read_spreadsheet_asks_for_grid_data():
+    # spreadsheets.get returns no cell values unless asked, so the
+    # rendered .gsheet.json would be tab metadata without this.
+    token_manager = SimpleNamespace(config=SimpleNamespace(api_base=""))
+    with patch(
+            "mirage.core.gsheets.read.google_get",
+            new_callable=AsyncMock,
+            return_value={"spreadsheetId": "s1"},
+    ) as get:
+        await read_spreadsheet(token_manager, "s1")
+    assert get.await_args.args[1].endswith("/spreadsheets/s1")
+    assert get.await_args.args[2] == {"includeGridData": "true"}

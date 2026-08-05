@@ -42,6 +42,13 @@ const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 const SLIDE_MIME = 'application/vnd.google-apps.presentation'
 const OWNER = { displayName: 'Integ User', emailAddress: 'integ@example.com', me: true }
 
+// The grid a new spreadsheet gets, and the pixel sizes the live API
+// reports for its untouched rows and columns.
+const GRID_ROWS = 1000
+const GRID_COLUMNS = 26
+const ROW_PIXELS = 21
+const COLUMN_PIXELS = 100
+
 interface Revision {
   id: string
   modifiedTime: string
@@ -650,19 +657,62 @@ function rangeLabel(tab: SheetTab, startRow: number, startCol: number, values: s
   return `${tab.title}!${start}:${end}`
 }
 
-function fmtSpreadsheet(id: string): Record<string, unknown> {
+// Verified against the live API on 2026-08-05, writing through mirage's own
+// path (values.update with valueInputOption=USER_ENTERED): a value that
+// parses as a number is stored as one, everything else stays a string, and
+// formattedValue is the text either way. An untouched cell is `{}` — no
+// keys at all, since ExtendedValue with no field set means empty.
+function cellData(text: string): Record<string, unknown> {
+  if (text === '') return {}
+  const numeric = Number.isFinite(Number(text))
+  const value = numeric ? { numberValue: Number(text) } : { stringValue: text }
+  return { userEnteredValue: value, effectiveValue: value, formattedValue: text }
+}
+
+// One GridData per tab, in the shape `includeGridData=true` returns: row
+// entries up to the last written row, cell entries up to the last written
+// column of that row, `{}` for a row with nothing in it, and metadata for
+// every row and column of the grid. `startRow`/`startColumn` are absent
+// because the live API omits them at zero.
+function gridData(tab: SheetTab): Record<string, unknown>[] {
+  const rows = rangeValues({ tab, startRow: 0, startCol: 0, endRow: null, endCol: null })
+  return [
+    {
+      rowData: rows.map((row) => (row.length === 0 ? {} : { values: row.map(cellData) })),
+      rowMetadata: Array.from({ length: GRID_ROWS }, () => ({ pixelSize: ROW_PIXELS })),
+      columnMetadata: Array.from({ length: GRID_COLUMNS }, () => ({ pixelSize: COLUMN_PIXELS })),
+    },
+  ]
+}
+
+function tabProperties(tab: SheetTab, index: number): Record<string, unknown> {
+  return {
+    sheetId: tab.sheetId,
+    title: tab.title,
+    index,
+    sheetType: 'GRID',
+    gridProperties: { rowCount: GRID_ROWS, columnCount: GRID_COLUMNS },
+  }
+}
+
+function fmtSpreadsheet(id: string, includeGridData = false): Record<string, unknown> {
   const sheet = state.sheets.get(id) as Spreadsheet
   return {
     spreadsheetId: id,
-    properties: { title: sheet.title, locale: 'en_US', timeZone: 'Etc/UTC' },
+    // The live API also carries defaultFormat and spreadsheetTheme here,
+    // which are styling this server has no model for and mirage never
+    // reads.
+    properties: {
+      title: sheet.title,
+      locale: 'en_US',
+      autoRecalc: 'ON_CHANGE',
+      timeZone: 'Etc/GMT',
+    },
     sheets: sheet.tabs.map((tab, index) => ({
-      properties: {
-        sheetId: tab.sheetId,
-        title: tab.title,
-        index,
-        sheetType: 'GRID',
-        gridProperties: { rowCount: 1000, columnCount: 26 },
-      },
+      properties: tabProperties(tab, index),
+      // Real Sheets omits `data` entirely without includeGridData, which
+      // is the whole reason mirage asks for it.
+      ...(includeGridData ? { data: gridData(tab) } : {}),
     })),
     spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit`,
   }
@@ -682,7 +732,9 @@ function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
       }
       sheet.nextSheetId += 1
       sheet.tabs.push(tab)
-      replies.push({ addSheet: { properties: { sheetId: tab.sheetId, title: tab.title } } })
+      // The live API replies with the whole SheetProperties, not just the
+      // id and title.
+      replies.push({ addSheet: { properties: tabProperties(tab, sheet.tabs.length - 1) } })
     } else if ('deleteSheet' in request) {
       const r = request.deleteSheet as { sheetId?: number }
       sheet.tabs = sheet.tabs.filter((t) => t.sheetId !== r.sheetId)
@@ -1412,7 +1464,7 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   m = /^\/v4\/spreadsheets\/([^/:]+)$/.exec(path)
   if (m !== null && method === 'GET') {
     if (!state.sheets.has(m[1] as string)) return NOT_FOUND
-    return [200, fmtSpreadsheet(m[1] as string)]
+    return [200, fmtSpreadsheet(m[1] as string, query.get('includeGridData') === 'true')]
   }
   m = /^\/v4\/spreadsheets\/([^/:]+):batchUpdate$/.exec(path)
   if (m !== null && method === 'POST') {
@@ -1453,6 +1505,15 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
         200,
         {
           spreadsheetId: m[1],
+          // The table the append found, which the live API reports only
+          // when there was one; an empty tab has no tableRange at all.
+          ...(extent.rows > 0
+            ? {
+                tableRange:
+                  `${range.tab.title}!A1:` +
+                  `${colIndexToLetter(extent.cols - 1)}${String(extent.rows)}`,
+              }
+            : {}),
           updates: {
             spreadsheetId: m[1],
             updatedRange: rangeLabel(range.tab, startRow, range.startCol, values),

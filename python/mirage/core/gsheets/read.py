@@ -26,10 +26,16 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
+GRID_DATA_PARAM = "true"
+
 
 async def read_spreadsheet(token_manager: TokenManager,
                            spreadsheet_id: str) -> bytes:
-    """Fetch full spreadsheet JSON.
+    """Fetch full spreadsheet JSON, cell values included.
+
+    `spreadsheets.get` returns no grid data unless asked, so without
+    `includeGridData` the rendered `.gsheet.json` is tab metadata and
+    nothing an agent can read a cell from.
 
     Args:
         token_manager (TokenManager): manages OAuth2 tokens.
@@ -39,7 +45,8 @@ async def read_spreadsheet(token_manager: TokenManager,
         bytes: JSON response as bytes.
     """
     url = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
-    data = await google_get(token_manager, url)
+    data = await google_get(token_manager, url,
+                            {"includeGridData": GRID_DATA_PARAM})
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 
 
