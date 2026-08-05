@@ -122,12 +122,12 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     _, err, code = await run(ws, f"cat {src} {miss}")
     check(f"{label}: cat missing strerror", code == 1
           and err == f"cat: {miss}: No such file or directory\n")
-    # grep still searches the good operand, but the missing operand's read
-    # error forces exit 1 even though the other operand matched (matching
-    # single-mount grep, which flattens fs errors to 1).
+    # grep still searches the good operand, and the missing operand still
+    # decides the exit status: GNU prints the lines it did find and exits 2
+    # anyway, so a match does not excuse an operand it could not read.
     out, err, code = await run(ws, f"grep aaa {src} {miss}")
     check(
-        f"{label}: grep missing strerror", code == 1 and f"{src}:aaa" in out
+        f"{label}: grep missing strerror", code == 2 and f"{src}:aaa" in out
         and err == f"grep: {miss}: No such file or directory\n")
 
 

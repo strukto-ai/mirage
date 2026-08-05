@@ -528,6 +528,17 @@ export async function grepRecursive(
   return results
 }
 
+// The exit status grep and ripgrep share. An operand the search could not read
+// is exit 2, and it outranks a match: both tools print the lines they did find
+// and still exit 2. The one exception is grep's -q, documented as exiting zero
+// when a match is found "even if an error was detected". Everything else is the
+// familiar 0 for a match, 1 for none.
+export function exitCodeFor(matched: boolean, failed: boolean, quiet: boolean): number {
+  if (matched && quiet) return 0
+  if (failed) return 2
+  return matched ? 0 : 1
+}
+
 // Whether an operand names a directory, asked on both channels. A failed read
 // proves nothing on its own: a keyed store cannot read a directory and does not
 // call it missing either. Both channels are tried because on a prefix store a

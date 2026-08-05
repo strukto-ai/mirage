@@ -659,7 +659,7 @@ async def test_rg_multi_file_missing_operand_reports_and_continues():
     decoded = (await _drain_async(output)).decode()
     assert decoded == "/a.txt:hello\n/a.txt:world\n"
     assert io.stderr == b"rg: /nope.txt: No such file or directory\n"
-    assert io.exit_code == 1
+    assert io.exit_code == 2
 
 
 @pytest.mark.asyncio

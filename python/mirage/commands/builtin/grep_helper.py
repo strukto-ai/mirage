@@ -706,6 +706,30 @@ async def operand_is_directory(
         return False
 
 
+def exit_code_for(matched: bool, failed: bool, quiet: bool) -> int:
+    """The exit status grep and ripgrep share.
+
+    An operand the search could not read is exit 2, and it outranks a
+    match: both tools print the lines they did find and still exit 2. The
+    one exception is grep's -q, documented as exiting zero when a match is
+    found "even if an error was detected". Everything else is the familiar
+    0 for a match, 1 for none.
+
+    Args:
+        matched (bool): True when any line was selected.
+        failed (bool): True when an operand could not be searched.
+        quiet (bool): True if -q is set; ripgrep passes False.
+
+    Returns:
+        int: the exit code.
+    """
+    if matched and quiet:
+        return 0
+    if failed:
+        return 2
+    return 0 if matched else 1
+
+
 def operand_error(path: str, exc: BaseException, is_dir: bool) -> str:
     """GNU's stderr line for an operand grep could not search.
 

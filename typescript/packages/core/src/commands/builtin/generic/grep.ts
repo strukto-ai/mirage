@@ -26,6 +26,7 @@ import {
   compilePattern,
   countExitStream,
   countRecordsHaveMatches,
+  exitCodeFor,
   grepFilesOnly,
   type GrepFilesOnlyOptions,
   grepLines,
@@ -115,17 +116,6 @@ function filesOnlyOpts(f: FlagSet, recursive: boolean): GrepFilesOnlyOptions {
     wholeWord: f.wholeWord,
     basic: f.basicRegexp,
   }
-}
-
-// GNU grep's exit status. An operand grep could not search is exit 2, and it
-// outranks a match: GNU prints the lines it did find and still exits 2. The one
-// exception is -q, documented as exiting zero when a match is found "even if an
-// error was detected". Everything else is the familiar 0 for a match, 1 for
-// none.
-function exitCodeFor(matched: boolean, failed: boolean, quiet: boolean): number {
-  if (matched && quiet) return 0
-  if (failed) return 2
-  return matched ? 0 : 1
 }
 
 export async function grepGeneric(

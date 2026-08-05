@@ -7,8 +7,8 @@ from mirage.cache.read_through import (cache_aware_bound_bytes,
                                        cache_aware_bound_stream)
 from mirage.commands.builtin.grep_helper import (  # yapf: disable
     compile_pattern, count_exit_stream, count_records_have_matches,
-    grep_files_only, grep_lines, grep_recursive, grep_stream, prefix_lines,
-    resolve_pattern)
+    exit_code_for, grep_files_only, grep_lines, grep_recursive, grep_stream,
+    prefix_lines, resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
@@ -77,29 +77,6 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         after_context=a_ctx if a_ctx is not None else (c_ctx or 0),
         before_context=b_ctx if b_ctx is not None else (c_ctx or 0),
     )
-
-
-def exit_code_for(matched: bool, failed: bool, quiet: bool) -> int:
-    """GNU grep's exit status.
-
-    An operand grep could not search is exit 2, and it outranks a match: GNU
-    prints the lines it did find and still exits 2. The one exception is -q,
-    documented as exiting zero when a match is found "even if an error was
-    detected". Everything else is the familiar 0 for a match, 1 for none.
-
-    Args:
-        matched (bool): True when any line was selected.
-        failed (bool): True when an operand could not be searched.
-        quiet (bool): True if -q is set.
-
-    Returns:
-        int: the exit code.
-    """
-    if matched and quiet:
-        return 0
-    if failed:
-        return 2
-    return 0 if matched else 1
 
 
 async def grep(

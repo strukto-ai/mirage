@@ -180,13 +180,13 @@ async function checkReadFamily(
     `${label}: cat missing strerror`,
     cmiss[2] === 1 && cmiss[1] === `cat: ${miss}: No such file or directory\n`,
   );
-  // grep still searches the good operand, but the missing operand's read
-  // error forces exit 1 even though the other operand matched (matching
-  // single-mount grep, which flattens fs errors to 1).
+  // grep still searches the good operand, and the missing operand still
+  // decides the exit status: GNU prints the lines it did find and exits 2
+  // anyway, so a match does not excuse an operand it could not read.
   const gmiss = await run(ws, `grep aaa ${src} ${miss}`);
   check(
     `${label}: grep missing strerror`,
-    gmiss[2] === 1 &&
+    gmiss[2] === 2 &&
       gmiss[0].includes(`${src}:aaa`) &&
       gmiss[1] === `grep: ${miss}: No such file or directory\n`,
   );

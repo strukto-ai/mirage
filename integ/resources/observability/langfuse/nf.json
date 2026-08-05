@@ -47,7 +47,7 @@
       ],
       "command": "grep x /lf/traces/__nf_missing__.json",
       "expect": {
-        "exit": 1,
+        "exit": 2,
         "stdout": "",
         "stderr": "grep: /lf/traces/__nf_missing__.json: No such file or directory\n"
       }
