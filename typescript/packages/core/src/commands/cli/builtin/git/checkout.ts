@@ -21,6 +21,7 @@ import { FlagView } from '../../../spec/types.ts'
 import type { CLIVerbOpts } from '../../types.ts'
 import { headEntries, workChanges } from './changes.ts'
 import {
+  BadStartPointError,
   BranchExistsError,
   CheckoutConflictError,
   GitError,
@@ -197,7 +198,21 @@ export async function checkout(
     if (!creating && target === head.branch) {
       return [null, new IOResult({ stderr: ENC.encode(`Already on '${target}'\n`) })]
     }
-    const oid = await resolveCommit(repo, creating ? 'HEAD' : target)
+    // `checkout -b <new> [<start>]` branches from the start point when one is
+    // given, HEAD otherwise. Forcing HEAD here put the new branch on the
+    // current commit and dropped the operand without a word, so every commit
+    // after it landed on the wrong history.
+    const startPoint = creating ? texts[1] : undefined
+    let oid: string
+    if (startPoint !== undefined) {
+      try {
+        oid = await resolveCommit(repo, startPoint)
+      } catch {
+        throw new BadStartPointError(startPoint, target)
+      }
+    } else {
+      oid = await resolveCommit(repo, creating ? 'HEAD' : target)
+    }
     const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
     const after = await commitEntries(repo, oid)
     const state = await readIndex(repo, dispatch)

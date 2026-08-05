@@ -245,4 +245,15 @@ describe('the git root', () => {
       "fatal: cannot change to '/repo/nowhere': No such file or directory\n",
     )
   })
+
+  // A file is a path git cannot enter, and saying so matters more than it
+  // looks: discovery walks upwards, so tolerating it would run in the
+  // repository above and let a write verb mutate one nobody named.
+  it('reports a file operand as a chdir failure too', async () => {
+    const result = await ws.execute('git -C /repo/letters.txt log')
+    expect(result.exitCode).toBe(128)
+    expect(DEC.decode(result.stderr)).toBe(
+      "fatal: cannot change to '/repo/letters.txt': Not a directory\n",
+    )
+  })
 })

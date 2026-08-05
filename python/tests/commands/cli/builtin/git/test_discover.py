@@ -210,6 +210,19 @@ async def test_a_start_that_is_not_there_is_a_different_fatal():
 
 
 @pytest.mark.asyncio
+async def test_a_start_that_is_a_file_is_refused():
+    # A file is a path git cannot enter, and saying so matters more than
+    # it looks: discovery walks upwards, so tolerating it would run in
+    # the repository above and let a write verb mutate one nobody named.
+    with pytest.raises(NoWorkingDirectoryError) as excinfo:
+        await discover(_no_reads(),
+                       _stat_over({"/repo", "/repo/.git"}, {"/repo/a.txt"}),
+                       _root("/repo/"), "/repo/a.txt")
+    assert str(excinfo.value) == ("cannot change to '/repo/a.txt': "
+                                  "Not a directory")
+
+
+@pytest.mark.asyncio
 async def test_a_missing_start_beats_a_repository_above_it():
     # git enters -C before it looks for anything, so `git -C gone` fails
     # even standing inside a repository that would otherwise be found by

@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
-    FATAL_EXIT, AmbiguousArgumentError, BadDateError, GitError,
-    NotARepositoryError, NoWorkingDirectoryError, NoWorkspaceError)
+    FATAL_EXIT, AmbiguousArgumentError, BadDateError, BadStartPointError,
+    GitError, NotARepositoryError, NoWorkingDirectoryError, NoWorkspaceError,
+    RevisionResetError)
 
 
 def test_every_fatal_shares_one_base():
@@ -67,3 +68,20 @@ def test_missing_worktree_matches_gits_wording():
 def test_unusable_directory_option_reads_like_gits_chdir_failure():
     assert str(NoWorkingDirectoryError("build")) == (
         "cannot change to 'build': No such file or directory")
+
+
+def test_a_directory_option_naming_a_file_says_which_reason():
+    assert str(NoWorkingDirectoryError(
+        "a.txt",
+        "Not a directory")) == ("cannot change to 'a.txt': Not a directory")
+
+
+def test_a_bad_start_point_names_the_branch_it_would_have_made():
+    assert str(BadStartPointError("nosuchrev", "shiny")) == (
+        "'nosuchrev' is not a commit and a branch 'shiny' cannot be created "
+        "from it")
+
+
+def test_resetting_to_a_revision_says_which_feature_is_missing():
+    assert str(RevisionResetError("HEAD~1")) == (
+        "cannot reset to 'HEAD~1': this build resets the index from HEAD only")

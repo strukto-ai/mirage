@@ -142,6 +142,38 @@ async def test_creating_and_switching_in_one_step(git_rw, repo_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_creating_at_a_start_point_branches_from_there(
+        git_rw, repo_path: Path):
+    # The operand is the whole point of the form: without it every commit
+    # after the switch lands on the wrong history.
+    with Repo(str(repo_path)) as repo:
+        older = repo[repo.refs[b"HEAD"]].parents[0]
+    code, _out, err = await run(git_rw, "checkout -b older HEAD~1")
+    assert code == 0
+    assert err == b"Switched to a new branch 'older'\n"
+    with Repo(str(repo_path)) as repo:
+        assert repo.refs[b"refs/heads/older"] == older
+
+
+@pytest.mark.asyncio
+async def test_creating_without_a_start_point_branches_from_head(
+        git_rw, repo_path: Path):
+    with Repo(str(repo_path)) as repo:
+        head = repo.refs[b"HEAD"]
+    assert (await run(git_rw, "checkout -b shiny"))[0] == 0
+    with Repo(str(repo_path)) as repo:
+        assert repo.refs[b"refs/heads/shiny"] == head
+
+
+@pytest.mark.asyncio
+async def test_creating_at_a_start_point_that_is_not_a_commit(git_rw):
+    code, _out, err = await run(git_rw, "checkout -b shiny nosuchrev")
+    assert code == 128
+    assert err == (b"fatal: 'nosuchrev' is not a commit and a branch 'shiny' "
+                   b"cannot be created from it\n")
+
+
+@pytest.mark.asyncio
 async def test_creating_a_branch_that_exists_is_refused(git_rw):
     await run(git_rw, "branch topic")
     code, _out, err = await run(git_rw, "checkout -b topic")

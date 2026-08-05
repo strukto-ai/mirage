@@ -287,6 +287,30 @@ describe('git reset', () => {
     await h.run('reset letters.txt')
     expect(git(await h.drain(), ['status', '--porcelain'])).toBe(' M letters.txt\nM  numbers.txt\n')
   })
+
+  it('refuses a pathspec that matches nothing', async () => {
+    // Selecting nothing used to unstage nothing and exit 0, which reads to a
+    // script as "the index was reset".
+    const h = await harness()
+    const [code, , err] = await h.run('reset nosuch.txt')
+    expect(code).toBe(128)
+    expect(err).toBe(
+      "fatal: ambiguous argument 'nosuch.txt': unknown revision or path not " +
+        "in the working tree.\nUse '--' to separate paths from revisions, " +
+        "like this:\n'git <command> [<revision>...] -- [<file>...]'\n",
+    )
+  })
+
+  it('says which feature is missing for a revision operand', async () => {
+    // Real git resets the index to the named commit. This build does not, and
+    // "unknown revision" would be a lie about a revision it resolves.
+    const h = await harness()
+    const [code, , err] = await h.run('reset HEAD~1')
+    expect(code).toBe(128)
+    expect(err).toBe(
+      "fatal: cannot reset to 'HEAD~1': this build resets the index from HEAD only\n",
+    )
+  })
 })
 
 describe('git commit', () => {
@@ -382,6 +406,33 @@ describe('git checkout', () => {
     const [code, , err] = await h.run('checkout nosuchthing')
     expect(code).toBe(1)
     expect(err).toBe("error: pathspec 'nosuchthing' did not match any file(s) known to git\n")
+  })
+
+  it('creates at a start point when one is given', async () => {
+    // The operand is the whole point of the form: without it every commit
+    // after the switch lands on the wrong history.
+    const h = await harness()
+    const older = git(h.repo, ['rev-parse', 'HEAD~1']).trim()
+    const [code, , err] = await h.run('checkout -b older HEAD~1')
+    expect(code).toBe(0)
+    expect(err).toBe("Switched to a new branch 'older'\n")
+    expect(git(await h.drain(), ['rev-parse', 'older']).trim()).toBe(older)
+  })
+
+  it('creates at HEAD when no start point is given', async () => {
+    const h = await harness()
+    const head = git(h.repo, ['rev-parse', 'HEAD']).trim()
+    expect((await h.run('checkout -b shiny'))[0]).toBe(0)
+    expect(git(await h.drain(), ['rev-parse', 'shiny']).trim()).toBe(head)
+  })
+
+  it('refuses a start point that is not a commit', async () => {
+    const h = await harness()
+    const [code, , err] = await h.run('checkout -b shiny nosuchrev')
+    expect(code).toBe(128)
+    expect(err).toBe(
+      "fatal: 'nosuchrev' is not a commit and a branch 'shiny' cannot be created from it\n",
+    )
   })
 
   it('refuses a switch that would overwrite an edit', async () => {

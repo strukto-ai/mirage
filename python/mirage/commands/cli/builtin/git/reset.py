@@ -17,12 +17,15 @@ from typing import Any, Callable
 
 from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
+from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.changes import head_entries, work_changes
-from mirage.commands.cli.builtin.git.errors import (GitError, NoWorkspaceError,
-                                                    UnknownSwitchError)
+from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
+    AmbiguousArgumentError, GitError, NoWorkspaceError, RevisionResetError,
+    UnknownSwitchError)
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
+from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
                                                   start_point)
@@ -34,6 +37,27 @@ from mirage.ops.types import MountRoot, StatPath
 from mirage.types import PathSpec
 
 UNSTAGED_HEADER = "Unstaged changes after reset:"
+
+
+def _unmatched(repo: BaseRepo, operand: str) -> GitError:
+    """Which fatal an operand that selected no path deserves.
+
+    Two different mistakes reach here and git words them differently. A
+    typo names neither a revision nor a path, and git calls that
+    ambiguous. A revision names something real that this build cannot
+    reset to, and answering "unknown revision" for a revision it can
+    resolve perfectly well would send the caller looking for the wrong
+    problem.
+
+    Args:
+        repo (BaseRepo): the opened repository, for the revision lookup.
+        operand (str): the operand as the user spelled it.
+    """
+    try:
+        resolve_commit(repo, operand)
+    except GitError:
+        return AmbiguousArgumentError(operand)
+    return RevisionResetError(operand)
 
 
 def restored(sha: ObjectID, mode: int) -> IndexEntry:
@@ -104,8 +128,10 @@ async def reset(
         if texts:
             selected: set[str] = set()
             for operand in texts:
-                selected |= matched(names,
-                                    repo_relative(location, start, operand))
+                hits = matched(names, repo_relative(location, start, operand))
+                if not hits:
+                    raise _unmatched(repo, operand)
+                selected |= hits
         else:
             selected = names
         for name in selected:

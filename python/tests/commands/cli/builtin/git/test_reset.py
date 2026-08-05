@@ -92,6 +92,38 @@ async def test_a_pathspec_unstages_only_that_path(git_rw, repo_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_a_pathspec_that_matches_nothing_is_refused(git_rw):
+    # Selecting nothing used to unstage nothing and exit 0, which reads
+    # to a script as "the index was reset".
+    code, _out, err = await run(git_rw, "reset nosuch.txt")
+    assert code == 128
+    assert err == (b"fatal: ambiguous argument 'nosuch.txt': unknown revision "
+                   b"or path not in the working tree.\nUse '--' to separate "
+                   b"paths from revisions, like this:\n"
+                   b"'git <command> [<revision>...] -- [<file>...]'\n")
+
+
+@pytest.mark.asyncio
+async def test_a_revision_operand_says_which_feature_is_missing(git_rw):
+    # Real git resets the index to the named commit. This build does not,
+    # and "unknown revision" would be a lie about a revision it resolves.
+    code, _out, err = await run(git_rw, "reset HEAD~1")
+    assert code == 128
+    assert err == (b"fatal: cannot reset to 'HEAD~1': this build resets the "
+                   b"index from HEAD only\n")
+
+
+@pytest.mark.asyncio
+async def test_an_untracked_path_is_refused(git_rw, repo_path: Path):
+    # It is in the working tree but in neither the index nor HEAD, so
+    # reset has nothing to put back for it.
+    (repo_path / "fresh.txt").write_text("x\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "reset fresh.txt")
+    assert code == 128
+    assert b"ambiguous argument 'fresh.txt'" in err
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_switch_is_refused(git_rw):
     code, _out, err = await run(git_rw, "reset -Z")
     assert code == 129

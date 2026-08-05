@@ -18,16 +18,41 @@ import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIVerbOpts } from '../../types.ts'
 import { headEntries, workChanges } from './changes.ts'
-import { GitError, NoWorkspaceError, UnknownSwitchError } from './errors.ts'
+import {
+  AmbiguousArgumentError,
+  GitError,
+  NoWorkspaceError,
+  RevisionResetError,
+  UnknownSwitchError,
+} from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import { matched, repoRelative } from './pathspec.ts'
-import { opened } from './repo.ts'
+import { opened, type Repo } from './repo.ts'
+import { resolveCommit } from './revparse.ts'
 import type { TreeEntry } from './tree.ts'
 import { checkOperands, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 
 const ENC = new TextEncoder()
 const UNSTAGED_HEADER = 'Unstaged changes after reset:'
+
+/**
+ * Which fatal an operand that selected no path deserves.
+ *
+ * Two different mistakes reach here and git words them differently. A typo
+ * names neither a revision nor a path, and git calls that ambiguous. A revision
+ * names something real that this build cannot reset to, and answering "unknown
+ * revision" for a revision it can resolve perfectly well would send the caller
+ * looking for the wrong problem.
+ */
+async function unmatched(repo: Repo, operand: string): Promise<GitError> {
+  try {
+    await resolveCommit(repo, operand)
+  } catch {
+    return new AmbiguousArgumentError(operand)
+  }
+  return new RevisionResetError(operand)
+}
 
 /**
  * An index entry putting a path back to what HEAD records.
@@ -75,9 +100,9 @@ export async function reset(
     if (texts.length > 0) {
       selected = new Set()
       for (const operand of texts) {
-        for (const path of matched(names, repoRelative(repo.location, start, operand))) {
-          selected.add(path)
-        }
+        const hits = matched(names, repoRelative(repo.location, start, operand))
+        if (hits.size === 0) throw await unmatched(repo, operand)
+        for (const path of hits) selected.add(path)
       }
     } else {
       selected = names

@@ -25,11 +25,9 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.changes import head_entries, work_changes
-from mirage.commands.cli.builtin.git.errors import (BranchExistsError,
-                                                    CheckoutConflictError,
-                                                    GitError, NoWorkspaceError,
-                                                    UnknownPathspecError,
-                                                    UnknownSwitchError)
+from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
+    BadStartPointError, BranchExistsError, CheckoutConflictError, GitError,
+    NoWorkspaceError, UnknownPathspecError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.io import remove_file, write_file
@@ -42,7 +40,7 @@ from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.builtin.git.util import check_operands, fatal
+from mirage.commands.cli.builtin.git.util import HEAD, check_operands, fatal
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -246,7 +244,18 @@ async def checkout(
                 raise UnknownPathspecError(target) from exc
         if not creating and target == head.branch:
             return None, IOResult(stderr=f"Already on '{target}'\n".encode())
-        commit = resolve_commit(repo, target if not creating else "HEAD")
+        # ``checkout -b <new> [<start>]`` branches from the start point
+        # when one is given, HEAD otherwise. Forcing HEAD here put the new
+        # branch on the current commit and dropped the operand without a
+        # word, so every commit after it landed on the wrong history.
+        start = texts[1] if creating and len(texts) > 1 else None
+        if start is not None:
+            try:
+                commit = resolve_commit(repo, start)
+            except GitError as exc:
+                raise BadStartPointError(start, target) from exc
+        else:
+            commit = resolve_commit(repo, target if not creating else HEAD)
         before = await asyncio.to_thread(head_entries, repo) or {}
         after = await asyncio.to_thread(tree_of, repo, commit.id)
         state = await read_index(dispatch, location.gitdir)

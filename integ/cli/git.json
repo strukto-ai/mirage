@@ -755,6 +755,90 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_a_file_start_point_is_a_chdir_failure",
+      "seq": 568216,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/letters.txt log --oneline",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/repo/letters.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "git_checkout_creates_at_the_start_point",
+      "seq": 568217,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b older HEAD~1 > /dev/null 2>&1 && git -C /repo log --oneline -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_start_point_cleanup",
+      "seq": 568218,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -d older",
+      "expect": {
+        "exit": 0,
+        "stdout": "Deleted branch older (was 8ef2542).\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_refuses_a_start_point_that_is_not_a_commit",
+      "seq": 568219,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b shiny nosuchrev",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: 'nosuchrev' is not a commit and a branch 'shiny' cannot be created from it\n"
+      }
+    },
+    {
+      "id": "git_reset_refuses_a_pathspec_that_matches_nothing",
+      "seq": 568220,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo reset nosuch.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: ambiguous argument 'nosuch.txt': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_reset_says_which_feature_a_revision_operand_needs",
+      "seq": 568221,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo reset HEAD~1",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot reset to 'HEAD~1': this build resets the index from HEAD only\n"
+      }
     }
   ]
 }

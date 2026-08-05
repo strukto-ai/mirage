@@ -138,11 +138,18 @@ export async function discover(
       }
     }
     if (first) {
-      // git enters `-C` before it looks for anything, so a path that is not
-      // there fails on its own terms even when a directory above it holds a
-      // repository. Asked only after the first probe missed, because a hit
-      // already proves the directory is there.
-      if ((await statPath(current)) === null) throw new NoWorkingDirectoryError(start)
+      // git enters `-C` before it looks for anything, so a path it cannot
+      // enter fails on its own terms even when a directory above it holds a
+      // repository. A file counts as one it cannot enter: tolerating it would
+      // walk up and run in the parent repository, which for a write verb means
+      // mutating a repository the caller did not name. Asked only after the
+      // first probe missed, because a hit already proves the directory is
+      // there.
+      const here = await statPath(current)
+      if (here === null) throw new NoWorkingDirectoryError(start)
+      if (here.type !== FileType.DIRECTORY) {
+        throw new NoWorkingDirectoryError(start, 'Not a directory')
+      }
       first = false
     }
     if (current === root || current === '/') throw new NotARepositoryError()

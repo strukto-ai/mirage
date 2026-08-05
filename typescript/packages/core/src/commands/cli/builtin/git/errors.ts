@@ -114,10 +114,45 @@ export class NoWorkspaceError extends GitError {
   }
 }
 
-/** `-C` named a path that does not exist. */
+/**
+ * `-C` named a path git could not enter.
+ *
+ * Two reasons, both in git's own wording: nothing is there, or something is and
+ * it is not a directory. The second matters as much as the first, because
+ * discovery walks upwards from the start point: a file operand that is merely
+ * tolerated finds the repository above it and quietly runs there instead.
+ */
 export class NoWorkingDirectoryError extends GitError {
-  constructor(path: string) {
-    super(`cannot change to '${path}': No such file or directory`)
+  constructor(path: string, reason = 'No such file or directory') {
+    super(`cannot change to '${path}': ${reason}`)
+  }
+}
+
+/**
+ * `checkout -b` given a start point that is not a commit.
+ *
+ * git blames the start point rather than the branch name, and says so in one
+ * sentence naming both, which is more use than the generic "ambiguous argument"
+ * the same lookup failure produces elsewhere.
+ */
+export class BadStartPointError extends GitError {
+  constructor(start: string, name: string) {
+    super(`'${start}' is not a commit and a branch '${name}' cannot be created from it`)
+  }
+}
+
+/**
+ * `reset` given a revision, which this build does not take.
+ *
+ * Real git resets the index to any commit named here. mirage resets it from
+ * HEAD only, so the operand has nothing to do, and doing nothing quietly is the
+ * one answer a caller cannot act on: a script reads the zero exit as "the index
+ * was reset" when it was not. Saying which feature is missing beats reusing
+ * "unknown revision" for a revision that is perfectly well known.
+ */
+export class RevisionResetError extends GitError {
+  constructor(revision: string) {
+    super(`cannot reset to '${revision}': this build resets the index from HEAD only`)
   }
 }
 

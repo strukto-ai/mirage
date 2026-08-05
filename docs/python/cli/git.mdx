@@ -80,7 +80,7 @@ git -C /repo checkout topic
 | Verb       | Notes                                                            |
 | ---------- | ---------------------------------------------------------------- |
 | `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path |
-| `reset`    | mixed only; a pathspec limits it to those paths                   |
+| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths        |
 | `commit`   | `-m` required, `--author "Name <email>"` optional                 |
 | `branch`   | `-d` deletes a merged branch, `-D` any branch                     |
 | `checkout` | refuses rather than overwrite work you have not committed         |
@@ -94,6 +94,9 @@ serve, and inventing a name would put an unreviewed one into history.
 - **No network verbs.** `clone`, `fetch`, `pull` and `push` are absent.
 - **No `reset --hard`.** It destroys uncommitted work with no reflog here
   to recover it from.
+- **`reset` takes no revision.** Real git resets the index to any commit
+  named as an operand; this build resets it from HEAD only and refuses a
+  revision by name rather than doing nothing quietly.
 - **`checkout` refuses a staged change** rather than merging it into the
   target, so nothing is silently resolved.
 - **Diff hunk bodies can differ from git's** on the same change. Headers,
