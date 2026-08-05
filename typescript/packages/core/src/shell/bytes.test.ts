@@ -34,4 +34,21 @@ describe('byteChar / encodeText', () => {
   it('mixes bytes and text', () => {
     expect([...encodeText('a' + byteChar(0xff) + 'b')]).toEqual([0x61, 0xff, 0x62])
   })
+
+  it('keeps the low byte of an octal escape past one byte', () => {
+    // bash writes \400 as 0x00 and \777 as 0xff.
+    expect([...encodeText(byteChar(0o400))]).toEqual([0x00])
+    expect([...encodeText(byteChar(0o777))]).toEqual([0xff])
+  })
+
+  it('does not read a non-BMP character as a byte', () => {
+    // U+10080 is the surrogate pair D800 DC80, and DC80 is a sentinel
+    // only when it stands alone.
+    const pair = '\u{10080}'
+    expect([...encodeText(pair)]).toEqual([...new TextEncoder().encode(pair)])
+    expect([...encodeText('a' + pair + byteChar(0xff))]).toEqual([
+      ...new TextEncoder().encode('a' + pair),
+      0xff,
+    ])
+  })
 })
