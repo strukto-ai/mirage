@@ -174,6 +174,54 @@ describe('MontyRuntime', () => {
     expect(text(result.stdout)).toBe('v1\n')
   }, 30_000)
 
+  it('serves os.environ as a dict of the run env', async () => {
+    // The same nine reads the python host answers, so a program can be
+    // written against either. Declining the engine's os.environ call
+    // used to raise "not supported in this environment" here only.
+    const code = [
+      'import os',
+      "print(os.environ.get('K'))",
+      "print(os.environ.get('nope', 'dflt'))",
+      "print(os.environ['K'])",
+      "print('K' in os.environ, 'nope' in os.environ)",
+      'print(sorted(os.environ))',
+      'print(sorted(os.environ.items()))',
+      'print(len(os.environ))',
+      'print(type(os.environ).__name__)',
+    ].join('\n')
+    const result = await run(make(), code, [], { K: 'v', OTHER: 'w' })
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toBe(
+      [
+        'v',
+        'dflt',
+        'v',
+        'True False',
+        "['K', 'OTHER']",
+        "[('K', 'v'), ('OTHER', 'w')]",
+        '2',
+        'dict',
+      ]
+        .map((line) => line + '\n')
+        .join(''),
+    )
+  }, 30_000)
+
+  it('a missing os.environ key raises KeyError, not a runtime error', async () => {
+    const code =
+      "import os\ntry:\n    os.environ['nope']\nexcept KeyError as e:\n    print('KeyError', e)"
+    const result = await run(make(), code, [], { K: 'v' })
+    expect([result.exitCode, text(result.stdout)]).toEqual([0, "KeyError 'nope'\n"])
+  }, 30_000)
+
+  it('mutating os.environ cannot reach the host env', async () => {
+    // The callback hands back a copy, like python's
+    // OSAccess(environ=dict(environ)).
+    const code = "import os\nos.environ['K'] = 'guest'\nprint(os.getenv('K'))"
+    const result = await run(make(), code, [], { K: 'v' })
+    expect([result.exitCode, text(result.stdout)]).toEqual([0, 'v\n'])
+  }, 30_000)
+
   it('reads a virtual file through the bridge via pathlib', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new TextEncoder().encode('virtual') })
     const rt = make(dispatch)

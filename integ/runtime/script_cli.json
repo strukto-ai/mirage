@@ -87,6 +87,28 @@
       ]
     },
     {
+      "id": "config_readable_by_both_env_spellings",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "import os\ncfg = os.getenv('MIRAGE_CLI_CONFIG')\nprint('same', os.environ.get('MIRAGE_CLI_CONFIG') == cfg)\nprint('in', 'MIRAGE_CLI_CONFIG' in os.environ)\nprint('getitem', os.environ['MIRAGE_CLI_CONFIG'] == cfg)\n",
+            "config": { "width": 80 }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 0,
+            "stdout": "same True\nin True\ngetitem True\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "piped_stdin_reaches_the_program",
       "world": {
         "runtimes": ["monty", "vfs"],

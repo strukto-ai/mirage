@@ -121,9 +121,11 @@ function toEvalValue(value: unknown): EvalValue {
  * Run Python code on the Monty sandboxed interpreter (`@pydantic/monty`).
  *
  * Code executes in a crash-isolated Monty worker: no host filesystem,
- * environment, or network access. `pathlib` I/O and `os.getenv` are
- * serviced through the workspace bridge, so the code sees the workspace
- * mounts and nothing else. Command-line arguments are exposed as the
+ * environment, or network access. `pathlib` I/O is serviced through the
+ * workspace bridge, so the code sees the workspace mounts and nothing
+ * else, and the run's env is readable both ways python's monty spells
+ * it: `os.getenv` and `os.environ` (a dict copy, so the two hosts run
+ * the same program). Command-line arguments are exposed as the
  * `argv` global (`argv[0]` is the script name) and piped input as the
  * `stdin` global (bytes, None when nothing was piped). Monty implements
  * a Python subset; host-only features (`sys.stdin`, `sys.argv`,
@@ -417,6 +419,19 @@ export class MontyRuntime extends Runtime implements Evaluator {
         if (Object.hasOwn(env, key)) return env[key]
         return args.length > 1 ? args[1] : null
       }
+      if (name === 'os.environ') {
+        // The engine asks for the whole mapping as one call; a plain
+        // object arrives in the guest as a dict, so `.get`, `[...]`,
+        // `in`, iteration and len all work, and a missing key raises
+        // KeyError. Declining instead raised "'os.environ' is not
+        // supported in this environment", which made a program written
+        // against the python host fail here (integ/runtime caught it).
+        // A copy, like python's OSAccess(environ=dict(environ)): a
+        // guest that mutates it cannot reach the session's own env.
+        return { ...env }
+      }
+      // Everything below serves a path through the workspace bridge;
+      // the env doors above need no mount.
       if (bridge === null) return notHandled
       const path = pathArg(args[0])
       if (path === null) return notHandled

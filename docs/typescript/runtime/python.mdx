@@ -32,7 +32,8 @@ const io = await ws.execute(`python3 -c "print(open('/data/a.txt').read().strip(
 
 Monty runs each execution in a crash-isolated worker with microsecond
 startup and no host filesystem, environment, or network access. `pathlib`
-I/O and `os.getenv` route through the workspace mounts:
+I/O routes through the workspace mounts, and the run's env is readable
+either way Python spells it (`os.getenv` or `os.environ`):
 
 ```ts
 const ws = new Workspace(
