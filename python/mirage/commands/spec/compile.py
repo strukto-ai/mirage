@@ -51,6 +51,8 @@ class CompiledSpec:
         dest (dict[str, str]): spelling -> canonical spelling.
         multiple_dests (frozenset[str]): canonical spellings that
             accumulate repeated values into a list.
+        pair_dests (frozenset[str]): canonical spellings that consume two
+            tokens per occurrence and accumulate both, flattened.
         count_dests (frozenset[str]): canonical spellings of boolean
             flags whose occurrences accumulate into an int (click count,
             ``-vvv``).
@@ -93,6 +95,7 @@ class CompiledSpec:
     kind_by_dest: dict[str, ValueType] = field(default_factory=dict)
     dest: dict[str, str] = field(default_factory=dict)
     multiple_dests: frozenset[str] = frozenset()
+    pair_dests: frozenset[str] = frozenset()
     count_dests: frozenset[str] = frozenset()
     choices_by_dest: dict[str, tuple[str, ...]] = field(default_factory=dict)
     required_dests: tuple[str, ...] = ()
@@ -162,6 +165,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     kind_by_dest: dict[str, ValueType] = {}
     dest: dict[str, str] = {}
     multiple_dests: set[str] = set()
+    pair_dests: set[str] = set()
     count_dests: set[str] = set()
     choices_by_dest: dict[str, tuple[str, ...]] = {}
     required_dests: list[str] = []
@@ -175,6 +179,18 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         if opt.count and opt.type != "bool":
             raise ValueError(f"option {canonical!r}: count requires a "
                              "boolean flag (type 'bool')")
+        if opt.pair and opt.type == "bool":
+            raise ValueError(f"option {canonical!r}: pair requires a value "
+                             "flag (a boolean consumes no token)")
+        if opt.pair and opt.value_optional:
+            raise ValueError(f"option {canonical!r}: pair and value_optional "
+                             "are mutually exclusive")
+        if opt.pair and opt.short:
+            # A short spelling clusters and takes an attached value, both
+            # of which are single-token rules; jq's own two-token options
+            # are long-only for the same reason.
+            raise ValueError(f"option {canonical!r}: pair requires a long "
+                             "spelling only")
         if opt.type == "bool" and (opt.choices or opt.default is not None):
             raise ValueError(f"option {canonical!r}: choices and default "
                              "require a value flag")
@@ -198,8 +214,10 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             dest[opt.long] = canonical
         if opt.type != "bool":
             kind_by_dest[canonical] = opt.type
-        if opt.multiple:
+        if opt.multiple or opt.pair:
             multiple_dests.add(canonical)
+        if opt.pair:
+            pair_dests.add(canonical)
         if opt.count:
             count_dests.add(canonical)
         if opt.choices:
@@ -230,8 +248,8 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             # help text: two options that agree here are one action.
             long_signatures[opt.long] = "|".join(
                 (opt.type, str(opt.value_optional), str(opt.multiple),
-                 str(opt.count), ",".join(opt.choices), str(opt.required),
-                 str(opt.default)))
+                 str(opt.pair), str(opt.count), ",".join(opt.choices),
+                 str(opt.required), str(opt.default)))
             if opt.type == "bool":
                 long_bool_spellings.add(opt.long)
             elif opt.value_optional:
@@ -264,6 +282,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         kind_by_dest=kind_by_dest,
         dest=dest,
         multiple_dests=frozenset(multiple_dests),
+        pair_dests=frozenset(pair_dests),
         count_dests=frozenset(count_dests),
         choices_by_dest=choices_by_dest,
         required_dests=tuple(required_dests),

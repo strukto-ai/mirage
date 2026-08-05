@@ -142,3 +142,32 @@ def test_expand_long_exact_prefix_ambiguous_and_unknown():
     assert expand_long(cs, "--co") == ("--count", )
     assert expand_long(cs, "--zz") == ()
     assert expand_long(cs, "--") == ()
+
+
+def test_pair_on_a_boolean_flag_is_a_spec_error():
+    spec = CommandSpec(options=(Option(long="--arg", pair=True), ))
+    with pytest.raises(ValueError, match="pair requires a value flag"):
+        compile_spec(spec)
+
+
+def test_pair_with_a_short_spelling_is_a_spec_error():
+    spec = CommandSpec(
+        options=(Option(short="-a", long="--arg", type="str", pair=True), ))
+    with pytest.raises(ValueError, match="pair requires a long spelling"):
+        compile_spec(spec)
+
+
+def test_pair_of_paths_types_only_the_value():
+    # jq --rawfile name file: the name is text, the file is a path.
+    spec = CommandSpec(
+        options=(Option(long="--rawfile", type="path", pair=True), ))
+    compiled = compile_spec(spec)
+    assert compiled.kind_by_dest["--rawfile"] == "path"
+    assert "--rawfile" in compiled.pair_dests
+
+
+def test_pair_accumulates_like_multiple():
+    spec = CommandSpec(options=(Option(long="--arg", type="str", pair=True), ))
+    compiled = compile_spec(spec)
+    assert "--arg" in compiled.pair_dests
+    assert "--arg" in compiled.multiple_dests

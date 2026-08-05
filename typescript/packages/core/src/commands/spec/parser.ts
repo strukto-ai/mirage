@@ -183,13 +183,34 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         }
       }
       const etok = eqPos === -1 ? spelling : spelling + tok.slice(eqPos)
+      const isPair = cs.pairDests.has(cs.destOf(spelling))
       if (cs.longBoolSpellings.has(etok)) {
         setBoolFlag(flags, cs, etok)
         i += 1
-      } else if (cs.longValueSpellings.has(etok) && i + 1 < filteredArgv.length) {
+      } else if (isPair && eqPos === -1 && i + 2 < filteredArgv.length) {
+        // Two tokens, both recorded under the one dest, so the command
+        // reads the accumulated list in twos.
+        setValueFlag(flags, cs, spelling, filteredArgv[i + 1] ?? '')
+        setValueFlag(flags, cs, spelling, filteredArgv[i + 2] ?? '')
+        // The first token names the value and is always textual; the
+        // option's own kind describes the second.
+        wordKinds[origIndices[i + 1] ?? -1] = 'str'
+        wordKinds[origIndices[i + 2] ?? -1] = cs.kindOf.get(spelling) ?? null
+        i += 3
+      } else if (!isPair && cs.longValueSpellings.has(etok) && i + 1 < filteredArgv.length) {
         setValueFlag(flags, cs, etok, filteredArgv[i + 1] ?? '')
         wordKinds[origIndices[i + 1] ?? -1] = cs.kindOf.get(etok) ?? null
         i += 2
+      } else if (isPair) {
+        if (eqPos === -1) {
+          needsValueOptions.push(spelling)
+        } else {
+          // A two-token option has no `=` form (jq refuses `--arg=name`
+          // as an unknown option).
+          invalidOptions.push(tok)
+          optionErrorKinds.push('invalid')
+        }
+        i += 1
       } else {
         if (
           eqPos !== -1 &&
@@ -357,6 +378,14 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     .filter((op) => !op.providedBy.some((name) => cs.destOf(name) in flags))
     .map((op) => op.type)
 
+  // A flag can turn the rest slot textual for this line only (jq's
+  // --args makes every later operand a positional string rather than an
+  // input file). Only classification moves: unknown dash tokens stay as
+  // strict as the declared kind makes them.
+  const restKind: ValueType | null = spec.rest?.textWhen.some((name) => cs.destOf(name) in flags)
+    ? 'str'
+    : cs.restKind
+
   // Overflow operands past the declared positional slots pass through
   // classified like the last slot (TEXT when there is none), so a
   // fixed-arity command receives them and raises its own extra-operand
@@ -371,8 +400,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     let kind: ValueType
     if (j < positional.length) {
       kind = positional[j] ?? 'str'
-    } else if (cs.restKind !== null) {
-      kind = cs.restKind
+    } else if (restKind !== null) {
+      kind = restKind
     } else {
       kind = overflowKind
     }
@@ -391,7 +420,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   for (const [flagName, kind] of cs.kindByDest) {
     if (kind !== 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
-    if (Array.isArray(val)) {
+    if (Array.isArray(val) && cs.pairDests.has(flagName)) {
+      // Only the odd slots are the paths: the even ones name them.
+      const paired = val.map((part, index) => (index % 2 ? resolvePath(part, cwd) : part))
+      flags[flagName] = paired
+      pathFlagValues.push(...paired.filter((_, index) => index % 2 === 1))
+    } else if (Array.isArray(val)) {
       const resolvedList = val.map((part) => resolvePath(part, cwd))
       flags[flagName] = resolvedList
       pathFlagValues.push(...resolvedList)

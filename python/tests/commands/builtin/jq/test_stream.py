@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from mirage.core.jq import is_streamable_jsonl_expr
+from mirage.core.jq import is_streamable_jsonl_expr, parse_json_docs
 from mirage.core.ram.read import read_bytes
 from mirage.observe.context import RecordingScope
 from mirage.resource.disk.disk import DiskResource
@@ -189,11 +189,21 @@ class TestJqStreamingVerification:
     def test_jsonl_select_streaming_correct(self):
         data = self._make_large_jsonl(100)
         ws = self._ws_with_jsonl(data)
-        stdout, _ = run_raw(ws, "jq '.[] | select(.id > 95)' /m/data.jsonl")
+        # -c so each surviving document is one line; the streaming path
+        # pretty-prints by default, like jq itself.
+        stdout, _ = run_raw(ws, "jq -c '.[] | select(.id > 95)' /m/data.jsonl")
         raw = collect(stdout).decode()
         lines = [json.loads(x) for x in raw.strip().splitlines() if x.strip()]
         assert len(lines) == 4
         assert all(item["id"] > 95 for item in lines)
+
+    def test_jsonl_streaming_pretty_prints_by_default(self):
+        data = self._make_large_jsonl(3)
+        ws = self._ws_with_jsonl(data)
+        stdout, _ = run_raw(ws, "jq '.[] | select(.id > 0)' /m/data.jsonl")
+        raw = collect(stdout).decode()
+        assert raw.startswith("{\n  ")
+        assert len(parse_json_docs(raw.encode())) == 2
 
     def test_disk_jsonl_streaming(self, tmp_path):
         data = self._make_large_jsonl(50)

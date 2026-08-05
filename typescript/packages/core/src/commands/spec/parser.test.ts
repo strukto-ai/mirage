@@ -818,3 +818,61 @@ describe('float-typed values', () => {
     }
   })
 })
+
+describe('two-token options', () => {
+  it('consumes both tokens under one dest', () => {
+    const p = parseCommand(specOf('jq'), ['--arg', 'v', 'hello', '-n', '$v'], '/')
+    expect(p.flags['--arg']).toEqual(['v', 'hello'])
+    expect(p.texts()).toEqual(['$v'])
+    expect(p.paths()).toEqual([])
+  })
+
+  it('accumulates flattened across occurrences', () => {
+    const p = parseCommand(specOf('jq'), ['--arg', 'a', '1', '--argjson', 'b', '2', '.'], '/')
+    expect(p.flags['--arg']).toEqual(['a', '1'])
+    expect(p.flags['--argjson']).toEqual(['b', '2'])
+    expect(p.texts()).toEqual(['.'])
+  })
+
+  it('never classifies the value as a path', () => {
+    const p = parseCommand(specOf('jq'), ['--arg', 'v', '/etc/passwd', '.', '/d/a.json'], '/')
+    expect(p.flags['--arg']).toEqual(['v', '/etc/passwd'])
+    expect(p.paths()).toEqual(['/d/a.json'])
+  })
+
+  it('needs a value when a token is missing', () => {
+    expect(parseCommand(specOf('jq'), ['--arg', 'v'], '/').needsValueOptions).toEqual(['--arg'])
+  })
+
+  it('has no equals form', () => {
+    expect(parseCommand(specOf('jq'), ['--arg=v', 'hello', '.'], '/').invalidOptions).toEqual([
+      '--arg=v',
+    ])
+  })
+})
+
+describe('flag-driven operand kinds', () => {
+  it('resolves only the value of a path pair', () => {
+    const p = parseCommand(specOf('jq'), ['--rawfile', 'body', 'f.txt', '-n', '$body'], '/data')
+    expect(p.flags['--rawfile']).toEqual(['body', '/data/f.txt'])
+    expect(p.pathFlagValues).toEqual(['/data/f.txt'])
+  })
+
+  it('turns later operands into text under --args', () => {
+    const p = parseCommand(specOf('jq'), ['--args', '.', 'a', '/etc/passwd'], '/')
+    expect(p.texts()).toEqual(['.', 'a', '/etc/passwd'])
+    expect(p.paths()).toEqual([])
+  })
+
+  it('turns later operands into text under --jsonargs', () => {
+    const p = parseCommand(specOf('jq'), ['--jsonargs', '.', '1'], '/')
+    expect(p.texts()).toEqual(['.', '1'])
+    expect(p.paths()).toEqual([])
+  })
+
+  it('keeps operands as paths without those flags', () => {
+    const p = parseCommand(specOf('jq'), ['.', '/d/a.json'], '/')
+    expect(p.texts()).toEqual(['.'])
+    expect(p.paths()).toEqual(['/d/a.json'])
+  })
+})

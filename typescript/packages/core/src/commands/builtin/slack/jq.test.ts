@@ -82,7 +82,7 @@ describe('slack jq', () => {
         }),
       ],
       ['.[].text'],
-      { r: true },
+      { raw_output: true },
       { index: idx, transport },
     )
     const lines = out.stdout.split('\n').filter((s) => s !== '')

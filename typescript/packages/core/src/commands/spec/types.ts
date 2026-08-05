@@ -77,6 +77,18 @@ export interface OptionInit {
    */
   multiple?: boolean
   /**
+   * The option consumes two tokens, not one (jq's `--arg name value`;
+   * click's nargs=2). Occurrences always accumulate, flattened, so
+   * `--arg a 1 --arg b 2` arrives as `['a', '1', 'b', '2']` and the
+   * command reads it in twos. The first token of each pair names the
+   * value and is always textual; `type` describes the second, so a
+   * 'path' pair (`--rawfile name file`) resolves and routes only the
+   * file. An `=` form is not accepted (neither does jq), and a trailing
+   * occurrence missing either token is the usual "requires an argument"
+   * refusal.
+   */
+  pair?: boolean
+  /**
    * GNU optional-argument long option (e.g. `--color[=WHEN]`): bare
    * `--color` parses as true, `--color=auto` parses as the string, and a
    * detached next token is never consumed. Requires a long form.
@@ -118,6 +130,7 @@ export class Option {
   readonly numericShorthand: boolean
   readonly count: boolean
   readonly multiple: boolean
+  readonly pair: boolean
   readonly valueOptional: boolean
   readonly shortValue: boolean
   readonly choices: readonly string[]
@@ -132,6 +145,7 @@ export class Option {
     this.numericShorthand = init.numericShorthand ?? false
     this.count = init.count ?? false
     this.multiple = init.multiple ?? false
+    this.pair = init.pair ?? false
     this.valueOptional = init.valueOptional ?? false
     this.shortValue = init.shortValue ?? true
     this.choices = init.choices ?? []
@@ -147,6 +161,13 @@ export interface OperandInit {
    * through verbatim (never 'bool': an operand is a value by definition). */
   type?: ValueType
   /**
+   * Flags that make this slot textual even though it is declared 'path'.
+   * jq's `--args` turns the operands after the program into positional
+   * string values rather than input files, which is a property of the
+   * line, not of the slot, so it cannot be spelled in the type alone.
+   */
+  textWhen?: readonly string[]
+  /**
    * Flags that supply this operand's value. When any is present the slot is
    * skipped and remaining args classify as rest (e.g. grep's pattern with
    * -e/-f). This is the declarative form of the conditional real tools write
@@ -161,10 +182,12 @@ export interface OperandInit {
 export class Operand {
   readonly type: ValueType
   readonly providedBy: readonly string[]
+  readonly textWhen: readonly string[]
 
   constructor(init: OperandInit = {}) {
     this.type = init.type ?? 'path'
     this.providedBy = init.providedBy ?? []
+    this.textWhen = init.textWhen ?? []
     Object.freeze(this)
   }
 }

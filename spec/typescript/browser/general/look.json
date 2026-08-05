@@ -224,6 +224,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-f",
       "short_value": true,
@@ -234,10 +235,12 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "str"
     },
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     }
   ],

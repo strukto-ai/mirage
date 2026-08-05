@@ -188,14 +188,34 @@ def parse_command(
                     i += 1
                     continue
             etok = spelling if eq == -1 else spelling + tok[eq:]
+            is_pair = cs.dest_of(spelling) in cs.pair_dests
             if etok in cs.long_bool_spellings:
                 _set_bool_flag(flags, cs, etok)
                 i += 1
-            elif (etok in cs.long_value_spellings
+            elif is_pair and eq == -1 and i + 2 < len(filtered_argv):
+                # Two tokens, both recorded under the one dest, so the
+                # command reads the accumulated list in twos.
+                _set_value_flag(flags, cs, spelling, filtered_argv[i + 1])
+                _set_value_flag(flags, cs, spelling, filtered_argv[i + 2])
+                # The first token names the value and is always textual;
+                # the option's own kind describes the second.
+                word_kinds[orig_indices[i + 1]] = "str"
+                word_kinds[orig_indices[i + 2]] = cs.kind_of[spelling]
+                i += 3
+            elif (not is_pair and etok in cs.long_value_spellings
                   and i + 1 < len(filtered_argv)):
                 _set_value_flag(flags, cs, etok, filtered_argv[i + 1])
                 word_kinds[orig_indices[i + 1]] = cs.kind_of[etok]
                 i += 2
+            elif is_pair:
+                if eq == -1:
+                    needs_value_options.append(spelling)
+                else:
+                    # A two-token option has no `=` form (jq refuses
+                    # `--arg=name` as an unknown option).
+                    invalid_options.append(tok)
+                    option_error_kinds.append("invalid")
+                i += 1
             else:
                 if eq != -1 and (spelling in cs.long_value_spellings
                                  or spelling in cs.long_optional_spellings):
@@ -354,6 +374,15 @@ def parse_command(
         op.type for op in spec.positional
         if not any(cs.dest_of(name) in flags for name in op.provided_by))
 
+    # A flag can turn the rest slot textual for this line only (jq's
+    # --args makes every later operand a positional string rather than an
+    # input file). Only classification moves: unknown dash tokens stay as
+    # strict as the declared kind makes them.
+    rest_kind = cs.rest_kind
+    if spec.rest is not None and any(
+            cs.dest_of(name) in flags for name in spec.rest.text_when):
+        rest_kind = "str"
+
     # Overflow operands past the declared positional slots pass through
     # classified like the last slot (TEXT when there is none), so a
     # fixed-arity command receives them and raises its own extra-operand
@@ -372,8 +401,8 @@ def parse_command(
             kind = "str"
         elif j < len(positional):
             kind = positional[j]
-        elif cs.rest_kind is not None:
-            kind = cs.rest_kind
+        elif rest_kind is not None:
+            kind = rest_kind
         else:
             kind = overflow_kind
         if kind == "path":
@@ -389,7 +418,15 @@ def parse_command(
         if kind != "path" or flag_name not in flags:
             continue
         value = flags[flag_name]
-        if isinstance(value, list):
+        if isinstance(value, list) and flag_name in cs.pair_dests:
+            # Only the odd slots are the paths: the even ones name them.
+            paired = [
+                resolve_path(part, cwd) if index % 2 else part
+                for index, part in enumerate(value)
+            ]
+            flags[flag_name] = paired
+            path_flag_values.extend(paired[1::2])
+        elif isinstance(value, list):
             resolved_list = [resolve_path(part, cwd) for part in value]
             flags[flag_name] = resolved_list
             path_flag_values.extend(resolved_list)

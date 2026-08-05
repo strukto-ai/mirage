@@ -117,3 +117,36 @@ describe('expandLong', () => {
     expect(expandLong(cs, '--')).toEqual([])
   })
 })
+
+describe('pair options', () => {
+  it('refuses a boolean flag', () => {
+    const spec = new CommandSpec({ options: [new Option({ long: '--arg', pair: true })] })
+    expect(() => compileSpec(spec)).toThrow(/pair requires a value flag/)
+  })
+
+  it('refuses a short spelling', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ short: '-a', long: '--arg', type: 'str', pair: true })],
+    })
+    expect(() => compileSpec(spec)).toThrow(/pair requires a long spelling/)
+  })
+
+  it('types only the value of a path pair', () => {
+    // jq --rawfile name file: the name is text, the file is a path.
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--rawfile', type: 'path', pair: true })],
+    })
+    const compiled = compileSpec(spec)
+    expect(compiled.kindByDest.get('--rawfile')).toBe('path')
+    expect(compiled.pairDests.has('--rawfile')).toBe(true)
+  })
+
+  it('accumulates like multiple', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--arg', type: 'str', pair: true })],
+    })
+    const compiled = compileSpec(spec)
+    expect(compiled.pairDests.has('--arg')).toBe(true)
+    expect(compiled.multipleDests.has('--arg')).toBe(true)
+  })
+})

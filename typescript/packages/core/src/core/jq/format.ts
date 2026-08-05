@@ -12,12 +12,43 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const ENC = new TextEncoder()
+import { RS, type JqOptions } from './types.ts'
 
-function formatOne(value: unknown, raw: boolean, compact: boolean): Uint8Array {
-  if (raw && typeof value === 'string') return ENC.encode(value + '\n')
-  const json = compact ? JSON.stringify(value) : JSON.stringify(value, null, 2)
-  return ENC.encode(json + '\n')
+const ENC = new TextEncoder()
+const NON_ASCII = /[\u0080-\uFFFF]/g
+const NUL = new Uint8Array([0])
+const NEWLINE = ENC.encode('\n')
+const EMPTY = new Uint8Array(0)
+const RS_BYTES = ENC.encode(RS)
+
+function sortDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortDeep)
+  if (value === null || typeof value !== 'object') return value
+  const entries = Object.entries(value as Record<string, unknown>)
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const out: Record<string, unknown> = {}
+  for (const [key, inner] of entries) out[key] = sortDeep(inner)
+  return out
+}
+
+function escapeNonAscii(text: string): string {
+  // One \uXXXX per UTF-16 code unit, so an astral character escapes as
+  // its surrogate pair, which is what jq and Python's json both print.
+  return text.replace(NON_ASCII, (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'))
+}
+
+function dumps(value: unknown, opts: JqOptions): string {
+  const sorted = opts.sortKeys ? sortDeep(value) : value
+  const indent = opts.compact || opts.indent === 0 ? undefined : opts.tab ? '\t' : opts.indent
+  const json = JSON.stringify(sorted, null, indent)
+  return opts.asciiOutput ? escapeNonAscii(json) : json
+}
+
+function terminator(opts: JqOptions): Uint8Array {
+  // --raw-output0 wins over -j whichever order they were typed, which is
+  // what jq does.
+  if (opts.nulOutput) return NUL
+  return opts.joinOutput ? EMPTY : NEWLINE
 }
 
 export function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
@@ -32,13 +63,22 @@ export function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return out
 }
 
+/** Render one output value with its separator. */
+export function formatOne(value: unknown, opts: JqOptions): Uint8Array {
+  // -a beats -r: jq quotes and escapes a string under --ascii-output
+  // even when raw output was asked for.
+  const body =
+    opts.rawOutput && !opts.asciiOutput && typeof value === 'string'
+      ? ENC.encode(value)
+      : ENC.encode(dumps(value, opts))
+  // RFC 7464 puts the separator before the value, not after it.
+  const prefix = opts.seq ? RS_BYTES : EMPTY
+  return concatBytes([prefix, body, terminator(opts)])
+}
+
 /** Render every output of a jq program, one per line. */
-export function formatJqOutput(
-  outputs: readonly unknown[],
-  raw: boolean,
-  compact: boolean,
-): Uint8Array {
+export function formatJqOutput(outputs: readonly unknown[], opts: JqOptions): Uint8Array {
   const parts: Uint8Array[] = []
-  for (const value of outputs) parts.push(formatOne(value, raw, compact))
+  for (const value of outputs) parts.push(formatOne(value, opts))
   return concatBytes(parts)
 }
