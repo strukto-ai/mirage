@@ -102,7 +102,15 @@ async function scriptOutput(
     env.MIRAGE_CONFIG = JSON.stringify(inv.config)
   }
   const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
-  const result = await runtime.run({ code: script.source, args: [...inv.argv], env, stdin })
+  // A .mjs source needs the engine's module mode, the same bit the js
+  // command derives from the operand's extension.
+  const result = await runtime.run({
+    code: script.source,
+    args: [...inv.argv],
+    env,
+    stdin,
+    ...(script.module ? { flags: { module: true } } : {}),
+  })
   return runOutput(result)
 }
 

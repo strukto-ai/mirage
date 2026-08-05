@@ -68,7 +68,7 @@ function loadScriptSource(value: string): ScriptSource {
   }
   const path = value.trim()
   const language = path.endsWith('.js') || path.endsWith('.mjs') ? 'js' : 'python'
-  return new ScriptSource(readFileSync(path, 'utf-8'), language)
+  return new ScriptSource(readFileSync(path, 'utf-8'), language, path.endsWith('.mjs'))
 }
 
 function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {

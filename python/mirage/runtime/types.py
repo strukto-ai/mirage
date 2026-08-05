@@ -41,10 +41,18 @@ class ScriptSource:
         language (str): the script's language ("python" or "js"),
             stamped from the file extension at config load; the
             programmatic default is "python".
+        module (bool): the source is an ES module (a ``.mjs`` file), so
+            a js engine must run it in module mode or ``import`` and
+            top-level ``await`` fail. Stamped from the extension at
+            load beside ``language``, since the path is gone once the
+            source is embedded. Inert for policy scripts: a module has
+            no completion value, and their contract is the last
+            expression.
     """
 
     source: str
     language: str = "python"
+    module: bool = False
 
 
 @dataclass(frozen=True, slots=True)

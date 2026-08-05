@@ -485,7 +485,7 @@ describe('clis section', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('a .mjs script stamps the language', async () => {
+  it('a .mjs script stamps the language and the module bit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
     writeFileSync(join(dir, 'pager.mjs'), "console.log('page')")
     writeFileSync(
@@ -495,7 +495,25 @@ describe('clis section', () => {
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
     const [spec] = args.options.clis?.pager ?? []
-    expect((spec as CLISpec).script).toEqual(new ScriptSource("console.log('page')", 'js'))
+    // The module bit rides on the spec because the path is gone once
+    // the source is embedded, and an ES module needs the engine's
+    // module mode or `import` fails.
+    expect((spec as CLISpec).script).toEqual(new ScriptSource("console.log('page')", 'js', true))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('a plain .js script is not a module', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'pager.js'), "console.log('page')")
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nclis:\n  pager:\n    script: pager.js\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    const [spec] = args.options.clis?.pager ?? []
+    expect((spec as CLISpec).script?.language).toBe('js')
+    expect((spec as CLISpec).script?.module).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 

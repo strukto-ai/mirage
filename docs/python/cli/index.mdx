@@ -108,6 +108,13 @@ packages are available. The sandboxed runtimes are files plus compute:
 no sockets, no third-party imports on monty, no Node builtins on
 quickjs.
 
+Snapshots carry a script CLI by value: the embedded program travels in
+the snapshot and `Workspace.load` rebuilds the install from it, because
+there is no name for the loading process to resolve. Its config travels
+verbatim, since a script CLI declares no config model and so declares
+no secrets; keep credentials in the environment rather than the install
+config, or supply them through `clis=` on load.
+
 ## Discovering an installed CLI
 
 An install is discoverable from inside the shell, so an agent that was

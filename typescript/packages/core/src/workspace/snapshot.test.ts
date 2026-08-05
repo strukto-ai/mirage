@@ -30,7 +30,9 @@ import { type JobTaskResult } from '../shell/job_table.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
 import { MountMode } from '../types.ts'
 import { VERSION } from '../version.ts'
+import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
+import { ScriptSource } from './executor/policy/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace.ts'
 
@@ -422,5 +424,74 @@ describe('cli registry snapshot', () => {
     expect(r.stdoutText).toBe('tok=sek\n')
     await ws.close()
     await clone.close()
+  })
+
+  it('persists a script install so load can rebuild the spec', async () => {
+    // A script install resolves under no registry name, so the embedded
+    // program rides in the state and load rebuilds the spec from it.
+    const ws = buildWorkspace()
+    ws.registerCli(
+      'pager',
+      new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") }),
+      { width: 80 },
+    )
+    const state = await toStateDict(ws)
+    const entry = state.clis?.[0]
+    expect(entry?.spec).toBe('pager')
+    expect(entry?.script?.source).toBe("print('hi')")
+    expect(entry?.script?.language).toBe('python')
+    expect(entry?.script?.module).toBe(false)
+    // No configModel means nothing declares a secret, so the mapping is
+    // captured verbatim rather than guessed at.
+    expect(entry?.config).toEqual({ width: 80 })
+
+    const restored = await Workspace.fromState(state, { shellParser: parser })
+    const install = restored.clis().get('pager')
+    expect(install?.spec.script?.source).toBe("print('hi')")
+    expect(install?.spec.runtime).toBeNull()
+    await ws.close()
+    await restored.close()
+  })
+
+  it('carries the runtime pin and the module bit through a snapshot', async () => {
+    const ws = buildWorkspace()
+    ws.registerCli(
+      'pager',
+      new CLISpec({
+        name: 'pager',
+        script: new ScriptSource('export const x = 1', 'js', true),
+        runtime: 'quickjs',
+      }),
+      null,
+    )
+    const state = await toStateDict(ws)
+    expect(state.clis?.[0]?.runtime).toBe('quickjs')
+    expect(state.clis?.[0]?.script?.module).toBe(true)
+    const restored = await Workspace.fromState(state, { shellParser: parser })
+    const install = restored.clis().get('pager')
+    expect(install?.spec.runtime).toBe('quickjs')
+    expect(install?.spec.script?.module).toBe(true)
+    expect(install?.spec.script?.language).toBe('js')
+    await ws.close()
+    await restored.close()
+  })
+
+  it('the tar manifest carries installed clis', async () => {
+    // The manifest is an explicit key allowlist, and omitting clis
+    // dropped every install from a tar snapshot.
+    const ws = buildWorkspace()
+    ws.registerCli(
+      'pager',
+      new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") }),
+      null,
+    )
+    const [manifest] = splitManifestAndBlobs(
+      (await toStateDict(ws)) as unknown as Record<string, unknown>,
+    )
+    const clis = manifest.clis as { name: string; script?: { source: string } }[]
+    expect(clis).toHaveLength(1)
+    expect(clis[0]?.name).toBe('pager')
+    expect(clis[0]?.script?.source).toBe("print('hi')")
+    await ws.close()
   })
 })

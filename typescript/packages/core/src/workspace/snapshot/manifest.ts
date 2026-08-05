@@ -55,6 +55,10 @@ export function splitManifestAndBlobs(state: AnyDict): [AnyDict, Record<string, 
       [CacheKey.ENTRIES]: [],
     },
     [StateKey.JOBS]: [],
+    // Installed CLIs carry no blobs (an embedded script is text and a
+    // config is json), so they ride through whole; omitting the key
+    // dropped every install from a tar snapshot.
+    [StateKey.CLIS]: state[StateKey.CLIS] ?? [],
     [StateKey.FINGERPRINTS]: state[StateKey.FINGERPRINTS] ?? [],
     [StateKey.LIVE_ONLY_MOUNTS]: state[StateKey.LIVE_ONLY_MOUNTS] ?? [],
     [StateKey.NODES]: state[StateKey.NODES] ?? {},

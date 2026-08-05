@@ -244,6 +244,28 @@ async def test_script_declared_options_still_pass_verbatim():
 
 
 @pytest.mark.asyncio
+async def test_script_module_bit_reaches_the_runtime_as_a_flag():
+    # A .mjs source only runs as an ES module if the engine gets
+    # flags['module']; without it import and top-level await fail.
+    js = FakeJsRuntime()
+    spec = CLISpec(name="pager",
+                   script=ScriptSource("export const x = 1",
+                                       language="js",
+                                       module=True))
+    install = CLIInstall(name="pager", spec=spec, config=None)
+    _, io, _ = await handle_cli(install, ["pager"], Session("t"), entries=[js])
+    assert io.exit_code == 0
+    assert js.seen.pop().flags == {"module": True}
+
+
+@pytest.mark.asyncio
+async def test_script_without_the_module_bit_sends_no_flags():
+    py = FakePyRuntime()
+    await handle_cli(script_install(), ["pager"], Session("t"), entries=[py])
+    assert py.seen.pop().flags == {}
+
+
+@pytest.mark.asyncio
 async def test_script_env_carries_mirage_config_json():
     py = FakePyRuntime()
     install = script_install(config={"api_key": "k1"})

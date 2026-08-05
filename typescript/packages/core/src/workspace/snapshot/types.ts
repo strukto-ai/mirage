@@ -113,6 +113,17 @@ export interface CLISnapshot {
   name: string
   spec: string
   config: Record<string, unknown> | null
+  /**
+   * The embedded program, present only for a script install: its spec
+   * is synthesized from a yaml `script:` and so resolves under no
+   * registry name, leaving nothing for `load` to look up.
+   */
+  script?: {
+    source: string
+    language: string
+    module: boolean
+  }
+  runtime?: string | null
 }
 
 export interface WorkspaceStateDict {

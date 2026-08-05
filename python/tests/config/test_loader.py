@@ -453,7 +453,84 @@ clis:
     cfg = load_config(cfg_file)
     kwargs = cfg.to_workspace_kwargs()
     spec, _ = kwargs["clis"]["pager"]
-    assert spec.script == ScriptSource("console.log('page')", language="js")
+    # .mjs also stamps module: the path is gone once the source is
+    # embedded, so the engine could not otherwise know to run it as an
+    # ES module and `import` would fail.
+    assert spec.script == ScriptSource("console.log('page')",
+                                       language="js",
+                                       module=True)
+
+
+def test_clis_plain_js_script_is_not_a_module(tmp_path):
+    (tmp_path / "pager.js").write_text("console.log('page')")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.js
+""")
+    spec, _ = load_config(cfg_file).to_workspace_kwargs()["clis"]["pager"]
+    assert spec.script.language == "js"
+    assert spec.script.module is False
+
+
+def test_clis_path_form_reference_rebases_on_the_config_dir(
+        tmp_path, monkeypatch):
+    # `cli: ./tool.py:TREE` means "next to the config file", the same
+    # build-context rule script: follows; without rebasing it resolves
+    # against the process cwd and only works by luck.
+    (tmp_path / "tool.py").write_text(
+        "from mirage import CLISpec\n"
+        "TREE = CLISpec(name='tool', subcommands=(CLISpec(name='run',\n"
+        "               fn=lambda inv: None), ))\n")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  tool:
+    cli: ./tool.py:TREE
+""")
+    monkeypatch.chdir(tmp_path.parent)
+    cfg = load_config(cfg_file)
+    ref, _ = cfg.to_workspace_kwargs()["clis"]["tool"]
+    assert ref == f"{tmp_path / 'tool.py'}:TREE"
+
+
+def test_clis_module_dotpath_reference_is_left_alone(tmp_path):
+    # importlib resolves a dotpath, not the filesystem, so rebasing it
+    # would break the import.
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  tool:
+    cli: mypkg.clis:TREE
+""")
+    cfg = load_config(cfg_file)
+    ref, _ = cfg.to_workspace_kwargs()["clis"]["tool"]
+    assert ref == "mypkg.clis:TREE"
+
+
+def test_clis_registered_name_reference_is_left_alone(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  sl:
+    cli: slack
+""")
+    cfg = load_config(cfg_file)
+    ref, _ = cfg.to_workspace_kwargs()["clis"]["sl"]
+    assert ref == "slack"
 
 
 def test_clis_script_file_must_exist(tmp_path):

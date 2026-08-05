@@ -684,6 +684,14 @@ class CLIKey(StrEnum):
     NAME = "name"
     SPEC = "spec"
     CONFIG = "config"
+    SCRIPT = "script"
+    RUNTIME = "runtime"
+
+
+class ScriptKey(StrEnum):
+    SOURCE = "source"
+    LANGUAGE = "language"
+    MODULE = "module"
 
 
 class CacheKey(StrEnum):

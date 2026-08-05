@@ -323,7 +323,9 @@ def _load_script_source(value: str) -> ScriptSource:
                          f"(e.g. script: guard.py), got {value!r}")
     path = Path(value.strip())
     language = "js" if path.suffix in (".js", ".mjs") else "python"
-    return ScriptSource(path.read_text(), language=language)
+    return ScriptSource(path.read_text(),
+                        language=language,
+                        module=path.suffix == ".mjs")
 
 
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
@@ -352,6 +354,7 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
         for block in clis.values():
             if isinstance(block, dict):
                 _absolutize_script_key(block, base)
+                _absolutize_cli_ref(block, base)
 
 
 def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
@@ -366,6 +369,33 @@ def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
     if isinstance(script, str) and _is_script_path(script) \
             and not Path(script.strip()).is_absolute():
         entry["script"] = str(base / script.strip())
+
+
+def _absolutize_cli_ref(entry: dict[str, Any], base: Path) -> None:
+    """Rebase one ``clis`` entry's path-form ``cli`` reference.
+
+    ``cli: ./tool.py:TREE`` means "next to the config file", the same
+    build-context rule ``script:`` follows; without this the pointer
+    reaches ``load_attr`` relative and resolves against the server
+    process's cwd. A module dotpath (``pkg.mod:TREE``) is left alone:
+    importlib resolves it, not the filesystem. The split matches
+    ``load_attr``'s own test, so the two cannot disagree about what a
+    path is.
+
+    Args:
+        entry (dict[str, Any]): a ``clis`` mapping entry, mutated in
+            place.
+        base (Path): directory containing the config file.
+    """
+    ref = entry.get("cli")
+    if not isinstance(ref, str) or ":" not in ref:
+        return
+    source, attr = ref.rsplit(":", 1)
+    if "/" not in source and not source.endswith(".py"):
+        return
+    if Path(source).is_absolute():
+        return
+    entry["cli"] = f"{base / source}:{attr}"
 
 
 def _build_runtime_entries(

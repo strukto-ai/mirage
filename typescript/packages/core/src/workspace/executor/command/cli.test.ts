@@ -267,6 +267,26 @@ describe('handleCli script arm', () => {
     expect(py.seen.pop()?.args).toEqual(['-n', '3', 'report.txt'])
   })
 
+  it('the module bit reaches the runtime as a flag', async () => {
+    // A .mjs source only runs as an ES module if the engine gets
+    // flags.module; without it import and top-level await fail.
+    const js = new FakeJsRuntime()
+    const spec = new CLISpec({
+      name: 'pager',
+      script: new ScriptSource('export const x = 1', 'js', true),
+    })
+    const install: CLIInstall = { name: 'pager', spec, config: null }
+    const [, io] = await handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, [js])
+    expect(io.exitCode).toBe(0)
+    expect(js.seen.pop()?.flags).toEqual({ module: true })
+  })
+
+  it('a non-module script sends no flags', async () => {
+    const py = new FakePyRuntime()
+    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, [py])
+    expect(py.seen.pop()?.flags).toBeUndefined()
+  })
+
   it('the env carries MIRAGE_CONFIG as JSON', async () => {
     const py = new FakePyRuntime()
     const session = new Session({ sessionId: 't', env: { EDITOR: 'vi' } })

@@ -100,8 +100,15 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
     if inv.config is not None:
         env["MIRAGE_CONFIG"] = json.dumps(inv.config)
     stdin = await materialize(inv.stdin) if inv.stdin is not None else None
+    # A .mjs source needs the engine's module mode, the same bit the
+    # js command derives from the operand's extension.
+    flags = {"module": True} if script.module else {}
     result = await runtime.run(
-        RunArgs(code=script.source, args=list(inv.argv), env=env, stdin=stdin))
+        RunArgs(code=script.source,
+                args=list(inv.argv),
+                env=env,
+                stdin=stdin,
+                flags=flags))
     return run_output(result)
 
 

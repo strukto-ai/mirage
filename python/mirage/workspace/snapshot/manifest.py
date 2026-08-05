@@ -42,13 +42,20 @@ def split_manifest_and_blobs(
     a = _BlobAllocator()
 
     manifest: dict[str, Any] = {
-        StateKey.VERSION: state[StateKey.VERSION],
-        StateKey.MIRAGE_VERSION: state[StateKey.MIRAGE_VERSION],
-        StateKey.DEFAULT_SESSION_ID: state[StateKey.DEFAULT_SESSION_ID],
-        StateKey.DEFAULT_AGENT_ID: state[StateKey.DEFAULT_AGENT_ID],
-        StateKey.CURRENT_AGENT_ID: state[StateKey.CURRENT_AGENT_ID],
-        StateKey.SESSIONS: state[StateKey.SESSIONS],
-        StateKey.HISTORY: _history_to_manifest(state.get(StateKey.HISTORY), a),
+        StateKey.VERSION:
+        state[StateKey.VERSION],
+        StateKey.MIRAGE_VERSION:
+        state[StateKey.MIRAGE_VERSION],
+        StateKey.DEFAULT_SESSION_ID:
+        state[StateKey.DEFAULT_SESSION_ID],
+        StateKey.DEFAULT_AGENT_ID:
+        state[StateKey.DEFAULT_AGENT_ID],
+        StateKey.CURRENT_AGENT_ID:
+        state[StateKey.CURRENT_AGENT_ID],
+        StateKey.SESSIONS:
+        state[StateKey.SESSIONS],
+        StateKey.HISTORY:
+        _history_to_manifest(state.get(StateKey.HISTORY), a),
         StateKey.MOUNTS: [],
         StateKey.CACHE: {
             CacheKey.LIMIT:
@@ -58,9 +65,17 @@ def split_manifest_and_blobs(
             CacheKey.ENTRIES: [],
         },
         StateKey.JOBS: [],
-        StateKey.FINGERPRINTS: state.get(StateKey.FINGERPRINTS) or [],
-        StateKey.LIVE_ONLY_MOUNTS: state.get(StateKey.LIVE_ONLY_MOUNTS) or [],
-        StateKey.NODES: state.get(StateKey.NODES) or {},
+        # Installed CLIs carry no blobs (an embedded script is text and
+        # a config is json), so they ride through whole; omitting the
+        # key dropped every install from a tar snapshot.
+        StateKey.CLIS:
+        state.get(StateKey.CLIS) or [],
+        StateKey.FINGERPRINTS:
+        state.get(StateKey.FINGERPRINTS) or [],
+        StateKey.LIVE_ONLY_MOUNTS:
+        state.get(StateKey.LIVE_ONLY_MOUNTS) or [],
+        StateKey.NODES:
+        state.get(StateKey.NODES) or {},
     }
 
     for m in state[StateKey.MOUNTS]:
