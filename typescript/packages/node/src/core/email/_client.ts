@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ImapFlow, MailboxLockObject } from 'imapflow'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { parseRfc822, parseWithPayloads, type ParsedRfc822 } from './_parse.ts'
 
@@ -26,6 +27,25 @@ export async function listFolders(accessor: EmailAccessor): Promise<string[]> {
   return tree.map((m) => m.pathAsListed)
 }
 
+/**
+ * Selects and locks a mailbox, failing loudly when it does not exist.
+ *
+ * imapflow reports every refused command as a bare "Command failed" and
+ * keeps the server's own words on `responseText`, so a missing mailbox
+ * arrives naming neither itself nor the problem. A `responseText` means
+ * the server answered and refused, which is the same condition python
+ * checks through the SELECT response code.
+ */
+export async function lockMailbox(imap: ImapFlow, folder: string): Promise<MailboxLockObject> {
+  try {
+    return await imap.getMailboxLock(folder)
+  } catch (error) {
+    const answered = (error as { responseText?: string }).responseText !== undefined
+    if (answered) throw new Error(`no such mailbox '${folder}'`)
+    throw error
+  }
+}
+
 export async function listMessageUids(
   accessor: EmailAccessor,
   folder: string,
@@ -33,11 +53,14 @@ export async function listMessageUids(
   maxResults: number | null = null,
 ): Promise<string[]> {
   const imap = await accessor.getImap()
-  const lock = await imap.getMailboxLock(folder)
+  const lock = await lockMailbox(imap, folder)
   try {
     const query = parseSearchCriteria(searchCriteria)
     const uidsRaw = await imap.search(query, { uid: true })
-    if (uidsRaw === false) return []
+    // imapflow answers `false` when the server refused the search. That
+    // must not read as "matched nothing": it would hide criteria the
+    // server cannot answer behind an empty result.
+    if (uidsRaw === false) throw new Error(`IMAP rejected the search: ${searchCriteria}`)
     const uids = uidsRaw.map((n) => String(n))
     if (maxResults !== null && uids.length > maxResults) {
       return uids.slice(uids.length - maxResults)
@@ -250,7 +273,7 @@ export async function fetchRawMessage(
   uid: string,
 ): Promise<Uint8Array> {
   const imap = await accessor.getImap()
-  const lock = await imap.getMailboxLock(folder)
+  const lock = await lockMailbox(imap, folder)
   try {
     const msg = await imap.fetchOne(uid, { source: true, uid: true }, { uid: true })
     if (msg === false) {
@@ -268,7 +291,7 @@ export async function fetchMessage(
   uid: string,
 ): Promise<FetchedMessage> {
   const imap = await accessor.getImap()
-  const lock = await imap.getMailboxLock(folder)
+  const lock = await lockMailbox(imap, folder)
   try {
     const msg = await imap.fetchOne(uid, { source: true, flags: true, uid: true }, { uid: true })
     if (msg === false) {
@@ -293,7 +316,7 @@ export async function fetchHeaders(
 ): Promise<FetchedMessage[]> {
   if (uids.length === 0) return []
   const imap = await accessor.getImap()
-  const lock = await imap.getMailboxLock(folder)
+  const lock = await lockMailbox(imap, folder)
   try {
     const results: FetchedMessage[] = []
     for (const uid of uids) {
@@ -322,7 +345,7 @@ export async function fetchAttachment(
   filename: string,
 ): Promise<Uint8Array | null> {
   const imap = await accessor.getImap()
-  const lock = await imap.getMailboxLock(folder)
+  const lock = await lockMailbox(imap, folder)
   try {
     const msg = await imap.fetchOne(uid, { source: true }, { uid: true })
     if (msg === false) return null

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseSearchCriteria } from './_client.ts'
+import { listMessageUids, lockMailbox, parseSearchCriteria } from './_client.ts'
 
 // The IMAP criteria string is the cross-language contract: python hands
 // it straight to imaplib, node has to rebuild imapflow's search object
@@ -116,5 +116,39 @@ describe('parseSearchCriteria', () => {
     expect(() => parseSearchCriteria('ON 03-Xxx-2026')).toThrow('bad date')
     expect(() => parseSearchCriteria('ON 32-Jan-2026')).toThrow('bad date')
     expect(() => parseSearchCriteria('SINCE nonsense')).toThrow('bad date')
+  })
+})
+
+describe('mailbox and search failures', () => {
+  it('names the mailbox instead of relaying "Command failed"', async () => {
+    const imap = {
+      getMailboxLock: () => {
+        // imapflow's shape: a bare message plus the server's own words.
+        throw Object.assign(new Error('Command failed'), {
+          responseText: 'SELECT failed. No such mailbox',
+        })
+      },
+    }
+    await expect(lockMailbox(imap as never, 'Nope')).rejects.toThrow("no such mailbox 'Nope'")
+  })
+
+  it('rethrows a connection failure rather than blaming the mailbox', async () => {
+    const imap = {
+      getMailboxLock: () => {
+        throw new Error('ECONNRESET')
+      },
+    }
+    await expect(lockMailbox(imap as never, 'INBOX')).rejects.toThrow('ECONNRESET')
+  })
+
+  it('does not read a refused search as an empty result', async () => {
+    const imap = {
+      getMailboxLock: () => ({ release: () => undefined }),
+      search: () => false,
+    }
+    const accessor = { getImap: () => imap }
+    await expect(listMessageUids(accessor as never, 'INBOX', 'SEEN')).rejects.toThrow(
+      'IMAP rejected the search',
+    )
   })
 })

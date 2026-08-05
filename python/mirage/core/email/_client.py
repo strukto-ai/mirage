@@ -16,8 +16,30 @@ from email import policy
 from email.parser import BytesParser
 from typing import Any
 
+import aioimaplib
+
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email._parse import parse_rfc822
+
+
+async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
+    """Select a mailbox, failing loudly when it does not exist.
+
+    An unchecked SELECT leaves the session in AUTH state, and the next
+    command then fails with a raw protocol complaint ("command SEARCH
+    illegal in state AUTH") that names neither the mailbox nor the
+    problem.
+
+    Args:
+        imap (aioimaplib.IMAP4_SSL): the connected client.
+        folder (str): the mailbox to select.
+
+    Raises:
+        FileNotFoundError: the server refused the mailbox.
+    """
+    response = await imap.select(folder)
+    if response.result != "OK":
+        raise FileNotFoundError(f"no such mailbox {folder!r}")
 
 
 async def list_folders(accessor: EmailAccessor) -> list[str]:
@@ -41,9 +63,13 @@ async def list_message_uids(
     max_results: int | None = None,
 ) -> list[str]:
     imap = await accessor.get_imap()
-    await imap.select(folder)
+    await select_folder(imap, folder)
     response = await imap.search(search_criteria, charset=None)
-    if response.result != "OK" or not response.lines:
+    if response.result != "OK":
+        # A refused SEARCH must not read as "matched nothing": that hides
+        # criteria the server cannot answer behind an empty result.
+        raise ValueError(f"IMAP rejected the search: {search_criteria}")
+    if not response.lines:
         return []
     raw = response.lines[0]
     if isinstance(raw, (bytes, bytearray)):
@@ -82,7 +108,7 @@ async def fetch_raw_message(
     uid: str,
 ) -> bytes:
     imap = await accessor.get_imap()
-    await imap.select(folder)
+    await select_folder(imap, folder)
     response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     return _extract_body(response)
 
@@ -93,7 +119,7 @@ async def fetch_message(
     uid: str,
 ) -> dict[str, Any]:
     imap = await accessor.get_imap()
-    await imap.select(folder)
+    await select_folder(imap, folder)
     # BODY.PEEK[] instead of RFC822: reading a rendered file must not flip
     # \Seen on the mailbox, matching the imapflow client in the TS backend.
     response = await imap.uid("fetch", uid, "(BODY.PEEK[] FLAGS)")
@@ -113,7 +139,7 @@ async def fetch_headers(
     if not uids:
         return []
     imap = await accessor.get_imap()
-    await imap.select(folder)
+    await select_folder(imap, folder)
     results: list[dict[str, Any]] = []
     batch_size = 25
     for i in range(0, len(uids), batch_size):
@@ -135,7 +161,7 @@ async def fetch_attachment(
     filename: str,
 ) -> bytes | None:
     imap = await accessor.get_imap()
-    await imap.select(folder)
+    await select_folder(imap, folder)
     response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     raw_bytes = _extract_body(response)
     attachments = _parse_with_payloads(raw_bytes)

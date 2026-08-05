@@ -100,3 +100,37 @@ async def test_list_message_uids_empty(accessor):
 
     uids = await list_message_uids(accessor, "INBOX")
     assert uids == []
+
+
+@pytest.mark.asyncio
+async def test_a_missing_mailbox_names_itself(accessor):
+    mock_imap = AsyncMock()
+    mock_select_response = MagicMock()
+    mock_select_response.result = "NO"
+    mock_imap.select.return_value = mock_select_response
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
+
+    # An unchecked SELECT leaves the session in AUTH state and the next
+    # command complains about that instead of the mailbox.
+    with pytest.raises(FileNotFoundError, match="no such mailbox 'Nope'"):
+        await list_message_uids(accessor, "Nope")
+    mock_imap.search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_search_is_not_an_empty_result(accessor):
+    mock_imap = AsyncMock()
+    mock_select_response = MagicMock()
+    mock_select_response.result = "OK"
+    mock_imap.select.return_value = mock_select_response
+
+    mock_search_response = MagicMock()
+    mock_search_response.result = "BAD"
+    mock_search_response.lines = [b""]
+    mock_imap.search.return_value = mock_search_response
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
+
+    with pytest.raises(ValueError, match="IMAP rejected the search"):
+        await list_message_uids(accessor, "INBOX", "SENTON not-a-date")
