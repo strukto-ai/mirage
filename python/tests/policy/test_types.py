@@ -14,8 +14,8 @@
 
 import json
 
+from mirage.policy.types import ExecuteContext, ParsedCommand
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy.types import ParsedCommand, PolicyContext
 from mirage.runtime.types import RunArgs, RunResult
 
 
@@ -27,8 +27,8 @@ class StubRuntime(Runtime):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
-def sample_ctx() -> PolicyContext:
-    return PolicyContext(
+def sample_ctx() -> ExecuteContext:
+    return ExecuteContext(
         line="slack send /data/x | python3 p.py",
         commands=(ParsedCommand(command="slack",
                                 words=("slack", "send", "/data/x"),
@@ -53,11 +53,11 @@ def test_wire_schema_round_trips_through_json():
     """The to_dict payload survives a JSON file and from_dict replay."""
     ctx = sample_ctx()
     payload = json.loads(json.dumps(ctx.to_dict()))
-    assert PolicyContext.from_dict(payload) == ctx
+    assert ExecuteContext.from_dict(payload) == ctx
 
 
 def test_from_dict_ignores_the_runtime_decoration():
     ctx = sample_ctx()
     payload = ctx.to_dict(StubRuntime())
     assert payload["runtime"] == {"name": "monty", "captures": ["python3"]}
-    assert PolicyContext.from_dict(payload) == ctx
+    assert ExecuteContext.from_dict(payload) == ctx

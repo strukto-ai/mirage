@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import CommandContext, resolve_limit
-from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.route import PolicyDecision
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command

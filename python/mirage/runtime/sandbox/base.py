@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.policy.types import PolicyScript
+from mirage.runtime.route.types import PolicyScript
 from mirage.runtime.sandbox.config import SandboxConfig
 from mirage.runtime.types import RunArgs, RunResult
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parsedCommands, type PolicyDecision } from '../executor/policy/index.ts'
+import { parsedCommands, type PolicyDecision } from '../executor/route/index.ts'
 import {
   bindCommands,
   DEFAULT_ENTRIES,

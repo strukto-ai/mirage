@@ -12,10 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Protocol
 
 from mirage.types import Limit, PathSpec, Producer
+
+
+class RuntimeIdentity(Protocol):
+    """What ExecuteContext needs to know about a runtime.
+
+    Runtime satisfies this structurally; the narrow protocol keeps this
+    package a leaf (no runtime imports).
+    """
+
+    @property
+    def name(self) -> str:
+        ...
+
+    @property
+    def captures(self) -> tuple[str, ...]:
+        ...
 
 
 class MountRootQuery(Protocol):
@@ -46,11 +62,30 @@ class Deny:
     exit_code: int = 1
 
 
+@dataclass(frozen=True, slots=True)
+class Route:
+    """Place the line on a named runtime, the affirmative routing arm.
+
+    Only legal from ``pre_execute``. The first Route wins (placement is
+    an affirmative choice, never a refusal); an unknown runtime name is
+    a PolicyError at the router, mirroring the ``runtime=`` argument.
+
+    Args:
+        runtime (str): name of the entry that serves every command it
+            captures on this line.
+    """
+
+    kind: ClassVar[str] = "route"
+
+    runtime: str
+
+
 # The closed vocabulary of policy answers: a hook returns an Action to
 # state an opinion or None to stay silent. Deny refuses (first opinion
-# wins); Limit bounds (every opinion merges to the tightest, Limit.aggr).
-# Each hook accepts a fixed set of kinds (VALIDITY), enforced loud.
-Action = Deny | Limit
+# wins); Limit bounds (every opinion merges to the tightest, Limit.aggr);
+# Route places the line on a runtime (first Route wins). Each hook
+# accepts a fixed set of kinds (VALIDITY), enforced loud.
+Action = Deny | Limit | Route
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +173,184 @@ class OpsResultContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ParsedCommand:
+    """One command of the line being routed, distilled from the parse.
+
+    Args:
+        command (str): the command name (first word).
+        words (tuple[str, ...]): every word of the command, name first.
+        builtin (bool): whether the command has a builtin spec.
+        paths (tuple[str, ...]): absolute-path operands.
+        cli (str | None): the installed CLI whose head word ``command``
+            is, None otherwise. Lets a policy steer an installed name
+            between the virtual CLI and a runtime capturing the same
+            word.
+    """
+
+    command: str
+    words: tuple[str, ...]
+    builtin: bool
+    paths: tuple[str, ...]
+    cli: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecuteContext:
+    """One typed line about to execute, as pre_execute hooks see it.
+
+    Fires parse-before-dispatch, so a Deny refuses the line before
+    anything runs and a Route places it on a runtime. For
+    ``cat /data/logs.txt | python3 process.py`` typed in ``/data``,
+    monty's script (monty captures ``python3``) is consulted with::
+
+        ctx.line      == "cat /data/logs.txt | python3 process.py"
+        ctx.commands  == (
+            ParsedCommand(command="cat",
+                          words=("cat", "/data/logs.txt"),
+                          builtin=True,
+                          paths=("/data/logs.txt",)),
+            ParsedCommand(command="python3",
+                          words=("python3", "process.py"),
+                          builtin=True,
+                          paths=()),
+        )
+        ctx.command   == "python3"  # monty's first captured stage
+        ctx.builtin   == True
+        ctx.cwd       == "/data"
+
+    A pre_execute hook sees the same context with ``ctx.command`` as the
+    line's first stage. A config script gets this as the ``ctx`` dict
+    (see to_dict), with ``ctx["runtime"]`` naming the runtime being
+    asked.
+
+    Args:
+        line (str): the raw command line.
+        commands (tuple[ParsedCommand, ...]): parsed commands, empty on
+            a syntax error.
+        command (str): the stage addressed to the consulted party: an
+            entry script sees its runtime's first captured stage (see
+            for_runtime), a hook sees the line's first command. ""
+            when unparsable.
+        builtin (bool): whether ``command`` has a builtin spec.
+        cwd (str): session working directory.
+        env (dict[str, str]): session environment.
+        session_id (str): session hosting the line.
+        agent_id (str): agent executing the line.
+        mounts (tuple[str, ...]): workspace mount prefixes.
+    """
+
+    line: str
+    commands: tuple[ParsedCommand, ...]
+    command: str
+    builtin: bool
+    cwd: str
+    env: dict[str, str]
+    session_id: str
+    agent_id: str
+    mounts: tuple[str, ...]
+
+    def for_runtime(self, runtime: RuntimeIdentity) -> "ExecuteContext":
+        """The context as one runtime's script sees it.
+
+        ``command``/``builtin`` become the first stage the runtime
+        captures, so ``ctx.command == 'python3'`` means what it reads as
+        even on ``cat x | python3``. A runtime with no captured stage on
+        the line (including the catch-all vfs) keeps the line's first
+        stage.
+
+        Args:
+            runtime (RuntimeIdentity): the runtime being consulted.
+        """
+        for parsed in self.commands:
+            if parsed.command in runtime.captures:
+                return replace(self,
+                               command=parsed.command,
+                               builtin=parsed.builtin)
+        return self
+
+    def to_dict(self,
+                runtime: RuntimeIdentity | None = None) -> dict[str, Any]:
+        """The ctx payload as any evaluator's script sees it.
+
+        This is the execute context WIRE SCHEMA, a public contract:
+        JSON-shaped (strings, bools, lists, dicts), snake_case keys,
+        identical in both languages, so a script in any evaluator's
+        language (and any transport, in-process or remote) receives
+        the same structure. Keys: line, commands (command/words/
+        builtin/paths/cli per stage), command, builtin, cwd, env,
+        session_id, agent_id, mounts, plus runtime (name/captures)
+        for per-runtime scripts. from_dict is the inverse, so a
+        payload can be stored as JSON and replayed.
+
+        Args:
+            runtime (RuntimeIdentity | None): the runtime being asked,
+                added as ctx["runtime"] for per-runtime scripts.
+        """
+        payload: dict[str, Any] = {
+            "line":
+            self.line,
+            "commands": [{
+                "command": c.command,
+                "words": list(c.words),
+                "builtin": c.builtin,
+                "paths": list(c.paths),
+                "cli": c.cli,
+            } for c in self.commands],
+            "command":
+            self.command,
+            "builtin":
+            self.builtin,
+            "cwd":
+            self.cwd,
+            "env":
+            dict(self.env),
+            "session_id":
+            self.session_id,
+            "agent_id":
+            self.agent_id,
+            "mounts":
+            list(self.mounts),
+        }
+        if runtime is not None:
+            payload["runtime"] = {
+                "name": runtime.name,
+                "captures": list(runtime.captures),
+            }
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ExecuteContext":
+        """Rebuild a context from its wire-schema payload.
+
+        The inverse of to_dict for the context's own fields (the
+        payload's ``runtime`` block is per-consultation decoration and
+        is ignored), so a stored JSON payload replays through scripts
+        and routes in tests or debugging.
+
+        Args:
+            payload (dict[str, Any]): a to_dict-shaped payload.
+        """
+        return cls(
+            line=str(payload["line"]),
+            commands=tuple(
+                ParsedCommand(
+                    command=str(c["command"]),
+                    words=tuple(c["words"]),
+                    builtin=bool(c["builtin"]),
+                    paths=tuple(c["paths"]),
+                    cli=(str(c["cli"]) if c.get("cli") is not None else None))
+                for c in payload["commands"]),
+            command=str(payload["command"]),
+            builtin=bool(payload["builtin"]),
+            cwd=str(payload["cwd"]),
+            env=dict(payload["env"]),
+            session_id=str(payload["session_id"]),
+            agent_id=str(payload["agent_id"]),
+            mounts=tuple(payload["mounts"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ExecuteResultContext:
     """One finished execute() line, as post_execute hooks see it.
 
@@ -157,6 +370,7 @@ class ExecuteResultContext:
 
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind}),
+    "pre_execute": frozenset({Deny.kind, Route.kind}),
     "pre_ops": frozenset({Deny.kind}),
     "post_ops": frozenset({Deny.kind, Limit.kind}),
     "post_execute": frozenset({Limit.kind}),

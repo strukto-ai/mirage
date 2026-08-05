@@ -32,6 +32,7 @@ import {
   Workspace,
   type Action,
   type CommandContext,
+  type ExecuteContext,
   type ExecuteResultContext,
   type MountSpec,
   type OpsContext,
@@ -93,6 +94,7 @@ interface PolicySpec {
   prefix?: string;
   suffix?: string;
   marker?: string;
+  runtime?: string;
   max_bytes?: number;
   max_lines?: number;
   on_exceed?: string;
@@ -147,6 +149,36 @@ class DenyFlag implements Policy {
   preCommand(ctx: CommandContext): Action | null {
     if (ctx.command === this.spec.command && ctx.argv.includes(this.spec.flag ?? "")) {
       return { kind: "deny", message: this.spec.message ?? "" };
+    }
+    return null;
+  }
+}
+
+class DenyLine implements Policy {
+  private readonly marker: string;
+  private readonly message: string;
+  constructor(spec: PolicySpec) {
+    this.marker = spec.marker ?? "";
+    this.message = spec.message ?? "";
+  }
+  preExecute(ctx: ExecuteContext): Action | null {
+    if (ctx.line.includes(this.marker)) {
+      return { kind: "deny", message: this.message, exitCode: 126 };
+    }
+    return null;
+  }
+}
+
+class RouteCommand implements Policy {
+  private readonly command: string;
+  private readonly runtime: string;
+  constructor(spec: PolicySpec) {
+    this.command = spec.command ?? "";
+    this.runtime = spec.runtime ?? "";
+  }
+  preExecute(ctx: ExecuteContext): Action | null {
+    if (ctx.commands.some((c) => c.command === this.command)) {
+      return { kind: "route", runtime: this.runtime };
     }
     return null;
   }
@@ -227,6 +259,8 @@ class Boom implements Policy {
 
 const POLICY_KINDS: Record<string, new (spec: PolicySpec) => Policy> = {
   deny_flag: DenyFlag,
+  deny_line: DenyLine,
+  route_command: RouteCommand,
   lock_writes: LockWrites,
   seal_reads: SealReads,
   redact_reads: RedactReads,

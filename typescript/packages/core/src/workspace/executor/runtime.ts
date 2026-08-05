@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
-import { ScriptSource, type PolicyScript } from './policy/types.ts'
+import { ScriptSource, type PolicyScript } from './route/types.ts'
 import type { RunArgs, RunResult, RuntimeOptions } from './runtime_types.ts'
 
 /**

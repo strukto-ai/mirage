@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.errors import FindParseError, UsageError
-from mirage.runtime.policy import PolicyDeny
+from mirage.policy import PolicyDeny
 from mirage.workspace.workspace.failure import failure_result
 
 

@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.limit import guard_output
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import ExecuteResultContext, post_execute_gate
-from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.route import PolicyDecision
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.types import Producer

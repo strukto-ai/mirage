@@ -12,96 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
 import logging
-from typing import Any
 
 from mirage.policy.base import Policy
-from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.policy.errors import PolicyError
 from mirage.policy.spec import SpecPolicy
 from mirage.policy.types import (VALIDITY, CommandContext, Deny,
-                                 ExecuteResultContext, GuardSpec, OpsContext,
-                                 OpsResultContext)
-from mirage.types import Limit, PathSpec
+                                 ExecuteContext, ExecuteResultContext,
+                                 GuardSpec, OpsContext, OpsResultContext,
+                                 Route)
+from mirage.types import Limit
 
 logger = logging.getLogger(__name__)
 
-HookContext = (CommandContext | OpsContext | OpsResultContext
+HookContext = (CommandContext | ExecuteContext | OpsContext | OpsResultContext
                | ExecuteResultContext)
-
-
-async def pre_ops_gate(policies: "Policies", op: str, path: PathSpec,
-                       write: bool, prefix: str) -> None:
-    """Fire pre_ops at an op door; a Deny becomes EACCES.
-
-    The one seam helper both doors (the ops facade and the dispatcher)
-    call, so a refusal is byte-identical however the mount is reached:
-    PermissionError with errno EACCES and the virtual path as filename,
-    which the shell renders as "<cmd>: <path>: Permission denied" and
-    FUSE translates to -EACCES.
-
-    Args:
-        policies (Policies): the workspace's admission policies.
-        op (str): operation name.
-        path (PathSpec): the resolved virtual path.
-        write (bool): whether the op mutates the mount.
-        prefix (str): the owning mount's prefix.
-    """
-    if not policies.wants("pre_ops"):
-        return
-    deny = await policies.pre_ops(
-        OpsContext(op=op, path=path, write=write, prefix=prefix))
-    if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
-                           path.virtual)
-
-
-async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
-                        write: bool, prefix: str, result: Any) -> Limit | None:
-    """Fire post_ops at an op door; a Deny suppresses the result.
-
-    Returns the merged Limit bound (tightest per field across every
-    opining policy) for the door to apply to a byte-producing result,
-    or None when no policy bounds this op.
-
-    Args:
-        policies (Policies): the workspace's admission policies.
-        op (str): operation name.
-        path (PathSpec): the resolved virtual path.
-        write (bool): whether the op mutated the mount.
-        prefix (str): the owning mount's prefix.
-        result (Any): the op's raw result, offered to the hooks.
-    """
-    if not policies.wants("post_ops"):
-        return None
-    deny, bound = await policies.post_ops(
-        OpsResultContext(op=op,
-                         path=path,
-                         write=write,
-                         prefix=prefix,
-                         result=result))
-    if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
-                           path.virtual)
-    return bound
-
-
-async def post_execute_gate(
-        policies: "Policies",
-        ctx: ExecuteResultContext) -> tuple[Deny | None, Limit | None]:
-    """Fire post_execute at the workspace boundary.
-
-    Returns the fail-closed Deny (a raising policy) if any, and the
-    merged Limit bound for the boundary to enforce on the line's
-    output stream.
-
-    Args:
-        policies (Policies): the workspace's policies.
-        ctx (ExecuteResultContext): the finished line's facts.
-    """
-    if not policies.wants("post_execute"):
-        return None, None
-    return await policies.post_execute(ctx)
 
 
 class Policies:
@@ -161,36 +86,50 @@ class Policies:
                     break
         self._wanted = frozenset(wanted)
 
-    async def _fire(self, hook: str, ctx: HookContext,
-                    subject: str) -> tuple[Deny | None, Limit | None]:
+    async def _fire(
+            self, hook: str, ctx: HookContext,
+            subject: str) -> tuple[Deny | None, Limit | None, Route | None]:
         """One loop for every hook: first Deny wins, Limits merge.
 
-        A refusal short-circuits (limits are moot once the result is
-        suppressed); Limit actions accumulate and aggregate to the
-        tightest value per field.
+        A refusal short-circuits (limits and routes are moot once the
+        line is refused); Limit actions accumulate and aggregate to the
+        tightest value per field; the first Route is kept and later
+        Routes ignored, but a later policy can still Deny over it.
+
+        A raising policy fails closed into a Deny naming it, except a
+        PolicyError, which is a programming error reporting a
+        caller-fixable mistake and propagates instead.
         """
         base = getattr(Policy, hook)
         limits: list[Limit] = []
+        route: Route | None = None
         for policy in self._policies:
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__
             try:
                 action = await getattr(policy, hook)(ctx)
+            except PolicyError:
+                raise
             except Exception as exc:
                 logger.error("%s policy %s raised: %s", hook, name, exc)
-                return Deny(f"{subject}: policy {name} failed: {exc}\n"), None
+                return (Deny(f"{subject}: policy {name} failed: {exc}\n"),
+                        None, None)
             if action is None:
                 continue
             legal = VALIDITY[hook]
             if isinstance(action, Deny) and Deny.kind in legal:
-                return action, None
+                return action, None, None
             if isinstance(action, Limit) and Limit.kind in legal:
                 limits.append(action)
                 continue
+            if isinstance(action, Route) and Route.kind in legal:
+                if route is None:
+                    route = action
+                continue
             raise PolicyError(f"{hook} of {name} returned {action!r}; "
                               f"legal kinds here: {sorted(legal)}")
-        return None, Limit.aggr(limits)
+        return None, Limit.aggr(limits), route
 
     async def pre_command(self, ctx: CommandContext) -> Deny | None:
         """Fire pre_command across the policies; first Deny wins.
@@ -198,8 +137,19 @@ class Policies:
         Args:
             ctx (CommandContext): the classified command.
         """
-        deny, _ = await self._fire("pre_command", ctx, ctx.command)
+        deny, _, _ = await self._fire("pre_command", ctx, ctx.command)
         return deny
+
+    async def pre_execute(
+            self, ctx: ExecuteContext) -> tuple[Deny | None, Route | None]:
+        """Fire pre_execute; first Deny wins, first Route places the line.
+
+        Args:
+            ctx (ExecuteContext): the parsed line's facts.
+        """
+        deny, _, route = await self._fire("pre_execute", ctx, ctx.command
+                                          or "line")
+        return deny, route
 
     async def pre_ops(self, ctx: OpsContext) -> Deny | None:
         """Fire pre_ops across the policies; first Deny wins.
@@ -207,7 +157,7 @@ class Policies:
         Args:
             ctx (OpsContext): the op about to run.
         """
-        deny, _ = await self._fire("pre_ops", ctx, ctx.op)
+        deny, _, _ = await self._fire("pre_ops", ctx, ctx.op)
         return deny
 
     async def post_ops(
@@ -217,7 +167,8 @@ class Policies:
         Args:
             ctx (OpsResultContext): the op and its raw result.
         """
-        return await self._fire("post_ops", ctx, ctx.op)
+        deny, bound, _ = await self._fire("post_ops", ctx, ctx.op)
+        return deny, bound
 
     async def post_execute(
             self,
@@ -227,5 +178,6 @@ class Policies:
         Args:
             ctx (ExecuteResultContext): the finished line's facts.
         """
-        return await self._fire("post_execute", ctx, ctx.producer.command
-                                or "line")
+        deny, bound, _ = await self._fire("post_execute", ctx,
+                                          ctx.producer.command or "line")
+        return deny, bound

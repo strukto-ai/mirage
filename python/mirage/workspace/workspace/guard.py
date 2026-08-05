@@ -30,6 +30,6 @@ def reject_config_script(kind: str, value: object) -> None:
     """
     if isinstance(value, str):
         raise TypeError(
-            f"{kind} must be a callable taking the PolicyContext; config "
+            f"{kind} must be a callable taking the ExecuteContext; config "
             f"scripts reference a .py file (script:/policy: in the "
             f"workspace yaml)")

@@ -17,7 +17,7 @@ from collections.abc import Container
 import tree_sitter
 
 from mirage.commands.spec import SPECS
-from mirage.runtime.policy.types import ParsedCommand
+from mirage.policy.types import ParsedCommand
 from mirage.shell.types import NodeType
 
 _WORD_TYPES = (NodeType.COMMAND_NAME, NodeType.WORD, NodeType.STRING,

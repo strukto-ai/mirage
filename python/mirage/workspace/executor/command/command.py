@@ -27,7 +27,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit, resolve_producer
-from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.route import PolicyDecision
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer

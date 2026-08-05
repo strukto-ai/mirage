@@ -15,6 +15,7 @@
 import type {
   Action,
   CommandContext,
+  ExecuteContext,
   ExecuteResultContext,
   OpsContext,
   OpsResultContext,
@@ -31,6 +32,14 @@ import type {
  */
 export interface Policy {
   preCommand?(ctx: CommandContext): Action | null | Promise<Action | null>
+  /**
+   * Steer or refuse one typed line before anything runs. Fires
+   * parse-before-dispatch, once per top-level line. A Deny refuses the
+   * line (exit 126, policy-denied wording); a Route places it on a
+   * named runtime, overriding the static bindings the way the
+   * `runtime` argument does. The first Route wins.
+   */
+  preExecute?(ctx: ExecuteContext): Action | null | Promise<Action | null>
   /**
    * Admit or refuse one VFS op, whatever door it entered. The hot
    * path: fires per op, so keep the hook cheap; expensive decisions

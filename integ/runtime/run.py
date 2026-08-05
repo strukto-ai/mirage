@@ -30,11 +30,13 @@ from mirage import MountMode, Workspace  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.types import CommandContext  # noqa: E402
 from mirage.policy.types import Deny  # noqa: E402
+from mirage.policy.types import ExecuteContext  # noqa: E402
 from mirage.policy.types import ExecuteResultContext  # noqa: E402
 from mirage.policy.types import OpsContext  # noqa: E402
 from mirage.policy.types import OpsResultContext  # noqa: E402
+from mirage.policy.types import Route  # noqa: E402
 from mirage.runtime.base import Runtime  # noqa: E402
-from mirage.runtime.policy import ScriptSource  # noqa: E402
+from mirage.runtime.route import ScriptSource  # noqa: E402
 from mirage.runtime.table import build_runtime  # noqa: E402
 from mirage.runtime.types import RunArgs, RunResult  # noqa: E402
 from mirage.types import Limit, PathSpec  # noqa: E402
@@ -77,6 +79,32 @@ class DenyFlag(Policy):
     async def pre_command(self, ctx: CommandContext) -> Deny | None:
         if ctx.command == self._command and self._flag in ctx.argv:
             return Deny(message=self._message)
+        return None
+
+
+class DenyLine(Policy):
+    """Test-only pre_execute policy: refuse lines holding a marker."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._marker = spec["marker"]
+        self._message = spec["message"]
+
+    async def pre_execute(self, ctx: ExecuteContext) -> Deny | None:
+        if self._marker in ctx.line:
+            return Deny(message=self._message, exit_code=126)
+        return None
+
+
+class RouteCommand(Policy):
+    """Test-only pre_execute policy: place a command's lines on a runtime."""
+
+    def __init__(self, spec: dict[str, Any]) -> None:
+        self._command = spec["command"]
+        self._runtime = spec["runtime"]
+
+    async def pre_execute(self, ctx: ExecuteContext) -> Route | None:
+        if any(c.command == self._command for c in ctx.commands):
+            return Route(self._runtime)
         return None
 
 
@@ -153,6 +181,8 @@ class Boom(Policy):
 
 POLICY_KINDS = {
     "deny_flag": DenyFlag,
+    "deny_line": DenyLine,
+    "route_command": RouteCommand,
     "lock_writes": LockWrites,
     "seal_reads": SealReads,
     "redact_reads": RedactReads,
