@@ -72,8 +72,8 @@ export function bccAddresses(raw: Uint8Array): string[] {
   for (const line of bccLines(raw)) {
     const value = line.replace(/^bcc:/i, '')
     for (const part of value.split(',')) {
-      const match = /<([^>]+)>/.exec(part) ?? [null, part.trim()]
-      const email = (match[1] ?? '').trim()
+      const angled = /<([^>]+)>/.exec(part)
+      const email = (angled === null ? part : (angled[1] ?? '')).trim()
       if (email !== '') addresses.push(email)
     }
   }
@@ -88,7 +88,10 @@ function bccLines(raw: Uint8Array): string[] {
   let collecting = false
   for (const line of head.split(/\r?\n/)) {
     if (/^[ \t]/.test(line)) {
-      if (collecting) found[found.length - 1] += ` ${line.trim()}`
+      if (collecting) {
+        const last = found.pop() ?? ''
+        found.push(`${last} ${line.trim()}`)
+      }
       continue
     }
     collecting = /^bcc:/i.test(line)

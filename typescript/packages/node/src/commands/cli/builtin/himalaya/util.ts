@@ -60,7 +60,9 @@ export async function route(
   const parsed = await sendRaw(config, raw)
   const result = {
     status: 'sent',
-    to: parsed.to.map((entry) => (entry.name === '' ? entry.email : `${entry.name} <${entry.email}>`)).join(', '),
+    to: parsed.to
+      .map((entry) => (entry.name === '' ? entry.email : `${entry.name} <${entry.email}>`))
+      .join(', '),
     subject: parsed.subject,
   }
   return [ENC.encode(JSON.stringify(result)) as ByteSource, new IOResult()]

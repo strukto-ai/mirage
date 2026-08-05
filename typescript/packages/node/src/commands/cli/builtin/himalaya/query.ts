@@ -72,7 +72,7 @@ function tokenize(source: string): Token[] {
   const tokens: Token[] = []
   let index = 0
   while (index < source.length) {
-    const char = source[index] as string
+    const char = source.charAt(index)
     if (/\s/.test(char)) {
       index += 1
       continue
@@ -85,9 +85,9 @@ function tokenize(source: string): Token[] {
     if (char === '"') {
       index += 1
       const chars: string[] = []
-      while (index < source.length && source[index] !== '"') {
-        if (source[index] === '\\' && index + 1 < source.length) index += 1
-        chars.push(source[index] as string)
+      while (index < source.length && source.charAt(index) !== '"') {
+        if (source.charAt(index) === '\\' && index + 1 < source.length) index += 1
+        chars.push(source.charAt(index))
         index += 1
       }
       if (index >= source.length) throw new QueryError('unterminated quoted pattern')
@@ -96,7 +96,7 @@ function tokenize(source: string): Token[] {
       continue
     }
     const start = index
-    while (index < source.length && !/[\s()]/.test(source[index] as string)) index += 1
+    while (index < source.length && !/[\s()]/.test(source.charAt(index))) index += 1
     tokens.push({ text: source.slice(start, index), quoted: false })
   }
   return tokens
@@ -135,7 +135,8 @@ function imapDate(text: string): Date {
 
 function formatDate(value: Date): string {
   const day = String(value.getUTCDate()).padStart(2, '0')
-  return `${day}-${IMAP_MONTHS[value.getUTCMonth()]}-${value.getUTCFullYear()}`
+  const month = IMAP_MONTHS[value.getUTCMonth()] ?? 'Jan'
+  return `${day}-${month}-${String(value.getUTCFullYear())}`
 }
 
 /**
@@ -282,7 +283,10 @@ function compare(a: string | number, b: string | number): number {
  * the first sorter ends up the primary key. With no sorters the order is
  * date descending, matching `envelope list`.
  */
-export function sortHeaders(headers: FetchedMessage[], sorters: readonly Sorter[]): FetchedMessage[] {
+export function sortHeaders(
+  headers: FetchedMessage[],
+  sorters: readonly Sorter[],
+): FetchedMessage[] {
   const ordered = [...headers]
   if (sorters.length === 0) {
     ordered.sort((a, b) => sentAt(b) - sentAt(a))

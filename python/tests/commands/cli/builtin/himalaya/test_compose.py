@@ -46,8 +46,8 @@ async def test_compose_writes_mime_to_stdout_without_send(sent):
     out, io = await compose(CONFIG, [], to="a@b.com", subject="Hi", body="yo")
     assert io.exit_code == 0
     assert "raw" not in sent
-    message = BytesParser(policy=default_policy).parsebytes(
-        await materialize(out))
+    message = BytesParser(policy=default_policy).parsebytes(await
+                                                            materialize(out))
     assert message["From"] == "me@example.com"
     assert message["To"] == "a@b.com"
     assert message["Subject"] == "Hi"
@@ -77,8 +77,8 @@ async def test_recipients_accept_repeats_and_comma_lists(sent):
                            cc="d@x",
                            subject="Hi",
                            body="yo")
-    message = BytesParser(policy=default_policy).parsebytes(
-        await materialize(out))
+    message = BytesParser(policy=default_policy).parsebytes(await
+                                                            materialize(out))
     assert message["To"] == "a@x, b@x, c@x"
     assert message["Cc"] == "d@x"
 
@@ -89,16 +89,16 @@ async def test_body_falls_back_to_stdin(sent):
                            stdin=b"piped body",
                            to="a@x",
                            subject="Hi")
-    message = BytesParser(policy=default_policy).parsebytes(
-        await materialize(out))
+    message = BytesParser(policy=default_policy).parsebytes(await
+                                                            materialize(out))
     assert message.get_content().strip() == "piped body"
 
 
 @pytest.mark.asyncio
 async def test_from_flag_overrides_the_account_username(sent):
     out, _ = await compose(CONFIG, [], to="a@x", body="yo", **{"from": "x@y"})
-    message = BytesParser(policy=default_policy).parsebytes(
-        await materialize(out))
+    message = BytesParser(policy=default_policy).parsebytes(await
+                                                            materialize(out))
     assert message["From"] == "x@y"
 
 

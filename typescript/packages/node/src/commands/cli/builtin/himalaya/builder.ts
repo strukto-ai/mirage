@@ -139,11 +139,9 @@ export function build(compose: Compose, source: Source | null = null): Uint8Arra
   if (source !== null) {
     const original = source.message
     const prefix = PREFIXES[source.mode]
-    if (subject === null) {
-      subject = hasPrefix(original.subject, prefix)
-        ? original.subject
-        : `${prefix}${original.subject}`
-    }
+    subject ??= hasPrefix(original.subject, prefix)
+      ? original.subject
+      : `${prefix}${original.subject}`
     if (source.mode === 'reply' && recipients.length === 0) {
       recipients = replyRecipients(original)
     }

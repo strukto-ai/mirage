@@ -14,12 +14,9 @@
 
 import pytest
 
-from mirage.commands.cli.builtin.himalaya.builder import (Compose, Source,
-                                                          build, compose_body,
-                                                          has_prefix,
-                                                          quote_text,
-                                                          reply_recipients,
-                                                          split_addresses)
+from mirage.commands.cli.builtin.himalaya.builder import (  # yapf: disable
+    Compose, Source, build, compose_body, has_prefix, quote_text,
+    reply_recipients, split_addresses)
 
 ORIGINAL = {
     "subject": "Quarterly numbers",
@@ -61,8 +58,8 @@ def test_quote_text_does_not_double_space_already_quoted_lines():
 
 
 def test_quote_headline_is_not_itself_quoted():
-    assert quote_text("a", "On Monday, Alice wrote:") == (
-        "On Monday, Alice wrote:\n> a")
+    assert quote_text(
+        "a", "On Monday, Alice wrote:") == ("On Monday, Alice wrote:\n> a")
 
 
 def test_quote_text_of_an_empty_body_is_empty():

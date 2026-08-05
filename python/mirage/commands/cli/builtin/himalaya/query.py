@@ -204,7 +204,8 @@ class _Parser:
         if word == "after":
             # Strictly greater than the given day; IMAP SINCE is
             # inclusive, so ask for the day after.
-            return f"SINCE {_format_date(_imap_date(value) + timedelta(days=1))}"
+            after = _imap_date(value) + timedelta(days=1)
+            return f"SINCE {_format_date(after)}"
         if word == "flag":
             key = FLAGS.get(value.lower())
             if key is None:
