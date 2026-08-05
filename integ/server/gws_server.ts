@@ -657,15 +657,68 @@ function rangeLabel(tab: SheetTab, startRow: number, startCol: number, values: s
   return `${tab.title}!${start}:${end}`
 }
 
+// Plain decimal only: a sign, digits either side of a point, an optional
+// exponent. `0x10`, `1_000`, `Infinity` and a whitespace-only cell are all
+// strings in live Sheets, which `Number()` would have made numeric.
+const DECIMAL = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
+const BOOLEAN = /^(true|false)$/i
+const EXPONENT = /[eE]/
+const EXPONENT_DIGITS = 2
+
+// A number typed with an exponent keeps a scientific format, which live
+// Sheets renders with two decimals and a two-digit exponent: `1e3` is
+// `"1.00E+03"`, `1e-3` is `"1.00E-03"`, `1e10` is `"1.00E+10"`.
+function scientific(value: number): string {
+  const [mantissa = '', exponent = ''] = value.toExponential(2).split('e')
+  const sign = exponent.startsWith('-') ? '-' : '+'
+  const digits = exponent.replace(/^[+-]/, '').padStart(EXPONENT_DIGITS, '0')
+  return `${mantissa}E${sign}${digits}`
+}
+
+// The grid a tab reports, which the live API grows to hold what was
+// written: 1313 written rows report rowCount 1313, and rowMetadata has one
+// entry per row of the grid rather than a fixed 1000.
+function tabGrid(tab: SheetTab): { rows: number; cols: number } {
+  const used = tabExtent(tab)
+  return {
+    rows: Math.max(GRID_ROWS, used.rows),
+    cols: Math.max(GRID_COLUMNS, used.cols),
+  }
+}
+
 // Verified against the live API on 2026-08-05, writing through mirage's own
-// path (values.update with valueInputOption=USER_ENTERED): a value that
-// parses as a number is stored as one, everything else stays a string, and
-// formattedValue is the text either way. An untouched cell is `{}` — no
-// keys at all, since ExtendedValue with no field set means empty.
+// path (values.update with valueInputOption=USER_ENTERED): `007` is the
+// number 7 and reports `"7"`, `4.50` reports `"4.5"`, `TRUE` and `true` are
+// both the boolean reporting `"TRUE"`, and everything else stays the string
+// it was typed as. An untouched cell is `{}` — no keys at all, since
+// ExtendedValue with no field set means empty.
+//
+// Not modeled, and a string here where live Sheets makes it a number: a
+// currency, percent, thousands-separated or date-shaped cell (`$5`, `50%`,
+// `1,234`, `2026-01-02`), which needs Sheets' locale-aware number formats.
+// A leading `+` is a formula in live Sheets (`+5` is formulaValue `"+5"`)
+// whose rendered value happens to match the number taken here.
 function cellData(text: string): Record<string, unknown> {
   if (text === '') return {}
-  const numeric = Number.isFinite(Number(text))
-  const value = numeric ? { numberValue: Number(text) } : { stringValue: text }
+  const trimmed = text.trim()
+  if (BOOLEAN.test(trimmed)) {
+    const value = { boolValue: trimmed.toLowerCase() === 'true' }
+    return {
+      userEnteredValue: value,
+      effectiveValue: value,
+      formattedValue: trimmed.toUpperCase(),
+    }
+  }
+  if (DECIMAL.test(trimmed)) {
+    const number = Number(trimmed)
+    const value = { numberValue: number }
+    return {
+      userEnteredValue: value,
+      effectiveValue: value,
+      formattedValue: EXPONENT.test(trimmed) ? scientific(number) : String(number),
+    }
+  }
+  const value = { stringValue: text }
   return { userEnteredValue: value, effectiveValue: value, formattedValue: text }
 }
 
@@ -676,22 +729,24 @@ function cellData(text: string): Record<string, unknown> {
 // because the live API omits them at zero.
 function gridData(tab: SheetTab): Record<string, unknown>[] {
   const rows = rangeValues({ tab, startRow: 0, startCol: 0, endRow: null, endCol: null })
+  const grid = tabGrid(tab)
   return [
     {
       rowData: rows.map((row) => (row.length === 0 ? {} : { values: row.map(cellData) })),
-      rowMetadata: Array.from({ length: GRID_ROWS }, () => ({ pixelSize: ROW_PIXELS })),
-      columnMetadata: Array.from({ length: GRID_COLUMNS }, () => ({ pixelSize: COLUMN_PIXELS })),
+      rowMetadata: Array.from({ length: grid.rows }, () => ({ pixelSize: ROW_PIXELS })),
+      columnMetadata: Array.from({ length: grid.cols }, () => ({ pixelSize: COLUMN_PIXELS })),
     },
   ]
 }
 
 function tabProperties(tab: SheetTab, index: number): Record<string, unknown> {
+  const grid = tabGrid(tab)
   return {
     sheetId: tab.sheetId,
     title: tab.title,
     index,
     sheetType: 'GRID',
-    gridProperties: { rowCount: GRID_ROWS, columnCount: GRID_COLUMNS },
+    gridProperties: { rowCount: grid.rows, columnCount: grid.cols },
   }
 }
 
