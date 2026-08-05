@@ -90,6 +90,10 @@ and the workspace mounts are visible as ordinary files through the
 runtime's bridge. Its exit code becomes the line's `$?` and its stderr
 reaches the shell.
 
+A Python program reads that variable either way the language spells it,
+`os.getenv('MIRAGE_CLI_CONFIG')` or `os.environ['MIRAGE_CLI_CONFIG']`, on
+every Python runtime and on both host languages.
+
 How arguments and input are spelled is the runtime's own contract, the
 same one the `python3` and `node` commands follow:
 
