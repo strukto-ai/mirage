@@ -20,7 +20,7 @@ from mirage.workspace.executor.builtins.lookup.constants import (TYPE_OPTIONS,
                                                                  WHICH_OPTIONS,
                                                                  WHICH_USAGE)
 from mirage.workspace.executor.builtins.lookup.types import NameKind
-from mirage.workspace.executor.builtins.shared import Result, ok, result
+from mirage.workspace.executor.builtins.shared import Result, result
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 
@@ -70,9 +70,10 @@ def handle_type(
         elif mode is None:
             out_lines.extend(f"{describe(name, kind)}\n" for kind in kinds)
     out = "".join(out_lines).encode() if out_lines else None
-    if not scan.operands or all_found:
-        return ok("type", out)
-    return result("type", out=out, exit_code=1, stderr="".join(err_lines))
+    # One call, so the diagnostics never ride on the status: a partial
+    # miss both warns and reports through the exit code.
+    code = 0 if (not scan.operands or all_found) else 1
+    return result("type", out=out, exit_code=code, stderr="".join(err_lines))
 
 
 def handle_which(
@@ -120,6 +121,5 @@ def handle_which(
         if not silent:
             out_lines.extend([f"{name}\n"] * len(kinds))
     out = "".join(out_lines).encode() if out_lines else None
-    if scan.operands and all_found:
-        return ok("which", out)
-    return result("which", out=out, exit_code=1)
+    code = 0 if (scan.operands and all_found) else 1
+    return result("which", out=out, exit_code=code)

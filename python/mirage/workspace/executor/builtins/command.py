@@ -57,9 +57,14 @@ def _probe(mode: str, rest: Sequence[str], session: Session,
         line = name if mode == "v" else describe(name, kind)
         out_lines.append(f"{line}\n")
     out = "".join(out_lines).encode() if out_lines else None
-    if not rest or any_found:
-        return ok("command", out)
-    return result("command", out=out, exit_code=1, stderr="".join(err_lines))
+    # The status and the diagnostics are independent: bash prints
+    # `command: nope: not found` for a missing name and still exits 0
+    # when another name resolved.
+    code = 0 if (not rest or any_found) else 1
+    return result("command",
+                  out=out,
+                  exit_code=code,
+                  stderr="".join(err_lines))
 
 
 async def handle_command_builtin(

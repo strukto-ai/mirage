@@ -90,6 +90,18 @@ async def test_v_multi_name_any_found_rc0():
 
 
 @pytest.mark.asyncio
+async def test_V_warns_for_a_missing_name_while_exiting_0():
+    # bash prints the diagnostic and still exits 0 when another name
+    # resolved: the status and the stderr are independent.
+    out, io, _ = await handle_command_builtin(FakeShell(),
+                                              ["-V", "cd", "nope_xyz"],
+                                              make_session(), make_registry())
+    assert await materialize(out) == b"cd is a shell builtin\n"
+    assert await materialize(io.stderr) == b"command: nope_xyz: not found\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
 async def test_v_multi_name_none_found_rc1():
     out, io, _ = await handle_command_builtin(FakeShell(),
                                               ["-v", "nope1", "nope2"],

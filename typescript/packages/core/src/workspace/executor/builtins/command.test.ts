@@ -144,6 +144,20 @@ describe('handleCommandBuiltin -v/-V', () => {
     expect(io.exitCode).toBe(1)
   })
 
+  it('-V warns for a missing name while exiting 0', async () => {
+    // bash prints the diagnostic and still exits 0 when another name
+    // resolved: the status and the stderr are independent.
+    const [out, io] = await handleCommandBuiltin(
+      vi.fn(),
+      ['-V', 'cd', 'nope_xyz'],
+      makeSession(),
+      makeRegistry(),
+    )
+    expect(await body(out)).toBe('cd is a shell builtin\n')
+    expect(decode(await materialize(io.stderr))).toBe('command: nope_xyz: not found\n')
+    expect(io.exitCode).toBe(0)
+  })
+
   it('reports a function', async () => {
     const session = makeSession()
     session.functions.myfn = []
