@@ -84,7 +84,7 @@ the config file) and the program runs on the workspace's runtime world:
 `.py` on the first Python runtime, `.js`/`.mjs` on the first JavaScript
 one. What it gets is what a native binary would get. The words after the
 head arrive verbatim, piped input arrives on standard input, the
-install's config arrives as `MIRAGE_CONFIG` in the environment as JSON,
+install's config arrives as `MIRAGE_CLI_CONFIG` in the environment as JSON,
 and the workspace mounts are visible as ordinary files through the
 runtime's bridge. Its exit code becomes the line's `$?` and its stderr
 reaches the shell.
@@ -102,7 +102,15 @@ On monty `argv[0]` is the program name, so arguments start at `argv[1]`;
 `scriptArgs[0]` is already the first argument.
 
 A script CLI is one program rather than a verb tree, so it parses its
-own arguments. `runtime:` pins which entry runs it, and `runtime: local`
+own arguments, and mirage stays out of the way: it recognizes no flags
+of its own, so `pager --width 80` reaches the program instead of being
+refused, and `pager --help` is the program's to answer. A spec that
+declares `options` or `positional` opts back in, and then mirage parses
+the line, renders `--help` and `man` from the declaration, and refuses
+an undeclared flag; that is only reachable in code, since a YAML entry
+declares no grammar.
+
+`runtime:` pins which entry runs it, and `runtime: local`
 escalates a Python script to the host interpreter, where third-party
 packages are available. The sandboxed runtimes are files plus compute:
 no sockets, no third-party imports on monty, no Node builtins on

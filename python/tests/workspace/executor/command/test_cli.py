@@ -124,6 +124,24 @@ async def test_leaf_usage_error_exits_2_with_prog_attribution():
                                 b"required")
 
 
+async def own_help(inv: CLIInvocation[None]):
+    return f"help={inv.flags.get('help')!r}\n".encode(), IOResult()
+
+
+@pytest.mark.asyncio
+async def test_leaf_declaring_help_is_handed_the_flag():
+    # Injection is skipped for a leaf that declares --help, so the
+    # answer is the leaf's too: intercepting it anyway would make the
+    # declaration unreachable.
+    spec = CLISpec(name="prog",
+                   fn=own_help,
+                   options=(Option(long="--help", description="own help"), ))
+    install = CLIInstall(name="prog", spec=spec, config=None)
+    stdout, io, _ = await handle_cli(install, ["prog", "--help"], Session("t"))
+    assert io.exit_code == 0
+    assert await materialize(stdout) == b"help=True\n"
+
+
 async def slow_send(inv: CLIInvocation[None]):
     await asyncio.sleep(0.5)
     return None, IOResult()
@@ -274,7 +292,10 @@ async def test_script_env_carries_mirage_config_json():
     _, io, _ = await handle_cli(install, ["pager"], session, entries=[py])
     assert io.exit_code == 0
     run = py.seen.pop()
-    assert run.env == {"EDITOR": "vi", "MIRAGE_CONFIG": '{"api_key": "k1"}'}
+    assert run.env == {
+        "EDITOR": "vi",
+        "MIRAGE_CLI_CONFIG": '{"api_key": "k1"}'
+    }
 
 
 @pytest.mark.asyncio
@@ -283,7 +304,7 @@ async def test_script_env_omits_mirage_config_without_config():
     _, _, _ = await handle_cli(script_install(), ["pager"],
                                Session("t"),
                                entries=[py])
-    assert "MIRAGE_CONFIG" not in py.seen.pop().env
+    assert "MIRAGE_CLI_CONFIG" not in py.seen.pop().env
 
 
 @pytest.mark.asyncio
@@ -297,21 +318,54 @@ async def test_script_stdin_materializes_to_bytes():
 
 
 @pytest.mark.asyncio
-async def test_script_help_renders_without_executing():
+async def test_script_help_reaches_a_program_that_declared_nothing():
+    # A grammarless script root answers its own --help: mirage would
+    # render a page documenting only --help, which documents nothing.
     py = FakePyRuntime()
-    stdout, io, _ = await handle_cli(script_install(), ["pager", "--help"],
+    _, io, _ = await handle_cli(script_install(), ["pager", "--help"],
+                                Session("t"),
+                                entries=[py])
+    assert io.exit_code == 0
+    assert py.seen.pop().args == ["--help"]
+
+
+@pytest.mark.asyncio
+async def test_script_help_renders_when_the_spec_declares_a_grammar():
+    # Declaring options opts back into the front door, where the
+    # rendered page is truthful and the program never runs.
+    py = FakePyRuntime()
+    install = script_install(
+        options=(Option(short="-n", long="--lines", type="int"), ))
+    stdout, io, _ = await handle_cli(install, ["pager", "--help"],
                                      Session("t"),
                                      entries=[py])
     assert io.exit_code == 0
     out = await materialize(stdout)
     assert out.startswith(b"pager\n")
+    assert b"--lines" in out
     assert py.seen == []
 
 
 @pytest.mark.asyncio
-async def test_script_undeclared_flag_refuses_without_executing():
+async def test_script_undeclared_flag_reaches_the_program():
+    # The program is the parser, so a flag it accepts must not be
+    # refused on its behalf: a yaml clis entry declares no grammar at
+    # all, which would leave the tier operand-only.
     py = FakePyRuntime()
-    _, io, _ = await handle_cli(script_install(), ["pager", "--frobnicate"],
+    _, io, _ = await handle_cli(script_install(),
+                                ["pager", "--width", "80", "-n", "x"],
+                                Session("t"),
+                                entries=[py])
+    assert io.exit_code == 0
+    assert py.seen.pop().args == ["--width", "80", "-n", "x"]
+
+
+@pytest.mark.asyncio
+async def test_script_with_a_grammar_refuses_an_undeclared_flag():
+    py = FakePyRuntime()
+    install = script_install(
+        options=(Option(short="-n", long="--lines", type="int"), ))
+    _, io, _ = await handle_cli(install, ["pager", "--frobnicate"],
                                 Session("t"),
                                 entries=[py])
     assert io.exit_code == 2

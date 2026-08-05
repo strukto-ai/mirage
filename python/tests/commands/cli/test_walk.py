@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli import CLISpec, walk
-from mirage.commands.cli.walk import find_child, find_node
+from mirage.commands.cli.walk import (find_child, find_node, node_help,
+                                      owns_argv)
 from mirage.commands.spec.types import Option
 from mirage.runtime.types import ScriptSource
 
@@ -352,3 +353,22 @@ def test_script_root_terminates_the_walk_with_argv_verbatim():
     assert result.path == ()
     assert result.argv == ("--frobnicate", "report.txt")
     assert result.exit_code == 0
+
+
+def test_owns_argv_only_for_a_grammarless_script_root():
+    source = ScriptSource("print('hi')")
+    assert owns_argv(CLISpec(name="pager", script=source))
+    declared = CLISpec(name="pager",
+                       script=source,
+                       options=(Option(long="--width", type="int"), ))
+    assert not owns_argv(declared)
+    assert not owns_argv(CLISpec(name="prog", fn=_verb))
+
+
+def test_manual_of_a_grammarless_script_omits_the_help_row():
+    # man renders from the spec, so it must not advertise a --help the
+    # program answers itself.
+    text = node_help("pager",
+                     CLISpec(name="pager", script=ScriptSource("print(1)")))
+    assert text.startswith("pager\n")
+    assert "--help" not in text

@@ -180,14 +180,55 @@ describe('script CLI e2e', () => {
     }
   }, 60_000)
 
-  it('the install config arrives as MIRAGE_CONFIG', async () => {
+  it('the install config arrives as MIRAGE_CLI_CONFIG', async () => {
     const ws = buildScriptWorkspace()
     try {
-      ws.registerCli('pager', pagerSpec("import os\nprint(os.getenv('MIRAGE_CONFIG'))"), {
+      ws.registerCli('pager', pagerSpec("import os\nprint(os.getenv('MIRAGE_CLI_CONFIG'))"), {
         width: 80,
       })
       const res = await ws.execute('pager')
       expect([res.exitCode, dec.decode(res.stdout)]).toEqual([0, '{"width":80}\n'])
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('the script receives its own flags', async () => {
+    // A yaml clis entry declares no grammar, so mirage must not refuse
+    // flags on the program's behalf; the program is the parser.
+    const ws = buildScriptWorkspace()
+    try {
+      ws.registerCli('pager', pagerSpec("print('paged', argv[1:])"))
+      const res = await ws.execute('pager --width 80 -n report.txt')
+      expect([res.exitCode, dec.decode(res.stdout)]).toEqual([
+        0,
+        "paged ['--width', '80', '-n', 'report.txt']\n",
+      ])
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('the script answers its own --help', async () => {
+    const ws = buildScriptWorkspace()
+    try {
+      ws.registerCli('pager', pagerSpec("print('program usage', argv[1:])"))
+      const res = await ws.execute('pager --help')
+      expect([res.exitCode, dec.decode(res.stdout)]).toEqual([0, "program usage ['--help']\n"])
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('man promises no --help flag for it', async () => {
+    const ws = buildScriptWorkspace()
+    try {
+      ws.registerCli('pager', pagerSpec("print('hi')"))
+      const res = await ws.execute('man pager')
+      const out = dec.decode(res.stdout)
+      expect(res.exitCode).toBe(0)
+      expect(out.startsWith('pager\n')).toBe(true)
+      expect(out).not.toContain('--help')
     } finally {
       await ws.close()
     }

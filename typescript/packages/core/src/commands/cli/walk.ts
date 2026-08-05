@@ -57,6 +57,26 @@ export function findNode(
 }
 
 /**
+ * True when the node parses its own command line instead of mirage.
+ *
+ * A script root that declares no grammar is the only such node: the
+ * embedded program is the parser, so its flags are not mirage's to
+ * recognize, and a generated help page would document nothing. Mirage
+ * forwards the whole line to it (a pass-through rest operand) and leaves
+ * `--help` to the program. A script root that does declare options or
+ * operands opts back into the ordinary machinery, which then renders
+ * truthful help and refuses undeclared flags.
+ */
+export function ownsArgv(node: CLISpec): boolean {
+  return (
+    node.script !== null &&
+    node.options.length === 0 &&
+    node.positional.length === 0 &&
+    node.rest === null
+  )
+}
+
+/**
  * A group node's help: the ordinary command help plus Commands rows.
  * One renderer serves leaves and groups; the same text serves `--help`
  * (stdout, exit 0) and the bare-group refusal (stdout, exit 1, matching
@@ -70,11 +90,14 @@ export function nodeHelp(name: string, node: CLISpec): string {
   ])
   // --help is a registered option everywhere (argparse add_help, click
   // add_help_option, withHelpSupport for leaves), so the listing shows it
-  // unless the node declares its own.
-  const listed = node.options.some((option) => option.long === '--help')
-    ? node
-    : // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
-      new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
+  // unless the node declares its own or answers the flag itself
+  // (ownsArgv), where advertising it would promise a page mirage no
+  // longer renders.
+  const listed =
+    node.options.some((option) => option.long === '--help') || ownsArgv(node)
+      ? node
+      : // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+        new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
   return renderHelp(name, listed, rows)
 }
 

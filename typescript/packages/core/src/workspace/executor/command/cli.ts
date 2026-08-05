@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
 import { CLISpec, type CLIInvocation } from '../../../commands/cli/types.ts'
-import { walk } from '../../../commands/cli/walk.ts'
+import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
+import { Operand } from '../../../commands/spec/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { wordText, type PathSpec } from '../../../types.ts'
@@ -35,12 +37,32 @@ import type { ScriptSource } from '../policy/types.ts'
 import { runOutput, type Runtime } from '../runtime.ts'
 import { optionError, parseFlags } from './flags.ts'
 
-// argparse add_help: a leaf answers --help with its own help unless it
-// declares the flag itself. CLISpec init accepts instance fields, so
-// the spread is a plain init bag (the withHelpSupport pattern).
-function withInjectedHelp(leaf: CLISpec): CLISpec {
+// A textual rest operand is the spec's pass-through form: the parser
+// reads undeclared dashed tokens as operands instead of refusing them
+// (lenientDashOperands), which is what a program parsing its own argv
+// needs. 'str', not 'path', so nothing is cwd-resolved or routed.
+const PASSTHROUGH_REST = new Operand({ type: 'str' })
+
+/**
+ * The spec a leaf's argv parses against, and who answers `--help`.
+ *
+ * Usually mirage: a leaf declares its grammar, the parser enforces it,
+ * and `--help` is injected the way argparse's add_help does. Two nodes
+ * answer for themselves instead. A leaf that declares `--help` asked for
+ * the flag, so it is delivered rather than intercepted. And a script root
+ * that declares no grammar (ownsArgv) has the whole line forwarded:
+ * refusing `--width` on behalf of a program that accepts it would make
+ * the tier unusable, since a YAML `clis:` entry cannot declare options at
+ * all. Returns the spec to parse with and whether the injected `--help`
+ * is mirage's to answer. CLISpec init accepts instance fields, so each
+ * spread is a plain init bag (the withHelpSupport pattern).
+ */
+function parseSpecFor(leaf: CLISpec): [CLISpec, boolean] {
   // eslint-disable-next-line @typescript-eslint/no-misused-spread
-  return new CLISpec({ ...leaf, options: [...leaf.options, HELP_OPTION] })
+  if (ownsArgv(leaf)) return [new CLISpec({ ...leaf, rest: PASSTHROUGH_REST }), false]
+  if (leaf.options.some((option) => option.long === '--help')) return [leaf, false]
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread
+  return [new CLISpec({ ...leaf, options: [...leaf.options, HELP_OPTION] }), true]
 }
 
 /**
@@ -89,7 +111,7 @@ function selectRuntime(
  * The script tier's whole contract, the one a native binary could also
  * honor: the program re-parses `argv` (the verbatim tokens after the
  * head), reads piped stdin, and finds the install's config as
- * MIRAGE_CONFIG (JSON) in its environment. The outcome converts
+ * `MIRAGE_CLI_CONFIG` (JSON) in its environment. The outcome converts
  * through the interpreter handlers' one mapping (runOutput).
  */
 async function scriptOutput(
@@ -99,7 +121,7 @@ async function scriptOutput(
 ): Promise<[Uint8Array | null, IOResult]> {
   const env: Record<string, string> = { ...inv.env }
   if (inv.config !== null && inv.config !== undefined) {
-    env.MIRAGE_CONFIG = JSON.stringify(inv.config)
+    env[CLI_CONFIG_ENV] = JSON.stringify(inv.config)
   }
   const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
   // A .mjs source needs the engine's module mode, the same bit the js
@@ -125,8 +147,9 @@ async function scriptOutput(
  * CommandSpec. The leaf handler renders the line's one CLIInvocation,
  * built here and nowhere else: an fn leaf runs as `fn(inv)`, a script
  * leaf runs its embedded program on a workspace runtime
- * (scriptOutput), so help, usage refusals, and classification all
- * happen in front of either tier. `entries` is the workspace's
+ * (scriptOutput), so usage refusals, limits, and classification all
+ * happen in front of either tier. Help too, for every node that declared
+ * a grammar to render it from (parseSpecFor). `entries` is the workspace's
  * ordered runtime world, which a script leaf selects its interpreter
  * from; empty (outside a workspace) refuses script installs.
  */
@@ -157,12 +180,11 @@ export async function handleCli(
   const leaf = result.leaf
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const hasHelp = leaf.options.some((option) => option.long === '--help')
-  const parseSpec = hasHelp ? leaf : withInjectedHelp(leaf)
+  const [parseSpec, mirageHelp] = parseSpecFor(leaf)
 
   const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd)
   const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
-  if (flagKwargs.help === true) {
+  if (mirageHelp && flagKwargs.help === true) {
     const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
@@ -198,7 +220,9 @@ export async function handleCli(
     flags[flagKwargName(spelling)] = value
   }
   Object.assign(flags, flagKwargs)
-  delete flags.help
+  // Only the injected flag is dropped; a leaf that declared --help
+  // itself is handed the value it asked for.
+  if (mirageHelp) delete flags.help
 
   const inv: CLIInvocation = {
     config: install.config,

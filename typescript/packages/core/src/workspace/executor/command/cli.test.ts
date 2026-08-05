@@ -117,6 +117,29 @@ describe('handleCli', () => {
     expect(out).toContain('--help')
   })
 
+  it('a leaf declaring --help is handed the flag', async () => {
+    // Injection is skipped for a leaf that declares --help, so the
+    // answer is the leaf's too: intercepting it anyway would make the
+    // declaration unreachable.
+    const ownHelp: CLIVerbFn = (inv) => [
+      new TextEncoder().encode(`help=${String(inv.flags.help)}\n`),
+      new IOResult(),
+    ]
+    const spec = new CLISpec({
+      name: 'prog',
+      fn: ownHelp,
+      options: [new Option({ long: '--help', description: 'own help' })],
+    })
+    const install: CLIInstall = { name: 'prog', spec, config: null }
+    const [stdout, io] = await handleCli(
+      install,
+      ['prog', '--help'],
+      new Session({ sessionId: 't' }),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(dec.decode(await materialize(stdout))).toBe('help=true\n')
+  })
+
   it('leaf usage errors exit 2 with prog attribution', async () => {
     const install = makeInstall()
     const [, io] = await handleCli(
@@ -287,7 +310,7 @@ describe('handleCli script arm', () => {
     expect(py.seen.pop()?.flags).toBeUndefined()
   })
 
-  it('the env carries MIRAGE_CONFIG as JSON', async () => {
+  it('the env carries MIRAGE_CLI_CONFIG as JSON', async () => {
     const py = new FakePyRuntime()
     const session = new Session({ sessionId: 't', env: { EDITOR: 'vi' } })
     const [, io] = await handleCli(
@@ -298,13 +321,13 @@ describe('handleCli script arm', () => {
       [py],
     )
     expect(io.exitCode).toBe(0)
-    expect(py.seen.pop()?.env).toEqual({ EDITOR: 'vi', MIRAGE_CONFIG: '{"apiKey":"k1"}' })
+    expect(py.seen.pop()?.env).toEqual({ EDITOR: 'vi', MIRAGE_CLI_CONFIG: '{"apiKey":"k1"}' })
   })
 
-  it('the env omits MIRAGE_CONFIG without config', async () => {
+  it('the env omits MIRAGE_CLI_CONFIG without config', async () => {
     const py = new FakePyRuntime()
     await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, [py])
-    expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CONFIG')
+    expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CLI_CONFIG')
   })
 
   it('stdin materializes to bytes', async () => {
@@ -314,9 +337,11 @@ describe('handleCli script arm', () => {
     expect(py.seen.pop()?.stdin).toEqual(stdin)
   })
 
-  it('--help renders without executing', async () => {
+  it('--help reaches a program that declared nothing', async () => {
+    // A grammarless script root answers its own --help: mirage would
+    // render a page documenting only --help, which documents nothing.
     const py = new FakePyRuntime()
-    const [stdout, io] = await handleCli(
+    const [, io] = await handleCli(
       scriptInstall(),
       ['pager', '--help'],
       new Session({ sessionId: 't' }),
@@ -324,14 +349,53 @@ describe('handleCli script arm', () => {
       [py],
     )
     expect(io.exitCode).toBe(0)
-    expect(dec.decode(await materialize(stdout)).startsWith('pager\n')).toBe(true)
+    expect(py.seen.pop()?.args).toEqual(['--help'])
+  })
+
+  it('--help renders when the spec declares a grammar', async () => {
+    // Declaring options opts back into the front door, where the
+    // rendered page is truthful and the program never runs.
+    const py = new FakePyRuntime()
+    const install = scriptInstall({
+      options: [new Option({ short: '-n', long: '--lines', type: 'int' })],
+    })
+    const [stdout, io] = await handleCli(
+      install,
+      ['pager', '--help'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(0)
+    const out = dec.decode(await materialize(stdout))
+    expect(out.startsWith('pager\n')).toBe(true)
+    expect(out).toContain('--lines')
     expect(py.seen).toEqual([])
   })
 
-  it('an undeclared flag refuses without executing', async () => {
+  it('an undeclared flag reaches the program', async () => {
+    // The program is the parser, so a flag it accepts must not be
+    // refused on its behalf: a yaml clis entry declares no grammar at
+    // all, which would leave the tier operand-only.
     const py = new FakePyRuntime()
     const [, io] = await handleCli(
       scriptInstall(),
+      ['pager', '--width', '80', '-n', 'x'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(0)
+    expect(py.seen.pop()?.args).toEqual(['--width', '80', '-n', 'x'])
+  })
+
+  it('a script with a grammar refuses an undeclared flag', async () => {
+    const py = new FakePyRuntime()
+    const install = scriptInstall({
+      options: [new Option({ short: '-n', long: '--lines', type: 'int' })],
+    })
+    const [, io] = await handleCli(
+      install,
       ['pager', '--frobnicate'],
       new Session({ sessionId: 't' }),
       null,

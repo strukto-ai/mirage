@@ -254,7 +254,8 @@ async def test_script_cli_reads_config_from_mirage_config_env(ws):
     ws.register_cli(
         "pager",
         pager_spec("import os\n"
-                   "print(os.environ.get('MIRAGE_CONFIG'))"), {"width": 80})
+                   "print(os.environ.get('MIRAGE_CLI_CONFIG'))"),
+        {"width": 80})
     code, out, _ = await run(ws, "pager")
     assert (code, out) == (0, b'{"width": 80}\n')
 
@@ -324,11 +325,37 @@ async def test_script_cli_js_runs_on_quickjs(ws):
 
 
 @pytest.mark.asyncio
+async def test_script_cli_receives_its_own_flags(ws):
+    # A yaml clis entry declares no grammar, so mirage must not refuse
+    # flags on the program's behalf; the program is the parser.
+    ws.register_cli("pager", pager_spec("print('paged', argv[1:])"))
+    code, out, err = await run(ws, "pager --width 80 -n report.txt")
+    assert (code, err) == (0, b"")
+    assert out == b"paged ['--width', '80', '-n', 'report.txt']\n"
+
+
+@pytest.mark.asyncio
+async def test_script_cli_answers_its_own_help(ws):
+    ws.register_cli("pager", pager_spec("print('program usage', argv[1:])"))
+    code, out, _ = await run(ws, "pager --help")
+    assert (code, out) == (0, b"program usage ['--help']\n")
+
+
+@pytest.mark.asyncio
+async def test_man_of_a_script_cli_promises_no_help_flag(ws):
+    ws.register_cli("pager", pager_spec("print('hi')"))
+    code, out, _ = await run(ws, "man pager")
+    assert code == 0
+    assert out.startswith(b"pager\n")
+    assert b"--help" not in out
+
+
+@pytest.mark.asyncio
 async def test_yaml_script_entry_executes_end_to_end(tmp_path):
     script = tmp_path / "pager.py"
     script.write_text(
         "import os\n"
-        "print('yaml', argv[1], os.environ.get('MIRAGE_CONFIG'))\n")
+        "print('yaml', argv[1], os.environ.get('MIRAGE_CLI_CONFIG'))\n")
     cfg = load_config({
         "mounts": {
             "/data": {

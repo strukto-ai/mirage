@@ -20,12 +20,14 @@ from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
                                                  maybe_with_timeout,
                                                  run_with_timeout)
+from mirage.commands.cli.constants import CLI_CONFIG_ENV
 from mirage.commands.cli.types import CLIInvocation, CLISpec
-from mirage.commands.cli.walk import walk
+from mirage.commands.cli.walk import owns_argv, walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.help import render_help
+from mirage.commands.spec.types import Operand
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -39,6 +41,38 @@ from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+# A textual rest operand is the spec's pass-through form: the parser
+# reads undeclared dashed tokens as operands instead of refusing them
+# (lenient_dash_operands), which is what a program parsing its own argv
+# needs. "str", not "path", so nothing is cwd-resolved or routed.
+PASSTHROUGH_REST = Operand(type="str")
+
+
+def parse_spec_for(leaf: CLISpec) -> tuple[CLISpec, bool]:
+    """The spec a leaf's argv parses against, and who answers ``--help``.
+
+    Usually mirage: a leaf declares its grammar, the parser enforces it,
+    and ``--help`` is injected the way argparse's add_help does. Two
+    nodes answer for themselves instead. A leaf that declares ``--help``
+    asked for the flag, so it is delivered rather than intercepted. And
+    a script root that declares no grammar (owns_argv) has the whole
+    line forwarded: refusing ``--width`` on behalf of a program that
+    accepts it would make the tier unusable, since a YAML ``clis:``
+    entry cannot declare options at all.
+
+    Args:
+        leaf (CLISpec): the resolved leaf node.
+
+    Returns:
+        tuple[CLISpec, bool]: the spec to parse with, and whether the
+        injected ``--help`` is mirage's to answer.
+    """
+    if owns_argv(leaf):
+        return replace(leaf, rest=PASSTHROUGH_REST), False
+    if any(option.long == "--help" for option in leaf.options):
+        return leaf, False
+    return replace(leaf, options=leaf.options + (HELP_OPTION, )), True
 
 
 def _select_runtime(
@@ -88,8 +122,8 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
     The script tier's whole contract, the one a native binary could
     also honor: the program re-parses ``argv`` (the verbatim tokens
     after the head), reads piped stdin, and finds the install's config
-    as MIRAGE_CONFIG (JSON) in its environment. The outcome converts
-    through the interpreter commands' one mapping (run_output).
+    as ``MIRAGE_CLI_CONFIG`` (JSON) in its environment. The outcome
+    converts through the interpreter commands' one mapping (run_output).
 
     Args:
         inv (CLIInvocation): the line's one invocation record.
@@ -98,7 +132,7 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
     """
     env = dict(inv.env)
     if inv.config is not None:
-        env["MIRAGE_CONFIG"] = json.dumps(inv.config)
+        env[CLI_CONFIG_ENV] = json.dumps(inv.config)
     stdin = await materialize(inv.stdin) if inv.stdin is not None else None
     # A .mjs source needs the engine's module mode, the same bit the
     # js command derives from the operand's extension.
@@ -129,8 +163,9 @@ async def handle_cli(
     CommandSpec. The leaf handler renders the line's one CLIInvocation,
     built here and nowhere else: an fn leaf runs as ``fn(inv)``, a
     script leaf runs its embedded program on a workspace runtime
-    (_script_output), so help, usage refusals, and classification all
-    happen in front of either tier.
+    (_script_output), so usage refusals, limits, and classification all
+    happen in front of either tier. Help too, for every node that
+    declared a grammar to render it from (parse_spec_for).
 
     Args:
         install (CLIInstall): the resolved installation (head word,
@@ -164,15 +199,13 @@ async def handle_cli(
 
     prog = " ".join((install.name, ) + result.path)
     leaf = result.leaf
-    # argparse add_help: every leaf answers --help with its own help
-    # unless it declares the flag itself. No injected --version: that is
-    # a GNU coreutils convention, not an argparse one.
-    parse_spec = leaf
-    if not any(option.long == "--help" for option in leaf.options):
-        parse_spec = replace(leaf, options=leaf.options + (HELP_OPTION, ))
+    # argparse add_help, minus the two nodes that answer for themselves
+    # (parse_spec_for). No injected --version: that is a GNU coreutils
+    # convention, not an argparse one.
+    parse_spec, mirage_help = parse_spec_for(leaf)
 
     parsed = parse_flags(list(result.argv), parse_spec, prog, session.cwd)
-    if parsed.flag_kwargs.get("help") is True:
+    if mirage_help and parsed.flag_kwargs.get("help") is True:
         help_text = render_help(prog, parse_spec).encode()
         return help_text, IOResult(), ExecutionNode(command=cmd_str,
                                                     exit_code=0)
@@ -195,7 +228,10 @@ async def handle_cli(
         for spelling, value in result.group_flags.items()
     }
     kw.update(parsed.flag_kwargs)
-    kw.pop("help", None)
+    if mirage_help:
+        # Only the injected flag is dropped; a leaf that declared
+        # --help itself is handed the value it asked for.
+        kw.pop("help", None)
 
     inv = CLIInvocation(install.config,
                         argv=tuple(argv),

@@ -595,7 +595,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
     spec = CLISpec(name="pager",
                    script=ScriptSource(
                        "import os\n"
-                       "print(argv[1], os.environ['MIRAGE_CONFIG'])"))
+                       "print(argv[1], os.environ['MIRAGE_CLI_CONFIG'])"))
     ws.register_cli("pager", spec, config={"width": 80})
     path = tmp_path / "snap.tar"
     await ws.snapshot(str(path))
