@@ -26,7 +26,7 @@ from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.bre import bre_to_python
 from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.key_prefix import mount_prefix_of
@@ -676,32 +676,34 @@ async def grep_recursive(
 
 async def operand_is_directory(
     readdir_fn: _AsyncReaddir,
-    stat_fn: _AsyncStat,
+    info: FileStat | None,
     path: str,
 ) -> bool:
     """Whether an operand names a directory, asked on both channels.
 
-    A failed read proves nothing on its own: a keyed store cannot read a
-    directory and does not call it missing either. Both channels a backend can
-    answer on are tried because on a prefix store a directory is the set of
-    keys under it rather than an object, so stat can miss one that readdir
-    lists happily.
+    Both channels are consulted because on a prefix store a directory is
+    the set of keys under it rather than an object, so stat misses one
+    that readdir lists happily. The listing has to be non-empty to count:
+    such a store answers readdir for any path at all, returning nothing
+    for one that does not exist, so a bare "it did not raise" reads every
+    missing file as a directory. The cost is that a genuinely empty
+    directory is invisible there, which is the same thing ``du`` already
+    documents and the safer way round: naming a missing file is a report
+    a caller can act on, calling it a directory is not.
 
     Args:
         readdir_fn (_AsyncReaddir): backend directory reader.
-        stat_fn (_AsyncStat): backend stat reader.
+        info (FileStat | None): what stat said, None when it could not
+            answer.
         path (str): the operand path.
 
     Returns:
         bool: True when either channel reports a directory.
     """
+    if info is not None:
+        return info.type is FileType.DIRECTORY
     try:
-        return (await stat_fn(path)).type == FileType.DIRECTORY
-    except WALK_ERRORS:
-        pass
-    try:
-        await readdir_fn(path)
-        return True
+        return bool(await readdir_fn(path))
     except WALK_ERRORS:
         return False
 
@@ -730,19 +732,20 @@ def exit_code_for(matched: bool, failed: bool, quiet: bool) -> int:
     return 0 if matched else 1
 
 
-def operand_error(path: str, exc: BaseException, is_dir: bool) -> str:
-    """GNU's stderr line for an operand grep could not search.
+def operand_error(path: str, exc: BaseException) -> str:
+    """GNU's stderr line for an operand grep could not read.
+
+    A directory does not reach here: it is recognized from its type
+    before the read, because what a read raises for one is whatever the
+    backend happens to do about it.
 
     Args:
         path (str): the operand as it was named.
         exc (BaseException): what the read raised.
-        is_dir (bool): True when the operand is a directory.
 
     Returns:
         str: the `grep: <path>: <reason>` line, without a trailing newline.
     """
-    if is_dir:
-        return f"grep: {path}: Is a directory"
     if isinstance(exc, FileNotFoundError):
         return f"grep: {path}: No such file or directory"
     return f"grep: {path}: {exc}"
@@ -770,16 +773,22 @@ async def grep_files_only(
     compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word,
                                basic)
 
+    # What the operand is, asked before it is read. A failed read is a
+    # backend-dependent proxy for the type and a poor one: a keyed store
+    # reads a directory path without complaint and returns nothing, and
+    # ssh answers with an SFTP error that is not an OSError at all, so
+    # classifying afterwards gets a different answer per backend.
+    info: FileStat | None = None
+    try:
+        info = await stat_fn(path)
+    except WALK_ERRORS:
+        info = None
+
     if recursive:
         # GNU only walks directory operands; a file operand under -r takes
         # the plain single-file scan (TS grepGeneric parity). Stat failures
         # keep the walk so missing operands surface its error shape.
-        operand_is_file = False
-        try:
-            s = await stat_fn(path)
-            operand_is_file = s.type != FileType.DIRECTORY
-        except WALK_ERRORS:
-            operand_is_file = False
+        operand_is_file = info is not None and info.type != FileType.DIRECTORY
         if not operand_is_file:
             return await grep_recursive(
                 readdir_fn,
@@ -797,27 +806,27 @@ async def grep_files_only(
                 read_stream_fn,
             )
 
+    # GNU names a directory operand and moves on without descending into
+    # it; only -r walks one, and that branch returned above. Walking here
+    # would make -l alone behave like -rl.
+    if await operand_is_directory(readdir_fn, info, path):
+        if warnings is not None:
+            warnings.append(f"grep: {path}: Is a directory")
+        return []
+
     try:
         data = await read_bytes_fn(path)
-        text_lines = data.decode(errors="replace").splitlines()
-        count = 0
-        for _i, line in enumerate(text_lines, 1):
-            m = compiled.search(line)
-            matched = bool(m) != invert
-            if matched:
-                count += 1
-                if max_count is not None and count >= max_count:
-                    break
-        if count_only:
-            return [str(count)]
-        return [path] if count > 0 else []
-    except (FileNotFoundError, ValueError, IsADirectoryError) as exc:
-        read_error: BaseException = exc
-
-    # The read failed. GNU names a directory operand and moves on without
-    # descending into it; only -r walks one, and that branch returned above.
-    # Walking here would make -l alone behave like -rl.
-    if warnings is not None:
-        is_dir = await operand_is_directory(readdir_fn, stat_fn, path)
-        warnings.append(operand_error(path, read_error, is_dir))
-    return []
+    except WALK_ERRORS as exc:
+        if warnings is not None:
+            warnings.append(operand_error(path, exc))
+        return []
+    text_lines = data.decode(errors="replace").splitlines()
+    count = 0
+    for line in text_lines:
+        if bool(compiled.search(line)) != invert:
+            count += 1
+            if max_count is not None and count >= max_count:
+                break
+    if count_only:
+        return [str(count)]
+    return [path] if count > 0 else []

@@ -539,32 +539,32 @@ export function exitCodeFor(matched: boolean, failed: boolean, quiet: boolean): 
   return matched ? 0 : 1
 }
 
-// Whether an operand names a directory, asked on both channels. A failed read
-// proves nothing on its own: a keyed store cannot read a directory and does not
-// call it missing either. Both channels are tried because on a prefix store a
-// directory is the set of keys under it rather than an object, so stat can miss
-// one that readdir lists happily.
+// Whether an operand names a directory, asked on both channels. Both are
+// consulted because on a prefix store a directory is the set of keys under it
+// rather than an object, so stat misses one that readdir lists happily. The
+// listing has to be non-empty to count: such a store answers readdir for any
+// path at all, returning nothing for one that does not exist, so a bare "it did
+// not throw" reads every missing file as a directory. The cost is that a
+// genuinely empty directory is invisible there, which is the same thing `du`
+// already documents and the safer way round: naming a missing file is a report
+// a caller can act on, calling it a directory is not.
 async function operandIsDirectory(
   readdirFn: AsyncReaddirFn,
-  statFn: AsyncStatFn,
+  info: FileStat | null,
   path: string,
 ): Promise<boolean> {
+  if (info !== null) return info.type === FileType.DIRECTORY
   try {
-    return (await statFn(path)).type === FileType.DIRECTORY
-  } catch {
-    // Fall through to the other channel.
-  }
-  try {
-    await readdirFn(path)
-    return true
+    return (await readdirFn(path)).length > 0
   } catch {
     return false
   }
 }
 
-// GNU's stderr line for an operand grep could not search.
-function operandError(path: string, err: unknown, isDir: boolean): string {
-  if (isDir) return `grep: ${path}: Is a directory`
+// GNU's stderr line for an operand grep could not read. A directory does not
+// reach here: it is recognized from its type before the read, because what a
+// read throws for one is whatever the backend happens to do about it.
+function operandError(path: string, err: unknown): string {
   if (isMissingPath(err)) return `grep: ${path}: No such file or directory`
   return `grep: ${path}: ${err instanceof Error ? err.message : String(err)}`
 }
@@ -585,47 +585,54 @@ export async function grepFilesOnly(
     opts.wholeWord,
     opts.basic,
   )
+  // What the operand is, asked before it is read. A failed read is a
+  // backend-dependent proxy for the type and a poor one: a keyed store reads a
+  // directory path without complaint and returns nothing, and ssh answers with
+  // an SFTP error that is not a filesystem error at all, so classifying
+  // afterwards gets a different answer per backend.
+  let info: FileStat | null = null
+  try {
+    info = await statFn(path)
+  } catch {
+    info = null
+  }
   if (opts.recursive) {
     // GNU only walks directory operands; a file operand under -r takes the
     // plain single-file scan (python grep_files_only parity). Stat failures
     // keep the walk so missing operands surface its error shape.
-    let operandIsFile = false
-    try {
-      const s = await statFn(path)
-      operandIsFile = s.type !== FileType.DIRECTORY
-    } catch {
-      operandIsFile = false
-    }
+    const operandIsFile = info !== null && info.type !== FileType.DIRECTORY
     if (!operandIsFile) {
       return grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
     }
   }
+  // GNU names a directory operand and moves on without descending into it; only
+  // -r walks one, and that branch returned above. Walking here would make -l
+  // alone behave like -rl.
+  if (await operandIsDirectory(readdirFn, info, path)) {
+    if (warnings !== null) warnings.push(`grep: ${path}: Is a directory`)
+    return []
+  }
+  let data: Uint8Array
   try {
-    const data = await readBytesFn(path)
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(data)
-    const lines = text.split('\n')
-    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-    let count = 0
-    for (const line of lines) {
-      const found = compiled.test(line)
-      const matched = opts.invert ? !found : found
-      if (matched) {
-        count += 1
-        if (opts.maxCount !== null && count >= opts.maxCount) break
-      }
-    }
-    if (opts.countOnly) return [String(count)]
-    return count > 0 ? [path] : []
+    data = await readBytesFn(path)
   } catch (err) {
-    // The read failed. GNU names a directory operand and moves on without
-    // descending into it; only -r walks one, and that branch returned above.
-    // Walking here would make -l alone behave like -rl.
-    if (warnings !== null) {
-      const isDir = await operandIsDirectory(readdirFn, statFn, path)
-      warnings.push(operandError(path, err, isDir))
+    if (warnings !== null) warnings.push(operandError(path, err))
+    return []
+  }
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(data)
+  const lines = text.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  let count = 0
+  for (const line of lines) {
+    const found = compiled.test(line)
+    const matched = opts.invert ? !found : found
+    if (matched) {
+      count += 1
+      if (opts.maxCount !== null && count >= opts.maxCount) break
     }
   }
-  return []
+  if (opts.countOnly) return [String(count)]
+  return count > 0 ? [path] : []
 }
 
 // Prefix every line chunk with a filename label (grep -H). The grep stream

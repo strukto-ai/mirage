@@ -109,8 +109,12 @@ describe('postgres grep push-down and globs', () => {
     // stat must resolve here: glob expansion legitimately stats the paths it
     // discovers, so only searchEntity discriminates "push-down ran" from
     // "push-down was skipped". Before the fix, detectScope read the "*" as an
-    // entity and searchEntity was called with it.
-    vi.mocked(statModule.stat).mockResolvedValue(undefined as never)
+    // entity and searchEntity was called with it. It resolves with a real
+    // stat because the generic scan reads the type to tell a file operand
+    // from a directory one, which is what the backend answers here.
+    vi.mocked(statModule.stat).mockResolvedValue(
+      new FileStat({ name: 'rows.jsonl', type: FileType.TEXT }),
+    )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
     const result = await cmd.fn(makeAccessor(), [globPath()], ['ada'], {
