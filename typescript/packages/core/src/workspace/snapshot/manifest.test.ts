@@ -84,9 +84,10 @@ describe('splitManifestAndBlobs', () => {
     const [manifest, blobs] = splitManifestAndBlobs(state)
 
     const cache = manifest[StateKey.CACHE] as AnyDict
-    const entry = (cache[CacheKey.ENTRIES] as AnyDict[])[0] as AnyDict
-    const ref = (entry[CacheKey.DATA] as AnyDict)[BLOB_REF_KEY] as string
-    expect(blobs[ref]).toEqual(new TextEncoder().encode('hello'))
+    const entries = cache[CacheKey.ENTRIES] as AnyDict[]
+    const ref = (entries[0]?.[CacheKey.DATA] as AnyDict | undefined)?.[BLOB_REF_KEY]
+    expect(typeof ref).toBe('string')
+    expect(blobs[String(ref)]).toEqual(new TextEncoder().encode('hello'))
     // Sibling cache knobs survive the rewrite of the entries list.
     expect(cache[CacheKey.LIMIT]).toBe(10)
   })
@@ -103,10 +104,10 @@ describe('splitManifestAndBlobs', () => {
 
     const [manifest, blobs] = splitManifestAndBlobs(state)
 
-    const job = (manifest[StateKey.JOBS] as AnyDict[])[0] as AnyDict
-    const ref = (job[JobKey.STDOUT] as AnyDict)[BLOB_REF_KEY] as string
-    expect(blobs[ref]).toEqual(new TextEncoder().encode('out'))
-    expect(job[JobKey.STDERR]).toBe('')
+    const job = (manifest[StateKey.JOBS] as AnyDict[])[0]
+    const ref = (job?.[JobKey.STDOUT] as AnyDict | undefined)?.[BLOB_REF_KEY]
+    expect(blobs[String(ref)]).toEqual(new TextEncoder().encode('out'))
+    expect(job?.[JobKey.STDERR]).toBe('')
   })
 
   it('rewrites mount resource state instead of passing it through', () => {
@@ -124,9 +125,10 @@ describe('splitManifestAndBlobs', () => {
 
     const [manifest, blobs] = splitManifestAndBlobs(state)
 
-    const mount = (manifest[StateKey.MOUNTS] as AnyDict[])[0] as AnyDict
-    const files = (mount[MountKey.RESOURCE_STATE] as AnyDict).files as AnyDict
-    const ref = (files['/a.txt'] as AnyDict)[BLOB_REF_KEY] as string
-    expect(blobs[ref]).toEqual(new TextEncoder().encode('hi'))
+    const mount = (manifest[StateKey.MOUNTS] as AnyDict[])[0]
+    const resourceState = mount?.[MountKey.RESOURCE_STATE] as AnyDict | undefined
+    const files = resourceState?.files as AnyDict | undefined
+    const ref = (files?.['/a.txt'] as AnyDict | undefined)?.[BLOB_REF_KEY]
+    expect(blobs[String(ref)]).toEqual(new TextEncoder().encode('hi'))
   })
 })
