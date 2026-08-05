@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { jqEval, referencesInputs } from './eval.ts'
+import { jqEval, referencesArgs, referencesInputs } from './eval.ts'
 
 /**
  * Evaluate expr and return its single output.
@@ -390,5 +390,36 @@ describe('named args and inputs', () => {
     expect(referencesInputs('reduce inputs as $x (0; . + $x)')).toBe(true)
     expect(referencesInputs('.myinputs')).toBe(false)
     expect(referencesInputs('.inputs_total')).toBe(false)
+  })
+
+  it('ignores the word where it spells data', () => {
+    expect(referencesInputs('.inputs')).toBe(false)
+    expect(referencesInputs('.a.inputs')).toBe(false)
+    expect(referencesInputs('$inputs')).toBe(false)
+    expect(referencesInputs('{inputs: .a}')).toBe(false)
+    expect(referencesInputs('{inputs}')).toBe(false)
+    expect(referencesInputs('{a, inputs}')).toBe(false)
+    expect(referencesInputs('m::inputs')).toBe(false)
+  })
+
+  it('ignores strings and comments', () => {
+    expect(referencesInputs('"no inputs found"')).toBe(false)
+    expect(referencesInputs('. # drains inputs')).toBe(false)
+    expect(referencesInputs('"a\\("b" + "inputs")c"')).toBe(false)
+  })
+
+  it('reads calls in every value position', () => {
+    expect(referencesInputs('{a: inputs}')).toBe(true)
+    expect(referencesInputs('{(inputs): 1}')).toBe(true)
+    expect(referencesInputs('[1, inputs, 2]')).toBe(true)
+    expect(referencesInputs('"\\(inputs)"')).toBe(true)
+  })
+
+  it('reads $ARGS the same way', () => {
+    expect(referencesArgs('$ARGS.positional')).toBe(true)
+    expect(referencesArgs('{$ARGS}')).toBe(true)
+    expect(referencesArgs('"$ARGS"')).toBe(false)
+    expect(referencesArgs('. # $ARGS')).toBe(false)
+    expect(referencesArgs('$ARGSX')).toBe(false)
   })
 })

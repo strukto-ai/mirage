@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.jq.eval import jq_eval, references_inputs
+from mirage.core.jq.eval import jq_eval, references_args, references_inputs
 
 
 def test_single_output_is_a_one_element_list():
@@ -87,3 +87,34 @@ def test_references_inputs_finds_whole_words_only():
     assert references_inputs("reduce inputs as $x (0; . + $x)")
     assert not references_inputs(".myinputs")
     assert not references_inputs(".inputs_total")
+
+
+def test_references_inputs_ignores_the_word_spelling_data():
+    assert not references_inputs(".inputs")
+    assert not references_inputs(".a.inputs")
+    assert not references_inputs("$inputs")
+    assert not references_inputs("{inputs: .a}")
+    assert not references_inputs("{inputs}")
+    assert not references_inputs("{a, inputs}")
+    assert not references_inputs("m::inputs")
+
+
+def test_references_inputs_ignores_strings_and_comments():
+    assert not references_inputs('"no inputs found"')
+    assert not references_inputs(". # drains inputs")
+    assert not references_inputs('"a\\("b" + "inputs")c"')
+
+
+def test_references_inputs_reads_calls_in_every_value_position():
+    assert references_inputs("{a: inputs}")
+    assert references_inputs("{(inputs): 1}")
+    assert references_inputs("[1, inputs, 2]")
+    assert references_inputs('"\\(inputs)"')
+
+
+def test_references_args_ignores_strings_and_comments():
+    assert references_args("$ARGS.positional")
+    assert references_args("{$ARGS}")
+    assert not references_args('"$ARGS"')
+    assert not references_args(". # $ARGS")
+    assert not references_args("$ARGSX")

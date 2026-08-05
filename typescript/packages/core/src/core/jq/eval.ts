@@ -15,25 +15,108 @@
 import * as jqWasm from 'jq-wasm'
 import { ARGS_VAR, INPUTS_VAR, type JqOptions } from './types.ts'
 
-const INPUTS_REF = /\binputs\b/
-const ARGS_REF = /\$ARGS\b/
+const INPUTS_REF = /(?<![\w$.:])inputs(?![\w:])/
+const ARGS_REF = /\$ARGS(?![\w:])/
+const IDENT = /[A-Za-z_][A-Za-z0-9_]*/y
 const TO_STREAM = 'tostream'
+const INTERP = '\\('
+const OPENERS = '([{'
+const CLOSERS = ')]}'
 
 /**
- * Report whether a jq program mentions the `inputs` builtin.
+ * Blank out every part of a jq program that cannot be a call.
  *
- * Binding the remaining documents is what makes `inputs` work, and that
- * binding is one copy of the stream per evaluation, so it is only paid
- * for by a program that asks for it. A mention inside a string literal
- * reads as a reference, which costs a binding and changes nothing else.
+ * Three things are replaced by spaces: string bodies, `#` comments, and the
+ * field names an object shorthand abbreviates (`{a, inputs}` is
+ * `{a: .a, inputs: .inputs}`). Interpolations stay code, because
+ * `"\(inputs)"` really does call the builtin, so everything between `\(`
+ * and its closing paren survives, nested strings included.
  */
-export function referencesInputs(expr: string): boolean {
-  return INPUTS_REF.test(expr)
+function codeOnly(expr: string): string {
+  const out: string[] = []
+  // Open brackets, innermost last, with an interpolation recorded as one
+  // too; empty means the scan is at the top level of the program.
+  const stack: string[] = []
+  let inString = false
+  let prev = ''
+  let i = 0
+  while (i < expr.length) {
+    const ch = expr.charAt(i)
+    if (inString) {
+      if (ch === '\\' && i + 1 < expr.length) {
+        if (expr.charAt(i + 1) === '(') {
+          inString = false
+          stack.push(INTERP)
+        }
+        out.push('  ')
+        i += 2
+        continue
+      }
+      inString = ch !== '"'
+      out.push(' ')
+      i += 1
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      out.push(' ')
+      i += 1
+      continue
+    }
+    if (ch === '#') {
+      while (i < expr.length && expr.charAt(i) !== '\n') {
+        out.push(' ')
+        i += 1
+      }
+      continue
+    }
+    IDENT.lastIndex = i
+    const word = IDENT.exec(expr)
+    if (word !== null) {
+      const text = word[0]
+      const key = stack[stack.length - 1] === '{' && (prev === '{' || prev === ',')
+      out.push(key ? ' '.repeat(text.length) : text)
+      prev = text.charAt(text.length - 1)
+      i += text.length
+      continue
+    }
+    if (OPENERS.includes(ch)) {
+      stack.push(ch)
+    } else if (ch === ')' && stack[stack.length - 1] === INTERP) {
+      stack.pop()
+      inString = true
+      out.push(' ')
+      prev = ''
+      i += 1
+      continue
+    } else if (CLOSERS.includes(ch) && stack.length > 0 && stack[stack.length - 1] !== INTERP) {
+      stack.pop()
+    }
+    out.push(ch)
+    if (ch.trim() !== '') prev = ch
+    i += 1
+  }
+  return out.join('')
 }
 
-/** Report whether a jq program mentions the `$ARGS` variable. */
+/**
+ * Report whether a jq program calls the `inputs` builtin.
+ *
+ * Binding the remaining documents is what makes `inputs` work, and it also
+ * makes the program run once over the whole stream instead of once per
+ * document, so only the builtin may answer here: the word also spells a
+ * field (`.inputs`, `{inputs}`), a variable (`$inputs`), an object key
+ * (`{inputs: 1}`), a module member (`m::inputs`), and anything at all
+ * inside a string or a comment, none of which change how the stream is
+ * read.
+ */
+export function referencesInputs(expr: string): boolean {
+  return INPUTS_REF.test(codeOnly(expr))
+}
+
+/** Report whether a jq program reads the `$ARGS` variable. */
 export function referencesArgs(expr: string): boolean {
-  return ARGS_REF.test(expr)
+  return ARGS_REF.test(codeOnly(expr))
 }
 
 /** The value `$ARGS` resolves to for a run. */

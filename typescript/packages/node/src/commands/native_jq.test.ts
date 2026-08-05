@@ -86,6 +86,14 @@ describe.each(NATIVE_BACKENDS)('native jq (%s backend)', (kind) => {
     ['jq --arg v hi -c "[.a,$v]"', '{"a":1}'],
     ['jq -c "[., inputs]"', '{"a":1}\n{"a":2}\n{"a":3}\n'],
     ['jq -n -c "[inputs]"', '{"a":1}\n{"a":2}\n'],
+    ['jq -c .inputs', '{"inputs":1}\n{"inputs":2}\n'],
+    ['jq -c "{inputs}"', '{"inputs":1}\n{"inputs":2}\n'],
+    ['jq -c "{inputs: .a}"', '{"a":1}\n{"a":2}\n'],
+    ['jq -c \'"no inputs"\'', '{"a":1}\n{"a":2}\n'],
+    ['jq -c ". # inputs"', '{"a":1}\n{"a":2}\n'],
+    ['jq -c "{a: inputs}"', '1\n2\n'],
+    ['jq -c "[1, inputs, 2]"', '9\n8\n'],
+    ['jq -c \'"\\(inputs)"\'', '1\n2\n'],
   ])('%s matches native', async (cmd, input) => {
     const env = makeEnv(kind)
     try {

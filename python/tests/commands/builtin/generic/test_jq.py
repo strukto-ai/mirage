@@ -19,6 +19,7 @@ FILES = {
     "/d/lines2.txt": b"alpha\nbeta\ngamma\n",
     "/d/a.json": b'{"a":1}\n',
     "/d/b.json": b'{"b":2}\n',
+    "/d/fields.json": b'{"inputs":1}\n{"inputs":2}\n',
 }
 
 
@@ -146,6 +147,18 @@ async def test_null_input_never_reads_its_operands():
 async def test_inputs_without_null_input_drains_the_stream_once():
     out, _ = await _run(["/d/multi.json"], "[., inputs]", compact_output=True)
     assert out == b'[{"a":1},{"a":2},{"a":3}]\n'
+
+
+@pytest.mark.asyncio
+async def test_a_field_named_inputs_still_runs_per_document():
+    out, _ = await _run(["/d/fields.json"], ".inputs", compact_output=True)
+    assert out == b"1\n2\n"
+
+
+@pytest.mark.asyncio
+async def test_the_word_inputs_in_a_string_still_runs_per_document():
+    out, _ = await _run(["/d/multi.json"], '"no inputs"', compact_output=True)
+    assert out == b'"no inputs"\n"no inputs"\n"no inputs"\n'
 
 
 @pytest.mark.asyncio
