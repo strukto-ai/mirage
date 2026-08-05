@@ -259,7 +259,7 @@ describe('handleCli script arm', () => {
       ['pager', 'report.txt', 'x'],
       new Session({ sessionId: 't' }),
       null,
-      [js, py],
+      { entries: [js, py] },
     )
     expect(io.exitCode).toBe(0)
     expect(dec.decode(await materialize(stdout))).toBe('ran\n')
@@ -284,7 +284,7 @@ describe('handleCli script arm', () => {
       ['pager', '-n', '3', 'report.txt'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(0)
     expect(py.seen.pop()?.args).toEqual(['-n', '3', 'report.txt'])
@@ -299,14 +299,18 @@ describe('handleCli script arm', () => {
       script: new ScriptSource('export const x = 1', 'js', true),
     })
     const install: CLIInstall = { name: 'pager', spec, config: null }
-    const [, io] = await handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, [js])
+    const [, io] = await handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, {
+      entries: [js],
+    })
     expect(io.exitCode).toBe(0)
     expect(js.seen.pop()?.flags).toEqual({ module: true })
   })
 
   it('a non-module script sends no flags', async () => {
     const py = new FakePyRuntime()
-    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, [py])
+    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, {
+      entries: [py],
+    })
     expect(py.seen.pop()?.flags).toBeUndefined()
   })
 
@@ -318,7 +322,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       session,
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(0)
     expect(py.seen.pop()?.env).toEqual({ EDITOR: 'vi', MIRAGE_CLI_CONFIG: '{"apiKey":"k1"}' })
@@ -326,7 +330,9 @@ describe('handleCli script arm', () => {
 
   it('the env omits MIRAGE_CLI_CONFIG without config', async () => {
     const py = new FakePyRuntime()
-    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, [py])
+    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, {
+      entries: [py],
+    })
     expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CLI_CONFIG')
   })
 
@@ -335,7 +341,9 @@ describe('handleCli script arm', () => {
     // 'pager:' and two installs of one program are distinguishable.
     const py = new FakePyRuntime()
     const install: CLIInstall = { name: 'renamed', spec: scriptInstall().spec, config: null }
-    await handleCli(install, ['renamed', 'report.txt'], new Session({ sessionId: 't' }), null, [py])
+    await handleCli(install, ['renamed', 'report.txt'], new Session({ sessionId: 't' }), null, {
+      entries: [py],
+    })
     const run = py.seen.pop()
     expect(run?.prog).toBe('renamed')
     expect(run?.args).toEqual(['report.txt'])
@@ -344,7 +352,9 @@ describe('handleCli script arm', () => {
   it('stdin materializes to bytes', async () => {
     const py = new FakePyRuntime()
     const stdin = new TextEncoder().encode('body')
-    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), stdin, [py])
+    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), stdin, {
+      entries: [py],
+    })
     expect(py.seen.pop()?.stdin).toEqual(stdin)
   })
 
@@ -357,7 +367,7 @@ describe('handleCli script arm', () => {
       ['pager', '--help'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(0)
     expect(py.seen.pop()?.args).toEqual(['--help'])
@@ -375,7 +385,7 @@ describe('handleCli script arm', () => {
       ['pager', '--help'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(0)
     const out = dec.decode(await materialize(stdout))
@@ -394,7 +404,7 @@ describe('handleCli script arm', () => {
       ['pager', '--width', '80', '-n', 'x'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(0)
     expect(py.seen.pop()?.args).toEqual(['--width', '80', '-n', 'x'])
@@ -410,7 +420,7 @@ describe('handleCli script arm', () => {
       ['pager', '--frobnicate'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(2)
     expect(dec.decode(await materialize(io.stderr))).toMatch(
@@ -429,7 +439,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       new Session({ sessionId: 't' }),
       null,
-      [first, pinned],
+      { entries: [first, pinned] },
     )
     expect(io.exitCode).toBe(0)
     expect(first.seen).toEqual([])
@@ -443,7 +453,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
@@ -460,7 +470,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       new Session({ sessionId: 't' }),
       null,
-      [js],
+      { entries: [js] },
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
@@ -476,7 +486,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
@@ -499,7 +509,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       new Session({ sessionId: 't' }),
       null,
-      [crash],
+      { entries: [crash] },
     )
     expect(io.exitCode).toBe(1)
     expect(dec.decode(await materialize(io.stderr))).toBe('pager: engine exploded\n')
@@ -517,7 +527,7 @@ describe('handleCli script arm', () => {
       ['pager'],
       new Session({ sessionId: 't' }),
       null,
-      [py],
+      { entries: [py] },
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(3)
@@ -534,7 +544,7 @@ describe('handleCli script arm', () => {
     })
     const install: CLIInstall = { name: 'pager', spec, config: null }
     await expect(
-      handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, [sleepy]),
+      handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, { entries: [sleepy] }),
     ).rejects.toThrow(/pager: timed out/)
   })
 })

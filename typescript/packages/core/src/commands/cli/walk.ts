@@ -16,6 +16,7 @@ import { HELP_OPTION } from '../config.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { renderHelp } from '../spec/help.ts'
+import { resolvePath } from '../../utils/path.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
@@ -212,21 +213,50 @@ function expandGroupLong(node: CLISpec, cs: CompiledSpec, spelling: string): rea
 }
 
 /**
+ * Resolve PATH-typed group values against the working directory.
+ *
+ * A group option declared `type: 'path'` has to mean what it means on a leaf,
+ * or the type is a lie at exactly one level of the tree. The flat parser
+ * resolves PATH values right after defaults land, so a `-C` that defaults to
+ * `'.'` becomes the session cwd and a relative `-C build` becomes absolute; do
+ * the same here rather than handing a leaf a raw relative string it has no cwd
+ * to interpret.
+ *
+ * Resolved to absolute strings, not PathSpec: a group flag never picks a mount
+ * (CLI dispatch consults none), so the routing half of the leaf's PATH recovery
+ * has nothing to do here.
+ */
+function resolveGroupPaths(cs: CompiledSpec, flags: WalkFlagBag, cwd: string): void {
+  for (const [dest, kind] of cs.kindByDest) {
+    if (kind !== 'path' || !(dest in flags)) continue
+    const value = flags[dest]
+    if (Array.isArray(value)) {
+      flags[dest] = value.map((part) => resolvePath(part, cwd))
+    } else if (typeof value === 'string') {
+      flags[dest] = resolvePath(value, cwd)
+    }
+  }
+}
+
+/**
  * Apply a node's declarative option rules after its scan: defaults land as
- * if typed, then choices and required are enforced, the same order the
- * flat parser uses. Returns a rendered refusal or null when satisfied.
+ * if typed and PATH values resolve, then choices and required are enforced,
+ * the same order the flat parser uses. Returns a rendered refusal or null when
+ * satisfied.
  */
 function finishNode(
   name: string,
   node: CLISpec,
   cs: CompiledSpec,
   flags: WalkFlagBag,
+  cwd: string,
 ): WalkResult | null {
   for (const [dest, value] of cs.defaults) {
     if (!(dest in flags)) {
       flags[dest] = cs.multipleDests.has(dest) ? [value] : value
     }
   }
+  resolveGroupPaths(cs, flags, cwd)
   // Numeric-typed values before choices, argparse's order; wording is
   // git's parse-options refusal (`--depth` on a non-integer), one phrase
   // for int and float alike.
@@ -272,9 +302,11 @@ function finishNode(
  * on stderr with exit 1, and group-level option errors refuse on stderr
  * with exit 129. The leaf's own argv is not parsed here; it rides the
  * ordinary spec machinery. `head` is the installed head word, used in
- * every rendering so a renamed install prints its own name.
+ * every rendering so a renamed install prints its own name, and `cwd` is the
+ * working directory PATH-typed group values resolve against, so a group option
+ * resolves the way a leaf option does.
  */
-export function walk(head: string, spec: CLISpec, argv: readonly string[]): WalkResult {
+export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd = '/'): WalkResult {
   let node = spec
   let path: string[] = []
   const flags: WalkFlagBag = {}
@@ -394,7 +426,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
         i += 1
         continue
       }
-      const refused = finishNode(name, node, cs, flags)
+      const refused = finishNode(name, node, cs, flags, cwd)
       if (refused !== null) return refused
       // An alias resolves to its canonical node; the path records the
       // canonical name (argparse prog attribution: errors under `gws co`
@@ -410,7 +442,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
       break
     }
     if (descended) continue
-    const refused = finishNode(name, node, cs, flags)
+    const refused = finishNode(name, node, cs, flags, cwd)
     if (refused !== null) return refused
     return new WalkResult({
       output: ENC.encode(nodeHelp(name, node)),

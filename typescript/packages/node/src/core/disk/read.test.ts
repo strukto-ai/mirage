@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
-import { read } from './read.ts'
+import { read, readRange } from './read.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -39,5 +39,37 @@ describe('core/disk/read', () => {
 
   it('throws "file not found" on ENOENT', async () => {
     await expect(read(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe('core/disk/readRange', () => {
+  it('returns a bounded window', async () => {
+    await writeFile(join(root, 'a.txt'), '0123456789')
+    const data = await readRange(accessor, spec('/a.txt'), undefined, 2, 4)
+    expect(new TextDecoder().decode(data)).toBe('2345')
+  })
+
+  it('runs to the end of the file without a size', async () => {
+    await writeFile(join(root, 'a.txt'), '0123456789')
+    const data = await readRange(accessor, spec('/a.txt'), undefined, 7, null)
+    expect(new TextDecoder().decode(data)).toBe('789')
+  })
+
+  it('stops at the end when the window runs past it', async () => {
+    await writeFile(join(root, 'a.txt'), '0123456789')
+    const data = await readRange(accessor, spec('/a.txt'), undefined, 8, 99)
+    expect(new TextDecoder().decode(data)).toBe('89')
+  })
+
+  it('is empty from past the end', async () => {
+    await writeFile(join(root, 'a.txt'), '0123456789')
+    const data = await readRange(accessor, spec('/a.txt'), undefined, 99, 4)
+    expect(data.byteLength).toBe(0)
+  })
+
+  it('throws "file not found" on ENOENT', async () => {
+    await expect(readRange(accessor, spec('/missing'), undefined, 0, 4)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

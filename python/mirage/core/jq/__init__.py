@@ -12,14 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.jq.eval import jq_eval
+from mirage.core.jq.eval import (args_object, jq_eval, references_args,
+                                 references_inputs, stream_events)
 from mirage.core.jq.format import format_jq_output
 from mirage.core.jq.stream import (eval_jsonl_stream, is_jsonl_path,
                                    is_streamable_jsonl_expr, parse_json_auto,
                                    parse_json_docs, parse_json_path,
-                                   parse_jsonl)
+                                   parse_jsonl, parse_seq_docs,
+                                   split_raw_lines)
+from mirage.core.jq.types import DEFAULT_INDENT, JqOptions
 
 __all__ = [
+    "DEFAULT_INDENT",
+    "JqOptions",
+    "args_object",
     "eval_jsonl_stream",
     "format_jq_output",
     "is_jsonl_path",
@@ -29,4 +35,9 @@ __all__ = [
     "parse_json_docs",
     "parse_json_path",
     "parse_jsonl",
+    "parse_seq_docs",
+    "references_args",
+    "references_inputs",
+    "stream_events",
+    "split_raw_lines",
 ]

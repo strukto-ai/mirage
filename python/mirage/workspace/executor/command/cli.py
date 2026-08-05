@@ -21,7 +21,8 @@ from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
                                                  maybe_with_timeout,
                                                  run_with_timeout)
 from mirage.commands.cli.constants import CLI_CONFIG_ENV
-from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.cli.refusal import leaf_refusal
+from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIVerbOpts
 from mirage.commands.cli.walk import owns_argv, walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
@@ -31,6 +32,7 @@ from mirage.commands.spec.types import Operand
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
+from mirage.ops.types import MountRoot, StatPath
 from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import runtime_for_language
@@ -40,7 +42,7 @@ from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.session import Session
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import DispatchFn, ExecutionNode
 
 # A textual rest operand is the spec's pass-through form: the parser
 # reads undeclared dashed tokens as operands instead of refusing them
@@ -156,6 +158,9 @@ async def handle_cli(
     session: Session,
     stdin: ByteSource | None = None,
     entries: list[Runtime] | None = None,
+    dispatch: DispatchFn | None = None,
+    stat_path: StatPath | None = None,
+    mount_root: MountRoot | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a line whose head word is an installed CLI.
 
@@ -183,6 +188,14 @@ async def handle_cli(
         entries (list[Runtime] | None): the workspace's ordered
             runtime world, which a script leaf selects its interpreter
             from; None (outside a workspace) refuses script installs.
+        dispatch (DispatchFn | None): workspace op dispatcher, for a CLI
+            whose subject is files rather than an API.
+        stat_path (StatPath | None): dispatcher-backed stat asking both
+            channels a backend can answer on.
+        mount_root (MountRoot | None): the mount prefix serving a path.
+            These three ride ``inv.ops`` as one CLIVerbOpts; a verb that
+            never reads it cannot touch a mount, and outside a workspace
+            the field is None.
     """
     # Words re-enter string space as typed (word_text): the walk owns
     # interpretation, so a quoted "Lunch?" must not arrive as the
@@ -192,7 +205,7 @@ async def handle_cli(
     argv = [word_text(p) for p in parts[1:]]
     stdout: ByteSource | None
 
-    result = walk(install.name, install.spec, argv)
+    result = walk(install.name, install.spec, argv, session.cwd)
     if result.leaf is None:
         stderr = result.output if result.stream == "stderr" else b""
         stdout = result.output if result.stream == "stdout" else None
@@ -216,12 +229,13 @@ async def handle_cli(
 
     refusal = option_error(prog, parsed)
     if refusal is not None:
-        msg, _code = refusal
-        # Leaf usage errors exit 2 (argparse), regardless of the
-        # USAGE_EXIT table: prog is an installed name, never a GNU tool
-        # with its own pinned exit.
-        refusal_io = IOResult(exit_code=2, stderr=msg)
-        refusal_node = ExecutionNode(command=cmd_str, exit_code=2, stderr=msg)
+        # The dialect is the root's, not the leaf's: a program answers
+        # in one voice at every level.
+        msg, code = leaf_refusal(install.spec.usage_style, refusal[0], parsed)
+        refusal_io = IOResult(exit_code=code, stderr=msg)
+        refusal_node = ExecutionNode(command=cmd_str,
+                                     exit_code=code,
+                                     stderr=msg)
         return None, refusal_io, refusal_node
 
     # Group flags merge into the one bag: ancestor/descendant collisions
@@ -237,13 +251,22 @@ async def handle_cli(
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
 
+    # The workspace doors a mount-reading verb needs ride the record as
+    # one field. Most CLIs never read it: an API client has no
+    # filesystem, while `git` is nothing but one. None outside a
+    # workspace, so a verb that needs a mount refuses there on its own.
+    ops = (CLIVerbOpts(dispatch=dispatch,
+                       stat_path=stat_path,
+                       mount_root=mount_root) if dispatch is not None
+           or stat_path is not None or mount_root is not None else None)
     inv = CLIInvocation(install.config,
                         argv=tuple(argv),
                         paths=tuple(parsed.paths),
                         texts=tuple(parsed.texts),
                         flags=kw,
                         stdin=stdin,
-                        env=dict(session.env))
+                        env=dict(session.env),
+                        ops=ops)
 
     if leaf.script is not None:
         runtime, refused = _select_runtime(prog, leaf, entries or [])

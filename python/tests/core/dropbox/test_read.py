@@ -66,6 +66,41 @@ async def test_read_strips_mount_prefix(index):
 
 
 @pytest.mark.asyncio
+async def test_a_ranged_read_asks_dropbox_for_the_range(index):
+    with patch("mirage.core.dropbox.readdir.list_folder",
+               new_callable=AsyncMock,
+               return_value=FILE_LISTING):
+        with patch("mirage.core.dropbox.read.dropbox_download",
+                   new_callable=AsyncMock,
+                   return_value=b"i!") as download:
+            data = await read(make_accessor(),
+                              PathSpec(virtual="/note.txt",
+                                       directory="/",
+                                       resource_path="note.txt"),
+                              index,
+                              offset=1,
+                              size=2)
+    assert data == b"i!"
+    assert download.await_args.args[2] == "bytes=1-2"
+
+
+@pytest.mark.asyncio
+async def test_an_index_less_ranged_read_still_carries_the_range(index):
+    # The ops factory's emulated truncate reads without an index, which
+    # takes the other branch of read() and must range just the same.
+    with patch("mirage.core.dropbox.read.dropbox_download",
+               new_callable=AsyncMock,
+               return_value=b"i!") as download:
+        await read(make_accessor(),
+                   PathSpec(virtual="/note.txt",
+                            directory="/",
+                            resource_path="note.txt"),
+                   offset=1,
+                   size=2)
+    assert download.await_args.args[2] == "bytes=1-2"
+
+
+@pytest.mark.asyncio
 async def test_read_downloads_through_subfolder_root(index):
     with patch("mirage.core.dropbox.readdir.list_folder",
                new_callable=AsyncMock,

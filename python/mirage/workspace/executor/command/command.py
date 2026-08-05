@@ -31,6 +31,7 @@ from mirage.runtime.policy import PolicyDecision
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
+from mirage.workspace.executor.builtins.links import path_stat
 from mirage.workspace.executor.command.cli import handle_cli
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
@@ -38,7 +39,8 @@ from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
                                                        default_cwd_operand,
                                                        merge_scopes,
                                                        path_flag_scopes)
-from mirage.workspace.executor.command.run import (exec_node, run_on_mount,
+from mirage.workspace.executor.command.run import (exec_node, mount_root_of,
+                                                   run_on_mount,
                                                    scalar_find_flags)
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
@@ -102,14 +104,22 @@ async def handle_command(
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)
-    # and above every mount branch (a CLI consults no mount).
+    # and above every mount branch (a CLI consults no mount). A CLI that
+    # works on files rather than an API (`git`) reads the workspace
+    # facts it needs off `inv.ops`; the rest never look.
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
-        return await handle_cli(cli_install,
-                                parts,
-                                session,
-                                stdin,
-                                entries=registry.runtime_entries)
+        return await handle_cli(
+            cli_install,
+            parts,
+            session,
+            stdin,
+            entries=registry.runtime_entries,
+            dispatch=dispatch,
+            stat_path=(functools.partial(path_stat, dispatch)
+                       if dispatch is not None else None),
+            mount_root=functools.partial(mount_root_of, registry),
+        )
 
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(parts, cmd_name, registry, session.cwd,

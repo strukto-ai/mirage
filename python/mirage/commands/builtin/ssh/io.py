@@ -36,6 +36,7 @@ from mirage.core.ssh.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: a.root is not None,

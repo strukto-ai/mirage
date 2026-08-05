@@ -14,12 +14,67 @@
 
 import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
+import type { MountRoot, StatPath } from '../../ops/types.ts'
 import type { ScriptSource } from '../../workspace/executor/policy/types.ts'
-import type { CommandFnResult } from '../config.ts'
+import type { CommandDispatch, CommandFnResult } from '../config.ts'
 import { compileSpec } from '../spec/compile.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 
 import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
+
+/**
+ * Which program's usage-error dialect a CLI speaks.
+ *
+ * An installed CLI is not a GNU tool, so a leaf that refuses an option it does
+ * not declare answers in argparse's shape and exit code by default. A CLI that
+ * mimics an existing program has to answer in that program's shape instead:
+ * mirage implements a subset of git, so most of git's real options arrive
+ * undeclared, and an agent that reads the refusal should see what git would
+ * have said rather than learn that it is talking to a reimplementation.
+ *
+ * Covers the unknown-option refusal and the exit code, which is what an
+ * undeclared flag produces. Every other usage error (a missing value, an
+ * unparseable int) stays in argparse's shape for both styles, because those
+ * only happen for options a CLI does declare.
+ */
+export enum UsageStyle {
+  ARGPARSE = 'argparse',
+  GIT = 'git',
+}
+
+/**
+ * The workspace doors a mount-reading CLI verb needs, as one field.
+ *
+ * Most CLIs want none of this: an account CLI reaches a service and has
+ * no filesystem, while `git`'s whole subject is a repository that lives
+ * on a mount. So this rides `CLIInvocation.ops` and is absent outside a
+ * workspace (a spec exercised directly in a test), and a verb that never
+ * reads it cannot touch a mount. That is the same opt-in a declared
+ * parameter gave, moved onto the one record every leaf already takes.
+ */
+export interface CLIVerbOpts {
+  /**
+   * The workspace op dispatcher. A CLI routes by name rather than by operand,
+   * so nothing hands it an accessor; a verb that works over a mount (git over a
+   * checkout) reaches one through this instead.
+   */
+  dispatch?: CommandDispatch
+  /**
+   * Dispatcher-backed stat of one path, asking both channels a backend can
+   * answer on. On a prefix store a directory is the set of keys under it rather
+   * than an object of its own, so a point lookup misses a `.git` that readdir
+   * reports; discovery needs the same two-channel answer `find` asks about its
+   * own start point.
+   */
+  statPath?: StatPath
+  /**
+   * The mount prefix serving a virtual path. A mount boundary is a filesystem
+   * boundary, which is where git stops looking for a repository
+   * (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an unrelated
+   * backend.
+   */
+  mountRoot?: MountRoot
+}
 
 /**
  * Everything one CLI line hands its handler, built once per line by the
@@ -28,7 +83,8 @@ import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
  * `texts`, `flags`), so every handler tier renders whichever its
  * substrate can express. Narrower than CommandOpts on purpose: a CLI
  * consults no mount, so there is no resource, no mount prefix, and no
- * filetype cascade; the config carries whatever the handler needs.
+ * filetype cascade; the config carries whatever the handler needs, and a
+ * verb whose subject is files reads `ops`.
  */
 export interface CLIInvocation<ConfigT = unknown> {
   /** The installation's validated config, null without a configModel. */
@@ -45,6 +101,12 @@ export interface CLIInvocation<ConfigT = unknown> {
   stdin: ByteSource | null
   /** The session's environment variables. */
   env: Readonly<Record<string, string>>
+  /**
+   * The workspace doors a mount-reading verb needs (`git`), absent
+   * outside a workspace and for every CLI that reaches a service instead
+   * of a filesystem.
+   */
+  ops?: CLIVerbOpts
 }
 
 /**
@@ -66,6 +128,7 @@ export interface CLISpecInit extends CommandSpecInit {
   configModel?: CLIConfigModel | null
   script?: ScriptSource | null
   runtime?: string | null
+  usageStyle?: UsageStyle
 }
 
 /**
@@ -114,6 +177,13 @@ export class CLISpec extends CommandSpec {
    * language. Takes `script`.
    */
   readonly runtime: string | null
+  /**
+   * Root only. How a leaf refuses an option it does not declare. Defaults to
+   * argparse, which is right for a CLI mirage invented; a CLI that mimics an
+   * existing program sets the style that program uses, so an agent reading the
+   * message and the exit code sees what it would from the real one.
+   */
+  readonly usageStyle: UsageStyle
 
   constructor(init: CLISpecInit) {
     super(init)
@@ -126,6 +196,7 @@ export class CLISpec extends CommandSpec {
     this.configModel = init.configModel ?? null
     this.script = init.script ?? null
     this.runtime = init.runtime ?? null
+    this.usageStyle = init.usageStyle ?? UsageStyle.ARGPARSE
     if (this.name === '' || /\s/.test(this.name)) {
       throw new Error(`cli name '${this.name}' must be a single non-empty word`)
     }

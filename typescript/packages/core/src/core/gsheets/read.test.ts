@@ -33,7 +33,7 @@ import { PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
 import * as drive from '../google/drive.ts'
 import * as client from '../google/_client.ts'
-import { read } from './read.ts'
+import { read, readSpreadsheet } from './read.ts'
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -81,5 +81,12 @@ describe('gsheets read auto-bootstrap', () => {
       resourcePath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('asks for grid data, which spreadsheets.get omits by default', async () => {
+    vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 's1' })
+    await readSpreadsheet(STUB_TOKEN_MANAGER, 's1')
+    expect(vi.mocked(client.googleGet).mock.lastCall?.[1]).toMatch(/\/spreadsheets\/s1$/)
+    expect(vi.mocked(client.googleGet).mock.lastCall?.[2]).toEqual({ includeGridData: 'true' })
   })
 })

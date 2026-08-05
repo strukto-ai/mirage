@@ -45,3 +45,32 @@ async def read_bytes(accessor: DiskAccessor,
         raise FileNotFoundError(virtual) from exc
     record("read", path, "disk", len(data), start_ms)
     return data
+
+
+async def read_range(accessor: DiskAccessor,
+                     path_spec: PathSpec,
+                     index: IndexCacheStore = NULL_INDEX,
+                     offset: int = 0,
+                     size: int | None = None) -> bytes:
+    """Read a byte range, seeking rather than reading the whole file.
+
+    Args:
+        accessor (DiskAccessor): the mount's disk handle.
+        path_spec (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, unused here.
+        offset (int): first byte to read.
+        size (int | None): how many bytes, or None for the rest.
+    """
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
+    root = accessor.root
+    start_ms = int(time.monotonic() * 1000)
+    p = _resolve(root, path)
+    try:
+        async with aiofiles.open(p, "rb") as f:
+            await f.seek(offset)
+            data = await (f.read() if size is None else f.read(size))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(virtual) from exc
+    record("read", path, "disk", len(data), start_ms)
+    return data

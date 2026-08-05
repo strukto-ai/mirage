@@ -273,7 +273,7 @@ class Ops:
             bytes: File content.
         """
         if offset or size is not None:
-            return await self._call("read", path, offset, size)
+            return await self._call("read", path, offset=offset, size=size)
         return await self._call("read", path)
 
     async def write(self, path: str, data: bytes) -> None:

@@ -287,6 +287,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-i",
       "short_value": true,
@@ -301,6 +302,7 @@
       "long": null,
       "multiple": true,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-e",
       "short_value": true,
@@ -315,6 +317,7 @@
       "long": null,
       "multiple": true,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-f",
       "short_value": true,
@@ -329,6 +332,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-n",
       "short_value": true,
@@ -343,6 +347,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-E",
       "short_value": true,
@@ -357,6 +362,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-r",
       "short_value": true,
@@ -370,11 +376,13 @@
         "-e",
         "-f"
       ],
+      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

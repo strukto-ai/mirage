@@ -114,6 +114,18 @@ function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileS
   return merged.with({ uid: merged.uid ?? user, gid: merged.gid ?? user })
 }
 
+/**
+ * The mount prefix serving a virtual path, "/" when none does.
+ *
+ * A mount boundary is a filesystem boundary, which is what a caller walking up a
+ * tree needs in order to stop: `git` looks for a `.git` no further than the
+ * mount root, the way real git stops discovery at a filesystem boundary. A path
+ * under no mount answers "/" so the walk still terminates.
+ */
+export function mountRootOf(registry: MountRegistry, virtual: string): string {
+  return registry.mountFor(virtual)?.prefix ?? '/'
+}
+
 // Run one already-parsed command on the mount that owns its paths. The shared
 // single-mount execution tail: mount resolution, session-mode checks, executeCmd,
 // filesystem-error formatting, ls/find post-processing, and read/write key

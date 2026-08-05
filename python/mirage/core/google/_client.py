@@ -209,8 +209,19 @@ async def google_delete(
 async def google_get_bytes(
     token_manager: TokenManager,
     url: str,
+    range_header: str | None = None,
 ) -> bytes:
+    """GET a URL as raw bytes, optionally only a byte range of it.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        url (str): API URL.
+        range_header (str | None): an HTTP ``Range`` value, or None for
+            the whole body.
+    """
     headers = await google_headers(token_manager)
+    if range_header:
+        headers["Range"] = range_header
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
             resp.raise_for_status()

@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type CommandSpec, type ValueType, type Option } from './types.ts'
+import { type CommandSpec, type Option } from './types.ts'
 
-function valueLabel(valueType: ValueType): string {
-  if (valueType === 'bool') return ''
-  return valueType === 'path' ? ' <path>' : ' <text>'
+function valueLabel(opt: Option): string {
+  if (opt.type === 'bool') return ''
+  // A pair option takes two tokens, and the first one names the value.
+  const value = opt.type === 'path' ? '<path>' : '<text>'
+  return opt.pair ? ` <name> ${value}` : ` ${value}`
 }
 
 // Python's rstrip('\n'). A `/\n+$/` regex is a polynomial ReDoS on a long
@@ -31,7 +33,7 @@ function flagDisplay(opt: Option): string {
   const parts: string[] = []
   if (opt.short !== null) parts.push(opt.short)
   if (opt.long !== null) parts.push(opt.long)
-  return parts.join(', ') + valueLabel(opt.type)
+  return parts.join(', ') + valueLabel(opt)
 }
 
 /** Display rows [flag spelling, description] for a spec's options. */

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { jqEval } from './eval.ts'
+export { argsObject, jqEval, referencesArgs, referencesInputs, streamEvents } from './eval.ts'
 export { concatBytes, formatJqOutput } from './format.ts'
 export {
   evalJsonlStream,
@@ -21,4 +21,8 @@ export {
   parseJsonAuto,
   parseJsonDocs,
   parseJsonPath,
+  parseSeqDocs,
+  splitRawLines,
 } from './stream.ts'
+export { DEFAULT_INDENT, jqOptions } from './types.ts'
+export type { JqOptions } from './types.ts'

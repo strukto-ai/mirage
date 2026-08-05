@@ -26,6 +26,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-O",
       "short_value": true,
@@ -40,6 +41,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-q",
       "short_value": true,
@@ -54,6 +56,7 @@
       "long": "--spider",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -64,11 +67,13 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

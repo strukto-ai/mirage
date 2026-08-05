@@ -14,6 +14,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
@@ -21,14 +22,66 @@ from pydantic import BaseModel
 from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.types import ByteSource
+from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
+
+
+class UsageStyle(Enum):
+    """Which program's usage-error dialect a CLI speaks.
+
+    An installed CLI is not a GNU tool, so a leaf that refuses an option
+    it does not declare answers in argparse's shape and exit code by
+    default. A CLI that mimics an existing program has to answer in that
+    program's shape instead: mirage implements a subset of git, so most
+    of git's real options arrive undeclared, and an agent that reads the
+    refusal should see what git would have said rather than learn that
+    it is talking to a reimplementation.
+
+    Covers the unknown-option refusal and the exit code, which is what
+    an undeclared flag produces. Every other usage error (a missing
+    value, an unparseable int) stays in argparse's shape for both
+    styles, because those only happen for options a CLI does declare.
+    """
+
+    ARGPARSE = "argparse"
+    GIT = "git"
+
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
 FlagBag = dict[str, str | bool | int | list[str]]
 
 ConfigT = TypeVar("ConfigT")
+
+
+@dataclass(frozen=True)
+class CLIVerbOpts:
+    """The workspace doors a mount-reading CLI verb needs, as one field.
+
+    Most CLIs want none of this: an account CLI reaches a service and
+    has no filesystem, while ``git``'s whole subject is a repository
+    that lives on a mount. So this rides ``CLIInvocation.ops`` and is
+    None outside a workspace (a spec exercised directly in a test), and
+    a verb that never reads it cannot touch a mount. That is the same
+    opt-in the parameter-injection form gave, moved onto the one record
+    every leaf already takes: the door is a field read instead of a
+    signature the dispatcher inspects.
+
+    Args:
+        dispatch (Callable[..., Any] | None): the workspace op
+            dispatcher. Typed loosely on purpose: the DispatchFn
+            Protocol lives in ``workspace.types``, and ``commands``
+            stays free of a workspace import.
+        stat_path (StatPath | None): dispatcher-backed stat that asks
+            both channels a backend can answer on.
+        mount_root (MountRoot | None): the mount prefix serving a path.
+            A mount boundary is a filesystem boundary, which is where
+            git stops looking for a repository.
+    """
+    dispatch: Callable[..., Any] | None = None
+    stat_path: StatPath | None = None
+    mount_root: MountRoot | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +113,9 @@ class CLIInvocation(Generic[ConfigT]):
         stdin (ByteSource | None): piped input, None when the line has
             none.
         env (Mapping[str, str]): the session's environment variables.
+        ops (CLIVerbOpts | None): the workspace doors a mount-reading
+            verb needs (``git``), None outside a workspace and for every
+            CLI that reaches a service instead of a filesystem.
     """
     config: ConfigT
     argv: tuple[str, ...] = ()
@@ -68,6 +124,7 @@ class CLIInvocation(Generic[ConfigT]):
     flags: Mapping[str, object] = field(default_factory=dict)
     stdin: ByteSource | None = None
     env: Mapping[str, str] = field(default_factory=dict)
+    ops: CLIVerbOpts | None = None
 
 
 @dataclass(frozen=True)
@@ -122,12 +179,19 @@ class CLISpec(CommandSpec):
         runtime (str | None): name of the world runtime entry that runs
             ``script`` (YAML ``runtime:``); None picks the first entry
             speaking the script's language. Takes ``script``.
+        usage_style (UsageStyle): root only. How a leaf refuses an option
+            it does not declare. Defaults to argparse, which is right for
+            a CLI mirage invented; a CLI that mimics an existing program
+            sets the style that program uses, so an agent reading the
+            message and the exit code sees what it would from the real
+            one.
     """
     name: str = ""
     aliases: tuple[str, ...] = ()
     fn: Callable[..., Any] | None = None
     subcommands: tuple["CLISpec", ...] = ()
     write: bool = False
+    usage_style: UsageStyle = UsageStyle.ARGPARSE
     # hash=False: Limit is a mutable dataclass, and the
     # frozen CLISpec must stay hashable for compile_spec's per-spec
     # cache. Equality still compares the field; only the hash skips it

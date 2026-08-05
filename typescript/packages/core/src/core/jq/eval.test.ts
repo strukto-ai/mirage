@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { jqEval } from './eval.ts'
+import { jqEval, referencesArgs, referencesInputs } from './eval.ts'
 
 /**
  * Evaluate expr and return its single output.
@@ -365,5 +365,61 @@ describe('jq eval — output arity', () => {
 
   it('a bracket pair inside a string literal is one output', async () => {
     expect(await jqEval({ a: 'x[]y' }, '.a | contains("[]")')).toEqual([true])
+  })
+})
+
+describe('named args and inputs', () => {
+  it('binds $name from named args', async () => {
+    expect(await jqEval({ a: 1 }, '[.a, $v]', { v: 'hi' })).toEqual([[1, 'hi']])
+  })
+
+  it('carries JSON values', async () => {
+    expect(await jqEval(null, '$v', { v: { k: [1, 2] } })).toEqual([{ k: [1, 2] }])
+  })
+
+  it('yields the bound documents from inputs', async () => {
+    expect(await jqEval(null, '[inputs]', {}, [1, 2, 3])).toEqual([[1, 2, 3]])
+  })
+
+  it('lets a program define its own inputs', async () => {
+    expect(await jqEval(null, 'def inputs: 9; [inputs]', {}, [1, 2])).toEqual([[9]])
+  })
+
+  it('finds whole-word inputs references only', () => {
+    expect(referencesInputs('[inputs]')).toBe(true)
+    expect(referencesInputs('reduce inputs as $x (0; . + $x)')).toBe(true)
+    expect(referencesInputs('.myinputs')).toBe(false)
+    expect(referencesInputs('.inputs_total')).toBe(false)
+  })
+
+  it('ignores the word where it spells data', () => {
+    expect(referencesInputs('.inputs')).toBe(false)
+    expect(referencesInputs('.a.inputs')).toBe(false)
+    expect(referencesInputs('$inputs')).toBe(false)
+    expect(referencesInputs('{inputs: .a}')).toBe(false)
+    expect(referencesInputs('{inputs}')).toBe(false)
+    expect(referencesInputs('{a, inputs}')).toBe(false)
+    expect(referencesInputs('m::inputs')).toBe(false)
+  })
+
+  it('ignores strings and comments', () => {
+    expect(referencesInputs('"no inputs found"')).toBe(false)
+    expect(referencesInputs('. # drains inputs')).toBe(false)
+    expect(referencesInputs('"a\\("b" + "inputs")c"')).toBe(false)
+  })
+
+  it('reads calls in every value position', () => {
+    expect(referencesInputs('{a: inputs}')).toBe(true)
+    expect(referencesInputs('{(inputs): 1}')).toBe(true)
+    expect(referencesInputs('[1, inputs, 2]')).toBe(true)
+    expect(referencesInputs('"\\(inputs)"')).toBe(true)
+  })
+
+  it('reads $ARGS the same way', () => {
+    expect(referencesArgs('$ARGS.positional')).toBe(true)
+    expect(referencesArgs('{$ARGS}')).toBe(true)
+    expect(referencesArgs('"$ARGS"')).toBe(false)
+    expect(referencesArgs('. # $ARGS')).toBe(false)
+    expect(referencesArgs('$ARGSX')).toBe(false)
   })
 })

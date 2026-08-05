@@ -31,6 +31,7 @@ from mirage.observe.context import active_recorder, record, revision_for
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.ranges import range_header, slice_window
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,12 @@ async def read_bytes(
     return await download_file(token_manager, file_id)
 
 
-async def read_file_versioned(token_manager: TokenManager, file_id: str,
-                              virtual: str, label: str) -> bytes:
+async def read_file_versioned(token_manager: TokenManager,
+                              file_id: str,
+                              virtual: str,
+                              label: str,
+                              offset: int = 0,
+                              size: int | None = None) -> bytes:
     """Download a binary file honouring snapshot revision pins.
 
     A pinned path reads that revision's content; an actively recorded read
@@ -55,19 +60,22 @@ async def read_file_versioned(token_manager: TokenManager, file_id: str,
         file_id (str): file ID.
         virtual (str): full virtual path (pin lookup key).
         label (str): mount-relative path recorded with the read.
+        offset (int): first byte to read.
+        size (int | None): how many bytes, or None for the rest.
     """
     pinned = revision_for(virtual)
+    window = range_header(offset, size)
     start_ms = int(time.monotonic() * 1000)
     fingerprint = None
     revision = pinned
     if pinned:
-        data = await download_revision(token_manager, file_id, pinned)
+        data = await download_revision(token_manager, file_id, pinned, window)
     elif active_recorder() is not None:
         fingerprint, revision = await capture_file_metadata(
             token_manager, file_id)
-        data = await download_file(token_manager, file_id)
+        data = await download_file(token_manager, file_id, window)
     else:
-        data = await download_file(token_manager, file_id)
+        data = await download_file(token_manager, file_id, window)
     record("read",
            label,
            "gdrive",
@@ -82,7 +90,22 @@ async def read(
     accessor: GDriveAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
+    offset: int = 0,
+    size: int | None = None,
 ) -> bytes:
+    """Read a Drive file, optionally only a byte range of it.
+
+    Only a binary file has a remote range to ask for. A google-apps file
+    is rendered here into JSON, so its bytes do not exist until we make
+    them and the window can only be taken afterwards.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, consulted for the file id.
+        offset (int): first byte to read.
+        size (int | None): how many bytes, or None for the rest.
+    """
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
@@ -106,10 +129,15 @@ async def read(
     if result.entry.resource_type in DIRECTORY_RESOURCE_TYPES:
         raise IsADirectoryError(virtual)
     if result.entry.resource_type == "gdrive/gdoc":
-        return await read_doc(accessor.token_manager, result.entry.id)
-    if result.entry.resource_type == "gdrive/gsheet":
-        return await read_spreadsheet(accessor.token_manager, result.entry.id)
-    if result.entry.resource_type == "gdrive/gslide":
-        return await read_presentation(accessor.token_manager, result.entry.id)
-    return await read_file_versioned(accessor.token_manager, result.entry.id,
-                                     virtual, key)
+        rendered = await read_doc(accessor.token_manager, result.entry.id)
+    elif result.entry.resource_type == "gdrive/gsheet":
+        rendered = await read_spreadsheet(accessor.token_manager,
+                                          result.entry.id)
+    elif result.entry.resource_type == "gdrive/gslide":
+        rendered = await read_presentation(accessor.token_manager,
+                                           result.entry.id)
+    else:
+        return await read_file_versioned(accessor.token_manager,
+                                         result.entry.id, virtual, key, offset,
+                                         size)
+    return slice_window(rendered, offset, size)

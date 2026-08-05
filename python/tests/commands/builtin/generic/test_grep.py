@@ -138,7 +138,7 @@ async def test_grep_single_dir_operand_warns():
         read_stream=rs,
     )
     assert await _drain_async(output) == b""
-    assert io.exit_code == 1
+    assert io.exit_code == 2
     assert io.stderr == b"grep: /d: Is a directory\n"
 
 
@@ -620,7 +620,10 @@ async def test_grep_quiet_count_zero_counts_exits_1():
 
 
 @pytest.mark.asyncio
-async def test_grep_multi_file_missing_operand_matches_still_exit_1():
+async def test_grep_multi_file_missing_operand_matches_still_exit_2():
+    """A match does not excuse an unreadable operand: GNU prints the lines it
+    did find and still exits 2.
+    """
     readdir, stat, rb, rs = _make_backend({"/a.txt": b"hello\n"})
     output, io = await grep(
         [_spec("/a.txt"), _spec("/nope.txt")],
@@ -633,7 +636,7 @@ async def test_grep_multi_file_missing_operand_matches_still_exit_1():
     decoded = (await _drain_async(output)).decode()
     assert decoded == "/a.txt:hello\n"
     assert io.stderr == b"grep: /nope.txt: No such file or directory\n"
-    assert io.exit_code == 1
+    assert io.exit_code == 2
 
 
 @pytest.mark.asyncio

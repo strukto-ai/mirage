@@ -140,6 +140,7 @@
       "long": "--lines",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-l",
       "short_value": true,
@@ -154,6 +155,7 @@
       "long": "--bytes",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-b",
       "short_value": true,
@@ -168,6 +170,7 @@
       "long": "--number",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-n",
       "short_value": true,
@@ -182,6 +185,7 @@
       "long": "--numeric-suffixes",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-d",
       "short_value": true,
@@ -196,6 +200,7 @@
       "long": "--hex-suffixes",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-x",
       "short_value": true,
@@ -210,6 +215,7 @@
       "long": "--suffix-length",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-a",
       "short_value": true,
@@ -224,6 +230,7 @@
       "long": "--additional-suffix",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -238,6 +245,7 @@
       "long": "--separator",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-t",
       "short_value": true,
@@ -248,10 +256,12 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     },
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     }
   ],

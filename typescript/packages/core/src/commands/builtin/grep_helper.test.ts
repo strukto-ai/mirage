@@ -198,6 +198,7 @@ describe('grepFilesOnly', () => {
       onlyMatching: false,
       maxCount: null,
       wholeWord: false,
+      basic: true,
     })
     expect(hits).toEqual(['/data/notes.txt'])
   })

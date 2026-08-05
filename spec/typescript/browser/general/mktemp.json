@@ -84,6 +84,7 @@
       "long": "--directory",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-d",
       "short_value": true,
@@ -98,6 +99,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-p",
       "short_value": true,
@@ -112,6 +114,7 @@
       "long": "--tmpdir",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -126,6 +129,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-t",
       "short_value": true,
@@ -140,6 +144,7 @@
       "long": "--dry-run",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-u",
       "short_value": true,
@@ -154,6 +159,7 @@
       "long": "--quiet",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-q",
       "short_value": true,
@@ -168,6 +174,7 @@
       "long": "--suffix",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -178,6 +185,7 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "str"
     }
   ],

@@ -42,6 +42,7 @@ from mirage.core.gdrive.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_dir_name=lambda _accessor, child: _is_dir_name(child),

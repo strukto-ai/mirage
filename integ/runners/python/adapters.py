@@ -2117,6 +2117,30 @@ def build_mounts(
     return mounts, cleanups
 
 
+def cli_install(service: "Service | None",
+                cli_name: str) -> tuple[CLISpec, dict[str, object] | None]:
+    """The spec and config to install one CLI under its head word.
+
+    Every CLI here so far talks to an API, so its mock service hands
+    over both the tree and the credentials pointing at itself. `git` is
+    the first with neither: it reads a repository out of a mount, which
+    is what makes it installable from a bare name, so it resolves
+    through the registry the YAML ``clis:`` section uses and installs
+    with no config at all.
+
+    Args:
+        service (Service | None): the target's mock service, None for a
+            target that needs none.
+        cli_name (str): the head word the target declared.
+    """
+    if service is None:
+        return cli_spec_for(cli_name), None
+    # Widen the assert when another service grows a CLI.
+    assert isinstance(service, (DiscordService, EmailService, GwsService,
+                                LinearService, NotionService, SlackService))
+    return service.cli_installs()[cli_name]
+
+
 async def mutate_write(shadow_ws: Workspace, path: str,
                        content: bytes) -> None:
     await shadow_ws.ops.write(path, content)
@@ -2151,11 +2175,7 @@ async def open_target(
     else:
         ws = Workspace(mounts, mode=MountMode.WRITE, agent_id=agent_id)
     for cli_name in target.get("clis", []):
-        # Widen the assert when another service grows a CLI.
-        assert isinstance(service,
-                          (DiscordService, EmailService, GwsService,
-                           LinearService, NotionService, SlackService))
-        spec, config = service.cli_installs()[cli_name]
+        spec, config = cli_install(service, cli_name)
         ws.register_cli(cli_name, spec, config)
     return ws, functools.partial(teardown_target, [ws], cleanups, service)
 

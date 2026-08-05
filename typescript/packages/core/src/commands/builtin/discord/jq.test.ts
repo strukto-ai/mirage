@@ -82,7 +82,7 @@ describe('discord jq', () => {
         }),
       ],
       ['.[].content'],
-      { r: true },
+      { raw_output: true },
       { index: idx, transport },
     )
     const lines = out.stdout.split('\n').filter((s) => s !== '')

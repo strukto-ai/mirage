@@ -20,6 +20,7 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import CommandContext, resolve_limit
 from mirage.runtime.policy import PolicyDecision
+from mirage.shell.bytes import encode_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command
@@ -194,7 +195,7 @@ async def _dispatch_command_body(
                 for sc in child.named_children:
                     content = await expand_node(sc, session, execute_fn,
                                                 call_stack)
-                    stdin = content.encode() + b"\n"
+                    stdin = encode_text(content) + b"\n"
                     break
 
     # Process substitution: <(cmd) feeds inner stdout as stdin.

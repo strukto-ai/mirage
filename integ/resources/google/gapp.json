@@ -273,6 +273,58 @@
         "stdout": "",
         "stderr": "cp: cannot create regular file '/docs/owned/in2.txt': Operation not supported\n"
       }
+    },
+    {
+      "id": "gapp_sheets_cells",
+      "seq": 520020,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '[.sheets[0].data[0].rowData[].values[].formattedValue]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"region\",\"revenue\",\"flag\",\"code\",\"exp\",\"emea\",\"120\",\"TRUE\",\"0x10\",\"1.00E+03\",\"apac\",\"90\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_cell_value_is_typed",
+      "seq": 520021,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '.sheets[0].data[0].rowData[1].values[1].effectiveValue'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"numberValue\":120}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_row_is_a_grid_row",
+      "seq": 520022,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '[.sheets[0].data[0].rowData[] | [.values[].formattedValue]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"region\",\"revenue\",\"flag\",\"code\",\"exp\"],[\"emea\",\"120\",\"TRUE\",\"0x10\",\"1.00E+03\"],[\"apac\",\"90\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_cell_types_follow_user_entered",
+      "seq": 520023,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '[.sheets[0].data[0].rowData[1].values[] | (.userEnteredValue | keys[0])]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"stringValue\",\"numberValue\",\"boolValue\",\"stringValue\",\"numberValue\"]\n",
+        "stderr": ""
+      }
     }
   ]
 }

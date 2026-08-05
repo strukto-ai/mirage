@@ -23,6 +23,7 @@ from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.find import find as _find
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.read import read_bytes as _read
+from mirage.core.disk.read import read_range as _read_range
 from mirage.core.disk.readdir import readdir as _readdir
 from mirage.core.disk.rename import rename as _rename
 from mirage.core.disk.rm import rm_r as _rm_r
@@ -37,6 +38,7 @@ from mirage.core.disk.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read_range,
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: a.root is not None,

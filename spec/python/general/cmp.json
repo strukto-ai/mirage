@@ -266,6 +266,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-l",
       "short_value": true,
@@ -280,6 +281,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-s",
       "short_value": true,
@@ -294,6 +296,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-n",
       "short_value": true,
@@ -308,6 +311,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-b",
       "short_value": true,
@@ -322,6 +326,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-i",
       "short_value": true,
@@ -332,10 +337,12 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     },
     {
       "provided_by": [],
+      "text_when": [],
       "type": "path"
     }
   ],

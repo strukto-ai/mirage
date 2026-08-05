@@ -26,7 +26,8 @@ from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.bre import bre_to_python
 from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -297,10 +298,25 @@ def merge_pattern_list(
     return "\n".join(parts)
 
 
+def _source_of(part: str, fixed_string: bool, basic: bool) -> str:
+    """One pattern's regex source, in the syntax it was written in.
+
+    Args:
+        part (str): a single pattern from the list.
+        fixed_string (bool): True if -F flag is set.
+        basic (bool): True when the pattern is a basic regular
+            expression (grep's default), False for an extended one.
+    """
+    if fixed_string:
+        return re.escape(part)
+    return bre_to_python(part) if basic else part
+
+
 def build_pattern_str(
     pattern: str,
     fixed_string: bool = False,
     whole_word: bool = False,
+    basic: bool = False,
 ) -> str:
     """Build a regex source string from a POSIX pattern list.
 
@@ -309,19 +325,24 @@ def build_pattern_str(
             any of the patterns matches.
         fixed_string (bool): True if -F flag is set.
         whole_word (bool): True if -w flag is set.
+        basic (bool): True when the patterns are basic regular
+            expressions, which grep reads by default and which invert
+            most of Python's operators. False leaves them alone, which
+            is right for -E and for rg's own dialect.
 
     Returns:
         str: regex source string.
     """
     parts = pattern.split("\n")
     if len(parts) == 1:
-        pat_str = re.escape(pattern) if fixed_string else pattern
+        pat_str = _source_of(pattern, fixed_string, basic)
         if whole_word:
             pat_str = r"\b" + pat_str + r"\b"
         return pat_str
     subs: list[str] = []
     for part in parts:
-        sub = re.escape(part) if fixed_string else f"(?:{part})"
+        source = _source_of(part, fixed_string, basic)
+        sub = source if fixed_string else f"(?:{source})"
         if whole_word:
             sub = r"\b" + sub + r"\b"
         subs.append(sub)
@@ -333,10 +354,20 @@ def compile_pattern(
     ignore_case: bool = False,
     fixed_string: bool = False,
     whole_word: bool = False,
+    basic: bool = False,
 ) -> re.Pattern[str]:
+    """Compile a pattern list into one matcher.
+
+    Args:
+        pattern (str): newline-separated pattern list.
+        ignore_case (bool): True if -i flag is set.
+        fixed_string (bool): True if -F flag is set.
+        whole_word (bool): True if -w flag is set.
+        basic (bool): True for a basic regular expression.
+    """
     flags = re.IGNORECASE if ignore_case else 0
-    return re.compile(build_pattern_str(pattern, fixed_string, whole_word),
-                      flags)
+    return re.compile(
+        build_pattern_str(pattern, fixed_string, whole_word, basic), flags)
 
 
 def get_extension(path: str) -> str | None:
@@ -643,6 +674,83 @@ async def grep_recursive(
     return results
 
 
+async def operand_is_directory(
+    readdir_fn: _AsyncReaddir,
+    info: FileStat | None,
+    path: str,
+) -> bool:
+    """Whether an operand names a directory, asked on both channels.
+
+    Both channels are consulted because on a prefix store a directory is
+    the set of keys under it rather than an object, so stat misses one
+    that readdir lists happily. The listing has to be non-empty to count:
+    such a store answers readdir for any path at all, returning nothing
+    for one that does not exist, so a bare "it did not raise" reads every
+    missing file as a directory. The cost is that a genuinely empty
+    directory is invisible there, which is the same thing ``du`` already
+    documents and the safer way round: naming a missing file is a report
+    a caller can act on, calling it a directory is not.
+
+    Args:
+        readdir_fn (_AsyncReaddir): backend directory reader.
+        info (FileStat | None): what stat said, None when it could not
+            answer.
+        path (str): the operand path.
+
+    Returns:
+        bool: True when either channel reports a directory.
+    """
+    if info is not None:
+        return info.type is FileType.DIRECTORY
+    try:
+        return bool(await readdir_fn(path))
+    except WALK_ERRORS:
+        return False
+
+
+def exit_code_for(matched: bool, failed: bool, quiet: bool) -> int:
+    """The exit status grep and ripgrep share.
+
+    An operand the search could not read is exit 2, and it outranks a
+    match: both tools print the lines they did find and still exit 2. The
+    one exception is grep's -q, documented as exiting zero when a match is
+    found "even if an error was detected". Everything else is the familiar
+    0 for a match, 1 for none.
+
+    Args:
+        matched (bool): True when any line was selected.
+        failed (bool): True when an operand could not be searched.
+        quiet (bool): True if -q is set; ripgrep passes False.
+
+    Returns:
+        int: the exit code.
+    """
+    if matched and quiet:
+        return 0
+    if failed:
+        return 2
+    return 0 if matched else 1
+
+
+def operand_error(path: str, exc: BaseException) -> str:
+    """GNU's stderr line for an operand grep could not read.
+
+    A directory does not reach here: it is recognized from its type
+    before the read, because what a read raises for one is whatever the
+    backend happens to do about it.
+
+    Args:
+        path (str): the operand as it was named.
+        exc (BaseException): what the read raised.
+
+    Returns:
+        str: the `grep: <path>: <reason>` line, without a trailing newline.
+    """
+    if isinstance(exc, FileNotFoundError):
+        return f"grep: {path}: No such file or directory"
+    return f"grep: {path}: {exc}"
+
+
 async def grep_files_only(
     readdir_fn: _AsyncReaddir,
     stat_fn: _AsyncStat,
@@ -658,21 +766,29 @@ async def grep_files_only(
     only_matching: bool,
     max_count: int | None,
     whole_word: bool,
+    basic: bool,
     warnings: list[str] | None,
     read_stream_fn=None,
 ) -> list[str]:
-    compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
+    compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word,
+                               basic)
+
+    # What the operand is, asked before it is read. A failed read is a
+    # backend-dependent proxy for the type and a poor one: a keyed store
+    # reads a directory path without complaint and returns nothing, and
+    # ssh answers with an SFTP error that is not an OSError at all, so
+    # classifying afterwards gets a different answer per backend.
+    info: FileStat | None = None
+    try:
+        info = await stat_fn(path)
+    except WALK_ERRORS:
+        info = None
 
     if recursive:
         # GNU only walks directory operands; a file operand under -r takes
         # the plain single-file scan (TS grepGeneric parity). Stat failures
         # keep the walk so missing operands surface its error shape.
-        operand_is_file = False
-        try:
-            s = await stat_fn(path)
-            operand_is_file = s.type != FileType.DIRECTORY
-        except WALK_ERRORS:
-            operand_is_file = False
+        operand_is_file = info is not None and info.type != FileType.DIRECTORY
         if not operand_is_file:
             return await grep_recursive(
                 readdir_fn,
@@ -690,64 +806,27 @@ async def grep_files_only(
                 read_stream_fn,
             )
 
+    # GNU names a directory operand and moves on without descending into
+    # it; only -r walks one, and that branch returned above. Walking here
+    # would make -l alone behave like -rl.
+    if await operand_is_directory(readdir_fn, info, path):
+        if warnings is not None:
+            warnings.append(f"grep: {path}: Is a directory")
+        return []
+
     try:
         data = await read_bytes_fn(path)
-        text_lines = data.decode(errors="replace").splitlines()
-        count = 0
-        for _i, line in enumerate(text_lines, 1):
-            m = compiled.search(line)
-            matched = bool(m) != invert
-            if matched:
-                count += 1
-                if max_count is not None and count >= max_count:
-                    break
-        if count_only:
-            return [str(count)]
-        return [path] if count > 0 else []
-    except (FileNotFoundError, ValueError, IsADirectoryError) as exc:
-        if warnings is not None:
-            warnings.append(f"grep: {path}: {exc}")
-
-    try:
-        s = await stat_fn(path)
-        if s.type == FileType.DIRECTORY:
-            return await grep_recursive(
-                readdir_fn,
-                stat_fn,
-                read_bytes_fn,
-                path,
-                compiled,
-                invert,
-                line_numbers,
-                count_only,
-                True,
-                only_matching,
-                max_count,
-                warnings,
-                read_stream_fn,
-            )
     except WALK_ERRORS as exc:
         if warnings is not None:
-            warnings.append(f"grep: {path}: {exc}")
-        try:
-            await readdir_fn(path)
-            return await grep_recursive(
-                readdir_fn,
-                stat_fn,
-                read_bytes_fn,
-                path,
-                compiled,
-                invert,
-                line_numbers,
-                count_only,
-                True,
-                only_matching,
-                max_count,
-                warnings,
-                read_stream_fn,
-            )
-        except WALK_ERRORS as exc2:
-            if warnings is not None:
-                warnings.append(f"grep: {path}: {exc2}")
-
-    return []
+            warnings.append(operand_error(path, exc))
+        return []
+    text_lines = data.decode(errors="replace").splitlines()
+    count = 0
+    for line in text_lines:
+        if bool(compiled.search(line)) != invert:
+            count += 1
+            if max_count is not None and count >= max_count:
+                break
+    if count_only:
+        return [str(count)]
+    return [path] if count > 0 else []

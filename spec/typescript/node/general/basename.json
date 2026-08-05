@@ -287,6 +287,7 @@
       "long": "--multiple",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-a",
       "short_value": true,
@@ -301,6 +302,7 @@
       "long": "--suffix",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-s",
       "short_value": true,
@@ -315,6 +317,7 @@
       "long": "--zero",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-z",
       "short_value": true,
@@ -325,6 +328,7 @@
   "positional": [],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "str"
   }
 }

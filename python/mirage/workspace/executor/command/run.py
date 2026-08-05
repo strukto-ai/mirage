@@ -137,6 +137,25 @@ def link_view(namespace: Namespace | None,
                                                   dispatch))
 
 
+def mount_root_of(registry: MountRegistry, virtual: str) -> str:
+    """The mount prefix serving a virtual path, "/" when none does.
+
+    A mount boundary is a filesystem boundary, which is what a caller
+    walking up a tree needs in order to stop: `git` looks for a `.git`
+    no further than the mount root, the way real git stops discovery at
+    a filesystem boundary. A path under no mount answers "/" so the walk
+    still terminates.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        virtual (str): absolute virtual path.
+    """
+    try:
+        return registry.mount_for(virtual).prefix
+    except ValueError:
+        return "/"
+
+
 def namespace_stat_overlay(namespace: Namespace, virtual: str,
                            stat: FileStat) -> FileStat:
     """Merge namespace attr overlays into one stat row (ls/stat rendering).

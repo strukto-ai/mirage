@@ -172,7 +172,7 @@ async def test_stat_size_matches_read_for_every_file(accessor, index):
     async def _list(_tm, folder_id):
         return tree[folder_id]
 
-    async def _download(_tm, file_id):
+    async def _download(_tm, file_id, _range=None):
         return contents[file_id]
 
     files: list[str] = []

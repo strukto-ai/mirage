@@ -26,6 +26,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-c",
       "short_value": true,
@@ -36,6 +37,7 @@
   "positional": [],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "str"
   }
 }

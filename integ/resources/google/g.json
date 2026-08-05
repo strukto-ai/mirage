@@ -136,7 +136,7 @@
       "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Data\"}}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"autoRecalc\":\"ON_CHANGE\",\"timeZone\":\"Etc/GMT\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
         "stderr": ""
       }
     },
@@ -178,7 +178,7 @@
       "command": "gws sheets spreadsheets get --params '{\"spreadsheetId\": \"sheet0001\"}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"autoRecalc\":\"ON_CHANGE\",\"timeZone\":\"Etc/GMT\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
         "stderr": ""
       }
     },
@@ -192,7 +192,7 @@
       "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": \"Extra\"}}}]}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\"}}}]}",
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\",\"index\":1,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}}]}",
         "stderr": ""
       }
     },

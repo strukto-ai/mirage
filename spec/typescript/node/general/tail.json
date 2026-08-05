@@ -294,6 +294,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": true,
+      "pair": false,
       "required": false,
       "short": "-n",
       "short_value": true,
@@ -308,6 +309,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-c",
       "short_value": true,
@@ -322,6 +324,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-q",
       "short_value": true,
@@ -336,6 +339,7 @@
       "long": null,
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-v",
       "short_value": true,
@@ -350,6 +354,7 @@
       "long": "--follow",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": "-f",
       "short_value": true,
@@ -360,6 +365,7 @@
   "positional": [],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

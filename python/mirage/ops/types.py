@@ -23,6 +23,11 @@ StatOverlay = Callable[[str, FileStat], FileStat]
 # What a traversal command asks about its own start point, which decides
 # whether a walk is possible at all.
 StatPath = Callable[[str], Awaitable["FileStat | None"]]
+# The mount prefix serving a virtual path. A mount boundary is a
+# filesystem boundary, which is where git stops looking for a repository
+# (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an
+# unrelated backend.
+MountRoot = Callable[[str], str]
 # lstat for one path: the link's own stat, None when not a link.
 LinkStat = Callable[[str], "FileStat | None"]
 # Stat rows for the links directly under a directory, for listings.

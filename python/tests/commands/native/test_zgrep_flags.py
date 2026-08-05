@@ -112,3 +112,34 @@ def test_zgrep_h(env):
     env.mirage("gzip /data/f.txt")
     result = env.mirage("zgrep -h hello /data/f.txt.gz")
     assert "hello" in result
+
+
+def test_zgrep_reads_a_basic_expression(env):
+    """zgrep is grep over decompressed bytes, so + is an ordinary character."""
+    env.create_file("f.txt", b"aab\na+b\n")
+    env.mirage("gzip /data/f.txt")
+    result = env.mirage("zgrep 'a+b' /data/f.txt.gz")
+    assert "a+b" in result
+    assert "aab" not in result
+
+
+def test_zgrep_E_reads_an_extended_expression(env):
+    env.create_file("f.txt", b"aab\na+b\n")
+    env.mirage("gzip /data/f.txt")
+    result = env.mirage("zgrep -E 'a+b' /data/f.txt.gz")
+    assert "aab" in result
+
+
+def test_zgrep_G_asks_for_the_default_dialect(env):
+    env.create_file("f.txt", b"aab\na+b\n")
+    env.mirage("gzip /data/f.txt")
+    result = env.mirage("zgrep -G 'a+b' /data/f.txt.gz")
+    assert "a+b" in result
+    assert "aab" not in result
+
+
+def test_zgrep_bre_backslash_plus_is_the_operator(env):
+    env.create_file("f.txt", b"aab\na+b\n")
+    env.mirage("gzip /data/f.txt")
+    result = env.mirage(r"zgrep 'a\+b' /data/f.txt.gz")
+    assert "aab" in result

@@ -64,7 +64,7 @@ async def test_read_downloads_plain_file(accessor, index):
             return_value=b"file content",
     ) as mock:
         result = await read(accessor, _scope("/docs/readme.txt"), index=index)
-        mock.assert_called_once_with(accessor.token_manager, "file123")
+        mock.assert_called_once_with(accessor.token_manager, "file123", None)
         assert result == b"file content"
 
 

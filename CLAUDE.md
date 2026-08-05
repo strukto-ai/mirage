@@ -49,8 +49,24 @@ Command history is a recording, not a command log. A hidden `Observer` records e
 ## CLIs
 
 An installed CLI is a typed program tree (`CLISpec`) bound to a head word on the
-workspace. It is **dispatched by name, never by operand path**, and consults no
-mount: the VFS is how an agent discovers state, the CLI is how it acts.
+workspace. It is **dispatched by name, never by operand path**: the VFS is how an
+agent discovers state, the CLI is how it acts.
+
+- **An account CLI consults no mount; `git` is the one that does.** The two are
+  different tiers, told apart by `config_model`. An account CLI
+  (`slack`, `linear`, `gws`, …) declares one, initializes from it, and reaches a
+  service, so a mount would be a second source of truth for the same account.
+  `git` declares none, because there is nothing to authenticate to, and its
+  subject is a repository that lives on a mount, so it reads that repository
+  through the op dispatcher like any command. That is what makes `git` work on a
+  RAM mount, a disk mount or an object store without knowing which. It reaches
+  the dispatcher through `CLIVerbOpts` (`dispatch`, `stat_path`, `mount_root`),
+  which `handle_cli`/`handleCli` puts on `inv.ops`; the field is None/absent
+  outside a workspace, and a verb that never reads it cannot touch a mount, so
+  this stays opt-in per verb rather than ambient. The door is one field read
+  rather than a parameter list the dispatcher inspects, because every leaf takes
+  exactly one `CLIInvocation` and nothing is threaded through keyword injection.
+  Do not give an account CLI a mount, and do not give `git` a `config_model`.
 
 - **The lifecycle is host-side only.** `register_cli`/`unregister_cli`
   (`workspace.py`, `workspace.ts`) are called by the embedding program, never by
@@ -61,12 +77,14 @@ mount: the VFS is how an agent discovers state, the CLI is how it acts.
   with `command <name>`, and visible in `type -a`. A deployment that needs a head
   word pinned enforces that in the policy layer's `pre_execute`, not in the CLI
   registry.
+
 - **Precedence is written down once**, in `_layers`/`layers`
   (`workspace/route/route.py`, `route.ts`): shell builtin, namespace command,
   function, CLI, mount. `route` takes the first match (the winner, which is what
   dispatch runs) and `route_all`/`routeAll` takes all of them (every layer, which
   is what `type -a` prints). The generator is lazy so the winner still costs one
   probe. Do not add a second precedence list.
+
 - **Discoverability is part of shipping a CLI**, and it comes from the spec, so
   it works for a user's own registered CLI exactly as for a builtin one. `man <cli>` and `man <cli> <verb>...` render through `node_help`/`nodeHelp`, the
   same renderer `--help` uses, so a manual cannot drift from the program; bare

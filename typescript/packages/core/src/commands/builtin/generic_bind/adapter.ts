@@ -116,6 +116,16 @@ export interface DuOps<A extends Accessor = Accessor> {
 export interface CommandIO<A extends Accessor = Accessor> {
   readdir: ReaddirOp<A>
   readBytes: ReadBytesOp<A>
+  // A byte window without reading the whole file. Optional: a backend that
+  // renders its content has no remote range to ask for, and the generic ops
+  // factory reads and slices for anything that omits it.
+  readRange?: (
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore | undefined,
+    offset: number,
+    size: number | null,
+  ) => Promise<Uint8Array>
   readStream: ReadStreamOp<A>
   stat: StatOp<A>
   isMounted: (accessor: A) => boolean

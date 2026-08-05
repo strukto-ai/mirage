@@ -22,6 +22,7 @@ from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
 from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
 from mirage.commands.spec.help import render_help
+from mirage.utils.path import resolve_path
 
 
 def _verb_display(child: CLISpec) -> str:
@@ -249,19 +250,49 @@ def _expand_group_long(node: CLISpec, cs: CompiledSpec,
     return candidates
 
 
-def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
-                 flags: FlagBag) -> WalkResult | None:
+def _resolve_group_paths(cs: CompiledSpec, flags: FlagBag, cwd: str) -> None:
+    """Resolve PATH-typed group values against the working directory.
+
+    A group option declared ``type="path"`` has to mean what it means on
+    a leaf, or the type is a lie at exactly one level of the tree. The
+    flat parser resolves PATH values right after defaults land, so a
+    ``-C`` that defaults to ``"."`` becomes the session cwd and a
+    relative ``-C build`` becomes absolute; do the same here rather than
+    handing a leaf a raw relative string it has no cwd to interpret.
+
+    Resolved to absolute strings, not PathSpec: a group flag never picks
+    a mount (CLI dispatch consults none), so the routing half of the
+    leaf's PATH recovery has nothing to do here.
+
+    Args:
+        cs (CompiledSpec): the node's compiled tables.
+        flags (FlagBag): accumulated group flags, updated in place.
+        cwd (str): current working directory.
+    """
+    for dest, kind in cs.kind_by_dest.items():
+        if kind != "path" or dest not in flags:
+            continue
+        value = flags[dest]
+        if isinstance(value, list):
+            flags[dest] = [resolve_path(part, cwd) for part in value]
+        elif isinstance(value, str):
+            flags[dest] = resolve_path(value, cwd)
+
+
+def _finish_node(name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag,
+                 cwd: str) -> WalkResult | None:
     """Apply a node's declarative option rules after its scan.
 
-    Defaults land as if typed, then choices and required are enforced,
-    the same order the flat parser uses. Returns a rendered refusal or
-    None when the node is satisfied.
+    Defaults land as if typed and PATH values resolve, then choices and
+    required are enforced, the same order the flat parser uses. Returns
+    a rendered refusal or None when the node is satisfied.
 
     Args:
         name (str): display path walked so far.
         node (CLISpec): the group node just scanned.
         cs (CompiledSpec): the node's compiled tables.
         flags (FlagBag): accumulated group flags.
+        cwd (str): current working directory, for PATH values.
     """
     for dest, default in cs.defaults.items():
         if dest not in flags:
@@ -269,6 +300,7 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
                 flags[dest] = [default]
             else:
                 flags[dest] = default
+    _resolve_group_paths(cs, flags, cwd)
     # Numeric-typed values before choices, argparse's order; wording is
     # git's parse-options refusal (`--depth` on a non-integer), one
     # phrase for int and float alike.
@@ -299,7 +331,10 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec,
     return None
 
 
-def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
+def walk(head: str,
+         spec: CLISpec,
+         argv: Sequence[str],
+         cwd: str = "/") -> WalkResult:
     """Resolve one command line against a CLI tree.
 
     Each level consumes its own options in POSIX order (stop at the
@@ -316,6 +351,8 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
             renamed install prints its own name.
         spec (CLISpec): the root of the tree.
         argv (Sequence[str]): the words after the head.
+        cwd (str): working directory for PATH-typed group values, so a
+            group option resolves the way a leaf option does.
     """
     node = spec
     path: tuple[str, ...] = ()
@@ -428,7 +465,7 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
                     return _usage_error(name, node, error)
                 i += 1
                 continue
-            refused = _finish_node(name, node, cs, flags)
+            refused = _finish_node(name, node, cs, flags, cwd)
             if refused is not None:
                 return refused
             # An alias resolves to its canonical node; the path records
@@ -444,7 +481,7 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
             break
         if descended:
             continue
-        refused = _finish_node(name, node, cs, flags)
+        refused = _finish_node(name, node, cs, flags, cwd)
         if refused is not None:
             return refused
         return WalkResult(output=node_help(name, node).encode(),

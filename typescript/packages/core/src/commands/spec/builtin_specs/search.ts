@@ -37,6 +37,9 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-w' }),
       new Option({ short: '-F' }),
       new Option({ short: '-E' }),
+      // -G asks for the basic expressions grep already reads by default, so it
+      // is accepted and changes nothing.
+      new Option({ short: '-G' }),
       new Option({ short: '-o' }),
       new Option({ short: '-q' }),
       new Option({ short: '-H' }),
@@ -58,12 +61,112 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   jq: new CommandSpec({
     options: [
-      new Option({ short: '-r' }),
-      new Option({ short: '-c' }),
-      new Option({ short: '-s' }),
+      new Option({
+        short: '-n',
+        long: '--null-input',
+        description: 'Use null as the single input value',
+      }),
+      new Option({
+        short: '-R',
+        long: '--raw-input',
+        description: 'Read each line as a string instead of JSON',
+      }),
+      new Option({ short: '-s', long: '--slurp', description: 'Read all inputs into one array' }),
+      new Option({
+        short: '-c',
+        long: '--compact-output',
+        description: 'Compact instead of pretty-printed output',
+      }),
+      new Option({
+        short: '-r',
+        long: '--raw-output',
+        description: 'Output strings without quotes or escapes',
+      }),
+      new Option({
+        long: '--raw-output0',
+        description: 'Implies -r and writes NUL after each output',
+      }),
+      new Option({
+        short: '-j',
+        long: '--join-output',
+        description: 'Implies -r and writes no trailing newline',
+      }),
+      new Option({
+        short: '-a',
+        long: '--ascii-output',
+        description: 'Escape non-ASCII characters in output',
+      }),
+      new Option({ short: '-S', long: '--sort-keys', description: 'Sort object keys on output' }),
+      new Option({
+        short: '-e',
+        long: '--exit-status',
+        description: 'Set the exit status from the last output',
+      }),
+      new Option({ long: '--tab', description: 'Indent with tabs' }),
+      new Option({ long: '--indent', type: 'int', description: 'Indent with n spaces (max 7)' }),
+      new Option({
+        short: '-M',
+        long: '--monochrome-output',
+        description: 'Disable colored output (already the default)',
+      }),
+      new Option({
+        long: '--unbuffered',
+        description: 'Accepted for compatibility; output is one buffer',
+      }),
+      new Option({
+        short: '-f',
+        long: '--from-file',
+        type: 'path',
+        description: 'Read the filter from a file',
+      }),
+      new Option({
+        long: '--stream',
+        description: 'Read each input as its [path, leaf] events',
+      }),
+      new Option({
+        long: '--seq',
+        description: 'Read and write RS-delimited JSON text sequences',
+      }),
+      new Option({
+        long: '--arg',
+        type: 'str',
+        pair: true,
+        description: 'Set $name to a string value',
+      }),
+      new Option({
+        long: '--argjson',
+        type: 'str',
+        pair: true,
+        description: 'Set $name to a JSON value',
+      }),
+      new Option({
+        long: '--rawfile',
+        type: 'path',
+        pair: true,
+        description: "Set $name to a file's contents",
+      }),
+      new Option({
+        long: '--slurpfile',
+        type: 'path',
+        pair: true,
+        description: "Set $name to a file's documents, as an array",
+      }),
+      new Option({
+        long: '--args',
+        description: 'Read the remaining operands as positional string values',
+      }),
+      new Option({
+        long: '--jsonargs',
+        description: 'Read the remaining operands as positional JSON values',
+      }),
+      new Option({ short: '-h', long: '--help', description: 'Show this help and exit' }),
     ],
-    positional: [new Operand({ type: 'str' })],
-    rest: new Operand({ type: 'path' }),
+    // Without providedBy, `jq -f prog.jq data.json` would take data.json
+    // as the filter and never read it as a file.
+    positional: [new Operand({ type: 'str', providedBy: ['-f'] })],
+    // --args and --jsonargs turn the operands after the program into
+    // $ARGS.positional, so they stop being input files.
+    rest: new Operand({ type: 'path', textWhen: ['--args', '--jsonargs'] }),
   }),
   rg: new CommandSpec({
     options: [
@@ -135,6 +238,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-e', type: 'str', multiple: true }),
       new Option({ short: '-f', type: 'path', multiple: true }),
       new Option({ short: '-E' }),
+      new Option({ short: '-G' }),
       new Option({ short: '-F' }),
       new Option({ short: '-H' }),
       new Option({ short: '-h' }),

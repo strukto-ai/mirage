@@ -18,6 +18,7 @@ import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import { byteChar } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -381,6 +382,13 @@ describe('handleEcho', () => {
     const [out] = handleEcho(['-e', 'hi\\cgone'])
     expect(decode(out as Uint8Array)).toBe('hi\n')
   })
+
+  it('-e reads \\xHH and \\0NNN as bytes', () => {
+    const bytes = (args: string[]): number[] => [...(handleEcho(args)[0] as Uint8Array)]
+    expect(bytes(['-ne', '\\xff'])).toEqual([0xff])
+    expect(bytes(['-ne', '\\0377'])).toEqual([0xff])
+    expect(bytes(['-ne', '\\xc3\\xa9'])).toEqual([0xc3, 0xa9])
+  })
 })
 
 describe('handlePrintf', () => {
@@ -459,6 +467,24 @@ describe('handlePrintf', () => {
 
   it.each(CASES)('printf %j → %j', (args, expected, code) => {
     expect(run(args)).toEqual([expected, code])
+  })
+
+  it('reads \\xHH and \\NNN as bytes, \\u as a code point', () => {
+    // bash writes \xff as the byte 0xFF, which is not valid UTF-8 at all,
+    // rather than as the code point U+00FF.
+    const bytes = (args: string[]): number[] => [
+      ...(handlePrintf(args, new Session({ sessionId: 'test' }))[0] as Uint8Array),
+    ]
+    expect(bytes(['\\xff'])).toEqual([0xff])
+    expect(bytes(['\\377'])).toEqual([0xff])
+    expect(bytes(['\\xc3\\xa9'])).toEqual([0xc3, 0xa9])
+    expect(bytes(['\\x41\\x42'])).toEqual([0x41, 0x42])
+    expect(bytes(['%b', '\\xff'])).toEqual([0xff])
+    expect(bytes(['\\u00e9'])).toEqual([0xc3, 0xa9])
+  })
+
+  it('quotes a raw byte as octal', () => {
+    expect(stdout(['%q\n', byteChar(0xff)])).toBe("$'\\377'\n")
   })
 
   it('empty args → empty output', () => {

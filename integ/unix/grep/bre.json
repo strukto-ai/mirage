@@ -1,0 +1,202 @@
+{
+  "cases": [
+    {
+      "id": "grep_bre_plus_is_literal",
+      "seq": 500300,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a+b\\naab\\n' > /data/bre.txt && grep 'a+b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a+b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_escaped_plus_is_the_quantifier",
+      "seq": 500301,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a+b\\naab\\n' > /data/bre.txt && grep 'a\\+b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_question_is_literal",
+      "seq": 500302,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a?b\\nab\\n' > /data/bre.txt && grep 'a?b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a?b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_pipe_is_literal",
+      "seq": 500303,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a|b\\nab\\n' > /data/bre.txt && grep 'a|b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a|b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_escaped_pipe_alternates",
+      "seq": 500304,
+      "targets": ["ram", "disk"],
+      "command": "printf 'xa\\nyb\\nzc\\n' > /data/bre.txt && grep 'a\\|b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "xa\nyb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_braces_are_literal",
+      "seq": 500305,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a{2}\\naa\\n' > /data/bre.txt && grep 'a{2}' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a{2}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_escaped_braces_are_the_interval",
+      "seq": 500306,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a{2}\\naa\\n' > /data/bre.txt && grep 'a\\{2\\}' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aa\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_parens_are_literal",
+      "seq": 500307,
+      "targets": ["ram", "disk"],
+      "command": "printf '(ab)\\nab\\n' > /data/bre.txt && grep '(ab)' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "(ab)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_caret_mid_pattern_is_literal",
+      "seq": 500308,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a^b\\nab\\n' > /data/bre.txt && grep 'a^b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a^b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_dollar_mid_pattern_is_literal",
+      "seq": 500309,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a$b\\nab\\n' > /data/bre.txt && grep 'a$b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a$b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_star_with_nothing_to_repeat_is_literal",
+      "seq": 500310,
+      "targets": ["ram", "disk"],
+      "command": "printf '*abc\\nabc\\n' > /data/bre.txt && grep '*abc' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "*abc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_backreference",
+      "seq": 500311,
+      "targets": ["ram", "disk"],
+      "command": "printf 'aa\\nab\\n' > /data/bre.txt && grep '\\(a\\)\\1' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aa\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_G_is_the_default_spelled_out",
+      "seq": 500312,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a+b\\naab\\n' > /data/bre.txt && grep -G 'a+b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a+b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_E_still_reads_extended",
+      "seq": 500313,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a+b\\naab\\n' > /data/bre.txt && grep -E 'a+b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_anchors_still_anchor",
+      "seq": 500314,
+      "targets": ["ram", "disk"],
+      "command": "printf 'ab\\nxab\\n' > /data/bre.txt && grep '^ab' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_files_only_reads_the_same_dialect",
+      "seq": 500315,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a+b\\n' > /data/bhit.txt && printf 'aab\\n' > /data/bmiss.txt && grep -l 'a+b' /data/bhit.txt /data/bmiss.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/bhit.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_files_only_recursive_reads_the_same_dialect",
+      "seq": 500316,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data2/bre && printf 'a+b\\n' > /data2/bre/hit.txt && printf 'aab\\n' > /data2/bre/miss.txt && grep -rl 'a+b' /data2/bre",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data2/bre/hit.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_E_files_only_still_reads_extended",
+      "seq": 500317,
+      "targets": ["ram", "disk"],
+      "command": "printf 'a+b\\n' > /data/bhit.txt && printf 'aab\\n' > /data/bmiss.txt && grep -lE 'a+b' /data/bhit.txt /data/bmiss.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/bmiss.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

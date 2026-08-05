@@ -150,3 +150,67 @@ def test_registry_resolution():
     for ro in make_generic_ops("x", make_table()):
         registry.register(ro)
     assert registry.resolve("read", "x") is not None
+
+
+def read_op(table: CommandIO):
+    """The read op the factory built for a table.
+
+    Args:
+        table (CommandIO): the backend's op table.
+    """
+    return next(o for o in make_generic_ops("x", table) if o.name == "read")
+
+
+@pytest.mark.asyncio
+async def test_a_whole_file_read_never_asks_for_a_range():
+    table = make_table()
+    assert await read_op(table).fn(NOOPAccessor(), PATH) == b"data"
+    table.read_bytes.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_backend_without_ranges_reads_and_slices():
+    # Correct everywhere, and the only meaningful answer for a backend
+    # that renders its bytes rather than storing them.
+    table = make_table()
+    op = read_op(table)
+    assert await op.fn(NOOPAccessor(), PATH, offset=1, size=2) == b"at"
+
+
+@pytest.mark.asyncio
+async def test_slicing_without_a_size_runs_to_the_end():
+    table = make_table()
+    assert await read_op(table).fn(NOOPAccessor(), PATH, offset=2) == b"ta"
+
+
+@pytest.mark.asyncio
+async def test_a_native_range_is_preferred_and_the_whole_read_is_skipped():
+    # The point of the whole change: on an object store this is one
+    # ranged GET rather than fetching the object and throwing most away.
+    native = AsyncMock(return_value=b"ng")
+    table = make_table(read_range=native)
+    got = await read_op(table).fn(NOOPAccessor(), PATH, offset=1, size=2)
+    assert got == b"ng"
+    native.assert_awaited_once()
+    table.read_bytes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_native_range_is_bypassed_for_a_whole_file_read():
+    native = AsyncMock(return_value=b"ng")
+    table = make_table(read_range=native)
+    assert await read_op(table).fn(NOOPAccessor(), PATH) == b"data"
+    native.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_zero_length_read_asks_the_backend_nothing():
+    # No store can express an empty range, and the answer is known, so
+    # it is served here rather than turned into a request that would
+    # either fetch the whole object or be refused.
+    native = AsyncMock(return_value=b"ng")
+    table = make_table(read_range=native)
+    assert await read_op(table).fn(NOOPAccessor(), PATH, offset=1,
+                                   size=0) == b""
+    native.assert_not_awaited()
+    table.read_bytes.assert_not_awaited()

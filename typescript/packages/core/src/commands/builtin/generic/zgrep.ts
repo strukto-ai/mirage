@@ -117,7 +117,9 @@ export async function zgrepGeneric(
     ]
   }
   const rawPattern = resolution.pattern
-  const extendedRegex = fl.asBool('E')
+  // zgrep is grep over decompressed bytes, so it reads a basic expression
+  // unless -E says otherwise; -G asks for the default explicitly.
+  const basicRegexp = !fl.asBool('E')
   const fixedString = fl.asBool('F') && !neverMatch
   const wholeWord = fl.asBool('w')
   const ignoreCase = fl.asBool('i')
@@ -130,8 +132,7 @@ export async function zgrepGeneric(
   const forceH = fl.asBool('H')
   const hideH = fl.asBool('h')
   const maxCount = fl.asInt('m') ?? null
-  void extendedRegex
-  const pattern = compilePattern(rawPattern, ignoreCase, fixedString, wholeWord)
+  const pattern = compilePattern(rawPattern, ignoreCase, fixedString, wholeWord, basicRegexp)
 
   const multi = paths.length > 1
   const showFilename = forceH || (multi && !hideH)

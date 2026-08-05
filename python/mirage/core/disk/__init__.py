@@ -19,7 +19,7 @@ from mirage.core.disk.du import size as du_size
 from mirage.core.disk.exists import exists
 from mirage.core.disk.find import find
 from mirage.core.disk.mkdir import mkdir
-from mirage.core.disk.read import read_bytes
+from mirage.core.disk.read import read_bytes, read_range
 from mirage.core.disk.readdir import readdir
 from mirage.core.disk.rename import rename
 from mirage.core.disk.rm import rm_r
@@ -39,6 +39,7 @@ __all__ = [
     "find",
     "mkdir",
     "read_bytes",
+    "read_range",
     "read_stream",
     "readdir",
     "rename",

@@ -24,6 +24,7 @@ from mirage.core.dropbox.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.ranges import range_header
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,19 @@ async def read(
     accessor: DropboxAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
+    offset: int = 0,
+    size: int | None = None,
 ) -> bytes:
+    """Read a file, optionally only a byte range of it.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        path (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, consulted for the entry.
+        offset (int): first byte to read.
+        size (int | None): how many bytes, or None for the rest.
+    """
+    window = range_header(offset, size)
     if index is NULL_INDEX:
         # Index-less callers (the ops factory's emulated truncate)
         # download directly; the API 409s on missing paths and folders.
@@ -83,7 +96,8 @@ async def read(
         dropbox_path = dropbox_path_from_virtual(accessor.root_path,
                                                  path.virtual, prefix)
         try:
-            return await dropbox_download(accessor.token_manager, dropbox_path)
+            return await dropbox_download(accessor.token_manager, dropbox_path,
+                                          window)
         except DropboxApiError as exc:
             if exc.status == 409:
                 raise enoent(path.virtual) from exc
@@ -91,7 +105,7 @@ async def read(
     _, virtual_key, prefix = await _resolve_entry(accessor, path, index)
     dropbox_path = dropbox_path_from_virtual(accessor.root_path, virtual_key,
                                              prefix)
-    return await dropbox_download(accessor.token_manager, dropbox_path)
+    return await dropbox_download(accessor.token_manager, dropbox_path, window)
 
 
 async def stream(

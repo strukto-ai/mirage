@@ -48,7 +48,7 @@ PROMPT = """\
                     {{ "formattedValue": "...",
                       "userEnteredValue": {{...}},
                       "effectiveValue": {{...}} }}
-                ]}}    # empty cells are omitted, not nullified
+                ]}}    # an empty cell is {{}}, a trailing one absent
               ]
             }}
           ]

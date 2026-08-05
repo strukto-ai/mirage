@@ -13,8 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
-import { CLISpec, type CLIInvocation } from '../../../commands/cli/types.ts'
+import { leafRefusal } from '../../../commands/cli/refusal.ts'
+import { CLISpec, type CLIInvocation, type CLIVerbOpts } from '../../../commands/cli/types.ts'
 import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
+import type { CommandDispatch } from '../../../commands/config.ts'
+import type { MountRoot, StatPath } from '../../../ops/types.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
@@ -141,6 +144,25 @@ async function scriptOutput(
 }
 
 /**
+ * Workspace facts the dispatcher can offer but most CLIs do not want: an API
+ * client needs no filesystem, while `git` is nothing but one. Forwarded whole
+ * onto the leaf's opts bag, so a leaf that does not read them ignores them and
+ * there is no allowlist of filesystem-aware CLIs to keep in step (the same rule
+ * `links` follows for mount commands).
+ */
+export interface CliFacts {
+  /**
+   * The workspace's ordered runtime world, which a script leaf selects
+   * its interpreter from; absent (outside a workspace) refuses script
+   * installs.
+   */
+  entries?: readonly Runtime[]
+  dispatch?: CommandDispatch
+  statPath?: StatPath
+  mountRoot?: MountRoot
+}
+
+/**
  * Execute a line whose head word is an installed CLI.
  *
  * Dispatch is by NAME: the install resolves the program tree and the
@@ -153,16 +175,16 @@ async function scriptOutput(
  * leaf runs its embedded program on a workspace runtime
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
- * a grammar to render it from (parseSpecFor). `entries` is the workspace's
- * ordered runtime world, which a script leaf selects its interpreter
- * from; empty (outside a workspace) refuses script installs.
+ * a grammar to render it from (parseSpecFor). The workspace facts in
+ * `facts` reach a verb as one `inv.ops` field, so a verb that never reads
+ * it cannot touch a mount.
  */
 export async function handleCli(
   install: CLIInstall,
   parts: readonly (string | PathSpec)[],
   session: Session,
   stdin: ByteSource | null = null,
-  entries: readonly Runtime[] = [],
+  facts: CliFacts = {},
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   // Words re-enter string space as typed (wordText): the walk owns
   // interpretation, so a quoted "Lunch?" must not arrive as the
@@ -172,7 +194,7 @@ export async function handleCli(
   const cmdStr = words.join(' ')
   const argv = words.slice(1)
 
-  const result = walk(install.name, install.spec, argv)
+  const result = walk(install.name, install.spec, argv, session.cwd)
   if (result.leaf === null) {
     const stderr = result.stream === 'stderr' ? result.output : new Uint8Array(0)
     const stdout = result.stream === 'stdout' ? result.output : null
@@ -205,14 +227,13 @@ export async function handleCli(
     parsed[11],
   )
   if (refusal !== null) {
-    // Leaf usage errors exit 2 (argparse), regardless of the
-    // USAGE_EXIT table: prog is an installed name, never a GNU tool
-    // with its own pinned exit.
-    const [msg] = refusal
+    // The dialect is the root's, not the leaf's: a program answers in one
+    // voice at every level.
+    const [msg, code] = leafRefusal(install.spec.usageStyle, refusal[0], parsed[4])
     return [
       null,
-      new IOResult({ exitCode: 2, stderr: msg }),
-      new ExecutionNode({ command: cmdStr, exitCode: 2, stderr: msg }),
+      new IOResult({ exitCode: code, stderr: msg }),
+      new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
     ]
   }
 
@@ -228,6 +249,15 @@ export async function handleCli(
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
 
+  // The workspace doors a mount-reading verb needs ride the record as one
+  // field. Most CLIs never read it: an API client has no filesystem,
+  // while `git` is nothing but one. Absent outside a workspace, so a verb
+  // that needs a mount refuses there on its own.
+  const ops: CLIVerbOpts = {
+    ...(facts.dispatch !== undefined ? { dispatch: facts.dispatch } : {}),
+    ...(facts.statPath !== undefined ? { statPath: facts.statPath } : {}),
+    ...(facts.mountRoot !== undefined ? { mountRoot: facts.mountRoot } : {}),
+  }
   const inv: CLIInvocation = {
     config: install.config,
     argv,
@@ -236,11 +266,12 @@ export async function handleCli(
     flags,
     stdin,
     env: { ...session.env },
+    ...(Object.keys(ops).length > 0 ? { ops } : {}),
   }
 
   let body: Promise<[ByteSource | null, IOResult] | null>
   if (leaf.script !== null) {
-    const [runtime, refused] = selectRuntime(prog, leaf, entries)
+    const [runtime, refused] = selectRuntime(prog, leaf, facts.entries ?? [])
     if (runtime === null) {
       // The interpreter is missing, not the command: 127 like an
       // interpreter command no runtime entry captures.

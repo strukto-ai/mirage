@@ -49,6 +49,7 @@
       "long": "--method",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -63,6 +64,7 @@
       "long": "--top-k",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -77,6 +79,7 @@
       "long": "--threshold",
       "multiple": false,
       "numeric_shorthand": false,
+      "pair": false,
       "required": false,
       "short": null,
       "short_value": true,
@@ -87,11 +90,13 @@
   "positional": [
     {
       "provided_by": [],
+      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
     "provided_by": [],
+    "text_when": [],
     "type": "path"
   }
 }

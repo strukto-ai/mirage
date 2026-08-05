@@ -101,6 +101,13 @@ def parse_flags(
             for opt in spec.options if opt.type == "path" and opt.multiple
             for name in (opt.short, opt.long) if name
         }
+        # A pair option's list alternates name, value; only the values
+        # are paths (jq --rawfile body /d/f.txt).
+        pair_path_keys = {
+            flag_kwarg_name(name)
+            for opt in spec.options if opt.type == "path" and opt.pair
+            for name in (opt.short, opt.long) if name
+        }
         single_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options if opt.type == "path" and not opt.multiple
@@ -108,7 +115,13 @@ def parse_flags(
         }
         if not str_flag_paths:
             for key, value in flag_kwargs.items():
-                if key in repeat_path_keys and isinstance(value, list):
+                if key in pair_path_keys and isinstance(value, list):
+                    flag_kwargs[key] = [
+                        scope_map.get(part, synthesize_path_spec(part))
+                        if index % 2 else part
+                        for index, part in enumerate(value)
+                    ]
+                elif key in repeat_path_keys and isinstance(value, list):
                     flag_kwargs[key] = [
                         scope_map.get(part, synthesize_path_spec(part))
                         for part in value

@@ -372,3 +372,38 @@ def test_manual_of_a_grammarless_script_omits_the_help_row():
                      CLISpec(name="pager", script=ScriptSource("print(1)")))
     assert text.startswith("pager\n")
     assert "--help" not in text
+
+
+def test_path_typed_group_option_resolves_against_cwd():
+    # A group option declared "path" has to mean what it means on a
+    # leaf, or the type is a lie at exactly one level of the tree.
+    tree = CLISpec(
+        name="tool",
+        options=(Option(short="-C", type="path"), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    relative = walk("tool", tree, ["-C", "build", "run"], "/repo/src")
+    assert relative.group_flags == {"-C": "/repo/src/build"}
+    absolute = walk("tool", tree, ["-C", "/other", "run"], "/repo/src")
+    assert absolute.group_flags == {"-C": "/other"}
+
+
+def test_path_typed_group_default_lands_as_the_cwd():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(short="-C", type="path", default="."), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    assert walk("tool", tree, ["run"], "/repo/src").group_flags == {
+        "-C": "/repo/src"
+    }
+
+
+def test_repeated_path_group_option_resolves_every_value():
+    tree = CLISpec(
+        name="tool",
+        options=(Option(long="--dir", type="path", multiple=True), ),
+        subcommands=(CLISpec(name="run", fn=_verb), ),
+    )
+    result = walk("tool", tree, ["--dir", "a", "--dir", "/b", "run"], "/w")
+    assert result.group_flags == {"--dir": ["/w/a", "/b"]}

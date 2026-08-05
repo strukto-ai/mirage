@@ -59,6 +59,10 @@ async function* good(): AsyncIterable<Uint8Array> {
 }
 function stream(p: PathSpec): AsyncIterable<Uint8Array> {
   if (p.virtual === '/data/bad.txt') throw new Error('boom')
+  // A real backend cannot read a directory, so neither does the fake: a
+  // stream that served bytes here would let a -l test pass on the harness
+  // rather than on the code.
+  if (p.virtual === '/data') throw new Error('EISDIR')
   return good()
 }
 
@@ -88,7 +92,7 @@ describe('grepGeneric recursive warnings', () => {
     expect(await decode(out)).toBe('/data/a.txt:alice\n')
     expect(io.stderr).not.toBeUndefined()
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data/bad.txt: boom\n')
-    expect(io.exitCode).toBe(1)
+    expect(io.exitCode).toBe(2)
   })
 
   it('grep -rl threads a stderr warning when a file read fails', async () => {
@@ -97,10 +101,32 @@ describe('grepGeneric recursive warnings', () => {
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data/bad.txt: boom\n')
   })
 
-  it('grep on a single directory operand warns and exits 1', async () => {
+  it('grep on a single directory operand warns and exits 2', async () => {
     const [out, io] = await runGrep({})
     expect(await decode(out)).toBe('')
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data: Is a directory\n')
-    expect(io.exitCode).toBe(1)
+    expect(io.exitCode).toBe(2)
+  })
+})
+
+describe('grepGeneric operand errors', () => {
+  // The directory holds a match, so a walk would put a filename on stdout.
+  it('grep -l names a directory operand without walking it', async () => {
+    const [out, io] = await runGrep({ args_l: true })
+    expect(await decode(out)).toBe('')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data: Is a directory\n')
+    expect(io.exitCode).toBe(2)
+  })
+
+  it('grep -q reports a failed operand as 2 when nothing matched', async () => {
+    const [, io] = await runGrep({ q: true })
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data: Is a directory\n')
+    expect(io.exitCode).toBe(2)
+  })
+
+  it('grep -rq lets a match outrank a failed operand', async () => {
+    const [, io] = await runGrep({ r: true, q: true })
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data/bad.txt: boom\n')
+    expect(io.exitCode).toBe(0)
   })
 })

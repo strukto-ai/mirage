@@ -5,11 +5,9 @@ from functools import partial
 
 from mirage.cache.read_through import (cache_aware_bound_bytes,
                                        cache_aware_bound_stream)
-from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_count_has_matches,
-                                                 grep_lines, grep_stream,
-                                                 nonzero_count_stream,
-                                                 resolve_pattern)
+from mirage.commands.builtin.grep_helper import (  # yapf: disable
+    compile_pattern, exit_code_for, grep_count_has_matches, grep_lines,
+    grep_stream, nonzero_count_stream, resolve_pattern)
 from mirage.commands.builtin.rg_helper import rg_full
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.output import (format_optional_records,
@@ -134,17 +132,20 @@ async def rg(
         rb = partial(call_read_bytes, read_bytes, prefix=mount_prefix)
 
         is_dir = False
+        unreadable: BaseException | None = None
         try:
             s = await st(paths[0].virtual)
             is_dir = s.type == FileType.DIRECTORY
-        except WALK_ERRORS:
+        except WALK_ERRORS as exc:
             try:
                 await rd(paths[0].virtual)
                 is_dir = True
             except WALK_ERRORS:
-                # Neither statable nor listable: keep is_dir False and let
-                # the plain-file search path report the real read error.
-                pass
+                # Neither statable nor listable: keep is_dir False and
+                # carry the error, which the single-operand path below
+                # reports as ripgrep's own rather than letting the shared
+                # handler flatten it to exit 1.
+                unreadable = exc
 
         # ripgrep labels when searching multiple files; -H forces the label
         # for a single file and -I suppresses it (cross-mount fanout forces
@@ -182,13 +183,11 @@ async def rg(
                 )
                 results.extend(respell_raw(hits_full, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings_f)
+            code = exit_code_for(bool(results), bool(warnings_f), False)
             if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            # A failed operand fails the command (deliberate divergence:
-            # ripgrep uses exit 2 for errors, mirage flattens fs errors
-            # to 1).
-            return format_records(results), IOResult(
-                exit_code=1 if warnings_f else 0, stderr=stderr)
+                return b"", IOResult(exit_code=code, stderr=stderr)
+            return format_records(results), IOResult(exit_code=code,
+                                                     stderr=stderr)
 
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
                               f.whole_word)
@@ -219,10 +218,16 @@ async def rg(
                 else:
                     all_results.extend(hits)
             stderr = format_optional_records(warnings)
+            code = exit_code_for(bool(all_results), bool(warnings), False)
             if not all_results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return format_records(all_results), IOResult(
-                exit_code=1 if warnings else 0, stderr=stderr)
+                return b"", IOResult(exit_code=code, stderr=stderr)
+            return format_records(all_results), IOResult(exit_code=code,
+                                                         stderr=stderr)
+
+        if unreadable is not None:
+            stderr = (f"rg: {paths[0].raw_path}: "
+                      f"{fs_strerror(unreadable)}\n").encode()
+            return b"", IOResult(exit_code=2, stderr=stderr)
 
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(paths[0])

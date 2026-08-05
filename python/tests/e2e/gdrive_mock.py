@@ -164,6 +164,22 @@ class FakeGDrive:
         return None
 
 
+def _sliced(data: bytes, range_header: str | None) -> bytes:
+    """Apply an HTTP ``Range`` value the way Drive would.
+
+    Args:
+        data (bytes): the whole object.
+        range_header (str | None): a ``bytes=<start>-<end>`` value, or
+            None for the whole thing.
+    """
+    if not range_header:
+        return data
+    span = range_header.split("=", 1)[1]
+    start_text, _, end_text = span.partition("-")
+    start = int(start_text)
+    return data[start:int(end_text) + 1] if end_text else data[start:]
+
+
 def _resolve_fake(token_manager, registry):
     if not registry:
         return None
@@ -218,16 +234,26 @@ def _build_fakes(registry):
     async def fake_list_shared_drives(token_manager) -> list[dict]:
         return []
 
-    async def fake_download_file(token_manager, file_id: str) -> bytes:
+    async def fake_download_file(token_manager,
+                                 file_id: str,
+                                 range_header: str | None = None) -> bytes:
+        # The Range is served here rather than ignored: Drive honours it
+        # for a binary file, so a fake that returned the whole object
+        # would hide a ranged read asking for the wrong window.
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
             raise FileNotFoundError(file_id)
+        data = None
         if fake.has_id(file_id):
-            return fake.get_bytes(file_id)
-        for _, other in registry:
-            if other.has_id(file_id):
-                return other.get_bytes(file_id)
-        raise FileNotFoundError(file_id)
+            data = fake.get_bytes(file_id)
+        else:
+            for _, other in registry:
+                if other.has_id(file_id):
+                    data = other.get_bytes(file_id)
+                    break
+        if data is None:
+            raise FileNotFoundError(file_id)
+        return _sliced(data, range_header)
 
     async def fake_capture_file_metadata(
             token_manager, file_id: str) -> tuple[str | None, str | None]:

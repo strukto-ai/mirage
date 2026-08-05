@@ -95,7 +95,7 @@ async def test_jq_raw_output():
                       ".name",
                       read_bytes=rb,
                       read_stream=rs,
-                      r=True)
+                      raw_output=True)
     assert b"alice" in out
     assert b'"' not in out
 
@@ -118,7 +118,7 @@ async def test_jq_missing_expression_defaults_dot():
     assert b"42" in out
     assert io.exit_code == 0
     out, io = await jq([], read_bytes=rb, read_stream=rs)
-    assert out is None
+    assert out == b""
     assert io.exit_code == 0
 
 
@@ -126,7 +126,7 @@ async def test_jq_missing_expression_defaults_dot():
 async def test_jq_no_input():
     rb, _, rs, _, _ = _make_backend({})
     out, io = await jq([], ".x", read_bytes=rb, read_stream=rs)
-    assert out is None
+    assert out == b""
     assert io.exit_code == 0
 
 

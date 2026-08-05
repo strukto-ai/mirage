@@ -42,6 +42,13 @@ const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 const SLIDE_MIME = 'application/vnd.google-apps.presentation'
 const OWNER = { displayName: 'Integ User', emailAddress: 'integ@example.com', me: true }
 
+// The grid a new spreadsheet gets, and the pixel sizes the live API
+// reports for its untouched rows and columns.
+const GRID_ROWS = 1000
+const GRID_COLUMNS = 26
+const ROW_PIXELS = 21
+const COLUMN_PIXELS = 100
+
 interface Revision {
   id: string
   modifiedTime: string
@@ -650,19 +657,117 @@ function rangeLabel(tab: SheetTab, startRow: number, startCol: number, values: s
   return `${tab.title}!${start}:${end}`
 }
 
-function fmtSpreadsheet(id: string): Record<string, unknown> {
+// Plain decimal only: a sign, digits either side of a point, an optional
+// exponent. `0x10`, `1_000`, `Infinity` and a whitespace-only cell are all
+// strings in live Sheets, which `Number()` would have made numeric.
+const DECIMAL = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
+const BOOLEAN = /^(true|false)$/i
+const EXPONENT = /[eE]/
+const EXPONENT_DIGITS = 2
+
+// A number typed with an exponent keeps a scientific format, which live
+// Sheets renders with two decimals and a two-digit exponent: `1e3` is
+// `"1.00E+03"`, `1e-3` is `"1.00E-03"`, `1e10` is `"1.00E+10"`.
+function scientific(value: number): string {
+  const [mantissa = '', exponent = ''] = value.toExponential(2).split('e')
+  const sign = exponent.startsWith('-') ? '-' : '+'
+  const digits = exponent.replace(/^[+-]/, '').padStart(EXPONENT_DIGITS, '0')
+  return `${mantissa}E${sign}${digits}`
+}
+
+// The grid a tab reports, which the live API grows to hold what was
+// written: 1313 written rows report rowCount 1313, and rowMetadata has one
+// entry per row of the grid rather than a fixed 1000.
+function tabGrid(tab: SheetTab): { rows: number; cols: number } {
+  const used = tabExtent(tab)
+  return {
+    rows: Math.max(GRID_ROWS, used.rows),
+    cols: Math.max(GRID_COLUMNS, used.cols),
+  }
+}
+
+// Verified against the live API on 2026-08-05, writing through mirage's own
+// path (values.update with valueInputOption=USER_ENTERED): `007` is the
+// number 7 and reports `"7"`, `4.50` reports `"4.5"`, `TRUE` and `true` are
+// both the boolean reporting `"TRUE"`, and everything else stays the string
+// it was typed as. An untouched cell is `{}` — no keys at all, since
+// ExtendedValue with no field set means empty.
+//
+// Not modeled, and a string here where live Sheets makes it a number: a
+// currency, percent, thousands-separated or date-shaped cell (`$5`, `50%`,
+// `1,234`, `2026-01-02`), which needs Sheets' locale-aware number formats.
+// A leading `+` is a formula in live Sheets (`+5` is formulaValue `"+5"`)
+// whose rendered value happens to match the number taken here.
+function cellData(text: string): Record<string, unknown> {
+  if (text === '') return {}
+  const trimmed = text.trim()
+  if (BOOLEAN.test(trimmed)) {
+    const value = { boolValue: trimmed.toLowerCase() === 'true' }
+    return {
+      userEnteredValue: value,
+      effectiveValue: value,
+      formattedValue: trimmed.toUpperCase(),
+    }
+  }
+  if (DECIMAL.test(trimmed)) {
+    const number = Number(trimmed)
+    const value = { numberValue: number }
+    return {
+      userEnteredValue: value,
+      effectiveValue: value,
+      formattedValue: EXPONENT.test(trimmed) ? scientific(number) : String(number),
+    }
+  }
+  const value = { stringValue: text }
+  return { userEnteredValue: value, effectiveValue: value, formattedValue: text }
+}
+
+// One GridData per tab, in the shape `includeGridData=true` returns: row
+// entries up to the last written row, cell entries up to the last written
+// column of that row, `{}` for a row with nothing in it, and metadata for
+// every row and column of the grid. `startRow`/`startColumn` are absent
+// because the live API omits them at zero.
+function gridData(tab: SheetTab): Record<string, unknown>[] {
+  const rows = rangeValues({ tab, startRow: 0, startCol: 0, endRow: null, endCol: null })
+  const grid = tabGrid(tab)
+  return [
+    {
+      rowData: rows.map((row) => (row.length === 0 ? {} : { values: row.map(cellData) })),
+      rowMetadata: Array.from({ length: grid.rows }, () => ({ pixelSize: ROW_PIXELS })),
+      columnMetadata: Array.from({ length: grid.cols }, () => ({ pixelSize: COLUMN_PIXELS })),
+    },
+  ]
+}
+
+function tabProperties(tab: SheetTab, index: number): Record<string, unknown> {
+  const grid = tabGrid(tab)
+  return {
+    sheetId: tab.sheetId,
+    title: tab.title,
+    index,
+    sheetType: 'GRID',
+    gridProperties: { rowCount: grid.rows, columnCount: grid.cols },
+  }
+}
+
+function fmtSpreadsheet(id: string, includeGridData = false): Record<string, unknown> {
   const sheet = state.sheets.get(id) as Spreadsheet
   return {
     spreadsheetId: id,
-    properties: { title: sheet.title, locale: 'en_US', timeZone: 'Etc/UTC' },
+    // The live API also carries defaultFormat and spreadsheetTheme here,
+    // which are styling this server has no model for and mirage never
+    // reads.
+    properties: {
+      title: sheet.title,
+      locale: 'en_US',
+      autoRecalc: 'ON_CHANGE',
+      timeZone: 'Etc/GMT',
+    },
     sheets: sheet.tabs.map((tab, index) => ({
-      properties: {
-        sheetId: tab.sheetId,
-        title: tab.title,
-        index,
-        sheetType: 'GRID',
-        gridProperties: { rowCount: 1000, columnCount: 26 },
-      },
+      properties: tabProperties(tab, index),
+      // Real Sheets omits `data` entirely without includeGridData, which
+      // is the whole reason mirage asks for it.
+      ...(includeGridData ? { data: gridData(tab) } : {}),
     })),
     spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit`,
   }
@@ -682,7 +787,9 @@ function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
       }
       sheet.nextSheetId += 1
       sheet.tabs.push(tab)
-      replies.push({ addSheet: { properties: { sheetId: tab.sheetId, title: tab.title } } })
+      // The live API replies with the whole SheetProperties, not just the
+      // id and title.
+      replies.push({ addSheet: { properties: tabProperties(tab, sheet.tabs.length - 1) } })
     } else if ('deleteSheet' in request) {
       const r = request.deleteSheet as { sheetId?: number }
       sheet.tabs = sheet.tabs.filter((t) => t.sheetId !== r.sheetId)
@@ -1412,7 +1519,7 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   m = /^\/v4\/spreadsheets\/([^/:]+)$/.exec(path)
   if (m !== null && method === 'GET') {
     if (!state.sheets.has(m[1] as string)) return NOT_FOUND
-    return [200, fmtSpreadsheet(m[1] as string)]
+    return [200, fmtSpreadsheet(m[1] as string, query.get('includeGridData') === 'true')]
   }
   m = /^\/v4\/spreadsheets\/([^/:]+):batchUpdate$/.exec(path)
   if (m !== null && method === 'POST') {
@@ -1453,6 +1560,15 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
         200,
         {
           spreadsheetId: m[1],
+          // The table the append found, which the live API reports only
+          // when there was one; an empty tab has no tableRange at all.
+          ...(extent.rows > 0
+            ? {
+                tableRange:
+                  `${range.tab.title}!A1:` +
+                  `${colIndexToLetter(extent.cols - 1)}${String(extent.rows)}`,
+              }
+            : {}),
           updates: {
             spreadsheetId: m[1],
             updatedRange: rangeLabel(range.tab, startRow, range.startCol, values),

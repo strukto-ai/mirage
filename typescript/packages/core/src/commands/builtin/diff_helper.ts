@@ -116,7 +116,7 @@ function getMatchingBlocks(a: readonly string[], b: readonly string[]): Match[] 
   return merged
 }
 
-function getOpcodes(a: readonly string[], b: readonly string[]): Opcode[] {
+export function getOpcodes(a: readonly string[], b: readonly string[]): Opcode[] {
   const matches = getMatchingBlocks(a, b)
   const opcodes: Opcode[] = []
   let i = 0

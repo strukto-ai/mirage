@@ -1746,6 +1746,42 @@
           "mode": "read"
         }
       ]
+    },
+    {
+      "id": "git-disk",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "git"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "disk",
+          "backend": "tmpdir",
+          "fixture": "git"
+        }
+      ]
+    },
+    {
+      "id": "git-ram",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "git"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "ram",
+          "backend": "memory",
+          "fixture": "git"
+        }
+      ]
     }
   ]
 }

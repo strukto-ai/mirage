@@ -7,8 +7,8 @@ from mirage.cache.read_through import (cache_aware_bound_bytes,
                                        cache_aware_bound_stream)
 from mirage.commands.builtin.grep_helper import (  # yapf: disable
     compile_pattern, count_exit_stream, count_records_have_matches,
-    grep_files_only, grep_lines, grep_recursive, grep_stream, prefix_lines,
-    resolve_pattern)
+    exit_code_for, grep_files_only, grep_lines, grep_recursive, grep_stream,
+    prefix_lines, resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
@@ -35,6 +35,7 @@ class GrepFlags:
     files_only: bool
     whole_word: bool
     fixed_string: bool
+    basic_regexp: bool
     only_matching: bool
     quiet: bool
     recursive: bool
@@ -64,6 +65,9 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         files_only=fl.as_bool("args_l"),
         whole_word=fl.as_bool("w"),
         fixed_string=fl.as_bool("F") and not never_match,
+        # grep reads a basic expression unless -E says
+        # otherwise; -G asks for the default explicitly.
+        basic_regexp=not fl.as_bool("E"),
         only_matching=fl.as_bool("o"),
         quiet=fl.as_bool("q"),
         recursive=fl.as_bool("r") or fl.as_bool("R"),
@@ -142,25 +146,25 @@ async def grep(
                     only_matching=f.only_matching,
                     max_count=f.max_count,
                     whole_word=f.whole_word,
+                    basic=f.basic_regexp,
                     warnings=warnings,
                     read_stream_fn=None,
                 )
                 results.extend(respell_raw(hits, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings)
-            if f.quiet:
-                return b"", IOResult(exit_code=0 if results else 1,
-                                     stderr=stderr)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            # A failed operand fails the command (deliberate divergence:
-            # GNU grep uses exit 2 for errors, mirage flattens fs errors
-            # to 1); -q above keeps GNU's match-wins rule.
-            return format_records(results), IOResult(
-                exit_code=1 if warnings else 0, stderr=stderr)
+            # Under -c a result is a count, and a zero count is not a match,
+            # so emptiness alone cannot decide the exit status.
+            matched = bool(results) and (not f.count_only or
+                                         count_records_have_matches(results))
+            code = exit_code_for(matched, bool(warnings), f.quiet)
+            if f.quiet or not results:
+                return b"", IOResult(exit_code=code, stderr=stderr)
+            return format_records(results), IOResult(exit_code=code,
+                                                     stderr=stderr)
 
         if f.recursive:
             pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
-                                  f.whole_word)
+                                  f.whole_word, f.basic_regexp)
             # OPTIMIZATION (see #207): this buffers every match into
             # all_results and returns it materialized, so
             # `grep -r PATTERN dir | head -n 3`
@@ -172,7 +176,12 @@ async def grep(
             all_results: list[str] = []
             warnings = []
             for p in paths:
-                s = await st(p.virtual)
+                try:
+                    s = await st(p.virtual)
+                except FileNotFoundError:
+                    warnings.append(
+                        f"grep: {p.raw_path}: No such file or directory")
+                    continue
                 if s.type == FileType.DIRECTORY:
                     res = await grep_recursive(
                         rd,
@@ -205,19 +214,14 @@ async def grep(
             stderr = format_optional_records(warnings)
             matched = bool(all_results) and (
                 not f.count_only or count_records_have_matches(all_results))
-            if f.quiet:
-                return b"", IOResult(exit_code=0 if matched else 1,
-                                     stderr=stderr)
-            if not all_results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if not matched:
-                return format_records(all_results), IOResult(exit_code=1,
-                                                             stderr=stderr)
-            return format_records(all_results), IOResult(
-                exit_code=1 if warnings else 0, stderr=stderr)
+            code = exit_code_for(matched, bool(warnings), f.quiet)
+            if f.quiet or not all_results:
+                return b"", IOResult(exit_code=code, stderr=stderr)
+            return format_records(all_results), IOResult(exit_code=code,
+                                                         stderr=stderr)
 
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
-                              f.whole_word)
+                              f.whole_word, f.basic_regexp)
 
         if len(paths) > 1:
             all_results = []
@@ -249,21 +253,24 @@ async def grep(
             stderr = format_optional_records(multi_warnings)
             matched = bool(all_results) and (
                 not f.count_only or count_records_have_matches(all_results))
-            if f.quiet:
-                return b"", IOResult(exit_code=0 if matched else 1,
-                                     stderr=stderr)
-            if not all_results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if not matched:
-                return format_records(all_results), IOResult(exit_code=1,
-                                                             stderr=stderr)
-            return format_records(all_results), IOResult(
-                exit_code=1 if multi_warnings else 0, stderr=stderr)
+            code = exit_code_for(matched, bool(multi_warnings), f.quiet)
+            if f.quiet or not all_results:
+                return b"", IOResult(exit_code=code, stderr=stderr)
+            return format_records(all_results), IOResult(exit_code=code,
+                                                         stderr=stderr)
 
-        first_stat = await st(paths[0].virtual)
+        # An unreadable operand is grep's own error to report, not the
+        # dispatcher's: the shared handler flattens every OSError to exit 1,
+        # which is right for cat and wrong for grep.
+        try:
+            first_stat = await st(paths[0].virtual)
+        except FileNotFoundError:
+            stderr = (f"grep: {paths[0].raw_path}: "
+                      "No such file or directory\n").encode()
+            return b"", IOResult(exit_code=2, stderr=stderr)
         if first_stat.type == FileType.DIRECTORY:
             stderr = f"grep: {paths[0].raw_path}: Is a directory\n".encode()
-            return b"", IOResult(exit_code=1, stderr=stderr)
+            return b"", IOResult(exit_code=2, stderr=stderr)
 
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(paths[0])
@@ -296,7 +303,8 @@ async def grep(
     source = _resolve_source(stdin,
                              "grep: usage: grep [flags] pattern [path]",
                              error_cls=UsageError)
-    pat = compile_pattern(pattern, f.ignore_case, f.fixed_string, f.whole_word)
+    pat = compile_pattern(pattern, f.ignore_case, f.fixed_string, f.whole_word,
+                          f.basic_regexp)
     stream = grep_stream(
         source,
         pat,

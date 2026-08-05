@@ -16,7 +16,10 @@ import orjson
 import pytest
 
 from mirage.core.jq.stream import (eval_jsonl_stream, parse_json_auto,
-                                   parse_json_docs)
+                                   parse_json_docs, split_raw_lines)
+from mirage.core.jq.types import JqOptions
+
+COMPACT = JqOptions(compact=True)
 
 
 def test_parse_json_auto_empty_raises_clear_error():
@@ -81,26 +84,63 @@ async def _collect(stream) -> list[str]:
 @pytest.mark.asyncio
 async def test_eval_jsonl_stream_dot_chain_maps_per_line():
     source = _lines(b'{"msg":"hello"}\n', b'{"msg":"world"}\n')
-    out = await _collect(eval_jsonl_stream(source, ".[].msg"))
+    out = await _collect(eval_jsonl_stream(source, ".[].msg", COMPACT))
     assert out == ['"hello"', '"world"']
 
 
 @pytest.mark.asyncio
 async def test_eval_jsonl_stream_raw_unquotes_strings():
     source = _lines(b'{"msg":"hello"}\n', b'{"msg":"world"}\n')
-    out = await _collect(eval_jsonl_stream(source, ".[].msg", raw=True))
+    opts = JqOptions(raw_output=True, compact=True)
+    out = await _collect(eval_jsonl_stream(source, ".[].msg", opts))
     assert out == ["hello", "world"]
 
 
 @pytest.mark.asyncio
 async def test_eval_jsonl_stream_prints_every_output_of_a_line():
     source = _lines(b'{"a":1,"b":2}\n', b'{"a":3,"b":4}\n')
-    out = await _collect(eval_jsonl_stream(source, ".[] | .a, .b"))
+    out = await _collect(eval_jsonl_stream(source, ".[] | .a, .b", COMPACT))
     assert out == ["1", "2", "3", "4"]
 
 
 @pytest.mark.asyncio
 async def test_eval_jsonl_stream_drops_lines_with_no_output():
     source = _lines(b'{"id":1}\n', b'{"id":2}\n', b'{"id":3}\n')
-    out = await _collect(eval_jsonl_stream(source, ".[] | select(.id > 2)"))
+    out = await _collect(
+        eval_jsonl_stream(source, ".[] | select(.id > 2)", COMPACT))
     assert out == ['{"id":3}']
+
+
+def test_parse_json_docs_empty_input_has_no_documents():
+    assert parse_json_docs(b"") == []
+    assert parse_json_docs(b"  \n\n ") == []
+
+
+def test_split_raw_lines_drops_only_the_trailing_newline():
+    assert split_raw_lines(b"a\nb\n") == ["a", "b"]
+    assert split_raw_lines(b"a\nb") == ["a", "b"]
+    assert split_raw_lines(b"") == []
+    assert split_raw_lines(b"\n") == [""]
+
+
+def test_split_raw_lines_keeps_other_unicode_breaks_inline():
+    # jq breaks on newlines only, never on the other separators a
+    # Unicode line splitter honors (here U+2028).
+    assert split_raw_lines("a\u2028b\n".encode()) == ["a\u2028b"]
+
+
+@pytest.mark.asyncio
+async def test_eval_jsonl_stream_pretty_prints_by_default():
+    source = _lines(b'{"a":1}\n')
+    out = []
+    async for chunk in eval_jsonl_stream(source, ".[]", JqOptions()):
+        out.append(chunk)
+    assert b"".join(out) == b'{\n  "a": 1\n}\n'
+
+
+@pytest.mark.asyncio
+async def test_eval_jsonl_stream_binds_named_args():
+    source = _lines(b'{"a":1}\n')
+    opts = JqOptions(compact=True, named_args={"v": "hi"})
+    out = await _collect(eval_jsonl_stream(source, ".[] | [., $v]", opts))
+    assert out == ['[{"a":1},"hi"]']

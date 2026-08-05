@@ -250,19 +250,22 @@ async def delete_file(
 async def download_file(
     token_manager: TokenManager,
     file_id: str,
+    range_header: str | None = None,
 ) -> bytes:
     """Download a regular file from Drive.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.
         file_id (str): file ID.
+        range_header (str | None): an HTTP ``Range`` value to fetch only
+            part of the file, or None for all of it.
 
     Returns:
         bytes: file content.
     """
     url = (f"{drive_base(token_manager)}/files/{file_id}"
            "?alt=media&supportsAllDrives=true")
-    return await google_get_bytes(token_manager, url)
+    return await google_get_bytes(token_manager, url, range_header)
 
 
 FOLDER_MIME = "application/vnd.google-apps.folder"

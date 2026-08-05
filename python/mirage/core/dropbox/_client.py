@@ -143,9 +143,21 @@ async def dropbox_upload(tm: DropboxTokenManager, path: str,
                     resp.status, summary_of(text))
 
 
-async def dropbox_download(tm: DropboxTokenManager, path: str) -> bytes:
+async def dropbox_download(tm: DropboxTokenManager,
+                           path: str,
+                           range_header: str | None = None) -> bytes:
+    """Download a file, optionally only a byte range of it.
+
+    Args:
+        tm (DropboxTokenManager): token manager.
+        path (str): Dropbox path of the file.
+        range_header (str | None): an HTTP ``Range`` value, or None for
+            the whole file.
+    """
     headers = await dropbox_auth_headers(tm)
     headers["Dropbox-API-Arg"] = json.dumps({"path": path})
+    if range_header:
+        headers["Range"] = range_header
     url = f"{tm.content_base}/files/download"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers) as resp:

@@ -37,6 +37,7 @@ from mirage.observe.context import (active_recorder, record, record_stream,
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
+from mirage.utils.ranges import range_header
 
 SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 UPLOAD_CHUNK = 10 * 327680
@@ -232,13 +233,6 @@ async def upload_session_write(config: MsGraphConfig, session_url: str,
             start += len(chunk)
 
 
-def _range_header(offset: int, size: int | None) -> str | None:
-    if not offset and size is None:
-        return None
-    end = (offset + size - 1) if size is not None else ""
-    return f"bytes={offset}-{end}"
-
-
 def folder_child_count(item: dict[str, Any]) -> int | None:
     """Child count from a driveItem's folder facet.
 
@@ -309,29 +303,27 @@ async def read_item(config: MsGraphConfig,
                     offset: int = 0,
                     size: int | None = None) -> bytes:
     pinned = revision_for(virtual)
-    range_header = _range_header(offset, size)
+    window = range_header(offset, size)
     start_ms = int(time.monotonic() * 1000)
     fingerprint = None
     revision = pinned
     try:
         if pinned:
             action = f"/versions/{quote(pinned, safe='')}/content"
-            data = await graph_get_bytes(config, loc.item(action),
-                                         range_header)
+            data = await graph_get_bytes(config, loc.item(action), window)
         elif active_recorder() is not None:
             fingerprint, revision, download_url = await capture_item_metadata(
                 config, loc)
             if download_url:
                 data = await graph_get_bytes(config,
                                              download_url,
-                                             range_header,
+                                             window,
                                              auth=False)
             else:
                 data = await graph_get_bytes(config, loc.item("/content"),
-                                             range_header)
+                                             window)
         else:
-            data = await graph_get_bytes(config, loc.item("/content"),
-                                         range_header)
+            data = await graph_get_bytes(config, loc.item("/content"), window)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)
