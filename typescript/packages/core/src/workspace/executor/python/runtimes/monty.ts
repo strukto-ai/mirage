@@ -124,14 +124,16 @@ function toEvalValue(value: unknown): EvalValue {
  * environment, or network access. `pathlib` I/O and `os.getenv` are
  * serviced through the workspace bridge, so the code sees the workspace
  * mounts and nothing else. Command-line arguments are exposed as the
- * `argv` global (`argv[0]` is the script name). Monty implements a
- * Python subset; host-only features (`sys.stdin`, `sys.argv`,
+ * `argv` global (`argv[0]` is the script name) and piped input as the
+ * `stdin` global (bytes, None when nothing was piped). Monty implements
+ * a Python subset; host-only features (`sys.stdin`, `sys.argv`,
  * third-party imports) are unavailable, and the builtin `open()` is not
  * bridgeable yet (the JS binding cannot return a file handle from an
  * `os` callback) — use `pathlib` for file I/O, or the pyodide runtime.
  */
 export class MontyRuntime extends Runtime implements Evaluator {
   readonly name = MONTY_RUNTIME
+  override readonly language = 'python'
   readonly [EVALUATOR] = true as const
   readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
@@ -373,7 +375,7 @@ export class MontyRuntime extends Runtime implements Evaluator {
     const out: string[] = []
     const err: string[] = []
     const options: Record<string, unknown> = {
-      inputs: { argv: ['main.py', ...args.args] },
+      inputs: { argv: ['main.py', ...args.args], stdin: args.stdin },
       printCallback: (stream: 'stdout' | 'stderr', text: string) => {
         if (stream === 'stderr') err.push(text)
         else out.push(text)

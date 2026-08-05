@@ -19,6 +19,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { ExecutionNode } from '../../types.ts'
+import { runOutput } from '../runtime.ts'
 import type { JsRuntime } from './interface.ts'
 import { QuickJsUnavailableError } from './types.ts'
 
@@ -101,11 +102,8 @@ export async function handleJs(
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
       ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
     })
-    return [
-      result.stdout.length > 0 ? result.stdout : null,
-      new IOResult({ exitCode: result.exitCode, stderr: result.stderr }),
-      new ExecutionNode({ command: cmdStr, exitCode: result.exitCode }),
-    ]
+    const [stdout, io] = runOutput(result)
+    return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode })]
   } catch (err) {
     // An in-VM limit interrupt is a timeout, not an interpreter
     // failure: let it reach the workspace's 124 handler.

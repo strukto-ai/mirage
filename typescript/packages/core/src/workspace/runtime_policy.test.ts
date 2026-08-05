@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import { EVALUATOR, type Evaluator } from './executor/runtime_mixin.ts'
 import type { EvalResult } from './executor/runtime_types.ts'
-import { POLICY_EVAL_TIMEOUT, evaluatorOf } from './executor/policy/index.ts'
+import { POLICY_EVAL_TIMEOUT, evaluatorOf, runtimeForLanguage } from './executor/policy/index.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
 import { QuickJsRuntime } from './executor/js/quickjs.ts'
@@ -304,6 +304,19 @@ describe('routing ladder', () => {
     expect(evaluatorOf([py, js])).toBe(py)
     expect(evaluatorOf([py], 'js')).toBe(py)
     expect(evaluatorOf([])).toBeNull()
+  })
+
+  it('runtimeForLanguage is first-match with no cross-language fallback', () => {
+    const monty = new MontyRuntime()
+    const quickjs = new QuickJsRuntime()
+    expect(runtimeForLanguage([monty, quickjs], 'python')).toBe(monty)
+    expect(runtimeForLanguage([monty, quickjs], 'js')).toBe(quickjs)
+    // Captures do not count (the fake captures python3 but declares no
+    // language), and unlike evaluatorOf there is no any-language
+    // fallback: a python program cannot run on a js engine.
+    expect(runtimeForLanguage([new NamedFakeRuntime('alpha')], 'python')).toBeNull()
+    expect(runtimeForLanguage([quickjs], 'python')).toBeNull()
+    expect(runtimeForLanguage([], 'js')).toBeNull()
   })
 
   it('a JS policy script reads mounted content through the fs bridge', async () => {

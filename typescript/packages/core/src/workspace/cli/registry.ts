@@ -79,6 +79,11 @@ export class CLIRegistry {
     spec: CLISpec,
     config: Record<string, unknown> | null,
   ): unknown {
+    if (spec.script !== null) {
+      // A script spec has no configModel: the mapping passes through
+      // as-is for the program to consume.
+      return config !== null && Object.keys(config).length > 0 ? { ...config } : null
+    }
     if (spec.configModel === null) {
       if (config !== null && Object.keys(config).length > 0) {
         throw new Error(`CLI '${name}': config given but '${spec.name}' declares no configModel`)

@@ -14,20 +14,14 @@
 
 import { listEmoji } from '../../../../core/slack/emoji.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { slackAccessor } from './accessor.ts'
 
 const ENC = new TextEncoder()
 
-export async function emojiList(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  _opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const emoji = await listEmoji(slackAccessor(config))
+export async function emojiList(inv: CLIInvocation): Promise<CommandFnResult> {
+  const emoji = await listEmoji(slackAccessor(inv.config))
   const out: ByteSource = ENC.encode(JSON.stringify(emoji))
   return [out, new IOResult()]
 }

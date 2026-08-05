@@ -16,9 +16,8 @@ import {
   FlagView,
   IOResult,
   type ByteSource,
-  type CLIVerbOpts,
+  type CLIInvocation,
   type CommandFnResult,
-  type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage, fetchRawMessage } from '../../../../core/email/_client.ts'
@@ -27,16 +26,11 @@ import { firstText } from './util.ts'
 
 const ENC = new TextEncoder()
 
-export async function read(
-  config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const uid = firstText(texts, 'message id')
+export async function read(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const uid = firstText(inv.texts, 'message id')
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
-  const accessor = new EmailAccessor(config as EmailConfig)
+  const accessor = new EmailAccessor(inv.config as EmailConfig)
   try {
     if (fl.asBool('raw')) {
       const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)

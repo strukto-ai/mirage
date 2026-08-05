@@ -16,7 +16,7 @@ import pytest
 
 from mirage.commands.builtin.general.interpreter import (Source,
                                                          resolve_source,
-                                                         run_code)
+                                                         run_code, run_output)
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
@@ -129,3 +129,18 @@ async def test_run_source_unbound_refuses_without_hint():
     stdout, io = await run_code("python3", prepared, None, {}, None, None)
     assert io.exit_code == 127
     assert io.stderr == b"python3: command not found\n"
+
+
+def test_run_output_is_the_one_result_mapping():
+    stdout, io = run_output(
+        RunResult(stdout=b"out", stderr=b"err", exit_code=3))
+    assert stdout == b"out"
+    assert io.exit_code == 3
+    assert io.stderr == b"err"
+
+
+def test_run_output_empty_stdout_becomes_no_stream():
+    stdout, io = run_output(RunResult(stdout=b"", stderr=None, exit_code=0))
+    assert stdout is None
+    assert io.exit_code == 0
+    assert io.stderr is None

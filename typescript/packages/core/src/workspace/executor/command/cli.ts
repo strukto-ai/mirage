@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CLISpec } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIInvocation } from '../../../commands/cli/types.ts'
 import { walk } from '../../../commands/cli/walk.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
@@ -30,6 +30,9 @@ import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
+import { runtimeForLanguage } from '../policy/decide.ts'
+import type { ScriptSource } from '../policy/types.ts'
+import { runOutput, type Runtime } from '../runtime.ts'
 import { optionError, parseFlags } from './flags.ts'
 
 // argparse add_help: a leaf answers --help with its own help unless it
@@ -41,6 +44,69 @@ function withInjectedHelp(leaf: CLISpec): CLISpec {
 }
 
 /**
+ * Pick the workspace entry that runs a script leaf.
+ *
+ * A `runtime:` pin names the entry, and the entry must speak the
+ * script's language, so `runtime: monty` on a `.mjs` fails loud
+ * instead of feeding JS to a python interpreter. Without a pin the
+ * first entry speaking the language serves (runtimeForLanguage).
+ * Every refusal names the world so the fix (add or rename an entry)
+ * is visible.
+ */
+function selectRuntime(
+  prog: string,
+  leaf: CLISpec,
+  entries: readonly Runtime[],
+): [Runtime | null, string | null] {
+  const script = leaf.script
+  if (script === null) {
+    throw new Error(`selecting a runtime for '${prog}' without a script`)
+  }
+  const known = entries.map((entry) => `'${entry.name}'`).join(', ') || 'none'
+  if (leaf.runtime !== null) {
+    const pinned = entries.find((entry) => entry.name === leaf.runtime) ?? null
+    if (pinned === null) {
+      return [null, `${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`]
+    }
+    if (pinned.language !== script.language) {
+      return [null, `${prog}: runtime '${pinned.name}' does not run ${script.language} scripts`]
+    }
+    return [pinned, null]
+  }
+  const entry = runtimeForLanguage(entries, script.language)
+  if (entry === null) {
+    return [
+      null,
+      `${prog}: no workspace runtime runs ${script.language} scripts (workspace runtimes: ${known})`,
+    ]
+  }
+  return [entry, null]
+}
+
+/**
+ * Render the invocation onto the selected runtime as one RunArgs.
+ *
+ * The script tier's whole contract, the one a native binary could also
+ * honor: the program re-parses `argv` (the verbatim tokens after the
+ * head), reads piped stdin, and finds the install's config as
+ * MIRAGE_CONFIG (JSON) in its environment. The outcome converts
+ * through the interpreter handlers' one mapping (runOutput).
+ */
+async function scriptOutput(
+  inv: CLIInvocation,
+  script: ScriptSource,
+  runtime: Runtime,
+): Promise<[Uint8Array | null, IOResult]> {
+  const env: Record<string, string> = { ...inv.env }
+  if (inv.config !== null && inv.config !== undefined) {
+    env.MIRAGE_CONFIG = JSON.stringify(inv.config)
+  }
+  const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
+  const result = await runtime.run({ code: script.source, args: [...inv.argv], env, stdin })
+  return runOutput(result)
+}
+
+/**
  * Execute a line whose head word is an installed CLI.
  *
  * Dispatch is by NAME: the install resolves the program tree and the
@@ -48,15 +114,20 @@ function withInjectedHelp(leaf: CLISpec): CLISpec {
  * backend (the one executor divergence from mount commands). The walk
  * consumes subcommand words and group options; the leaf's own argv
  * rides the ordinary spec machinery because a CLISpec IS a
- * CommandSpec, and the leaf handler runs as
- * `fn(config, paths, texts, opts)` with the installation's config in
- * the accessor's seat.
+ * CommandSpec. The leaf handler renders the line's one CLIInvocation,
+ * built here and nowhere else: an fn leaf runs as `fn(inv)`, a script
+ * leaf runs its embedded program on a workspace runtime
+ * (scriptOutput), so help, usage refusals, and classification all
+ * happen in front of either tier. `entries` is the workspace's
+ * ordered runtime world, which a script leaf selects its interpreter
+ * from; empty (outside a workspace) refuses script installs.
  */
 export async function handleCli(
   install: CLIInstall,
   parts: readonly (string | PathSpec)[],
   session: Session,
   stdin: ByteSource | null = null,
+  entries: readonly Runtime[] = [],
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   // Words re-enter string space as typed (wordText): the walk owns
   // interpretation, so a quoted "Lunch?" must not arrive as the
@@ -121,11 +192,42 @@ export async function handleCli(
   Object.assign(flags, flagKwargs)
   delete flags.help
 
-  const fn = leaf.fn
-  if (fn === null) {
-    // validateCli guarantees fn XOR subcommands and walk only returns
-    // fn-bearing nodes as leaf; reaching this is a bug.
-    throw new Error(`walk returned a leaf without fn for '${prog}'`)
+  const inv: CLIInvocation = {
+    config: install.config,
+    argv,
+    paths,
+    texts,
+    flags,
+    stdin,
+    env: { ...session.env },
+  }
+
+  let body: Promise<[ByteSource | null, IOResult] | null>
+  if (leaf.script !== null) {
+    const [runtime, refused] = selectRuntime(prog, leaf, entries)
+    if (runtime === null) {
+      // The interpreter is missing, not the command: 127 like an
+      // interpreter command no runtime entry captures.
+      const stderr = new TextEncoder().encode(`${refused ?? ''}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 127, stderr }),
+        new ExecutionNode({ command: cmdStr, exitCode: 127, stderr }),
+      ]
+    }
+    body = scriptOutput(inv, leaf.script, runtime)
+  } else {
+    const fn = leaf.fn
+    if (fn === null) {
+      // validateCli guarantees fn XOR subcommands XOR script and walk
+      // only returns handler-bearing nodes as leaf; reaching this is a
+      // bug.
+      throw new Error(`walk returned a leaf without a handler for '${prog}'`)
+    }
+    // Defer the call into the promise: a synchronously-thrown leaf
+    // error must land in the catch arms below, exactly as when the
+    // call sat inside the try.
+    body = (async () => fn(inv))()
   }
   // The leaf's declared limit bounds the handler body and its
   // streams, exactly like mount dispatch: without the wrap a blocking
@@ -136,11 +238,7 @@ export async function handleCli(
   let stdout: ByteSource | null = null
   let io = new IOResult()
   try {
-    const out = await runWithTimeout(
-      Promise.resolve(fn(install.config, paths, texts, { stdin, flags })),
-      timeout,
-      prog,
-    )
+    const out = await runWithTimeout(body, timeout, prog)
     if (out !== null) {
       ;[stdout, io] = out
     }

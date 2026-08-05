@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from mirage.commands.cli import CLISpec
 from mirage.commands.spec.types import Operand, Option
+from mirage.runtime.types import ScriptSource
 
 
 class _Config(BaseModel):
@@ -46,8 +47,40 @@ def test_node_takes_fn_or_subcommands_not_both():
 
 
 def test_node_needs_fn_or_subcommands():
-    with pytest.raises(ValueError, match="needs fn or subcommands"):
+    with pytest.raises(ValueError, match="needs fn, subcommands, or script"):
         CLISpec(name="gws")
+
+
+def test_script_root_stands_alone():
+    spec = CLISpec(name="pager", script=ScriptSource("print('hi')"))
+    assert spec.fn is None
+    assert spec.subcommands == ()
+
+
+def test_script_excludes_fn():
+    with pytest.raises(ValueError, match="fn or script, not both"):
+        CLISpec(name="pager", fn=_verb, script=ScriptSource("1"))
+
+
+def test_script_excludes_subcommands():
+    with pytest.raises(ValueError, match="subcommands belong to fn trees"):
+        CLISpec(name="pager",
+                script=ScriptSource("1"),
+                subcommands=(CLISpec(name="send", fn=_verb), ))
+
+
+def test_runtime_takes_script():
+    with pytest.raises(ValueError, match="it takes script"):
+        CLISpec(name="pager", fn=_verb, runtime="monty")
+    spec = CLISpec(name="pager", script=ScriptSource("1"), runtime="monty")
+    assert spec.runtime == "monty"
+
+
+def test_script_is_root_only():
+    with pytest.raises(ValueError, match="only the root of a tree may"):
+        CLISpec(name="gws",
+                subcommands=(CLISpec(name="pager",
+                                     script=ScriptSource("1")), ))
 
 
 def test_group_declares_no_positional_or_rest():

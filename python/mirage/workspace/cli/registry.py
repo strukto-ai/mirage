@@ -80,8 +80,9 @@ class CLIRegistry:
         self._installs[name] = install
         return install
 
-    def _validate_config(self, name: str, spec: CLISpec,
-                         config: dict[str, object] | None) -> BaseModel | None:
+    def _validate_config(
+        self, name: str, spec: CLISpec, config: dict[str, object] | None
+    ) -> BaseModel | dict[str, object] | None:
         """Validate an installation config against the spec's model.
 
         Args:
@@ -89,6 +90,10 @@ class CLIRegistry:
             spec (CLISpec): the program tree carrying ``config_model``.
             config (dict[str, object] | None): raw config mapping.
         """
+        if spec.script is not None:
+            # A script spec has no config_model: the mapping passes
+            # through as-is for the program to consume.
+            return dict(config) if config else None
         if spec.config_model is None:
             if config:
                 raise ValueError(f"CLI {name!r}: config given but "

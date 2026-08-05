@@ -12,34 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  FlagView,
-  type CLIVerbOpts,
-  type CommandFnResult,
-  type PathSpec,
-} from '@struktoai/mirage-core'
+import { FlagView, type CLIInvocation, type CommandFnResult } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { firstText, route } from './util.ts'
 
-export async function reply(
-  config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const uid = firstText(texts, 'message id')
+export async function reply(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const uid = firstText(inv.texts, 'message id')
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
-  const accessor = new EmailAccessor(config as EmailConfig)
+  const accessor = new EmailAccessor(inv.config as EmailConfig)
   let original
   try {
     original = await fetchMessage(accessor, mailbox, uid)
   } finally {
     await accessor.close()
   }
-  return route(config as EmailConfig, fl, opts.stdin, {
+  return route(inv.config as EmailConfig, fl, inv.stdin, {
     message: original,
     mode: 'reply',
     postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',

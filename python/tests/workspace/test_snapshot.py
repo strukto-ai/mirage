@@ -21,7 +21,7 @@ import pytest
 from pydantic import BaseModel, SecretStr
 
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
@@ -465,8 +465,9 @@ class _CliCfg(BaseModel):
     channel: str = "general"
 
 
-async def _cli_echo(config, paths, *texts, **flags):
-    return f"tok={config.token.get_secret_value()}\n".encode(), IOResult()
+async def _cli_echo(inv: CLIInvocation):
+    return (f"tok={inv.config.token.get_secret_value()}\n".encode(),
+            IOResult())
 
 
 _CLI_SPEC = CLISpec(name="snapcli",
@@ -549,8 +550,9 @@ class _NestedCfg(BaseModel):
     auth: _NestedAuth
 
 
-async def _nested_echo(config, paths, *texts, **flags):
-    return f"tok={config.auth.token.get_secret_value()}\n".encode(), IOResult()
+async def _nested_echo(inv: CLIInvocation):
+    return (f"tok={inv.config.auth.token.get_secret_value()}\n".encode(),
+            IOResult())
 
 
 _NESTED_SPEC = CLISpec(name="nestcli",

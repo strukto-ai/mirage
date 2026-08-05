@@ -12,22 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import to_json_bytes
 from mirage.core.notion.pages import update_page
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def trash(
-    config: NotionConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    page = await update_page(config,
+    fl = FlagView(inv.flags)
+    page = await update_page(inv.config,
                              fl.as_str("page") or "", {"in_trash": True})
     return yield_bytes(to_json_bytes(page)), IOResult()

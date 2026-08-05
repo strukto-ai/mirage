@@ -19,6 +19,7 @@ import pytest
 
 from mirage.commands.cli.builtin.gws.api import fill_path, run_gws_method
 from mirage.commands.cli.builtin.gws.methods import GWS_METHODS
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
@@ -50,9 +51,9 @@ async def test_documents_get_hits_docs_api():
                 "title": "T"
             },
     ) as get:
-        out, io = await run_gws_method(method,
-                                       CONFIG, [],
-                                       params='{"documentId": "d1"}')
+        out, io = await run_gws_method(
+            method,
+            CLIInvocation(CONFIG, flags={"params": '{"documentId": "d1"}'}))
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == {
         "documentId": "d1",
@@ -88,7 +89,7 @@ async def test_files_list_follows_next_page_token_by_default():
             new_callable=AsyncMock,
             side_effect=pages,
     ) as get:
-        out, io = await run_gws_method(method, CONFIG, [])
+        out, io = await run_gws_method(method, CLIInvocation(CONFIG))
     assert io.exit_code == 0
     assert get.await_count == 3
     tokens = [c.kwargs["params"].get("pageToken") for c in get.await_args_list]
@@ -106,7 +107,7 @@ async def test_single_page_output_has_no_trailing_newline():
             new_callable=AsyncMock,
             return_value={"files": []},
     ):
-        out, _io = await run_gws_method(method, CONFIG, [])
+        out, _io = await run_gws_method(method, CLIInvocation(CONFIG))
     assert await materialize(out) == b'{"files":[]}'
 
 
@@ -131,7 +132,8 @@ async def test_page_limit_stops_early():
             new_callable=AsyncMock,
             side_effect=pages,
     ) as get:
-        out, _io = await run_gws_method(method, CONFIG, [], page_limit="2")
+        out, _io = await run_gws_method(
+            method, CLIInvocation(CONFIG, flags={"page_limit": "2"}))
     assert get.await_count == 2
     assert len((await materialize(out)).decode().splitlines()) == 2
 
@@ -144,7 +146,8 @@ async def test_rejects_a_non_numeric_page_limit(raw):
     method = METHODS[("drive", "files", "list")]
     with pytest.raises(UsageError,
                        match="--page-limit must be a whole number"):
-        await run_gws_method(method, CONFIG, [], page_limit=raw)
+        await run_gws_method(method,
+                             CLIInvocation(CONFIG, flags={"page_limit": raw}))
 
 
 @pytest.mark.asyncio
@@ -154,9 +157,9 @@ async def test_files_delete_outputs_nothing():
             "mirage.commands.cli.builtin.gws.api.google_delete",
             new_callable=AsyncMock,
     ) as delete:
-        out, io = await run_gws_method(method,
-                                       CONFIG, [],
-                                       params='{"fileId": "f1"}')
+        out, io = await run_gws_method(
+            method, CLIInvocation(CONFIG, flags={"params":
+                                                 '{"fileId": "f1"}'}))
     assert out is None
     assert io.exit_code == 0
     assert "/files/f1" in delete.await_args.args[1]
@@ -166,14 +169,15 @@ async def test_files_delete_outputs_nothing():
 async def test_files_create_requires_body():
     method = METHODS[("drive", "files", "create")]
     with pytest.raises(UsageError, match="--json is required"):
-        await run_gws_method(method, CONFIG, [])
+        await run_gws_method(method, CLIInvocation(CONFIG))
 
 
 @pytest.mark.asyncio
 async def test_malformed_json_flag_is_a_usage_error():
     method = METHODS[("drive", "files", "create")]
     with pytest.raises(UsageError, match="--json must be valid JSON"):
-        await run_gws_method(method, CONFIG, [], json="{not json")
+        await run_gws_method(
+            method, CLIInvocation(CONFIG, flags={"json": "{not json"}))
 
 
 @pytest.mark.asyncio
@@ -186,9 +190,11 @@ async def test_permissions_create_posts_body():
     ) as post:
         out, _io = await run_gws_method(
             method,
-            CONFIG, [],
-            params='{"fileId": "f1"}',
-            json='{"role": "reader", "type": "anyone"}')
+            CLIInvocation(CONFIG,
+                          flags={
+                              "params": '{"fileId": "f1"}',
+                              "json": '{"role": "reader", "type": "anyone"}'
+                          }))
     assert await materialize(out) == b'{"id":"p1"}'
     assert post.await_args.args[1].endswith("/files/f1/permissions")
     assert post.await_args.args[2] == {"role": "reader", "type": "anyone"}
@@ -204,8 +210,11 @@ async def test_files_export_returns_raw_bytes():
     ) as get_bytes:
         out, _io = await run_gws_method(
             method,
-            CONFIG, [],
-            params='{"fileId": "f1", "mimeType": "application/pdf"}')
+            CLIInvocation(CONFIG,
+                          flags={
+                              "params":
+                              '{"fileId": "f1", "mimeType": "application/pdf"}'
+                          }))
     assert await materialize(out) == b"%PDF-1.4"
     assert "/files/f1/export?mimeType=application/pdf" in \
         get_bytes.await_args.args[1]

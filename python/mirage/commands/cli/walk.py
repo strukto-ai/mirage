@@ -301,7 +301,10 @@ def walk(head: str, spec: CLISpec, argv: Sequence[str]) -> WalkResult:
     flags: FlagBag = {}
     i = 0
     while True:
-        if node.fn is not None:
+        # A script node terminates the walk exactly like an fn leaf:
+        # its remaining argv rides the ordinary spec machinery for
+        # validation, then passes to the program verbatim.
+        if node.fn is not None or node.script is not None:
             return WalkResult(leaf=node,
                               path=path,
                               group_flags=flags,

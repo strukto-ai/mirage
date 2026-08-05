@@ -18,11 +18,13 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (BaseModel, ConfigDict, Field, field_validator,
+                      model_validator)
 
 from mirage.accessor.s3 import S3Config
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
+from mirage.commands.cli.types import CLISpec
 from mirage.policy import GuardSpec
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
@@ -241,16 +243,31 @@ class GuardBlock(BaseModel):
 class CLIBlock(BaseModel):
     """One ``clis:`` entry: install a named CLISpec with its own config.
 
-    The section key is the installed head word; ``cli`` names the
-    registered spec tree; ``config`` validates through that spec's
+    The section key is the installed head word. Exactly one handler
+    source: ``cli`` names a registered spec tree; ``script`` references
+    a program file whose content is embedded at load (the docker
+    build-context model). ``runtime`` optionally pins the world runtime
+    entry that runs the script; unset picks the first entry speaking
+    the script's language. ``config`` validates through the spec's
     ``config_model`` at install time (fail loud). A CLI never takes a
     mode and never shares a mount's credentials: a binary has no mode,
     the credential does.
     """
     model_config = ConfigDict(extra="forbid")
 
-    cli: str
+    cli: str | None = None
+    script: str | None = None
+    runtime: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _v_handler(self) -> "CLIBlock":
+        if (self.cli is None) == (self.script is None):
+            raise ValueError("a clis entry takes exactly one of cli or script")
+        if self.runtime is not None and self.script is None:
+            raise ValueError(
+                "runtime pins the script's runtime; it takes script")
+        return self
 
 
 class MountBlock(BaseModel):
@@ -326,15 +343,29 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
             and not Path(policy.strip()).is_absolute():
         raw["policy"] = str(base / policy.strip())
     runtimes = raw.get("runtimes")
-    if not isinstance(runtimes, list):
-        return
-    for entry in runtimes:
-        if not isinstance(entry, dict):
-            continue
-        script = entry.get("script")
-        if isinstance(script, str) and _is_script_path(script) \
-                and not Path(script.strip()).is_absolute():
-            entry["script"] = str(base / script.strip())
+    if isinstance(runtimes, list):
+        for entry in runtimes:
+            if isinstance(entry, dict):
+                _absolutize_script_key(entry, base)
+    clis = raw.get("clis")
+    if isinstance(clis, dict):
+        for block in clis.values():
+            if isinstance(block, dict):
+                _absolutize_script_key(block, base)
+
+
+def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
+    """Rebase one mapping's relative ``script`` path onto ``base``.
+
+    Args:
+        entry (dict[str, Any]): a ``runtimes`` or ``clis`` mapping
+            entry, mutated in place.
+        base (Path): directory containing the config file.
+    """
+    script = entry.get("script")
+    if isinstance(script, str) and _is_script_path(script) \
+            and not Path(script.strip()).is_absolute():
+        entry["script"] = str(base / script.strip())
 
 
 def _build_runtime_entries(
@@ -366,6 +397,27 @@ def _build_runtime_entries(
             options["script"] = _load_script_source(script)
         out.append(build_runtime(name, **options))
     return out
+
+
+def _cli_entry(name: str, block: CLIBlock) -> str | CLISpec:
+    """Resolve one ``clis:`` entry to a spec key or synthesized spec.
+
+    A ``cli`` entry stays the registered name for the workspace to
+    resolve; a ``script`` entry becomes a single-node CLISpec carrying
+    the embedded source, so the install is self-contained (the docker
+    build-context model).
+
+    Args:
+        name (str): the section key, the installed head word.
+        block (CLIBlock): the validated entry.
+    """
+    if block.script is not None:
+        return CLISpec(name=name,
+                       script=_load_script_source(block.script),
+                       runtime=block.runtime)
+    if block.cli is None:
+        raise ValueError(f"clis entry {name!r} takes cli or script")
+    return block.cli
 
 
 class WorkspaceConfig(BaseModel):
@@ -452,7 +504,7 @@ class WorkspaceConfig(BaseModel):
 
         if self.clis is not None:
             kwargs["clis"] = {
-                name: (block.cli, dict(block.config))
+                name: (_cli_entry(name, block), dict(block.config))
                 for name, block in self.clis.items()
             }
         return kwargs

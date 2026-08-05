@@ -105,7 +105,11 @@ async def handle_command(
     # and above every mount branch (a CLI consults no mount).
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
-        return await handle_cli(cli_install, parts, session, stdin)
+        return await handle_cli(cli_install,
+                                parts,
+                                session,
+                                stdin,
+                                entries=registry.runtime_entries)
 
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(parts, cmd_name, registry, session.cwd,

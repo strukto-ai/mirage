@@ -71,6 +71,12 @@ export class MountRegistry {
   // Catch-all when its captures are empty; explicit captures make
   // unclaimed commands an admission failure (126).
   vfsRuntime: Runtime | null = null
+  // The ordered runtime world, set by Runtimes at construction (the
+  // live array, so add() keeps it fresh). The CLI script arm selects
+  // an interpreter from it (a runtime: pin or the script's language),
+  // which the bindings map cannot answer: an entry behind another
+  // capturer never binds a command.
+  runtimeEntries: readonly Runtime[] = []
   // Command admission policies. Policies itself is a bare mechanism;
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and user policies follow it (Workspace

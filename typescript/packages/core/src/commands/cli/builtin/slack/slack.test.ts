@@ -18,7 +18,7 @@ import type { SlackResponse, SlackTransport } from '../../../../core/slack/_clie
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { SLACK } from './index.ts'
 import { emojiList } from './emoji_list.ts'
 import { listPins } from './list_pins.ts'
@@ -56,8 +56,8 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   return result
 }
 
-function makeOpts(flags: CLIVerbOpts['flags']): CLIVerbOpts {
-  return { stdin: null, flags }
+function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
+  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
 }
 
 const VERBS = [
@@ -90,8 +90,8 @@ describe('slack verbs', () => {
   it('send-message posts, and threads when --thread-ts is given', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, ts: '9.9' }
-    await sendMessage({}, [], [], makeOpts({ channel: 'C1', text: 'hi' }))
-    await sendMessage({}, [], [], makeOpts({ channel: 'C1', text: 'hi', thread_ts: '1.0' }))
+    await sendMessage(makeInv({}, { channel: 'C1', text: 'hi' }))
+    await sendMessage(makeInv({}, { channel: 'C1', text: 'hi', thread_ts: '1.0' }))
     expect(CALLS[0]?.body).toEqual({ channel: 'C1', text: 'hi' })
     expect(CALLS[1]?.body).toEqual({ channel: 'C1', thread_ts: '1.0', text: 'hi' })
   })
@@ -99,7 +99,7 @@ describe('slack verbs', () => {
   it('read-messages defaults the limit to 20', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, messages: [{ ts: '1.0', text: 'hey' }] }
-    const [out] = unwrap(await readMessages({}, [], [], makeOpts({ channel: 'C1' })))
+    const [out] = unwrap(await readMessages(makeInv({}, { channel: 'C1' })))
     expect(CALLS[0]?.endpoint).toBe('conversations.history')
     expect(CALLS[0]?.params).toEqual({ channel: 'C1', limit: '20' })
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ ts: '1.0', text: 'hey' }])
@@ -108,14 +108,14 @@ describe('slack verbs', () => {
   it('list-pins renders the items array', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, items: [{ type: 'message' }] }
-    const [out] = unwrap(await listPins({}, [], [], makeOpts({ channel: 'C1' })))
+    const [out] = unwrap(await listPins(makeInv({}, { channel: 'C1' })))
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ type: 'message' }])
   })
 
   it('emoji-list renders the emoji mapping', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, emoji: { shipit: 'url' } }
-    const [out] = unwrap(await emojiList({}, [], [], makeOpts({})))
+    const [out] = unwrap(await emojiList(makeInv({}, {})))
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ shipit: 'url' })
   })
 })

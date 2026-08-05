@@ -260,9 +260,14 @@ describe('himalaya verbs', () => {
   it('compose writes MIME to stdout without sending', async () => {
     sendRawMock.mockClear()
     const [out, io] = (await import('./compose.ts').then((m) =>
-      m.compose(CONFIG, [], [], {
-        stdin: null,
+      m.compose({
+        config: CONFIG,
+        argv: [],
+        paths: [],
+        texts: [],
         flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' },
+        stdin: null,
+        env: {},
       }),
     )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
@@ -278,9 +283,14 @@ describe('himalaya verbs', () => {
     sendRawMock.mockClear()
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     const [out] = (await import('./compose.ts').then((m) =>
-      m.compose(CONFIG, [], [], {
-        stdin: null,
+      m.compose({
+        config: CONFIG,
+        argv: [],
+        paths: [],
+        texts: [],
         flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true },
+        stdin: null,
+        env: {},
       }),
     )) as [Uint8Array, IOResult]
     expect(decode(sendRawMock.mock.calls[0]?.[1] as Uint8Array)).toContain('Subject: Hi')
@@ -293,9 +303,14 @@ describe('himalaya verbs', () => {
 
   it('reply derives subject, recipients and threading', async () => {
     const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await reply(CONFIG, [], ['7'], {
-      stdin: null,
+    const [out] = (await reply({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: ['7'],
       flags: { body: 'thanks' },
+      stdin: null,
+      env: {},
     })) as [Uint8Array, IOResult]
     const text = decode(await materialize(out))
     expect(text).toContain('Subject: Re: Quarterly numbers')
@@ -308,9 +323,14 @@ describe('himalaya verbs', () => {
 
   it('forward prefixes Fwd and keeps References but not In-Reply-To', async () => {
     const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await forward(CONFIG, [], ['7'], {
-      stdin: null,
+    const [out] = (await forward({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: ['7'],
       flags: { to: 'carol@example.com' },
+      stdin: null,
+      env: {},
     })) as [Uint8Array, IOResult]
     const text = decode(await materialize(out))
     expect(text).toContain('Subject: Fwd: Quarterly numbers')
@@ -320,16 +340,24 @@ describe('himalaya verbs', () => {
   })
 
   it('reply without an id is a usage error', async () => {
-    await expect(reply(CONFIG, [], [], { stdin: null, flags: {} })).rejects.toThrow(
-      'message id is required',
-    )
+    await expect(
+      reply({ config: CONFIG, argv: [], paths: [], texts: [], flags: {}, stdin: null, env: {} }),
+    ).rejects.toThrow('message id is required')
   })
 
   it('send reads a raw message from stdin', async () => {
     sendRawMock.mockClear()
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [out] = (await send(CONFIG, [], [], { stdin: raw, flags: {} })) as [Uint8Array, IOResult]
+    const [out] = (await send({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: [],
+      flags: {},
+      stdin: raw,
+      env: {},
+    })) as [Uint8Array, IOResult]
     expect(sendRawMock.mock.calls[0]?.[1]).toEqual(raw)
     expect(JSON.parse(decode(await materialize(out)))).toEqual({
       status: 'sent',
@@ -341,17 +369,30 @@ describe('himalaya verbs', () => {
   it('send refuses an empty message before reaching SMTP', async () => {
     sendRawMock.mockClear()
     await expect(
-      send(CONFIG, [], [], { stdin: new TextEncoder().encode('  \n '), flags: {} }),
+      send({
+        config: CONFIG,
+        argv: [],
+        paths: [],
+        texts: [],
+        flags: {},
+        stdin: new TextEncoder().encode('  \n '),
+        env: {},
+      }),
     ).rejects.toThrow('no message provided')
     expect(sendRawMock).not.toHaveBeenCalled()
   })
 
   it('list orders most recent first and closes its accessor', async () => {
     const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await listEnvelopes(CONFIG, [], [], { stdin: null, flags: {} })) as [
-      Uint8Array,
-      IOResult,
-    ]
+    const [out] = (await listEnvelopes({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: [],
+      flags: {},
+      stdin: null,
+      env: {},
+    })) as [Uint8Array, IOResult]
     const rows = JSON.parse(decode(await materialize(out))) as { uid: string }[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
     expect(closeSpy).toHaveBeenCalledTimes(1)
@@ -360,9 +401,14 @@ describe('himalaya verbs', () => {
 
   it('search sorts client side from the query clause', async () => {
     const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await searchEnvelopes(CONFIG, [], ['order', 'by', 'subject'], {
-      stdin: null,
+    const [out] = (await searchEnvelopes({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: ['order', 'by', 'subject'],
       flags: {},
+      stdin: null,
+      env: {},
     })) as [Uint8Array, IOResult]
     const rows = JSON.parse(decode(await materialize(out))) as { uid: string }[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])

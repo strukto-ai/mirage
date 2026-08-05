@@ -14,13 +14,13 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.gsheets.write import update_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 def values_json_from_flags(fl: FlagView) -> str:
@@ -39,13 +39,10 @@ def values_json_from_flags(fl: FlagView) -> str:
 
 
 async def write(
-    config: GoogleConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    result = await update_values(TokenManager(config),
+    fl = FlagView(inv.flags)
+    result = await update_values(TokenManager(inv.config),
                                  fl.as_str("spreadsheet") or "",
                                  fl.as_str("range") or "",
                                  values_json_from_flags(fl))

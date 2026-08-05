@@ -16,20 +16,14 @@ import { commentUpdate } from '../../../../../core/linear/_client.ts'
 import { normalizeComment, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/types.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIVerbOpts } from '../../../types.ts'
+import type { CLIInvocation } from '../../../types.ts'
 import { linearTransport, textOrStdin } from '../util.ts'
 
-export async function update(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const transport = linearTransport(config)
-  const body = await textOrStdin(fl.asStr('body'), opts.stdin, 'comment body is required')
+export async function update(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const transport = linearTransport(inv.config)
+  const body = await textOrStdin(fl.asStr('body'), inv.stdin, 'comment body is required')
   const comment = await commentUpdate(transport, fl.asStr('comment') ?? '', body)
   const issue = comment.issue
   const issueObj =

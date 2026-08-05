@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '../../io/types.ts'
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
 import { ScriptSource, type PolicyScript } from './policy/types.ts'
 import type { RunArgs, RunResult, RuntimeOptions } from './runtime_types.ts'
@@ -54,6 +55,13 @@ function coerceRuntimeConfig<C extends object>(
 export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
+  /**
+   * The language run() interprets ("python", "js"), null for engines
+   * that run whole lines or no code at all (vfs, sandboxes). A script
+   * CLI selects its interpreter by matching this
+   * (runtimeForLanguage), the run-side twin of evalLanguage.
+   */
+  readonly language: string | null = null
   /**
    * A runtime that runs whole lines sets this true and overrides
    * runLine. Interpreter runtimes leave it false: they are the engine
@@ -113,6 +121,21 @@ export abstract class Runtime {
 
 /** A workspace runtimes-list entry: an instance or a name shorthand. */
 export type RuntimeEntry = Runtime | string
+
+/**
+ * Convert one interpreter outcome into a command's output pair.
+ *
+ * The single RunResult-to-IOResult mapping: empty stdout becomes null
+ * (no stream), the exit code and stderr pass through. The interpreter
+ * handlers and the CLI script arm both convert through here so the
+ * mapping cannot drift (Python's run_output).
+ */
+export function runOutput(result: RunResult): [Uint8Array | null, IOResult] {
+  return [
+    result.stdout.length > 0 ? result.stdout : null,
+    new IOResult({ exitCode: result.exitCode, stderr: result.stderr }),
+  ]
+}
 
 /** The code API takes functions; script source belongs to config. */
 export function scriptStringError(kind = 'a script'): Error {

@@ -14,21 +14,17 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import get_user_profile
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def member_info(
-    config: SlackConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    user = await get_user_profile(config, fl.as_str("user") or "")
+        inv: CLIInvocation[SlackConfig]) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(inv.flags)
+    user = await get_user_profile(inv.config, fl.as_str("user") or "")
     out = json.dumps(user, ensure_ascii=False, separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

@@ -121,6 +121,7 @@ const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends Runtime implements Evaluator {
   readonly name = PYODIDE_RUNTIME
+  override readonly language = 'python'
   readonly [EVALUATOR] = true as const
   readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const

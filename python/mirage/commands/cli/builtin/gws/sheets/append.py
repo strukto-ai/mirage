@@ -15,23 +15,20 @@
 import json
 
 from mirage.commands.cli.builtin.gws.sheets.write import values_json_from_flags
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.gsheets.write import append_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def append(
-    config: GoogleConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    result = await append_values(TokenManager(config),
+    fl = FlagView(inv.flags)
+    result = await append_values(TokenManager(inv.config),
                                  fl.as_str("spreadsheet") or "",
                                  fl.as_str("range") or "A1",
                                  values_json_from_flags(fl))

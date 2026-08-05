@@ -135,6 +135,23 @@ describe('MontyRuntime', () => {
     expect(text(result.stdout)).toBe("['a', 'b']\n")
   }, 30_000)
 
+  it('exposes piped input as the stdin global', async () => {
+    const result = await make().run({
+      code: 'print(stdin.decode())',
+      args: [],
+      env: {},
+      stdin: new TextEncoder().encode('piped'),
+    })
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toBe('piped\n')
+  }, 30_000)
+
+  it('the stdin global is None without a pipe', async () => {
+    const result = await run(make(), 'print(stdin is None)')
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toBe('True\n')
+  }, 30_000)
+
   it('serves os.getenv from the run env only', async () => {
     const result = await run(make(), "import os\nprint(os.getenv('MY_VAR', 'unset'))", [], {
       MY_VAR: 'v1',
@@ -290,6 +307,7 @@ describe('monty unavailable', () => {
     const runtime = {
       name: 'monty',
       captures: ['python3', 'python'],
+      language: 'python',
       runsLines: false,
       config: {},
       attach: () => undefined,

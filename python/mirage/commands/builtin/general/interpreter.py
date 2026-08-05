@@ -19,8 +19,25 @@ from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.runtime.base import Runtime
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
+
+
+def run_output(result: RunResult) -> CommandOutput:
+    """Convert one interpreter outcome into a command's output shape.
+
+    The single RunResult-to-IOResult mapping: empty stdout becomes
+    None (no stream), the exit code and stderr pass through. The
+    interpreter commands and the CLI script arm both convert through
+    here so the mapping cannot drift.
+
+    Args:
+        result (RunResult): the interpreter execution outcome.
+    """
+    return result.stdout if result.stdout else None, IOResult(
+        exit_code=result.exit_code,
+        stderr=result.stderr,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +181,4 @@ async def run_code(
                 env=env or {},
                 stdin=prepared.stdin,
                 flags=flags))
-    return result.stdout if result.stdout else None, IOResult(
-        exit_code=result.exit_code,
-        stderr=result.stderr,
-    )
+    return run_output(result)

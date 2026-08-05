@@ -17,25 +17,26 @@ import importlib.util
 from typing import Any
 
 
-def load_backend_class(spec: str) -> type[Any]:
-    """Load a backend class from a spec string.
+def load_attr(spec: str) -> Any:
+    """Load a module attribute from a reference string.
 
     Supports two formats (auto-detected):
     - Script file: ``"./my_backend.py:MyClass"``
     - Module dotpath: ``"mypackage.backends:MyClass"``
 
     Args:
-        spec (str): ``"source:class_name"`` where source is a file path
+        spec (str): ``"source:attr_name"`` where source is a file path
             or module dotpath.
 
     Returns:
-        type: The loaded class.
+        Any: The loaded attribute; callers type-check what they expect
+        (a resource class, a CLISpec tree).
     """
     if ":" not in spec:
         raise ValueError(
             f"invalid backend spec {spec!r}, expected 'source:ClassName'")
 
-    source, class_name = spec.rsplit(":", 1)
+    source, attr_name = spec.rsplit(":", 1)
 
     if "/" in source or source.endswith(".py"):
         module_spec = importlib.util.spec_from_file_location(
@@ -50,7 +51,20 @@ def load_backend_class(spec: str) -> type[Any]:
     else:
         module = importlib.import_module(source)
 
-    if not hasattr(module, class_name):
-        raise ValueError(f"{class_name!r} not found in {source!r}")
+    if not hasattr(module, attr_name):
+        raise ValueError(f"{attr_name!r} not found in {source!r}")
 
-    return getattr(module, class_name)
+    return getattr(module, attr_name)
+
+
+def load_backend_class(spec: str) -> type[Any]:
+    """Load a backend class from a spec string via :func:`load_attr`.
+
+    Args:
+        spec (str): ``"source:class_name"`` where source is a file path
+            or module dotpath.
+
+    Returns:
+        type: The loaded class.
+    """
+    return load_attr(spec)

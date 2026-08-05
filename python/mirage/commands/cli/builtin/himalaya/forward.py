@@ -15,24 +15,19 @@
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.builder import Source
 from mirage.commands.cli.builtin.himalaya.util import first_text, route
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def forward(
-    config: EmailConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    uid = first_text(texts, "message id")
+        inv: CLIInvocation[EmailConfig]) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(inv.flags)
+    uid = first_text(inv.texts, "message id")
     mailbox = fl.as_str("mailbox") or "INBOX"
-    accessor = EmailAccessor(config)
+    accessor = EmailAccessor(inv.config)
     try:
         original = await fetch_message(accessor, mailbox, uid)
     finally:
@@ -44,4 +39,4 @@ async def forward(
                        if fl.as_str("posting_style") == "bottom" else "top"),
         quote_headline=fl.as_str("quote_headline") or "",
     )
-    return await route(config, fl, stdin, source)
+    return await route(inv.config, fl, inv.stdin, source)

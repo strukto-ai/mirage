@@ -16,7 +16,7 @@
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.commands.registry import command
-from mirage.commands.cli import CLISpec, register_cli_spec
+from mirage.commands.cli import CLIInvocation, CLISpec, register_cli_spec
 from mirage.types import FileStat, MountBackend, MountMode
 from mirage.policy import (Action, CommandContext, Deny, GuardSpec, Policy)
 from mirage.workspace import (ExecutionNode, Workspace, WorkspaceRunner)
@@ -44,6 +44,7 @@ __all__ = [
     "Mount",
     "MountBackend",
     "MountMode",
+    "CLIInvocation",
     "CLISpec",
     "register_cli_spec",
     "command",

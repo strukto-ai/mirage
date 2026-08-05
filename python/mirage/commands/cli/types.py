@@ -12,18 +12,62 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
-from mirage.types import Limit
+from mirage.io.types import ByteSource
+from mirage.runtime.types import ScriptSource
+from mirage.types import Limit, PathSpec
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
 FlagBag = dict[str, str | bool | int | list[str]]
+
+ConfigT = TypeVar("ConfigT")
+
+
+@dataclass(frozen=True)
+class CLIInvocation(Generic[ConfigT]):
+    """Everything one CLI line hands its handler, built once per line.
+
+    The executor constructs exactly one of these per invocation and
+    every handler tier renders it: an fn leaf is called as ``fn(inv)``,
+    a script handler maps ``argv``/``stdin``/``env`` onto RunArgs, a
+    native handler maps the same three onto a process. The record
+    carries both views of the line: the process view (``argv``,
+    ``stdin``, ``env``) and the parsed view (``config``, ``paths``,
+    ``texts``, ``flags``), so a handler takes whichever its substrate
+    can express and nothing is threaded through keyword injection.
+
+    Args:
+        config (ConfigT): the installation's validated ``config_model``
+            instance, None when the CLI declares no config. A leaf
+            annotates the concrete model (``CLIInvocation[SlackConfig]``),
+            the same authorship claim as the old ``config`` parameter.
+        argv (tuple[str, ...]): verbatim tokens after the head word,
+            subcommand words included.
+        paths (tuple[PathSpec, ...]): path-typed operands of the leaf,
+            cwd-resolved.
+        texts (tuple[str, ...]): text-typed operands of the leaf.
+        flags (Mapping[str, object]): merged group and leaf flags keyed
+            by kwarg name (``flag_kwarg_name`` spelling), read through
+            FlagView. PATH-typed flag values arrive as PathSpec.
+        stdin (ByteSource | None): piped input, None when the line has
+            none.
+        env (Mapping[str, str]): the session's environment variables.
+    """
+    config: ConfigT
+    argv: tuple[str, ...] = ()
+    paths: tuple[PathSpec, ...] = ()
+    texts: tuple[str, ...] = ()
+    flags: Mapping[str, object] = field(default_factory=dict)
+    stdin: ByteSource | None = None
+    env: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -39,10 +83,10 @@ class CLISpec(CommandSpec):
     CommandSpec.
 
     Construction validates the node at import time: the name must be a
-    single word, a node takes ``fn`` or ``subcommands`` (never both,
-    never neither), a group declares no positional/rest (its operand is
-    the subcommand word), child names must be unique, and only a tree's
-    root may declare ``config_model``.
+    single word, a node takes exactly one of ``fn``, ``subcommands``, or
+    ``script``, a group declares no positional/rest (its operand is the
+    subcommand word), child names must be unique, and only a tree's
+    root may declare ``config_model`` or ``script``.
 
     Args:
         name (str): the word at this level: argparse's ``prog`` for a
@@ -55,8 +99,8 @@ class CLISpec(CommandSpec):
             (argparse prog semantics). Inert on a root: the installed
             head word is the only way in.
         fn (Callable | None): leaf handler (argparse
-            ``set_defaults(func=...)``), called as
-            ``fn(config, paths, *texts, **flags)`` where ``config`` is the
+            ``set_defaults(func=...)``), called as ``fn(inv)`` with the
+            line's one CLIInvocation; ``inv.config`` is the
             installation's validated ``config_model`` instance (None when
             the CLI declares no config). What the handler does with the
             config: wrap it in an accessor, build its own client, or
@@ -69,6 +113,15 @@ class CLISpec(CommandSpec):
         config_model (type[BaseModel] | None): root only. Pydantic model
             validating an installation's config from YAML ``clis:`` or
             ``register_cli``; also the redaction schema for snapshots.
+        script (ScriptSource | None): root only, and the root stands
+            alone (no fn, no subcommands: the program re-parses argv
+            natively). The program that serves the whole install,
+            embedded from a YAML ``script:`` path at load; config is
+            the only door for script source, in code a leaf carries
+            ``fn``.
+        runtime (str | None): name of the world runtime entry that runs
+            ``script`` (YAML ``runtime:``); None picks the first entry
+            speaking the script's language. Takes ``script``.
     """
     name: str = ""
     aliases: tuple[str, ...] = ()
@@ -81,6 +134,8 @@ class CLISpec(CommandSpec):
     # (a collision is legal, a TypeError is not).
     limit: Limit | None = field(default=None, hash=False)
     config_model: type[BaseModel] | None = None
+    script: ScriptSource | None = None
+    runtime: str | None = None
 
     def __post_init__(self) -> None:
         validate_cli(self)

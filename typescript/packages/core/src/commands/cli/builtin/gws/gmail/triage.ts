@@ -17,22 +17,16 @@ import { extractHeader, getMessageRaw, listMessages } from '../../../../../core/
 import { TokenManager } from '../../../../../core/google/_client.ts'
 import type { GoogleConfig } from '../../../../../core/google/config.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../../commands/config.ts'
-import type { CLIVerbOpts } from '../../../../../commands/cli/types.ts'
+import type { CLIInvocation } from '../../../../../commands/cli/types.ts'
 
 const ENC = new TextEncoder()
 
-export async function triage(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function triage(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const query = fl.asStr('query') ?? 'is:unread'
   const maxResults = fl.asInt('max') ?? 20
-  const tm = new TokenManager(config as GoogleConfig)
+  const tm = new TokenManager(inv.config as GoogleConfig)
   const stubs = await listMessages(tm, { query, maxResults })
   const summaries: {
     id: string

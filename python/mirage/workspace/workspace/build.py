@@ -107,6 +107,7 @@ def wire_runtime_world(
     runtimes.resolve(entries)
     router = PolicyRouter(registry, runtimes, mount_prefixes)
     registry.runtime_bindings = bind_commands(runtimes.entries)
+    registry.runtime_entries = runtimes.entries
     registry.vfs_runtime = next(
         (entry for entry in runtimes.entries if isinstance(entry, VfsRuntime)),
         None)

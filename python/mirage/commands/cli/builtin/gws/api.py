@@ -21,7 +21,7 @@ from mirage.cache.context import invalidate_after_write
 from mirage.commands.cli.builtin.gws.methods import (GWS_METHODS,
                                                      SERVICE_BASES, GwsMethod,
                                                      gws_method_description)
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView, Option
 from mirage.core.google._client import (TokenManager, google_delete,
@@ -139,18 +139,14 @@ _CALLERS: dict[str, Callable[..., Awaitable[object]]] = {
 
 
 async def run_gws_method(
-    method: GwsMethod,
-    config: GoogleConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        method: GwsMethod, inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
+    fl = FlagView(inv.flags)
     params = _parse_json_flag(fl.as_str("params") or "", "--params")
     body = _parse_json_flag(fl.as_str("json") or "", "--json")
     if method.needs_body and not body:
         raise UsageError("--json is required")
-    token_manager = TokenManager(config)
+    token_manager = TokenManager(inv.config)
     path, query = fill_path(method.path, params)
     url = SERVICE_BASES[method.service](token_manager) + path
     query_params = _query_str(query)

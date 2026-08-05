@@ -164,6 +164,7 @@ const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
 // matching the Python runtime's live file I/O.
 export class QuickJsRuntime extends Runtime implements Evaluator {
   readonly name = QUICKJS_RUNTIME
+  override readonly language = 'js'
   readonly [EVALUATOR] = true as const
   readonly evalLanguage = 'js' as const
   static readonly commands: readonly string[] = ['node', 'js'] as const

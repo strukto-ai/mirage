@@ -14,6 +14,7 @@
 
 import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
+import type { ScriptSource } from '../../workspace/executor/policy/types.ts'
 import type { CommandFnResult } from '../config.ts'
 import { compileSpec } from '../spec/compile.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
@@ -21,28 +22,39 @@ import type { ZodObject, ZodRawShape } from 'zod'
 import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
 
 /**
- * The opts bag a CLI leaf receives: the parsed flags (group flags
- * merged in) and stdin. Narrower than CommandOpts on purpose: a CLI
+ * Everything one CLI line hands its handler, built once per line by the
+ * executor. The record carries both views of the invocation: the process
+ * view (`argv`, `stdin`, `env`) and the parsed view (`config`, `paths`,
+ * `texts`, `flags`), so every handler tier renders whichever its
+ * substrate can express. Narrower than CommandOpts on purpose: a CLI
  * consults no mount, so there is no resource, no mount prefix, and no
  * filetype cascade; the config carries whatever the handler needs.
  */
-export interface CLIVerbOpts {
-  stdin: ByteSource | null
+export interface CLIInvocation<ConfigT = unknown> {
+  /** The installation's validated config, null without a configModel. */
+  config: ConfigT
+  /** Verbatim tokens after the head word, subcommand words included. */
+  argv: readonly string[]
+  /** Path-typed operands of the leaf, cwd-resolved. */
+  paths: readonly PathSpec[]
+  /** Text-typed operands of the leaf. */
+  texts: readonly string[]
+  /** Merged group and leaf flags keyed by kwarg name, read via FlagView. */
   flags: Record<string, string | boolean | number | string[]>
+  /** Piped input, null when the line has none. */
+  stdin: ByteSource | null
+  /** The session's environment variables. */
+  env: Readonly<Record<string, string>>
 }
 
 /**
- * Leaf handler of a CLISpec node, called with the installation's validated
+ * Leaf handler of a CLISpec node, called as `fn(inv)` with the line's
+ * one CLIInvocation; `inv.config` is the installation's validated
  * config (null when the CLI declares no config model). What the handler
  * does with the config: wrap it in an accessor, build its own client, or
  * ignore it, is the author's business.
  */
-export type CLIVerbFn = (
-  config: unknown,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-) => Promise<CommandFnResult> | CommandFnResult
+export type CLIVerbFn = (inv: CLIInvocation) => Promise<CommandFnResult> | CommandFnResult
 
 export interface CLISpecInit extends CommandSpecInit {
   name: string
@@ -52,6 +64,8 @@ export interface CLISpecInit extends CommandSpecInit {
   write?: boolean
   limit?: Limit | null
   configModel?: CLIConfigModel | null
+  script?: ScriptSource | null
+  runtime?: string | null
 }
 
 /**
@@ -73,10 +87,11 @@ export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, un
  * with the ordinary spec machinery because every level is a CommandSpec.
  *
  * The constructor validates the node at module-import time: the name must
- * be a single word, a node takes `fn` or `subcommands` (never both, never
- * neither), a group declares no positional/rest (its operand is the
+ * be a single word, a node takes exactly one of `fn`, `subcommands`, or
+ * `script` (a script root stands alone: the program re-parses argv
+ * natively), a group declares no positional/rest (its operand is the
  * subcommand word), child names must be unique, and only a tree's root may
- * declare `configModel`.
+ * declare `configModel` or `script`.
  */
 export class CLISpec extends CommandSpec {
   readonly name: string
@@ -86,6 +101,19 @@ export class CLISpec extends CommandSpec {
   readonly write: boolean
   readonly limit: Limit | null
   readonly configModel: CLIConfigModel | null
+  /**
+   * Root only, and the root stands alone (no fn, no subcommands). The
+   * program that serves the whole install, embedded from a YAML
+   * `script:` path at load; config is the only door for script source,
+   * in code a leaf carries `fn`.
+   */
+  readonly script: ScriptSource | null
+  /**
+   * Name of the world runtime entry that runs `script` (YAML
+   * `runtime:`); null picks the first entry speaking the script's
+   * language. Takes `script`.
+   */
+  readonly runtime: string | null
 
   constructor(init: CLISpecInit) {
     super(init)
@@ -96,6 +124,8 @@ export class CLISpec extends CommandSpec {
     this.write = init.write ?? false
     this.limit = init.limit ?? null
     this.configModel = init.configModel ?? null
+    this.script = init.script ?? null
+    this.runtime = init.runtime ?? null
     if (this.name === '' || /\s/.test(this.name)) {
       throw new Error(`cli name '${this.name}' must be a single non-empty word`)
     }
@@ -104,11 +134,24 @@ export class CLISpec extends CommandSpec {
         throw new Error(`cli '${this.name}': alias '${alias}' must be a single non-empty word`)
       }
     }
+    if (this.script !== null && this.fn !== null) {
+      throw new Error(`cli '${this.name}': a node takes fn or script, not both`)
+    }
+    if (this.script !== null && this.subcommands.length > 0) {
+      throw new Error(
+        `cli '${this.name}': a script serves the whole program; subcommands belong to fn trees`,
+      )
+    }
+    if (this.runtime !== null && this.script === null) {
+      throw new Error(
+        `cli '${this.name}': runtime names the entry that runs script; it takes script`,
+      )
+    }
     if (this.fn !== null && this.subcommands.length > 0) {
       throw new Error(`cli '${this.name}': a node takes fn or subcommands, not both`)
     }
-    if (this.fn === null && this.subcommands.length === 0) {
-      throw new Error(`cli '${this.name}': a node needs fn or subcommands`)
+    if (this.fn === null && this.subcommands.length === 0 && this.script === null) {
+      throw new Error(`cli '${this.name}': a node needs fn, subcommands, or script`)
     }
     if (this.subcommands.length > 0 && (this.positional.length > 0 || this.rest !== null)) {
       throw new Error(
@@ -129,6 +172,12 @@ export class CLISpec extends CommandSpec {
       if (child.configModel !== null) {
         throw new Error(
           `cli '${this.name}': subcommand '${child.name}' declares configModel; ` +
+            'only the root of a tree may',
+        )
+      }
+      if (child.script !== null) {
+        throw new Error(
+          `cli '${this.name}': subcommand '${child.name}' declares script; ` +
             'only the root of a tree may',
         )
       }

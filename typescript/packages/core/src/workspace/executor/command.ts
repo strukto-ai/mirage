@@ -124,7 +124,7 @@ export async function handleCommand(
   // and above every mount branch (a CLI consults no mount).
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
-    return handleCli(cliInstall, parts, session, stdin)
+    return handleCli(cliInstall, parts, session, stdin, registry.runtimeEntries)
   }
 
   if (cmdName in CWD_DEFAULT_RAW) {

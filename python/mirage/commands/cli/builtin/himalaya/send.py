@@ -16,28 +16,24 @@ import json
 
 from mirage.commands.cli.builtin.himalaya.builder import drain
 from mirage.commands.cli.builtin.himalaya.smtp import send_raw
+from mirage.commands.cli.types import CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def send(
-    config: EmailConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+        inv: CLIInvocation[EmailConfig]) -> tuple[ByteSource | None, IOResult]:
     # The operand is a whole RFC 5322 message, so tokens rejoin with a
     # space and literal \n become real line breaks, the way upstream's
     # MessageArg resolves an inline message.
-    inline = " ".join(texts).replace("\\r", "").replace("\\n", "\n")
-    raw = inline.encode() if inline else await drain(stdin) if stdin else b""
+    inline = " ".join(inv.texts).replace("\\r", "").replace("\\n", "\n")
+    raw = inline.encode() if inline else await drain(inv.stdin
+                                                     ) if inv.stdin else b""
     if not raw.strip():
         raise ValueError("no message provided: pass it as an argument "
                          "or pipe it via standard input")
-    message = await send_raw(config, raw)
+    message = await send_raw(inv.config, raw)
     result = {
         "status": "sent",
         "to": message["To"],

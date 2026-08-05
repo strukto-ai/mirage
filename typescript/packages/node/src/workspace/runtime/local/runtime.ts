@@ -37,6 +37,7 @@ const LOCAL_CONFIG_KEYS: readonly string[] = ['home']
  */
 export class LocalRuntime extends Runtime {
   readonly name = 'local'
+  override readonly language = 'python'
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private readonly python: string
   private readonly children = new Set<ChildProcess>()

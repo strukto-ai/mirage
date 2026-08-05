@@ -17,22 +17,16 @@ import { TokenManager } from '../../../../../core/google/_client.ts'
 import type { GoogleConfig } from '../../../../../core/google/config.ts'
 import { appendValues } from '../../../../../core/gsheets/write.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../../commands/config.ts'
-import type { CLIVerbOpts } from '../../../../../commands/cli/types.ts'
+import type { CLIInvocation } from '../../../../../commands/cli/types.ts'
 import { valuesJsonFromFlags } from './write.ts'
 
 const ENC = new TextEncoder()
 
-export async function append(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function append(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const result = await appendValues(
-    new TokenManager(config as GoogleConfig),
+    new TokenManager(inv.config as GoogleConfig),
     fl.asStr('spreadsheet') ?? '',
     fl.asStr('range') ?? 'A1',
     valuesJsonFromFlags(fl),

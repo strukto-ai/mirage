@@ -257,7 +257,10 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[]): Walk
   const flags: WalkFlagBag = {}
   let i = 0
   for (;;) {
-    if (node.fn !== null) {
+    // A script node terminates the walk exactly like an fn leaf: its
+    // remaining argv rides the ordinary spec machinery for validation,
+    // then passes to the program verbatim.
+    if (node.fn !== null || node.script !== null) {
       return new WalkResult({ leaf: node, path, groupFlags: flags, argv: argv.slice(i) })
     }
     const name = [head, ...path].join(' ')

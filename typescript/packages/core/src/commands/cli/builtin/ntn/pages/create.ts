@@ -15,20 +15,14 @@
 import { FlagView } from '../../../../spec/types.ts'
 import { createPageRaw } from '../../../../../core/notion/pages.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIVerbOpts } from '../../../types.ts'
+import type { CLIInvocation } from '../../../types.ts'
 import { notionTransport, parseJsonFlag, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function create(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function create(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   let body: Record<string, unknown>
   try {
     body = parseJsonFlag(fl.asStr('json'), '--json')
@@ -36,7 +30,7 @@ export async function create(
   } catch (err) {
     return usageError(err)
   }
-  const page = await createPageRaw(notionTransport(config), body)
+  const page = await createPageRaw(notionTransport(inv.config), body)
   const out: ByteSource = ENC.encode(JSON.stringify(page))
   return [out, new IOResult()]
 }

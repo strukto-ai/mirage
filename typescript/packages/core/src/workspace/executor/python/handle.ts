@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../runtime.ts'
+import { runOutput, type Runtime } from '../runtime.ts'
 import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -98,11 +98,8 @@ export async function handlePython(
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
       ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
     })
-    return [
-      result.stdout.length > 0 ? result.stdout : null,
-      new IOResult({ exitCode: result.exitCode, stderr: result.stderr }),
-      new ExecutionNode({ command: cmdStr, exitCode: result.exitCode }),
-    ]
+    const [stdout, io] = runOutput(result)
+    return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode })]
   } catch (err) {
     // An in-VM limit interrupt is a timeout, not an interpreter
     // failure: let it reach the workspace's 124 handler.

@@ -58,6 +58,23 @@ def evaluator_of(entries: list[Runtime],
     return first
 
 
+def runtime_for_language(entries: list[Runtime],
+                         language: str) -> Runtime | None:
+    """The world's interpreter for a script CLI, evaluator_of's run twin.
+
+    The first entry whose ``run`` speaks the language wins, the same
+    first-match rule. Unlike evaluator_of there is no any-language
+    fallback: a python program cannot run on a js engine, so no match
+    means None and the caller reports the world's entries.
+
+    Args:
+        entries (list[Runtime]): the workspace's ordered world.
+        language (str): the script's language ("python" or "js").
+    """
+    return next((entry for entry in entries if entry.language == language),
+                None)
+
+
 async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],
                        evaluator: EvaluatorMixin | None) -> EvalValue:
     """Evaluate a config script on the world's evaluator.

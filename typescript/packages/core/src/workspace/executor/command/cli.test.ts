@@ -14,34 +14,25 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CLISpec, type CLIVerbFn, type CLIVerbOpts } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIInvocation, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { Operand, Option } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { Limit, type PathSpec } from '../../../types.ts'
+import { Limit } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
+import { ScriptSource } from '../policy/types.ts'
+import { Runtime } from '../runtime.ts'
+import type { RunArgs, RunResult } from '../runtime_types.ts'
 import { Session } from '../../session/session.ts'
 import { handleCli } from './cli.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
-interface Call {
-  config: unknown
-  paths: PathSpec[]
-  texts: string[]
-  opts: CLIVerbOpts
-}
-
-const calls: Call[] = []
+const calls: CLIInvocation[] = []
 const dec = new TextDecoder()
 
-function send(
-  config: unknown,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): [Uint8Array, IOResult] {
-  calls.push({ config, paths, texts, opts })
-  const token = (config as { token: string }).token
+function send(inv: CLIInvocation): [Uint8Array, IOResult] {
+  calls.push(inv)
+  const token = (inv.config as { token: string }).token
   return [new TextEncoder().encode(`sent[${token}]\n`), new IOResult()]
 }
 
@@ -72,14 +63,17 @@ describe('handleCli', () => {
     calls.length = 0
     const install = makeInstall()
     const parts = ['prog', '-vv', 'message', 'send', '-t', '#eng', 'hello', 'world']
-    const [stdout, io, node] = await handleCli(install, parts, new Session({ sessionId: 't' }))
+    const session = new Session({ sessionId: 't', env: { EDITOR: 'vi' } })
+    const [stdout, io, node] = await handleCli(install, parts, session)
     expect(io.exitCode).toBe(0)
     expect(dec.decode(await materialize(stdout))).toBe('sent[tok]\n')
-    const call = calls.pop()
-    expect((call?.config as { token: string }).token).toBe('tok')
-    expect(call?.texts).toEqual(['hello', 'world'])
-    expect(call?.opts.flags.to).toBe('#eng')
-    expect(call?.opts.flags.verbose).toBe(2)
+    const inv = calls.pop()
+    expect((inv?.config as { token: string }).token).toBe('tok')
+    expect(inv?.texts).toEqual(['hello', 'world'])
+    expect(inv?.flags.to).toBe('#eng')
+    expect(inv?.flags.verbose).toBe(2)
+    expect(inv?.argv).toEqual(['-vv', 'message', 'send', '-t', '#eng', 'hello', 'world'])
+    expect(inv?.env).toEqual({ EDITOR: 'vi' })
     expect(node.command).toBe('prog -vv message send -t #eng hello world')
   })
 
@@ -159,7 +153,7 @@ describe('handleCli', () => {
     ).rejects.toThrow(/prog run: timed out/)
   })
 
-  it('injects stdin into the opts bag', async () => {
+  it('carries stdin on the invocation record, never as a flag', async () => {
     calls.length = 0
     const install = makeInstall()
     const stdin = new TextEncoder().encode('body')
@@ -169,6 +163,283 @@ describe('handleCli', () => {
       new Session({ sessionId: 't' }),
       stdin,
     )
-    expect(calls.pop()?.opts.stdin).toBe(stdin)
+    const inv = calls.pop()
+    expect(inv?.stdin).toBe(stdin)
+    expect(inv?.flags).not.toHaveProperty('stdin')
+  })
+})
+
+class FakePyRuntime extends Runtime {
+  readonly name: string = 'fakepy'
+  override readonly language: string | null = 'python'
+  seen: RunArgs[] = []
+  result: RunResult = { stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 }
+
+  run(args: RunArgs): Promise<RunResult> {
+    this.seen.push(args)
+    return Promise.resolve(this.result)
+  }
+}
+
+class OtherPyRuntime extends FakePyRuntime {
+  override readonly name = 'otherpy'
+}
+
+class FakeJsRuntime extends FakePyRuntime {
+  override readonly name = 'fakejs'
+  override readonly language = 'js'
+}
+
+class CrashingRuntime extends FakePyRuntime {
+  override readonly name = 'crashpy'
+
+  override run(): Promise<RunResult> {
+    return Promise.reject(new Error('engine exploded'))
+  }
+}
+
+class SleepingRuntime extends FakePyRuntime {
+  override readonly name = 'sleepy'
+
+  override async run(): Promise<RunResult> {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return this.result
+  }
+}
+
+function scriptInstall(
+  opts: {
+    runtime?: string | null
+    config?: Record<string, unknown> | null
+    language?: string
+    options?: Option[]
+  } = {},
+): CLIInstall {
+  const spec = new CLISpec({
+    name: 'pager',
+    script: new ScriptSource("print('hi')", opts.language ?? 'python'),
+    runtime: opts.runtime ?? null,
+    options: opts.options ?? [],
+  })
+  return { name: 'pager', spec, config: opts.config ?? null }
+}
+
+describe('handleCli script arm', () => {
+  it('selects by language and runs with verbatim argv', async () => {
+    // The python script lands on the python-speaking entry even though
+    // a js entry sits first in the world; argv reaches the program
+    // verbatim so it can re-parse natively.
+    const py = new FakePyRuntime()
+    const js = new FakeJsRuntime()
+    const [stdout, io, node] = await handleCli(
+      scriptInstall(),
+      ['pager', 'report.txt', 'x'],
+      new Session({ sessionId: 't' }),
+      null,
+      [js, py],
+    )
+    expect(io.exitCode).toBe(0)
+    expect(dec.decode(await materialize(stdout))).toBe('ran\n')
+    expect(js.seen).toEqual([])
+    const run = py.seen.pop()
+    expect(run?.code).toBe("print('hi')")
+    expect(run?.args).toEqual(['report.txt', 'x'])
+    expect(node.command).toBe('pager report.txt x')
+    expect(node.exitCode).toBe(0)
+  })
+
+  it('declared options still pass verbatim', async () => {
+    // The spec is a typed front door: a declared option validates,
+    // then the program still receives the raw tokens, the contract a
+    // native binary could also honor.
+    const py = new FakePyRuntime()
+    const install = scriptInstall({
+      options: [new Option({ short: '-n', long: '--lines', type: 'int' })],
+    })
+    const [, io] = await handleCli(
+      install,
+      ['pager', '-n', '3', 'report.txt'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(0)
+    expect(py.seen.pop()?.args).toEqual(['-n', '3', 'report.txt'])
+  })
+
+  it('the env carries MIRAGE_CONFIG as JSON', async () => {
+    const py = new FakePyRuntime()
+    const session = new Session({ sessionId: 't', env: { EDITOR: 'vi' } })
+    const [, io] = await handleCli(
+      scriptInstall({ config: { apiKey: 'k1' } }),
+      ['pager'],
+      session,
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(0)
+    expect(py.seen.pop()?.env).toEqual({ EDITOR: 'vi', MIRAGE_CONFIG: '{"apiKey":"k1"}' })
+  })
+
+  it('the env omits MIRAGE_CONFIG without config', async () => {
+    const py = new FakePyRuntime()
+    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, [py])
+    expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CONFIG')
+  })
+
+  it('stdin materializes to bytes', async () => {
+    const py = new FakePyRuntime()
+    const stdin = new TextEncoder().encode('body')
+    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), stdin, [py])
+    expect(py.seen.pop()?.stdin).toEqual(stdin)
+  })
+
+  it('--help renders without executing', async () => {
+    const py = new FakePyRuntime()
+    const [stdout, io] = await handleCli(
+      scriptInstall(),
+      ['pager', '--help'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(0)
+    expect(dec.decode(await materialize(stdout)).startsWith('pager\n')).toBe(true)
+    expect(py.seen).toEqual([])
+  })
+
+  it('an undeclared flag refuses without executing', async () => {
+    const py = new FakePyRuntime()
+    const [, io] = await handleCli(
+      scriptInstall(),
+      ['pager', '--frobnicate'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(2)
+    expect(dec.decode(await materialize(io.stderr))).toMatch(
+      /^pager: unrecognized option '--frobnicate'/,
+    )
+    expect(py.seen).toEqual([])
+  })
+
+  it('the runtime pin is honored', async () => {
+    // The pin overrides first-match: the named entry runs the script
+    // even when an earlier entry speaks the same language.
+    const first = new FakePyRuntime()
+    const pinned = new OtherPyRuntime()
+    const [, io] = await handleCli(
+      scriptInstall({ runtime: 'otherpy' }),
+      ['pager'],
+      new Session({ sessionId: 't' }),
+      null,
+      [first, pinned],
+    )
+    expect(io.exitCode).toBe(0)
+    expect(first.seen).toEqual([])
+    expect(pinned.seen).toHaveLength(1)
+  })
+
+  it('an unknown pin exits 127', async () => {
+    const py = new FakePyRuntime()
+    const [, io, node] = await handleCli(
+      scriptInstall({ runtime: 'local' }),
+      ['pager'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(127)
+    expect(dec.decode(await materialize(io.stderr))).toBe(
+      "pager: unknown runtime: 'local' (workspace runtimes: 'fakepy')\n",
+    )
+    expect(node.exitCode).toBe(127)
+    expect(py.seen).toEqual([])
+  })
+
+  it('a pin language mismatch exits 127', async () => {
+    const js = new FakeJsRuntime()
+    const [, io] = await handleCli(
+      scriptInstall({ runtime: 'fakejs' }),
+      ['pager'],
+      new Session({ sessionId: 't' }),
+      null,
+      [js],
+    )
+    expect(io.exitCode).toBe(127)
+    expect(dec.decode(await materialize(io.stderr))).toBe(
+      "pager: runtime 'fakejs' does not run python scripts\n",
+    )
+    expect(js.seen).toEqual([])
+  })
+
+  it('no language match exits 127', async () => {
+    const py = new FakePyRuntime()
+    const [, io] = await handleCli(
+      scriptInstall({ language: 'js' }),
+      ['pager'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(io.exitCode).toBe(127)
+    expect(dec.decode(await materialize(io.stderr))).toBe(
+      "pager: no workspace runtime runs js scripts (workspace runtimes: 'fakepy')\n",
+    )
+  })
+
+  it('outside a workspace exits 127', async () => {
+    const [, io] = await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }))
+    expect(io.exitCode).toBe(127)
+    expect(dec.decode(await materialize(io.stderr))).toBe(
+      'pager: no workspace runtime runs python scripts (workspace runtimes: none)\n',
+    )
+  })
+
+  it('a crash reports prog-prefixed exit 1', async () => {
+    const crash = new CrashingRuntime()
+    const [, io] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new Session({ sessionId: 't' }),
+      null,
+      [crash],
+    )
+    expect(io.exitCode).toBe(1)
+    expect(dec.decode(await materialize(io.stderr))).toBe('pager: engine exploded\n')
+  })
+
+  it('the exit code and stderr surface', async () => {
+    const py = new FakePyRuntime()
+    py.result = {
+      stdout: new Uint8Array(),
+      stderr: new TextEncoder().encode('boom\n'),
+      exitCode: 3,
+    }
+    const [stdout, io, node] = await handleCli(
+      scriptInstall(),
+      ['pager'],
+      new Session({ sessionId: 't' }),
+      null,
+      [py],
+    )
+    expect(stdout).toBeNull()
+    expect(io.exitCode).toBe(3)
+    expect(dec.decode(await materialize(io.stderr))).toBe('boom\n')
+    expect(node.exitCode).toBe(3)
+  })
+
+  it('the leaf limit bounds the run', async () => {
+    const sleepy = new SleepingRuntime()
+    const spec = new CLISpec({
+      name: 'pager',
+      script: new ScriptSource("print('hi')"),
+      limit: new Limit({ timeoutSeconds: 0.05 }),
+    })
+    const install: CLIInstall = { name: 'pager', spec, config: null }
+    await expect(
+      handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, [sleepy]),
+    ).rejects.toThrow(/pager: timed out/)
   })
 })

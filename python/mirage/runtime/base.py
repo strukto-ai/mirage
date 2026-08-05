@@ -36,6 +36,11 @@ class Runtime(ABC):
 
     name: str
     captures: tuple[str, ...] = ()
+    # The language run() interprets ("python", "js"), None for engines
+    # that run whole lines or no code at all (vfs, sandboxes). A script
+    # CLI selects its interpreter by matching this
+    # (runtime_for_language), the run-side twin of eval_language.
+    language: str | None = None
     # Per-line admission script for the routing ladder, answering "do
     # I want this line": a callable taking a PolicyContext, or a
     # config-borne ScriptSource. None = always willing. Policy, not

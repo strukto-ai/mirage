@@ -12,20 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  FlagView,
-  type CLIVerbOpts,
-  type CommandFnResult,
-  type PathSpec,
-} from '@struktoai/mirage-core'
+import { FlagView, type CLIInvocation, type CommandFnResult } from '@struktoai/mirage-core'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { route } from './util.ts'
 
-export async function compose(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  return route(config as EmailConfig, new FlagView(opts.flags), opts.stdin, null)
+export async function compose(inv: CLIInvocation): Promise<CommandFnResult> {
+  return route(inv.config as EmailConfig, new FlagView(inv.flags), inv.stdin, null)
 }

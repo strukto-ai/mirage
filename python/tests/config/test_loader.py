@@ -416,6 +416,103 @@ def test_clis_section_parses_and_maps_to_kwargs():
     }
 
 
+def test_clis_script_entry_synthesizes_a_spec(tmp_path):
+    (tmp_path / "pager.py").write_text("print('page')")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.py
+    runtime: monty
+    config:
+      page_size: 20
+""")
+    cfg = load_config(cfg_file)
+    kwargs = cfg.to_workspace_kwargs()
+    spec, config = kwargs["clis"]["pager"]
+    assert spec.name == "pager"
+    assert spec.script == ScriptSource("print('page')")
+    assert spec.runtime == "monty"
+    assert config == {"page_size": 20}
+
+
+def test_clis_js_script_stamps_the_language(tmp_path):
+    (tmp_path / "pager.mjs").write_text("console.log('page')")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.mjs
+""")
+    cfg = load_config(cfg_file)
+    kwargs = cfg.to_workspace_kwargs()
+    spec, _ = kwargs["clis"]["pager"]
+    assert spec.script == ScriptSource("console.log('page')", language="js")
+
+
+def test_clis_script_file_must_exist(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.py
+""")
+    cfg = load_config(cfg_file)
+    with pytest.raises(FileNotFoundError):
+        cfg.to_workspace_kwargs()
+
+
+def test_clis_entry_takes_exactly_one_of_cli_or_script():
+    mounts = {"/data": {"resource": "ram"}}
+    with pytest.raises(ValueError, match="exactly one of cli or script"):
+        load_config({
+            "mounts": mounts,
+            "clis": {
+                "sl": {
+                    "cli": "slack",
+                    "script": "pager.py"
+                }
+            },
+        })
+    with pytest.raises(ValueError, match="exactly one of cli or script"):
+        load_config({
+            "mounts": mounts,
+            "clis": {
+                "sl": {
+                    "config": {
+                        "token": "x"
+                    }
+                }
+            },
+        })
+
+
+def test_clis_runtime_takes_script():
+    with pytest.raises(ValueError, match="it takes script"):
+        load_config({
+            "mounts": {
+                "/data": {
+                    "resource": "ram"
+                }
+            },
+            "clis": {
+                "sl": {
+                    "cli": "slack",
+                    "runtime": "monty"
+                }
+            },
+        })
+
+
 def test_clis_block_refuses_unknown_keys():
     with pytest.raises(ValueError, match="mode"):
         load_config({

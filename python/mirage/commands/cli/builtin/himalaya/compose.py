@@ -13,17 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.himalaya.util import route
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def compose(
-    config: EmailConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    return await route(config, FlagView(flags), stdin, None)
+        inv: CLIInvocation[EmailConfig]) -> tuple[ByteSource | None, IOResult]:
+    return await route(inv.config, FlagView(inv.flags), inv.stdin, None)

@@ -52,6 +52,32 @@ An installed CLI is a typed program tree (`CLISpec`) bound to a head word on the
 workspace. It is **dispatched by name, never by operand path**, and consults no
 mount: the VFS is how an agent discovers state, the CLI is how it acts.
 
+- **One invocation record, one front door, two handler tiers.** `handle_cli`
+  builds exactly one frozen `CLIInvocation` per line (`commands/cli/types.py`,
+  `types.ts`) carrying both views of it: the process view (`argv`, `stdin`,
+  `env`) and the parsed view (`config`, `paths`, `texts`, `flags`). Every tier
+  renders that one struct, so nothing is threaded through keyword injection and
+  the old stdin-clobber class is impossible by construction. A node carries
+  `fn` **or** `script`, never both: `fn` is an in-process callable (`fn(inv)`),
+  `script` is an ordinary program (yaml `script:`, embedded at load) that a
+  workspace runtime runs. Both tiers sit behind the same front door: the walk
+  and `parse_flags` render help, refuse unknown verbs, and validate declared
+  flags *before* either handler runs, so a script never sees a line the spec
+  rejected, and both convert their outcome through one mapping (`run_output` /
+  `runOutput`, also used by the `python3`/`node` commands). A script root
+  stands alone (no fn, no subcommands): the program re-parses argv itself, and
+  what it gets is what a native binary could also honor (argv verbatim after
+  the head word, piped stdin, the install config as `MIRAGE_CONFIG` json). Do
+  not add a third handler field without giving it the same front door.
+- **Which language a runtime speaks is one class attribute.** `Runtime.language`
+  ("python", "js", None for line runners and sandboxes) is the run-side twin of
+  `eval_language`, and `runtime_for_language`/`runtimeForLanguage`
+  (`runtime/policy/decide.py`, `executor/policy/decide.ts`) picks the first
+  entry that matches. Deliberately unlike `evaluator_of`, it has **no
+  any-language fallback**: a python program cannot run on a js engine, so no
+  match is a loud 127 naming the world. A `runtime:` pin names an entry and
+  must still speak the script's language. Never infer a runtime's language from
+  its name or its captures.
 - **The lifecycle is host-side only.** `register_cli`/`unregister_cli`
   (`workspace.py`, `workspace.ts`) are called by the embedding program, never by
   a line the agent types, and there is no `install`/`uninstall` shell builtin.

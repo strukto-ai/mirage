@@ -30,7 +30,7 @@ vi.mock('../../../../core/google/_client.ts', async () => {
 import * as client from '../../../../core/google/_client.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { CLIRegistry } from '../../../../workspace/cli/registry.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { fillPath, runGwsMethod } from './api.ts'
 import { GWS } from './index.ts'
@@ -42,8 +42,8 @@ const METHODS = new Map(GWS_METHODS.map((m) => [`${m.service}.${m.resource}.${m.
 
 const CONFIG: GoogleConfig = { clientId: 'cid', refreshToken: 'rt' }
 
-function makeOpts(flags: CLIVerbOpts['flags']): CLIVerbOpts {
-  return { stdin: null, flags }
+function makeInv(config: GoogleConfig, flags: CLIInvocation['flags']): CLIInvocation<GoogleConfig> {
+  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
 }
 
 function method(key: string) {
@@ -133,10 +133,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googleGet).mockResolvedValue({ documentId: 'd1', title: 'T' })
     const result = await runGwsMethod(
       method('docs.documents.get'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ params: '{"documentId": "d1"}' }),
+      makeInv(CONFIG, { params: '{"documentId": "d1"}' }),
     )
     if (result === null) throw new Error('expected result')
     const [out, io] = result
@@ -152,7 +149,7 @@ describe('gws api passthrough', () => {
       .mockResolvedValueOnce({ files: [{ id: 'a' }], nextPageToken: 't1' })
       .mockResolvedValueOnce({ files: [{ id: 'b' }], nextPageToken: 't2' })
       .mockResolvedValueOnce({ files: [{ id: 'c' }] })
-    const result = await runGwsMethod(method('drive.files.list'), CONFIG, [], [], makeOpts({}))
+    const result = await runGwsMethod(method('drive.files.list'), makeInv(CONFIG, {}))
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(0)
     const calls = vi.mocked(client.googleGet).mock.calls
@@ -177,7 +174,7 @@ describe('gws api passthrough', () => {
       .mockReset()
       .mockResolvedValueOnce({ files: [], nextPageToken: 't1' })
       .mockResolvedValueOnce({ files: [] })
-    const result = await runGwsMethod(method('drive.files.list'), CONFIG, [], [], makeOpts({}))
+    const result = await runGwsMethod(method('drive.files.list'), makeInv(CONFIG, {}))
     if (result === null) throw new Error('expected result')
     expect(DEC.decode(result[0] as Uint8Array)).toBe(
       '{"files":[],"nextPageToken":"t1"}\n{"files":[]}\n',
@@ -186,7 +183,7 @@ describe('gws api passthrough', () => {
 
   it('single-page output has no trailing newline', async () => {
     vi.mocked(client.googleGet).mockReset().mockResolvedValue({ files: [] })
-    const result = await runGwsMethod(method('drive.files.list'), CONFIG, [], [], makeOpts({}))
+    const result = await runGwsMethod(method('drive.files.list'), makeInv(CONFIG, {}))
     if (result === null) throw new Error('expected result')
     expect(DEC.decode(result[0] as Uint8Array)).toBe('{"files":[]}')
   })
@@ -199,10 +196,7 @@ describe('gws api passthrough', () => {
       .mockResolvedValueOnce({ files: [] })
     const result = await runGwsMethod(
       method('drive.files.list'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ page_limit: '2' }),
+      makeInv(CONFIG, { page_limit: '2' }),
     )
     if (result === null) throw new Error('expected result')
     expect(vi.mocked(client.googleGet).mock.calls.length).toBe(2)
@@ -218,10 +212,7 @@ describe('gws api passthrough', () => {
   it.each(['x', '-1', '1.5', '١٢', '²'])('rejects --page-limit %s', async (raw) => {
     const result = await runGwsMethod(
       method('drive.files.list'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ page_limit: raw }),
+      makeInv(CONFIG, { page_limit: raw }),
     )
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(2)
@@ -231,10 +222,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googleDelete).mockResolvedValue(undefined)
     const result = await runGwsMethod(
       method('drive.files.delete'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ params: '{"fileId": "f1"}' }),
+      makeInv(CONFIG, { params: '{"fileId": "f1"}' }),
     )
     if (result === null) throw new Error('expected result')
     expect(result[0]).toBeNull()
@@ -242,7 +230,7 @@ describe('gws api passthrough', () => {
   })
 
   it('files create requires a body', async () => {
-    const result = await runGwsMethod(method('drive.files.create'), CONFIG, [], [], makeOpts({}))
+    const result = await runGwsMethod(method('drive.files.create'), makeInv(CONFIG, {}))
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(2)
   })
@@ -250,10 +238,7 @@ describe('gws api passthrough', () => {
   it('malformed --json is a usage error with the shared wording', async () => {
     const result = await runGwsMethod(
       method('drive.files.create'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ json: '{not json' }),
+      makeInv(CONFIG, { json: '{not json' }),
     )
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(2)
@@ -264,10 +249,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googlePost).mockResolvedValue({ id: 'p1' })
     const result = await runGwsMethod(
       method('drive.permissions.create'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ params: '{"fileId": "f1"}', json: '{"role": "reader", "type": "anyone"}' }),
+      makeInv(CONFIG, { params: '{"fileId": "f1"}', json: '{"role": "reader", "type": "anyone"}' }),
     )
     if (result === null) throw new Error('expected result')
     expect(DEC.decode(result[0] as Uint8Array)).toBe('{"id":"p1"}')
@@ -280,10 +262,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googleGetBytes).mockResolvedValue(new TextEncoder().encode('%PDF-1.4'))
     const result = await runGwsMethod(
       method('drive.files.export'),
-      CONFIG,
-      [],
-      [],
-      makeOpts({ params: '{"fileId": "f1", "mimeType": "application/pdf"}' }),
+      makeInv(CONFIG, { params: '{"fileId": "f1", "mimeType": "application/pdf"}' }),
     )
     if (result === null) throw new Error('expected result')
     expect(DEC.decode(result[0] as Uint8Array)).toBe('%PDF-1.4')

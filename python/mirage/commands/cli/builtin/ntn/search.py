@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import to_json_bytes
@@ -19,19 +20,15 @@ from mirage.core.notion.pages import search_pages
 from mirage.core.notion.pathing import extract_title
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def search(
-    config: NotionConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
+    fl = FlagView(inv.flags)
     limit = fl.as_int("limit") or 20
     pages = await search_pages(
-        config,
+        inv.config,
         query=fl.as_str("query") or "",
         page_size=limit,
         max_results=limit,

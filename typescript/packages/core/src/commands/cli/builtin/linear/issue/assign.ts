@@ -16,20 +16,14 @@ import { issueUpdate, resolveUserId } from '../../../../../core/linear/_client.t
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/types.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIVerbOpts } from '../../../types.ts'
+import type { CLIInvocation } from '../../../types.ts'
 import { firstText, linearTransport, resolveIssue } from '../util.ts'
 
-export async function assign(
-  config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const transport = linearTransport(config)
-  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
+export async function assign(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const transport = linearTransport(inv.config)
+  const issueId = await resolveIssue(transport, firstText(inv.texts, 'issue key'))
   const assigneeId = await resolveUserId(
     transport,
     fl.asStr('assignee_id') ?? null,

@@ -14,25 +14,21 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import list_users, search_users
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def list_members(
-    config: SlackConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
+        inv: CLIInvocation[SlackConfig]) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(inv.flags)
     query = fl.as_str("query")
     if query:
-        users = await search_users(config, query)
+        users = await search_users(inv.config, query)
     else:
-        users = await list_users(config)
+        users = await list_users(inv.config)
     out = json.dumps(users, ensure_ascii=False, separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

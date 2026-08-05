@@ -99,6 +99,7 @@ class QuickJsRuntime(Runtime, EvaluatorMixin):
 
     name = "quickjs"
     captures = ("node", "js")
+    language = "js"
     eval_language = "js"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig

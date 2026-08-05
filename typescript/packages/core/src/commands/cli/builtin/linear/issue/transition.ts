@@ -16,20 +16,14 @@ import { issueUpdate } from '../../../../../core/linear/_client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/types.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIVerbOpts } from '../../../types.ts'
+import type { CLIInvocation } from '../../../types.ts'
 import { firstText, linearTransport, resolveIssue, resolveStateId } from '../util.ts'
 
-export async function transition(
-  config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const transport = linearTransport(config)
-  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
+export async function transition(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const transport = linearTransport(inv.config)
+  const issueId = await resolveIssue(transport, firstText(inv.texts, 'issue key'))
   const stateId = await resolveStateId(transport, fl.asStr('state_id'), fl.asStr('state_name'))
   const issue = await issueUpdate(transport, { issueId, stateId })
   return [toJsonBytes(normalizeIssue(issue)), new IOResult()]

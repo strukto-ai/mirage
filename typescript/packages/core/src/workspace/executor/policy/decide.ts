@@ -62,6 +62,18 @@ export function evaluatorOf(
 }
 
 /**
+ * The world's interpreter for a script CLI, evaluatorOf's run twin.
+ *
+ * The first entry whose `run` speaks the language wins, the same
+ * first-match rule. Unlike evaluatorOf there is no any-language
+ * fallback: a python program cannot run on a js engine, so no match
+ * means null and the caller reports the world's entries.
+ */
+export function runtimeForLanguage(entries: readonly Runtime[], language: string): Runtime | null {
+  return entries.find((entry) => entry.language === language) ?? null
+}
+
+/**
  * Evaluate a config script on the world's evaluator. The script sees
  * the ctx payload as the `ctx` global and its LAST EXPRESSION is the
  * verdict; the script's language is the evaluator's language.

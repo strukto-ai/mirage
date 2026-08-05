@@ -18,7 +18,7 @@ import type { LinearTransport } from '../../../../core/linear/_client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { LINEAR } from './index.ts'
 import { addLabel } from './issue/add_label.ts'
 import { create } from './issue/create.ts'
@@ -53,8 +53,8 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   return result
 }
 
-function makeOpts(flags: CLIVerbOpts['flags']): CLIVerbOpts {
-  return { stdin: null, flags }
+function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
+  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
 }
 
 function leaf(...path: string[]) {
@@ -121,9 +121,7 @@ describe('linear verbs', () => {
     RESPONDER = () => ({
       teams: { nodes: [TEAM, { id: 'team-2', key: 'OPS' }], pageInfo: NO_MORE },
     })
-    const [out] = unwrap(
-      await reads.teamList({ apiKey: 'k', teamIds: ['team-2'] }, [], [], makeOpts({})),
-    )
+    const [out] = unwrap(await reads.teamList(makeInv({ apiKey: 'k', teamIds: ['team-2'] }, {})))
     const rows = JSON.parse(DEC.decode(out as Uint8Array)) as { team_id: string }[]
     expect(rows.map((r) => r.team_id)).toEqual(['team-2'])
   })
@@ -135,11 +133,11 @@ describe('linear verbs', () => {
       if (query.includes('teams')) return { teams: { nodes: [TEAM], pageInfo: NO_MORE } }
       return { issue: { id: 'i-1', identifier: 'ENG-9', title: 'Title' } }
     }
-    const opts: CLIVerbOpts = {
+    const inv: CLIInvocation = {
+      ...makeInv({ apiKey: 'k' }, { team: 'ENG', title: 'Title' }),
       stdin: new TextEncoder().encode('body from stdin'),
-      flags: { team: 'ENG', title: 'Title' },
     }
-    const [out] = unwrap(await create({ apiKey: 'k' }, [], [], opts))
+    const [out] = unwrap(await create(inv))
     const created = GRAPHQL.find((c) => c.query.includes('issueCreate'))
     expect(created?.variables).toEqual({
       input: { title: 'Title', teamId: 'team-1', description: 'body from stdin' },
@@ -166,7 +164,7 @@ describe('linear verbs', () => {
         },
       }
     }
-    await addLabel({ apiKey: 'k' }, [], ['ENG-42'], makeOpts({ label_name: 'bug' }))
+    await addLabel({ ...makeInv({ apiKey: 'k' }, { label_name: 'bug' }), texts: ['ENG-42'] })
     const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
     expect(update?.variables).toEqual({
       id: 'i-1',
@@ -190,7 +188,7 @@ describe('linear verbs', () => {
       }
       return { issue: { id: 'i-1', identifier: 'ENG-42', team: { id: 'team-1' } } }
     }
-    await setProject({ apiKey: 'k' }, [], ['ENG-42'], makeOpts({ project_name: 'Search' }))
+    await setProject({ ...makeInv({ apiKey: 'k' }, { project_name: 'Search' }), texts: ['ENG-42'] })
     const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
     expect(update?.variables).toEqual({
       id: 'i-1',
@@ -201,11 +199,11 @@ describe('linear verbs', () => {
   it('search takes the flag or the operand', async () => {
     GRAPHQL.length = 0
     RESPONDER = () => ({ searchIssues: { nodes: [{ identifier: 'ENG-1' }] } })
-    await reads.search({ apiKey: 'k' }, [], ['login bug'], makeOpts({}))
-    await reads.search({ apiKey: 'k' }, [], [], makeOpts({ query: 'crash' }))
+    await reads.search({ ...makeInv({ apiKey: 'k' }, {}), texts: ['login bug'] })
+    await reads.search(makeInv({ apiKey: 'k' }, { query: 'crash' }))
     expect(GRAPHQL[0]?.variables).toMatchObject({ term: 'login bug' })
     expect(GRAPHQL[1]?.variables).toMatchObject({ term: 'crash' })
-    await expect(reads.search({ apiKey: 'k' }, [], [], makeOpts({}))).rejects.toThrow(
+    await expect(reads.search(makeInv({ apiKey: 'k' }, {}))).rejects.toThrow(
       'a search query is required',
     )
   })

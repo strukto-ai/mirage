@@ -91,6 +91,21 @@ def test_monty_argv_global():
     assert result.stdout == b"['a', 'b']\n"
 
 
+def test_monty_stdin_global():
+    runtime = MontyRuntime()
+    result = asyncio.run(
+        runtime.run(RunArgs(code="print(stdin.decode())", stdin=b"piped")))
+    assert result.exit_code == 0
+    assert result.stdout == b"piped\n"
+
+
+def test_monty_stdin_global_none_without_pipe():
+    runtime = MontyRuntime()
+    result = asyncio.run(runtime.run(RunArgs(code="print(stdin is None)")))
+    assert result.exit_code == 0
+    assert result.stdout == b"True\n"
+
+
 def test_monty_env_isolated_to_run_env():
     runtime = MontyRuntime()
     result = asyncio.run(
