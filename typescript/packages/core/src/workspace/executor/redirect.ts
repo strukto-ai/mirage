@@ -17,6 +17,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
@@ -89,8 +90,7 @@ export async function handleRedirect(
       }
       cmdStdin = data as ByteSource | null
     } else if (r.kind === RedirectKind.HEREDOC) {
-      cmdStdin =
-        typeof r.target === 'string' ? new TextEncoder().encode(r.target) : (r.target as ByteSource)
+      cmdStdin = typeof r.target === 'string' ? encodeText(r.target) : (r.target as ByteSource)
     } else if (r.kind === RedirectKind.HERESTRING) {
       const text = r.target
       if (typeof text === 'string') {
@@ -98,7 +98,7 @@ export async function handleRedirect(
         if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
           t = t.slice(1, -1)
         }
-        cmdStdin = new TextEncoder().encode(`${t}\n`)
+        cmdStdin = encodeText(`${t}\n`)
       } else {
         cmdStdin = text as ByteSource
       }

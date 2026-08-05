@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
 import { arrayExtent, arraySet } from '../../../shell/array.ts'
+import { byteChar, encodeText } from '../../../shell/bytes.ts'
 import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
@@ -25,6 +25,78 @@ import type { Result } from './scope.ts'
 // A subscript must be non-empty: bash rejects `a[]` as an invalid
 // identifier, while `a[ ]` is a valid arithmetic 0.
 export const PRINTF_TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?$/
+
+const ECHO_SIMPLE_ESCAPES: Readonly<Record<string, string>> = Object.freeze({
+  '\\': '\\',
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  a: '\x07',
+  b: '\b',
+  f: '\f',
+  v: '\v',
+})
+
+const HEX_CHARS = new Set('0123456789abcdefABCDEF')
+const OCT_CHARS = new Set('01234567')
+
+/**
+ * Process C-style escape sequences for `echo -e`.
+ *
+ * Single-pass to handle `\\` correctly (`\\b` → a literal `\b`). Supports
+ * `\\ \n \t \r \a \b \f \v`, `\xHH` (hex), `\0NNN` (octal) and `\c` (stop
+ * output); an unknown escape like `\z` passes through as `\z`. `tr` has
+ * its own reader (`commands/builtin/utils/escapes.ts`) because only the
+ * shell writes bytes: `\xHH` here names a byte, not a code point.
+ */
+function interpretEchoEscapes(text: string): string {
+  const out: string[] = []
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    if (text.charAt(i) !== '\\' || i + 1 >= n) {
+      out.push(text.charAt(i))
+      i += 1
+      continue
+    }
+    const ch = text.charAt(i + 1)
+    const simple = ECHO_SIMPLE_ESCAPES[ch]
+    if (simple !== undefined) {
+      out.push(simple)
+      i += 2
+    } else if (ch === 'c') {
+      break
+    } else if (ch === 'x') {
+      let digits = ''
+      let j = i + 2
+      while (j < n && digits.length < 2 && HEX_CHARS.has(text.charAt(j))) {
+        digits += text.charAt(j)
+        j += 1
+      }
+      if (digits !== '') {
+        out.push(byteChar(parseInt(digits, 16)))
+        i = j
+      } else {
+        out.push('\\x')
+        i += 2
+      }
+    } else if (ch === '0') {
+      let digits = ''
+      let j = i + 2
+      while (j < n && digits.length < 3 && OCT_CHARS.has(text.charAt(j))) {
+        digits += text.charAt(j)
+        j += 1
+      }
+      out.push(digits !== '' ? byteChar(parseInt(digits, 8)) : '\0')
+      i = j
+    } else {
+      out.push('\\')
+      out.push(ch)
+      i += 2
+    }
+  }
+  return out.join('')
+}
 
 /**
  * Print arguments, honoring GNU echo's option rules.
@@ -48,9 +120,9 @@ export function handleEcho(args: string[]): Result {
     idx += 1
   }
   let text = args.slice(idx).join(' ')
-  if (escapes) text = interpretEscapes(text)
+  if (escapes) text = interpretEchoEscapes(text)
   if (!noNewline) text += '\n'
-  const out = new TextEncoder().encode(text)
+  const out = encodeText(text)
   return [out, new IOResult(), new ExecutionNode({ command: 'echo', exitCode: 0 })]
 }
 
@@ -557,7 +629,11 @@ function readEscape(fmt: string, i: number): [string, number, boolean] {
       digits += fmt.charAt(j)
       j += 1
     }
-    if (digits) return [String.fromCodePoint(parseInt(digits, 16)), j, false]
+    if (digits) {
+      const value = parseInt(digits, 16)
+      // \x names a byte; \u and \U name a code point.
+      return [ch === 'x' ? byteChar(value) : String.fromCodePoint(value), j, false]
+    }
     return ['\\' + ch, i + 2, false]
   }
   if (OCT_DIGIT.test(ch)) {
@@ -569,7 +645,7 @@ function readEscape(fmt: string, i: number): [string, number, boolean] {
       j += 1
     }
     if (!digits) return ['\0', j, false]
-    return [String.fromCharCode(parseInt(digits, 8)), j, false]
+    return [byteChar(parseInt(digits, 8)), j, false]
   }
   return ['\\' + ch, i + 2, false]
 }
@@ -594,7 +670,7 @@ function expandEscapes(s: string): [string, boolean] {
 
 function quoteShell(s: string): string {
   if (s === '') return "''"
-  const data = new TextEncoder().encode(s)
+  const data = encodeText(s)
   let needAnsic = false
   for (const b of data) if (b < 0x20 || b === 0x7f || b >= 0x80) needAnsic = true
   if (needAnsic) {
@@ -879,7 +955,7 @@ export function handlePrintf(args: string[], session: Session): Result {
     }
     return [null, new IOResult({ exitCode }), new ExecutionNode({ command: 'printf', exitCode })]
   }
-  const out = new TextEncoder().encode(output)
+  const out = encodeText(output)
   if (errBytes !== null) {
     return [
       out,

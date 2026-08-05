@@ -19,6 +19,7 @@ from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.array import array_extent, array_set
+from mirage.shell.bytes import byte_char, encode_text
 from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -73,7 +74,7 @@ def _interpret_escapes(text: str) -> str:
                 digits.append(text[j])
                 j += 1
             if digits:
-                out.append(chr(int("".join(digits), 16)))
+                out.append(byte_char(int("".join(digits), 16)))
                 i = j
             else:
                 out.append("\\x")
@@ -85,7 +86,7 @@ def _interpret_escapes(text: str) -> str:
             while j < n and len(digits) < 3 and text[j] in _OCT:
                 digits.append(text[j])
                 j += 1
-            out.append(chr(int("".join(digits), 8)) if digits else "\0")
+            out.append(byte_char(int("".join(digits), 8)) if digits else "\0")
             i = j
         else:
             # unknown escape — pass through literally
@@ -127,7 +128,7 @@ async def handle_echo(
         text = _interpret_escapes(text)
     if not no_newline:
         text += "\n"
-    out = text.encode()
+    out = encode_text(text)
     return out, IOResult(), ExecutionNode(command="echo", exit_code=0)
 
 
@@ -423,7 +424,7 @@ def _expand_escapes(s: str) -> tuple[str, bool]:
 def _quote_shell(s: str) -> str:
     if s == "":
         return "''"
-    data = s.encode("utf-8")
+    data = encode_text(s)
     need_ansic = any(b < 0x20 or b == 0x7F or b >= 0x80 for b in data)
     if need_ansic:
         parts = ["$'"]
@@ -470,7 +471,10 @@ def _read_escape(fmt: str, i: int) -> tuple[str, int, bool]:
             digits.append(fmt[j])
             j += 1
         if digits:
-            return chr(int("".join(digits), 16)), j, False
+            value = int("".join(digits), 16)
+            # \x names a byte; \u and \U name a code point.
+            text = byte_char(value) if ch == "x" else chr(value)
+            return text, j, False
         return "\\" + ch, i + 2, False
     if ch in _OCT:
         digits = []
@@ -482,7 +486,7 @@ def _read_escape(fmt: str, i: int) -> tuple[str, int, bool]:
             j += 1
         if not digits:
             return "\0", j, False
-        return chr(int("".join(digits), 8)), j, False
+        return byte_char(int("".join(digits), 8)), j, False
     return "\\" + ch, i + 2, False
 
 
@@ -754,7 +758,7 @@ async def handle_printf(
         return None, IOResult(exit_code=exit_code, stderr=err_bytes
                               or None), ExecutionNode(command="printf",
                                                       exit_code=exit_code)
-    out = output.encode()
+    out = encode_text(output)
     if errors:
         return out, IOResult(exit_code=1,
                              stderr=err_bytes), ExecutionNode(command="printf",

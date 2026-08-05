@@ -20,6 +20,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
@@ -88,8 +89,8 @@ async def handle_redirect(
                 return _redirect_failure(scope, exc)
             cmd_stdin = file_data
         elif r.kind == RedirectKind.HEREDOC:
-            cmd_stdin = r.target.encode() if isinstance(r.target,
-                                                        str) else r.target
+            cmd_stdin = encode_text(r.target) if isinstance(r.target,
+                                                            str) else r.target
         elif r.kind == RedirectKind.HERESTRING:
             text = r.target
             if isinstance(text, str):
@@ -97,7 +98,7 @@ async def handle_redirect(
                     text = text[1:-1]
                 elif text.startswith("'") and text.endswith("'"):
                     text = text[1:-1]
-                cmd_stdin = (text + "\n").encode()
+                cmd_stdin = encode_text(text + "\n")
             else:
                 cmd_stdin = text
 

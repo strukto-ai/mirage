@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.shell.bytes import byte_char
 from mirage.workspace.executor.builtins.text import handle_echo, handle_printf
 from mirage.workspace.session import Session
 
@@ -42,6 +43,13 @@ async def test_trailing_n_prints_literally():
 @pytest.mark.asyncio
 async def test_cluster_ne():
     assert await echo_bytes(["-ne", "a\\tb"]) == b"a\tb"
+
+
+@pytest.mark.asyncio
+async def test_echo_hex_and_octal_escapes_name_bytes():
+    assert await echo_bytes(["-ne", "\\xff"]) == b"\xff"
+    assert await echo_bytes(["-ne", "\\0377"]) == b"\xff"
+    assert await echo_bytes(["-ne", "\\xc3\\xa9"]) == "é".encode()
 
 
 @pytest.mark.asyncio
@@ -177,6 +185,22 @@ async def test_printf_char_empty_is_nul():
 async def test_printf_unicode_escapes():
     assert await printf_bytes(["\\u00e9\n"]) == "é\n".encode()
     assert await printf_bytes(["\\U0001F600"]) == "😀".encode()
+
+
+@pytest.mark.asyncio
+async def test_printf_hex_and_octal_escapes_name_bytes():
+    # bash writes \xff as the byte 0xFF, which is not valid UTF-8 at
+    # all, rather than as the code point U+00FF.
+    assert await printf_bytes(["\\xff"]) == b"\xff"
+    assert await printf_bytes(["\\377"]) == b"\xff"
+    assert await printf_bytes(["\\xc3\\xa9"]) == "é".encode()
+    assert await printf_bytes(["\\x41\\x42"]) == b"AB"
+    assert await printf_bytes(["%b", "\\xff"]) == b"\xff"
+
+
+@pytest.mark.asyncio
+async def test_printf_quotes_a_raw_byte_as_octal():
+    assert await printf_bytes(["%q\n", byte_char(0xFF)]) == b"$'\\377'\n"
 
 
 @pytest.mark.asyncio

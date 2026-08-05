@@ -17,6 +17,7 @@ import type { PolicyDecision } from '../executor/policy/index.ts'
 import { mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
   ProcessSubDirection,
@@ -273,7 +274,7 @@ async function runCommandBody(
       if (child.type === NT.HERESTRING_REDIRECT) {
         for (const sc of child.namedChildren) {
           const content = await expandNode(sc, session, executeFn, callStack)
-          stdin = new TextEncoder().encode(`${content}\n`)
+          stdin = encodeText(`${content}\n`)
           break
         }
       }
