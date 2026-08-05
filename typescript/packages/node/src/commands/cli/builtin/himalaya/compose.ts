@@ -18,31 +18,14 @@ import {
   type CommandFnResult,
   type PathSpec,
 } from '@struktoai/mirage-core'
-import { EmailAccessor } from '../../../../accessor/email.ts'
-import { fetchMessage } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-import { firstText, route } from './util.ts'
+import { route } from './util.ts'
 
-export async function forward(
+export async function compose(
   config: unknown,
   _paths: PathSpec[],
-  texts: string[],
+  _texts: string[],
   opts: CLIVerbOpts,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const uid = firstText(texts, 'message id')
-  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
-  const accessor = new EmailAccessor(config as EmailConfig)
-  let original
-  try {
-    original = await fetchMessage(accessor, mailbox, uid)
-  } finally {
-    await accessor.close()
-  }
-  return route(config as EmailConfig, fl, opts.stdin, {
-    message: original,
-    mode: 'forward',
-    postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
-    quoteHeadline: fl.asStr('quote_headline') ?? '',
-  })
+  return route(config as EmailConfig, new FlagView(opts.flags), opts.stdin, null)
 }

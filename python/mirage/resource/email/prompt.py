@@ -23,9 +23,10 @@ PROMPT = """\
 
   <subject> is sanitized (don't construct it; ls the date dir).
 
-  To act on mail (list/read/send/reply/forward), use the himalaya CLI
-  if installed: himalaya --help"""
+  To act on mail (list/search/read/compose/reply/forward), use the
+  himalaya CLI if installed: himalaya --help"""
 
 WRITE_PROMPT = """\
   Sending mail goes through the himalaya CLI if installed:
-    himalaya message send --to "to@email.com" --subject "Hi" --body "..." """
+    himalaya message compose --to "to@email.com" --subject "Hi" \\
+      --body "..." --send"""

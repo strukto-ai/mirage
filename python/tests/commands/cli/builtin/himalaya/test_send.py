@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from email.parser import BytesParser
+from email.policy import default as default_policy
 
 import pytest
 
@@ -21,19 +23,47 @@ from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
 CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+RAW = b"From: me@example.com\nTo: a@b.com\nSubject: Hi\n\nyo"
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    seen: dict = {}
+
+    async def fake_send_raw(config, raw):
+        seen["raw"] = raw
+        return BytesParser(policy=default_policy).parsebytes(raw)
+
+    monkeypatch.setitem(send.__globals__, "send_raw", fake_send_raw)
+    return seen
 
 
 @pytest.mark.asyncio
-async def test_send_forwards_flags_to_send_message(monkeypatch):
-    calls = []
-
-    async def fake_send(config, to, subject, body):
-        calls.append((config, to, subject, body))
-        return {"status": "sent", "to": to, "subject": subject}
-
-    monkeypatch.setitem(send.__globals__, "send_message", fake_send)
-    out, io = await send(CONFIG, [], to="a@b.com", subject="Hi", body="yo")
+async def test_send_reads_the_message_from_stdin(sent):
+    out, io = await send(CONFIG, [], stdin=RAW)
     assert io.exit_code == 0
-    data = json.loads(await materialize(out))
-    assert data == {"status": "sent", "to": "a@b.com", "subject": "Hi"}
-    assert calls == [(CONFIG, "a@b.com", "Hi", "yo")]
+    assert sent["raw"] == RAW
+    assert json.loads(await materialize(out)) == {
+        "status": "sent",
+        "to": "a@b.com",
+        "subject": "Hi",
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_takes_an_inline_message_with_escaped_newlines(sent):
+    await send(CONFIG, [], "From:", "me@x", "\\n\\n", "body")
+    assert sent["raw"] == b"From: me@x \n\n body"
+
+
+@pytest.mark.asyncio
+async def test_inline_message_wins_over_stdin(sent):
+    await send(CONFIG, [], "From:", "me@x", stdin=RAW)
+    assert sent["raw"] == b"From: me@x"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_message_is_refused_before_smtp(sent):
+    with pytest.raises(ValueError, match="no message provided"):
+        await send(CONFIG, [], stdin=b"   \n ")
+    assert "raw" not in sent

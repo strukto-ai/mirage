@@ -13,31 +13,45 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  FlagView,
   IOResult,
+  materialize,
   type ByteSource,
   type CLIVerbOpts,
   type CommandFnResult,
   type PathSpec,
 } from '@struktoai/mirage-core'
-import { sendMessage } from '../../../../core/email/send.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
+import { sendRaw } from './smtp.ts'
 
 const ENC = new TextEncoder()
 
 export async function send(
   config: unknown,
   _paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CLIVerbOpts,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const result = await sendMessage(
-    config as EmailConfig,
-    fl.asStr('to') ?? '',
-    fl.asStr('subject') ?? '',
-    fl.asStr('body') ?? '',
-  )
+  // The operand is a whole RFC 5322 message, so tokens rejoin with a
+  // space and literal \n become real line breaks, the way upstream's
+  // MessageArg resolves an inline message.
+  const inline = texts.join(' ').replaceAll('\\r', '').replaceAll('\\n', '\n')
+  const raw =
+    inline !== ''
+      ? ENC.encode(inline)
+      : opts.stdin !== null
+        ? await materialize(opts.stdin)
+        : new Uint8Array()
+  if (new TextDecoder().decode(raw).trim() === '') {
+    throw new Error('no message provided: pass it as an argument or pipe it via standard input')
+  }
+  const parsed = await sendRaw(config as EmailConfig, raw)
+  const result = {
+    status: 'sent',
+    to: parsed.to
+      .map((entry) => (entry.name === '' ? entry.email : `${entry.name} <${entry.email}>`))
+      .join(', '),
+    subject: parsed.subject,
+  }
   const out: ByteSource = ENC.encode(JSON.stringify(result))
   return [out, new IOResult()]
 }

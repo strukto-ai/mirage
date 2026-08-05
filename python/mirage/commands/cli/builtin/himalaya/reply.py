@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.email import EmailAccessor
+from mirage.commands.cli.builtin.himalaya.builder import Source
+from mirage.commands.cli.builtin.himalaya.util import first_text, route
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
 from mirage.core.email.config import EmailConfig
-from mirage.core.email.send import reply_all_message, reply_message
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -28,21 +26,22 @@ async def reply(
     config: EmailConfig,
     paths: list[PathSpec],
     *texts: str,
+    stdin: ByteSource | None = None,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags)
-    uid = fl.as_str("uid") or ""
-    folder = fl.as_str("folder") or ""
-    body = fl.as_str("body") or ""
+    uid = first_text(texts, "message id")
+    mailbox = fl.as_str("mailbox") or "INBOX"
     accessor = EmailAccessor(config)
     try:
-        original = await fetch_message(accessor, folder, uid)
+        original = await fetch_message(accessor, mailbox, uid)
     finally:
         await accessor.close()
-    if fl.as_bool("all"):
-        result = await reply_all_message(config, original, body)
-    else:
-        result = await reply_message(config, original, body)
-    out = json.dumps(result, ensure_ascii=False,
-                     separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    source = Source(
+        message=original,
+        mode="reply",
+        posting_style=("bottom"
+                       if fl.as_str("posting_style") == "bottom" else "top"),
+        quote_headline=fl.as_str("quote_headline") or "",
+    )
+    return await route(config, fl, stdin, source)

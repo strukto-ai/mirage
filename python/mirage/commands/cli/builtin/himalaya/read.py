@@ -15,8 +15,9 @@
 import json
 
 from mirage.accessor.email import EmailAccessor
+from mirage.commands.cli.builtin.himalaya.util import first_text
 from mirage.commands.spec.types import FlagView
-from mirage.core.email._client import fetch_message
+from mirage.core.email._client import fetch_message, fetch_raw_message
 from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -30,11 +31,14 @@ async def read(
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags)
-    uid = fl.as_str("uid") or ""
-    folder = fl.as_str("folder") or ""
+    uid = first_text(texts, "message id")
+    mailbox = fl.as_str("mailbox") or "INBOX"
     accessor = EmailAccessor(config)
     try:
-        processed = await fetch_message(accessor, folder, uid)
+        if fl.as_bool("raw"):
+            return yield_bytes(await fetch_raw_message(accessor, mailbox,
+                                                       uid)), IOResult()
+        processed = await fetch_message(accessor, mailbox, uid)
     finally:
         await accessor.close()
     out = json.dumps(processed, ensure_ascii=False,

@@ -1103,7 +1103,7 @@
       "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json",
       "expect": {
         "exit": 0,
-        "stdout": "567\n",
+        "stdout": "581\n",
         "stderr": ""
       }
     },
@@ -1116,7 +1116,7 @@
       "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | wc -c",
       "expect": {
         "exit": 0,
-        "stdout": "567\n",
+        "stdout": "581\n",
         "stderr": ""
       }
     },

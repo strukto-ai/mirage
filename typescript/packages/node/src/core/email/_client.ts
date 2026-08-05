@@ -48,78 +48,158 @@ export async function listMessageUids(
   }
 }
 
-interface SearchQuery {
+/**
+ * imapflow's search object. AND is expressed by several keys on one
+ * object; `or` and `not` nest further objects.
+ */
+export interface SearchQuery {
   all?: boolean
-  unseen?: boolean
+  seen?: boolean
+  answered?: boolean
+  flagged?: boolean
+  draft?: boolean
+  deleted?: boolean
   body?: string
   text?: string
   subject?: string
   from?: string
   to?: string
+  on?: Date
   since?: Date
   before?: Date
+  not?: SearchQuery
+  or?: SearchQuery[]
 }
 
-function parseSearchCriteria(criteria: string): SearchQuery {
-  if (criteria === 'ALL' || criteria === '') return { all: true }
-  const out: SearchQuery = {}
-  const tokens = tokenizeCriteria(criteria)
-  let i = 0
-  while (i < tokens.length) {
-    const tok = (tokens[i] ?? '').toUpperCase()
-    if (tok === 'UNSEEN') {
-      out.unseen = true
-      i += 1
-      continue
-    }
-    if (
-      tok === 'TEXT' ||
-      tok === 'SUBJECT' ||
-      tok === 'FROM' ||
-      tok === 'TO' ||
-      tok === 'SINCE' ||
-      tok === 'BEFORE'
-    ) {
-      const v = tokens[i + 1] ?? ''
-      if (tok === 'TEXT') out.text = v
-      else if (tok === 'SUBJECT') out.subject = v
-      else if (tok === 'FROM') out.from = v
-      else if (tok === 'TO') out.to = v
-      else if (tok === 'SINCE') {
-        const d = parseImapDate(v)
-        if (d !== null) out.since = d
-      } else {
-        const d = parseImapDate(v)
-        if (d !== null) out.before = d
-      }
-      i += 2
-      continue
-    }
-    i += 1
+const FLAG_KEYS: Record<string, keyof SearchQuery> = {
+  SEEN: 'seen',
+  ANSWERED: 'answered',
+  FLAGGED: 'flagged',
+  DRAFT: 'draft',
+  DELETED: 'deleted',
+}
+
+const TEXT_KEYS: Record<string, 'body' | 'text' | 'subject' | 'from' | 'to'> = {
+  BODY: 'body',
+  TEXT: 'text',
+  SUBJECT: 'subject',
+  FROM: 'from',
+  TO: 'to',
+}
+
+const DATE_KEYS: Record<string, 'on' | 'since' | 'before'> = {
+  ON: 'on',
+  SINCE: 'since',
+  BEFORE: 'before',
+}
+
+/**
+ * ANDs two search objects.
+ *
+ * imapflow ANDs the keys of one object, so a plain merge works until the
+ * same key appears twice (`SUBJECT a SUBJECT b`). De Morgan expresses
+ * that case without dropping either half, which a merge would do
+ * silently.
+ */
+function andQueries(left: SearchQuery, right: SearchQuery): SearchQuery {
+  const collides = Object.keys(right).some((key) => key in left)
+  if (!collides) return { ...left, ...right }
+  return { not: { or: [{ not: left }, { not: right }] } }
+}
+
+class CriteriaParser {
+  private index = 0
+
+  constructor(private readonly tokens: string[]) {}
+
+  private peek(): string | undefined {
+    return this.tokens[this.index]
   }
-  return out
+
+  private take(): string {
+    const token = this.peek()
+    if (token === undefined) throw new Error('email: truncated IMAP search criteria')
+    this.index += 1
+    return token
+  }
+
+  atEnd(): boolean {
+    return this.index >= this.tokens.length
+  }
+
+  /** One or more keys juxtaposed, which IMAP reads as AND. */
+  parseSequence(stopAtParen = false): SearchQuery {
+    let query: SearchQuery | null = null
+    while (!this.atEnd()) {
+      if (stopAtParen && this.peek() === ')') break
+      const next = this.parseKey()
+      query = query === null ? next : andQueries(query, next)
+    }
+    return query ?? { all: true }
+  }
+
+  parseKey(): SearchQuery {
+    const token = this.take()
+    if (token === '(') {
+      const inner = this.parseSequence(true)
+      if (this.peek() !== ')') throw new Error('email: unbalanced IMAP search criteria')
+      this.index += 1
+      return inner
+    }
+    const word = token.toUpperCase()
+    if (word === 'ALL') return { all: true }
+    if (word === 'NOT') return { not: this.parseKey() }
+    if (word === 'OR') return { or: [this.parseKey(), this.parseKey()] }
+    if (word === 'UNSEEN') return { seen: false }
+    const flag = FLAG_KEYS[word]
+    if (flag !== undefined) return { [flag]: true }
+    const textKey = TEXT_KEYS[word]
+    if (textKey !== undefined) return { [textKey]: this.take() }
+    const dateKey = DATE_KEYS[word]
+    if (dateKey !== undefined) {
+      const parsed = parseImapDate(this.take())
+      if (parsed === null) throw new Error(`email: bad date in IMAP search criteria: ${token}`)
+      return { [dateKey]: parsed }
+    }
+    // Never fall through silently: a dropped key would widen the search
+    // and quietly return the wrong messages.
+    throw new Error(`email: unsupported IMAP search key '${token}'`)
+  }
+}
+
+export function parseSearchCriteria(criteria: string): SearchQuery {
+  if (criteria === 'ALL' || criteria === '') return { all: true }
+  return new CriteriaParser(tokenizeCriteria(criteria)).parseSequence()
 }
 
 function tokenizeCriteria(criteria: string): string[] {
   const tokens: string[] = []
   let i = 0
   while (i < criteria.length) {
-    if (criteria[i] === ' ') {
+    const char = criteria.charAt(i)
+    if (char === ' ') {
       i += 1
       continue
     }
-    if (criteria[i] === '"') {
-      const end = criteria.indexOf('"', i + 1)
-      if (end === -1) {
-        tokens.push(criteria.slice(i + 1))
-        break
-      }
-      tokens.push(criteria.slice(i + 1, end))
-      i = end + 1
+    if (char === '(' || char === ')') {
+      tokens.push(char)
+      i += 1
       continue
     }
-    let end = criteria.indexOf(' ', i)
-    if (end === -1) end = criteria.length
+    if (char === '"') {
+      let value = ''
+      let j = i + 1
+      while (j < criteria.length && criteria.charAt(j) !== '"') {
+        if (criteria.charAt(j) === '\\' && j + 1 < criteria.length) j += 1
+        value += criteria.charAt(j)
+        j += 1
+      }
+      tokens.push(value)
+      i = j + 1
+      continue
+    }
+    let end = i
+    while (end < criteria.length && !' ()'.includes(criteria.charAt(end))) end += 1
     tokens.push(criteria.slice(i, end))
     i = end
   }
@@ -145,9 +225,32 @@ function parseImapDate(s: string): Date | null {
   }
   const day = Number.parseInt(m[1] ?? '0', 10)
   const monKey = (m[2] ?? '').slice(0, 1).toUpperCase() + (m[2] ?? '').slice(1).toLowerCase()
-  const mon = months[monKey] ?? 0
+  const mon = months[monKey]
   const year = Number.parseInt(m[3] ?? '1970', 10)
-  return new Date(Date.UTC(year, mon, day))
+  // An unknown month defaulting to January, or a day rolling over into
+  // the next month, would hand the server a confidently wrong date.
+  if (mon === undefined) return null
+  const value = new Date(Date.UTC(year, mon, day))
+  if (value.getUTCMonth() !== mon || value.getUTCDate() !== day) return null
+  return value
+}
+
+export async function fetchRawMessage(
+  accessor: EmailAccessor,
+  folder: string,
+  uid: string,
+): Promise<Uint8Array> {
+  const imap = await accessor.getImap()
+  const lock = await imap.getMailboxLock(folder)
+  try {
+    const msg = await imap.fetchOne(uid, { source: true, uid: true }, { uid: true })
+    if (msg === false) {
+      throw new Error(`email: uid ${uid} not found in ${folder}`)
+    }
+    return msg.source instanceof Buffer ? new Uint8Array(msg.source) : new Uint8Array(0)
+  } finally {
+    lock.release()
+  }
 }
 
 export async function fetchMessage(

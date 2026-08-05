@@ -25,7 +25,8 @@ CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
 
 
 @pytest.mark.asyncio
-async def test_read_builds_accessor_and_closes_it(monkeypatch):
+async def test_read_takes_the_id_positionally_and_closes_the_accessor(
+        monkeypatch):
     seen = {}
     closed = []
 
@@ -39,7 +40,7 @@ async def test_read_builds_accessor_and_closes_it(monkeypatch):
 
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
-    out, io = await read(CONFIG, [], uid="7", folder="INBOX")
+    out, io = await read(CONFIG, [], "7", mailbox="INBOX")
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == {"subject": "Hi", "uid": "7"}
     assert isinstance(seen["accessor"], EmailAccessor)
@@ -49,7 +50,48 @@ async def test_read_builds_accessor_and_closes_it(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_read_closes_accessor_on_error(monkeypatch):
+async def test_read_defaults_the_mailbox_to_inbox(monkeypatch):
+    seen = {}
+
+    async def fake_fetch(accessor, folder, uid):
+        seen["folder"] = folder
+        return {"uid": uid}
+
+    monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
+    monkeypatch.setattr(EmailAccessor, "close", lambda self: _noop())
+    await read(CONFIG, [], "7")
+    assert seen["folder"] == "INBOX"
+
+
+async def _noop():
+    return None
+
+
+@pytest.mark.asyncio
+async def test_read_without_an_id_is_a_usage_error():
+    with pytest.raises(ValueError, match="message id is required"):
+        await read(CONFIG, [])
+
+
+@pytest.mark.asyncio
+async def test_raw_writes_the_rfc5322_bytes_verbatim(monkeypatch):
+
+    async def fake_raw(accessor, folder, uid):
+        return b"From: a@x\r\n\r\nbody"
+
+    def boom(*args, **kwargs):
+        raise AssertionError("--raw must not parse the message")
+
+    monkeypatch.setitem(read.__globals__, "fetch_raw_message", fake_raw)
+    monkeypatch.setitem(read.__globals__, "fetch_message", boom)
+    monkeypatch.setattr(EmailAccessor, "close", lambda self: _noop())
+    out, io = await read(CONFIG, [], "7", raw=True)
+    assert io.exit_code == 0
+    assert await materialize(out) == b"From: a@x\r\n\r\nbody"
+
+
+@pytest.mark.asyncio
+async def test_read_closes_the_accessor_on_error(monkeypatch):
     closed = []
 
     async def fake_fetch(accessor, folder, uid):
@@ -61,5 +103,5 @@ async def test_read_closes_accessor_on_error(monkeypatch):
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
     with pytest.raises(FileNotFoundError):
-        await read(CONFIG, [], uid="7", folder="INBOX")
+        await read(CONFIG, [], "9")
     assert len(closed) == 1

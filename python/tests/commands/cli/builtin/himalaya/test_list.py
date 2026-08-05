@@ -23,63 +23,64 @@ from mirage.io.types import materialize
 CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
 
 
+def envelope(uid: str, day: int) -> dict:
+    return {
+        "uid": uid,
+        "subject": f"s{uid}",
+        "date": f"Mon, {day:02d} Feb 2026 10:00:00 +0000",
+    }
+
+
 @pytest.fixture
 def patched(monkeypatch):
-    seen = {}
+    seen: dict = {"uids": ["1", "2", "3"]}
 
-    async def fake_search(accessor, folder, **criteria):
+    async def fake_uids(accessor, folder, criteria):
         seen["folder"] = folder
         seen["criteria"] = criteria
-        return seen.get("uids", ["1", "2"])
+        return seen["uids"]
 
     async def fake_headers(accessor, folder, uids):
-        return [{"uid": uid, "subject": f"s{uid}"} for uid in uids]
+        return [envelope(uid, index + 1) for index, uid in enumerate(uids)]
 
-    monkeypatch.setitem(list_envelopes.__globals__, "search_messages",
-                        fake_search)
+    monkeypatch.setitem(list_envelopes.__globals__, "list_message_uids",
+                        fake_uids)
     monkeypatch.setitem(list_envelopes.__globals__, "fetch_headers",
                         fake_headers)
     return seen
 
 
 @pytest.mark.asyncio
-async def test_list_defaults_inbox_and_renders_headers(patched):
+async def test_list_defaults_to_inbox_and_matches_everything(patched):
     out, io = await list_envelopes(CONFIG, [])
     assert io.exit_code == 0
-    data = json.loads(await materialize(out))
-    assert [d["uid"] for d in data] == ["1", "2"]
     assert patched["folder"] == "INBOX"
-    assert patched["criteria"]["max_results"] == 20
-    assert patched["criteria"]["unseen"] is False
+    assert patched["criteria"] == "ALL"
+    data = json.loads(await materialize(out))
+    # Most recent first, like upstream's `envelope list`.
+    assert [d["uid"] for d in data] == ["3", "2", "1"]
 
 
 @pytest.mark.asyncio
-async def test_list_threads_search_flags(patched):
-    await list_envelopes(
-        CONFIG,
-        [],
-        folder="Archive",
-        max=5,
-        unseen=True,
-        subject="inv",
-    )
+async def test_mailbox_flag_selects_the_folder(patched):
+    await list_envelopes(CONFIG, [], mailbox="Archive")
     assert patched["folder"] == "Archive"
-    assert patched["criteria"]["max_results"] == 5
-    assert patched["criteria"]["unseen"] is True
-    assert patched["criteria"]["subject"] == "inv"
 
 
 @pytest.mark.asyncio
-async def test_list_empty_result_skips_header_fetch(patched, monkeypatch):
+async def test_pages_count_from_one(patched):
+    out, _ = await list_envelopes(CONFIG, [], page=2, page_size=2)
+    data = json.loads(await materialize(out))
+    assert [d["uid"] for d in data] == ["1"]
 
-    async def fake_search(accessor, folder, **criteria):
-        return []
+
+@pytest.mark.asyncio
+async def test_empty_result_skips_the_header_fetch(patched, monkeypatch):
 
     async def boom(accessor, folder, uids):
         raise AssertionError("fetch_headers must not run for zero uids")
 
-    monkeypatch.setitem(list_envelopes.__globals__, "search_messages",
-                        fake_search)
+    patched["uids"] = []
     monkeypatch.setitem(list_envelopes.__globals__, "fetch_headers", boom)
     out, io = await list_envelopes(CONFIG, [])
     assert io.exit_code == 0

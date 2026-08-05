@@ -38,7 +38,7 @@ function dateFromHeader(dateStr: string): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-export interface SearchOptions {
+interface SearchOptions {
   text?: string | null
   subject?: string | null
   fromAddr?: string | null
@@ -72,7 +72,7 @@ function buildSearchCriteria(opts: SearchOptions): string {
   return parts.length > 0 ? parts.join(' ') : 'ALL'
 }
 
-export async function searchMessages(
+async function searchMessages(
   accessor: EmailAccessor,
   folder: string,
   opts: SearchOptions = {},

@@ -14,38 +14,35 @@
 
 import {
   FlagView,
-  IOResult,
-  type ByteSource,
   type CLIVerbOpts,
   type CommandFnResult,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage } from '../../../../core/email/_client.ts'
-import { replyAllMessage, replyMessage } from '../../../../core/email/send.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-
-const ENC = new TextEncoder()
+import { firstText, route } from './util.ts'
 
 export async function reply(
   config: unknown,
   _paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CLIVerbOpts,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags)
-  const cfg = config as EmailConfig
-  const accessor = new EmailAccessor(cfg)
+  const uid = firstText(texts, 'message id')
+  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
+  const accessor = new EmailAccessor(config as EmailConfig)
   let original
   try {
-    original = await fetchMessage(accessor, fl.asStr('folder') ?? '', fl.asStr('uid') ?? '')
+    original = await fetchMessage(accessor, mailbox, uid)
   } finally {
     await accessor.close()
   }
-  const body = fl.asStr('body') ?? ''
-  const result = fl.asBool('all')
-    ? await replyAllMessage(cfg, original, body)
-    : await replyMessage(cfg, original, body)
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
-  return [out, new IOResult()]
+  return route(config as EmailConfig, fl, opts.stdin, {
+    message: original,
+    mode: 'reply',
+    postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
+    quoteHeadline: fl.asStr('quote_headline') ?? '',
+  })
 }

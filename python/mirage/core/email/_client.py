@@ -76,6 +76,17 @@ async def list_message_uids(
     return uids
 
 
+async def fetch_raw_message(
+    accessor: EmailAccessor,
+    folder: str,
+    uid: str,
+) -> bytes:
+    imap = await accessor.get_imap()
+    await imap.select(folder)
+    response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
+    return _extract_body(response)
+
+
 async def fetch_message(
     accessor: EmailAccessor,
     folder: str,

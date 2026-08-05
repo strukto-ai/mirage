@@ -16,36 +16,58 @@ import { describe, expect, it, vi } from 'vitest'
 import { cliSpecFor, materialize, type IOResult } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { Workspace } from '../../../../workspace.ts'
+import { build, composeBody, hasPrefix, quoteText, splitAddresses } from './builder.ts'
+import { forward } from './forward.ts'
 import { HIMALAYA } from './index.ts'
 import { listEnvelopes } from './list.ts'
+import { pageSlice, parseQuery, QueryError, sortHeaders } from './query.ts'
+import { reply } from './reply.ts'
+import { searchEnvelopes } from './search.ts'
 import { send } from './send.ts'
 
-vi.mock('../../../../core/email/send.ts', () => ({
-  sendMessage: vi.fn((_config: unknown, to: string, subject: string) =>
-    Promise.resolve({ status: 'sent', to, subject }),
-  ),
-  replyMessage: vi.fn(),
-  replyAllMessage: vi.fn(),
-  forwardMessage: vi.fn(),
-}))
+const sendRawMock = vi.hoisted(() => vi.fn())
 
-vi.mock('../../../../core/email/search.ts', () => ({
-  searchMessages: vi.fn(() => Promise.resolve(['1', '2'])),
-}))
+vi.mock('./smtp.ts', () => ({ sendRaw: sendRawMock }))
 
 vi.mock('../../../../core/email/_client.ts', () => ({
-  fetchMessage: vi.fn(),
+  fetchRawMessage: vi.fn(() => Promise.resolve(new TextEncoder().encode('From: a@x\r\n\r\nbody'))),
+  fetchMessage: vi.fn(() => Promise.resolve(ORIGINAL)),
+  listMessageUids: vi.fn(() => Promise.resolve(['1', '2'])),
   fetchHeaders: vi.fn((_accessor: unknown, _folder: string, uids: string[]) =>
-    Promise.resolve(uids.map((uid) => ({ uid, subject: `s${uid}` }))),
+    Promise.resolve(uids.map((uid) => HEADERS[uid])),
   ),
 }))
+
+const ORIGINAL = {
+  subject: 'Quarterly numbers',
+  from: { name: 'Alice', email: 'alice@example.com' },
+  reply_to: [],
+  to: [{ name: '', email: 'me@example.com' }],
+  cc: [{ name: '', email: 'bob@example.com' }],
+  date: 'Mon, 02 Feb 2026 10:00:00 +0000',
+  body_text: 'the numbers',
+  body_html: '',
+  snippet: '',
+  message_id: '<m1@example.com>',
+  in_reply_to: null,
+  references: ['<m0@example.com>'],
+  has_attachments: false,
+  attachments: [],
+  uid: '7',
+  flags: [],
+}
+
+const HEADERS: Record<string, unknown> = {
+  '1': { ...ORIGINAL, uid: '1', subject: 'beta', date: 'Mon, 02 Feb 2026 10:00:00 +0000' },
+  '2': { ...ORIGINAL, uid: '2', subject: 'alpha', date: 'Tue, 03 Feb 2026 10:00:00 +0000' },
+}
 
 const CONFIG = {
   imapHost: 'h',
   imapPort: 993,
   smtpHost: 'h',
   smtpPort: 587,
-  username: 'u',
+  username: 'me@example.com',
   password: 'p',
   useSsl: false,
   maxMessages: 200,
@@ -61,29 +83,48 @@ function leaf(...path: string[]) {
   return node
 }
 
+function decode(out: Uint8Array): string {
+  return new TextDecoder().decode(out)
+}
+
 describe('himalaya tree', () => {
   it('matches the himalaya vocabulary', () => {
     expect(HIMALAYA.name).toBe('himalaya')
     expect(HIMALAYA.subcommands.map((g) => g.name)).toEqual(['envelope', 'message'])
-    expect(leaf('envelope').subcommands.map((v) => v.name)).toEqual(['list'])
+    expect(leaf('envelope').subcommands.map((v) => v.name)).toEqual(['list', 'search'])
     expect(leaf('message').subcommands.map((v) => v.name)).toEqual([
       'read',
+      'compose',
       'send',
       'reply',
       'forward',
     ])
   })
 
-  it('classifies writes and pins required flags', () => {
+  it('carries the upstream aliases', () => {
+    expect(leaf('envelope', 'list').aliases).toEqual(['ls'])
+    expect(leaf('envelope', 'search').aliases).toEqual(['sr'])
+    expect(leaf('message', 'compose').aliases).toEqual(['write', 'new'])
+    expect(leaf('message', 'forward').aliases).toEqual(['fwd'])
+  })
+
+  it('takes the message id as an operand and the mailbox as -m', () => {
+    for (const verb of ['read', 'reply', 'forward']) {
+      const node = leaf('message', verb)
+      expect(node.rest).not.toBeNull()
+      expect(node.options.find((o) => o.long === '--mailbox')?.short).toBe('-m')
+    }
+    expect(leaf('message', 'compose').rest).toBeNull()
+  })
+
+  it('classifies writes and requires no composer flag', () => {
     expect(leaf('envelope', 'list').write).toBe(false)
+    expect(leaf('envelope', 'search').write).toBe(false)
     expect(leaf('message', 'read').write).toBe(false)
-    for (const verb of ['send', 'reply', 'forward']) {
+    for (const verb of ['compose', 'send', 'reply', 'forward']) {
       expect(leaf('message', verb).write).toBe(true)
     }
-    const required = leaf('message', 'send')
-      .options.filter((o) => o.required)
-      .map((o) => o.long)
-    expect(required.sort()).toEqual(['--body', '--subject', '--to'])
+    expect(leaf('message', 'compose').options.every((o) => !o.required)).toBe(true)
   })
 
   it('registers itself for YAML resolution at import time', () => {
@@ -93,12 +134,7 @@ describe('himalaya tree', () => {
   it('applies config defaults through the zod model', () => {
     const model = HIMALAYA.configModel
     if (model === null || typeof model === 'function') throw new Error('expected zod model')
-    const parsed = model.parse({
-      imapHost: 'h',
-      smtpHost: 'h',
-      username: 'u',
-      password: 'p',
-    })
+    const parsed = model.parse({ imapHost: 'h', smtpHost: 'h', username: 'u', password: 'p' })
     expect(parsed.imapPort).toBe(993)
     expect(parsed.smtpPort).toBe(587)
     expect(parsed.useSsl).toBe(true)
@@ -106,37 +142,230 @@ describe('himalaya tree', () => {
   })
 })
 
+describe('search query DSL', () => {
+  it('turns text conditions into quoted IMAP keys', () => {
+    expect(parseQuery('from alice').criteria).toBe('FROM "alice"')
+    expect(parseQuery('body refund').criteria).toBe('BODY "refund"')
+  })
+
+  it('makes and implicit, or prefix, and binds and tighter', () => {
+    expect(parseQuery('from a and to b').criteria).toBe('(FROM "a" TO "b")')
+    expect(parseQuery('from a or to b').criteria).toBe('OR FROM "a" TO "b"')
+    expect(parseQuery('from a and to b or subject c').criteria).toBe(
+      'OR (FROM "a" TO "b") SUBJECT "c"',
+    )
+  })
+
+  it('regroups with parentheses and negates with not', () => {
+    expect(parseQuery('from a and (to b or subject c)').criteria).toBe(
+      '(FROM "a" OR TO "b" SUBJECT "c")',
+    )
+    expect(parseQuery('not flag seen').criteria).toBe('NOT SEEN')
+  })
+
+  it('asks for the next day since after is strictly greater', () => {
+    expect(parseQuery('date 2026-02-03').criteria).toBe('ON 03-Feb-2026')
+    expect(parseQuery('after 2026-01-01').criteria).toBe('SINCE 02-Jan-2026')
+  })
+
+  it('keeps spaces in a quoted pattern and defuses its keywords', () => {
+    expect(parseQuery('subject "and or not"').criteria).toBe('SUBJECT "and or not"')
+  })
+
+  it('parses sorters with asc as the default', () => {
+    expect(parseQuery('order by subject from desc').sorters).toEqual([
+      { kind: 'subject', descending: false },
+      { kind: 'from', descending: true },
+    ])
+  })
+
+  it('refuses what it cannot parse', () => {
+    expect(() => parseQuery('sender alice')).toThrow(QueryError)
+    expect(() => parseQuery('flag urgent')).toThrow(QueryError)
+    expect(() => parseQuery('date 2026-13-40')).toThrow(QueryError)
+    expect(() => parseQuery('order by')).toThrow(QueryError)
+    expect(() => parseQuery('from alice bogus')).toThrow(QueryError)
+    expect(() => parseQuery('subject "open')).toThrow(QueryError)
+  })
+
+  it('orders by date descending when no sorter is given', () => {
+    const rows = sortHeaders([HEADERS['1'], HEADERS['2']] as Parameters<typeof sortHeaders>[0], [])
+    expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
+  })
+
+  it('pages counting from one', () => {
+    expect(pageSlice([1, 2, 3, 4, 5], 3, 2)).toEqual([5])
+    expect(pageSlice([1, 2, 3], 9, 2)).toEqual([])
+  })
+})
+
+describe('message builder', () => {
+  it('flattens repeats and comma lists', () => {
+    expect(splitAddresses(['a@x, b@x', ' c@x '])).toEqual(['a@x', 'b@x', 'c@x'])
+  })
+
+  it('keeps the colon when testing for an existing prefix', () => {
+    expect(hasPrefix('Re: hello', 'Re: ')).toBe(true)
+    expect(hasPrefix('Ready to ship', 'Re: ')).toBe(false)
+  })
+
+  it('quotes each line once and leaves the headline unquoted', () => {
+    expect(quoteText('a\nb', '')).toBe('> a\n> b')
+    expect(quoteText('> a\nb', '')).toBe('>> a\n> b')
+    expect(quoteText('a', 'Alice wrote:')).toBe('Alice wrote:\n> a')
+  })
+
+  it('top posts by default and bottom posts on request', () => {
+    expect(composeBody('mine', '> theirs', '', 'top')).toBe('mine\n\n> theirs')
+    expect(composeBody('mine', '> theirs', '', 'bottom')).toBe('> theirs\n\nmine')
+    expect(composeBody('mine', '', 'sig', 'top')).toBe('mine\n\n-- \nsig')
+  })
+
+  it('refuses a message with no recipient', () => {
+    expect(() =>
+      build({
+        sender: 'me@x',
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: 'Hi',
+        body: 'yo',
+        signature: null,
+      }),
+    ).toThrow('no recipient')
+  })
+})
+
 describe('himalaya verbs', () => {
-  it('send renders the send result as JSON', async () => {
-    const [out, io] = (await send(CONFIG, [], [], {
-      stdin: null,
-      flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' },
-    })) as [Uint8Array, IOResult]
+  it('compose writes MIME to stdout without sending', async () => {
+    sendRawMock.mockClear()
+    const [out, io] = (await import('./compose.ts').then((m) =>
+      m.compose(CONFIG, [], [], {
+        stdin: null,
+        flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' },
+      }),
+    )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
-    expect(JSON.parse(new TextDecoder().decode(await materialize(out)))).toEqual({
+    expect(sendRawMock).not.toHaveBeenCalled()
+    const text = decode(await materialize(out))
+    expect(text).toContain('From: me@example.com')
+    expect(text).toContain('To: a@b.com')
+    expect(text).toContain('Subject: Hi')
+    expect(text.endsWith('yo\r\n')).toBe(true)
+  })
+
+  it('compose --send pushes the raw bytes through SMTP', async () => {
+    sendRawMock.mockClear()
+    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
+    const [out] = (await import('./compose.ts').then((m) =>
+      m.compose(CONFIG, [], [], {
+        stdin: null,
+        flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true },
+      }),
+    )) as [Uint8Array, IOResult]
+    expect(decode(sendRawMock.mock.calls[0]?.[1] as Uint8Array)).toContain('Subject: Hi')
+    expect(JSON.parse(decode(await materialize(out)))).toEqual({
       status: 'sent',
       to: 'a@b.com',
       subject: 'Hi',
     })
   })
 
-  it('list closes its per-call accessor', async () => {
+  it('reply derives subject, recipients and threading', async () => {
     const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await listEnvelopes(CONFIG, [], [], {
+    const [out] = (await reply(CONFIG, [], ['7'], {
+      stdin: null,
+      flags: { body: 'thanks' },
+    })) as [Uint8Array, IOResult]
+    const text = decode(await materialize(out))
+    expect(text).toContain('Subject: Re: Quarterly numbers')
+    expect(text).toContain('To: Alice <alice@example.com>')
+    expect(text).toContain('In-Reply-To: <m1@example.com>')
+    expect(text).toContain('References: <m0@example.com> <m1@example.com>')
+    expect(text).toContain('thanks\r\n\r\n> the numbers')
+    closeSpy.mockRestore()
+  })
+
+  it('forward prefixes Fwd and keeps References but not In-Reply-To', async () => {
+    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+    const [out] = (await forward(CONFIG, [], ['7'], {
+      stdin: null,
+      flags: { to: 'carol@example.com' },
+    })) as [Uint8Array, IOResult]
+    const text = decode(await materialize(out))
+    expect(text).toContain('Subject: Fwd: Quarterly numbers')
+    expect(text).not.toContain('In-Reply-To')
+    expect(text).toContain('References: <m0@example.com> <m1@example.com>')
+    closeSpy.mockRestore()
+  })
+
+  it('reply without an id is a usage error', async () => {
+    await expect(reply(CONFIG, [], [], { stdin: null, flags: {} })).rejects.toThrow(
+      'message id is required',
+    )
+  })
+
+  it('send reads a raw message from stdin', async () => {
+    sendRawMock.mockClear()
+    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
+    const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
+    const [out] = (await send(CONFIG, [], [], { stdin: raw, flags: {} })) as [Uint8Array, IOResult]
+    expect(sendRawMock.mock.calls[0]?.[1]).toEqual(raw)
+    expect(JSON.parse(decode(await materialize(out)))).toEqual({
+      status: 'sent',
+      to: 'a@b.com',
+      subject: 'Hi',
+    })
+  })
+
+  it('send refuses an empty message before reaching SMTP', async () => {
+    sendRawMock.mockClear()
+    await expect(
+      send(CONFIG, [], [], { stdin: new TextEncoder().encode('  \n '), flags: {} }),
+    ).rejects.toThrow('no message provided')
+    expect(sendRawMock).not.toHaveBeenCalled()
+  })
+
+  it('list orders most recent first and closes its accessor', async () => {
+    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+    const [out] = (await listEnvelopes(CONFIG, [], [], { stdin: null, flags: {} })) as [
+      Uint8Array,
+      IOResult,
+    ]
+    const rows = JSON.parse(decode(await materialize(out))) as { uid: string }[]
+    expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+    closeSpy.mockRestore()
+  })
+
+  it('search sorts client side from the query clause', async () => {
+    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+    const [out] = (await searchEnvelopes(CONFIG, [], ['order', 'by', 'subject'], {
       stdin: null,
       flags: {},
     })) as [Uint8Array, IOResult]
-    const rows = JSON.parse(new TextDecoder().decode(await materialize(out))) as {
-      uid: string
-    }[]
-    expect(rows.map((r) => r.uid)).toEqual(['1', '2'])
-    expect(closeSpy).toHaveBeenCalledTimes(1)
+    const rows = JSON.parse(decode(await materialize(out))) as { uid: string }[]
+    expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
     closeSpy.mockRestore()
   })
 })
 
 describe('himalaya dispatch', () => {
-  it('runs an installed tree end to end and exits 2 on missing required', async () => {
+  it('runs an installed tree end to end', async () => {
+    const ws = new Workspace({})
+    ws.registerCli('himalaya', HIMALAYA, {
+      imapHost: 'h',
+      smtpHost: 'h',
+      username: 'me@example.com',
+      password: 'p',
+    })
+    const io = await ws.execute('himalaya message compose --to a@b.com --subject Hi --body yo')
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(io.stdout)).toContain('To: a@b.com')
+    await ws.close()
+  })
+
+  it('reports an upstream verb mirage lacks with git wording', async () => {
     const ws = new Workspace({})
     ws.registerCli('himalaya', HIMALAYA, {
       imapHost: 'h',
@@ -144,16 +373,11 @@ describe('himalaya dispatch', () => {
       username: 'u',
       password: 'p',
     })
-    let io = await ws.execute('himalaya message send --to a@b.com --subject Hi --body yo')
-    expect(io.exitCode).toBe(0)
-    expect(JSON.parse(new TextDecoder().decode(io.stdout))).toEqual({
-      status: 'sent',
-      to: 'a@b.com',
-      subject: 'Hi',
-    })
-    io = await ws.execute('himalaya message send --subject Hi --body yo')
-    expect(io.exitCode).toBe(2)
-    expect(new TextDecoder().decode(io.stderr)).toContain("option '--to' is required")
+    const io = await ws.execute('himalaya message move 7 --to Archive')
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(io.stderr)).toBe(
+      "himalaya: 'move' is not a himalaya message command. See 'himalaya message --help'.\n",
+    )
     await ws.close()
   })
 })

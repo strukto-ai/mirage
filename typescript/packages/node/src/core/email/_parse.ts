@@ -37,6 +37,7 @@ export interface ParsedAttachmentWithPayload extends ParsedAttachment {
 
 export interface ParsedRfc822 {
   from: EmailAddress
+  reply_to: EmailAddress[]
   to: EmailAddress[]
   cc: EmailAddress[]
   subject: string
@@ -102,6 +103,7 @@ function fromParsed(parsed: ParsedMail, headersOnly: boolean): ParsedRfc822 {
     typeof refsRaw === 'string' ? refsRaw.split(/\s+/).filter((s) => s !== '') : (refsRaw ?? [])
   return {
     from: toAddr(parsed.from?.value[0]),
+    reply_to: toAddrList(parsed.replyTo),
     to: toAddrList(parsed.to),
     cc: toAddrList(parsed.cc),
     subject: parsed.subject ?? '',

@@ -12,37 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
-from mirage.accessor.email import EmailAccessor
-from mirage.commands.cli.builtin.himalaya.query import page_slice, sort_headers
+from mirage.commands.cli.builtin.himalaya.util import route
 from mirage.commands.spec.types import FlagView
-from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.config import EmailConfig
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-DEFAULT_PAGE_SIZE = 25
 
-
-async def list_envelopes(
+async def compose(
     config: EmailConfig,
     paths: list[PathSpec],
     *texts: str,
+    stdin: ByteSource | None = None,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    mailbox = fl.as_str("mailbox") or "INBOX"
-    page = fl.as_int("page") or 1
-    page_size = fl.as_int("page_size") or DEFAULT_PAGE_SIZE
-    accessor = EmailAccessor(config)
-    try:
-        uids = await list_message_uids(accessor, mailbox, "ALL")
-        headers = await fetch_headers(accessor, mailbox, uids) if uids else []
-    finally:
-        await accessor.close()
-    page_of = page_slice(sort_headers(headers, ()), page, page_size)
-    out = json.dumps(page_of, ensure_ascii=False,
-                     separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return await route(config, FlagView(flags), stdin, None)

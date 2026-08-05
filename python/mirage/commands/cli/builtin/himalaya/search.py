@@ -15,7 +15,10 @@
 import json
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.cli.builtin.himalaya.query import page_slice, sort_headers
+from mirage.commands.cli.builtin.himalaya.list import DEFAULT_PAGE_SIZE
+from mirage.commands.cli.builtin.himalaya.query import (page_slice,
+                                                        parse_query,
+                                                        sort_headers)
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.config import EmailConfig
@@ -23,10 +26,8 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-DEFAULT_PAGE_SIZE = 25
 
-
-async def list_envelopes(
+async def search_envelopes(
     config: EmailConfig,
     paths: list[PathSpec],
     *texts: str,
@@ -36,13 +37,16 @@ async def list_envelopes(
     mailbox = fl.as_str("mailbox") or "INBOX"
     page = fl.as_int("page") or 1
     page_size = fl.as_int("page_size") or DEFAULT_PAGE_SIZE
+    # The shell already split the query; upstream joins argv the same
+    # way before parsing, so a pattern with spaces needs literal quotes.
+    query = parse_query(" ".join(texts))
     accessor = EmailAccessor(config)
     try:
-        uids = await list_message_uids(accessor, mailbox, "ALL")
+        uids = await list_message_uids(accessor, mailbox, query.criteria)
         headers = await fetch_headers(accessor, mailbox, uids) if uids else []
     finally:
         await accessor.close()
-    page_of = page_slice(sort_headers(headers, ()), page, page_size)
+    page_of = page_slice(sort_headers(headers, query.sorters), page, page_size)
     out = json.dumps(page_of, ensure_ascii=False,
                      separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

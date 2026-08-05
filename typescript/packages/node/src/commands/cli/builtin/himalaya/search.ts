@@ -14,35 +14,42 @@
 
 import {
   FlagView,
+  IOResult,
+  type ByteSource,
   type CLIVerbOpts,
   type CommandFnResult,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
-import { fetchMessage } from '../../../../core/email/_client.ts'
+import { fetchHeaders, listMessageUids } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-import { firstText, route } from './util.ts'
+import { DEFAULT_PAGE_SIZE } from './list.ts'
+import { pageSlice, parseQuery, sortHeaders } from './query.ts'
 
-export async function forward(
+const ENC = new TextEncoder()
+
+export async function searchEnvelopes(
   config: unknown,
   _paths: PathSpec[],
   texts: string[],
   opts: CLIVerbOpts,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags)
-  const uid = firstText(texts, 'message id')
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
+  const page = fl.asInt('page') ?? 1
+  const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
+  // The shell already split the query; upstream joins argv the same way
+  // before parsing, so a pattern with spaces needs literal quotes.
+  const query = parseQuery(texts.join(' '))
   const accessor = new EmailAccessor(config as EmailConfig)
-  let original
+  let headers
   try {
-    original = await fetchMessage(accessor, mailbox, uid)
+    const uids = await listMessageUids(accessor, mailbox, query.criteria)
+    headers = uids.length > 0 ? await fetchHeaders(accessor, mailbox, uids) : []
   } finally {
     await accessor.close()
   }
-  return route(config as EmailConfig, fl, opts.stdin, {
-    message: original,
-    mode: 'forward',
-    postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
-    quoteHeadline: fl.asStr('quote_headline') ?? '',
-  })
+  const pageOf = pageSlice(sortHeaders(headers, query.sorters), page, pageSize)
+  const out: ByteSource = ENC.encode(JSON.stringify(pageOf))
+  return [out, new IOResult()]
 }

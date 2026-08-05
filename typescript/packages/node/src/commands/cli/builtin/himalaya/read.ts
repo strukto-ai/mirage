@@ -21,25 +21,31 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
-import { fetchMessage } from '../../../../core/email/_client.ts'
+import { fetchMessage, fetchRawMessage } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
+import { firstText } from './util.ts'
 
 const ENC = new TextEncoder()
 
 export async function read(
   config: unknown,
   _paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CLIVerbOpts,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags)
+  const uid = firstText(texts, 'message id')
+  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
   const accessor = new EmailAccessor(config as EmailConfig)
-  let processed
   try {
-    processed = await fetchMessage(accessor, fl.asStr('folder') ?? '', fl.asStr('uid') ?? '')
+    if (fl.asBool('raw')) {
+      const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)
+      return [raw, new IOResult()]
+    }
+    const processed = await fetchMessage(accessor, mailbox, uid)
+    const out: ByteSource = ENC.encode(JSON.stringify(processed))
+    return [out, new IOResult()]
   } finally {
     await accessor.close()
   }
-  const out: ByteSource = ENC.encode(JSON.stringify(processed))
-  return [out, new IOResult()]
 }
