@@ -322,7 +322,7 @@ describe('monty unavailable', () => {
     const runtime = {
       name: 'monty',
       captures: ['python3', 'python'],
-      language: 'python',
+      language: 'python' as const,
       runsLines: false,
       config: {},
       attach: () => undefined,

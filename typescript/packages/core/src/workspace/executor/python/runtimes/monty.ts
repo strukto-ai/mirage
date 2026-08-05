@@ -135,7 +135,6 @@ export class MontyRuntime extends Runtime implements Evaluator {
   readonly name = MONTY_RUNTIME
   override readonly language = 'python'
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: () => string[] = () => []

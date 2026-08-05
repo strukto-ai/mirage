@@ -25,6 +25,11 @@ EvalValue: TypeAlias = (None | bool | int | float | str | bytes
 # line (session mode only). "exit" is an explicit exit() call.
 EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
 
+# The languages a runtime can interpret, one name for both doors (run
+# and eval). A Literal, not str, so a typo is a type error instead of a
+# selector that silently matches nothing and reports "no runtime".
+Language: TypeAlias = Literal["python", "js"]
+
 
 @dataclass(frozen=True, slots=True)
 class ScriptSource:
@@ -38,7 +43,7 @@ class ScriptSource:
 
     Args:
         source (str): the script program.
-        language (str): the script's language ("python" or "js"),
+        language (Language): the script's language ("python" or "js"),
             stamped from the file extension at config load; the
             programmatic default is "python".
         module (bool): the source is an ES module (a ``.mjs`` file), so
@@ -51,7 +56,7 @@ class ScriptSource:
     """
 
     source: str
-    language: str = "python"
+    language: Language = "python"
     module: bool = False
 
 

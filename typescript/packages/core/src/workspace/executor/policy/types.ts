@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../runtime.ts'
-import type { EvalValue } from '../runtime_types.ts'
+import type { EvalValue, RuntimeLanguage } from '../runtime_types.ts'
 
 /** One command of the line being routed, distilled from the parse. */
 export interface ParsedCommand {
@@ -161,7 +161,7 @@ export class ScriptSource {
    */
   constructor(
     readonly source: string,
-    readonly language = 'python',
+    readonly language: RuntimeLanguage = 'python',
     readonly module = false,
   ) {}
 }

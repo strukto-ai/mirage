@@ -15,7 +15,7 @@
 import { IOResult } from '../../io/types.ts'
 import type { BridgeDispatchFn } from './python/mirage_bridge.ts'
 import { ScriptSource, type PolicyScript } from './policy/types.ts'
-import type { RunArgs, RunResult, RuntimeOptions } from './runtime_types.ts'
+import type { RunArgs, RunResult, RuntimeLanguage, RuntimeOptions } from './runtime_types.ts'
 
 /**
  * A constructor's config option as the runtime's own config, mirroring
@@ -56,12 +56,15 @@ export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
   /**
-   * The language run() interprets ("python", "js"), null for engines
-   * that run whole lines or no code at all (vfs, sandboxes). A script
-   * CLI selects its interpreter by matching this
-   * (runtimeForLanguage), the run-side twin of evalLanguage.
+   * The language this runtime interprets, at both doors: run() for a
+   * script CLI (runtimeForLanguage) and eval() for a config-borne
+   * policy script (evaluatorOf). One attribute, because two would let
+   * a runtime claim python at one door and js at the other, and the
+   * disagreement would only surface as an unexplained 127 or a policy
+   * evaluated on the wrong engine. Null for engines that run whole
+   * lines or no code at all (vfs, sandboxes).
    */
-  readonly language: string | null = null
+  readonly language: RuntimeLanguage | null = null
   /**
    * A runtime that runs whole lines sets this true and overrides
    * runLine. Interpreter runtimes leave it false: they are the engine

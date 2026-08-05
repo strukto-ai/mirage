@@ -14,7 +14,7 @@
 
 import importlib
 import tempfile
-from typing import Any
+from typing import Any, cast, get_args
 
 from pydantic import BaseModel
 
@@ -24,7 +24,7 @@ from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.registry import REGISTRY, resolve_class
 from mirage.resource.secrets import (has_redacted_secret, redacted_config_dump,
                                      revealed_config_dump)
-from mirage.runtime.types import ScriptSource
+from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, CLIKey, ConsistencyPolicy, JobKey,
                           MountKey, MountMode, ResourceName, ResourceStateKey,
@@ -105,15 +105,26 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLISpec:
 
     Args:
         entry (dict[str, Any]): one captured ``clis`` entry.
+
+    Raises:
+        ValueError: the captured script names a language no runtime can
+            speak. The value comes from a file, so it is checked here
+            rather than carried to the selector, which would report the
+            world's runtimes for a language that never existed.
     """
     script = entry.get(CLIKey.SCRIPT)
     if not isinstance(script, dict):
         return str(entry[CLIKey.SPEC])
-    return CLISpec(name=str(entry[CLIKey.SPEC]),
-                   script=ScriptSource(
-                       str(script[ScriptKey.SOURCE]),
-                       language=str(script[ScriptKey.LANGUAGE]),
-                       module=bool(script.get(ScriptKey.MODULE))),
+    name = str(entry[CLIKey.SPEC])
+    language = script.get(ScriptKey.LANGUAGE)
+    if language not in get_args(Language):
+        raise ValueError(f"snapshot cli {name!r}: unknown script language "
+                         f"{language!r}")
+    return CLISpec(name=name,
+                   script=ScriptSource(str(script[ScriptKey.SOURCE]),
+                                       language=cast(Language, language),
+                                       module=bool(script.get(
+                                           ScriptKey.MODULE))),
                    runtime=entry.get(CLIKey.RUNTIME))
 
 

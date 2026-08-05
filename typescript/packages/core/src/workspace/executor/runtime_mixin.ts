@@ -38,11 +38,11 @@ export interface Evaluator {
   readonly [EVALUATOR]: true
 
   /**
-   * The language `eval` speaks ("python" or "js"); the policy engine
-   * matches it against a config script's extension so a .js policy
-   * lands on a JS evaluator.
+   * The language `eval` speaks is `Runtime.language`, the same
+   * attribute `run` answers for: the policy engine matches it against a
+   * config script's extension so a .js policy lands on a JS evaluator.
+   * A separate name here would let one runtime claim two languages.
    */
-  readonly evalLanguage: 'python' | 'js'
 
   /**
    * Evaluate one program and return its last expression. `inputs`

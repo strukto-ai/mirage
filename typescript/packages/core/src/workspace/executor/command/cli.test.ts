@@ -21,7 +21,7 @@ import { Limit } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../policy/types.ts'
 import { Runtime } from '../runtime.ts'
-import type { RunArgs, RunResult } from '../runtime_types.ts'
+import type { RunArgs, RunResult, RuntimeLanguage } from '../runtime_types.ts'
 import { Session } from '../../session/session.ts'
 import { handleCli } from './cli.ts'
 
@@ -194,7 +194,7 @@ describe('handleCli', () => {
 
 class FakePyRuntime extends Runtime {
   readonly name: string = 'fakepy'
-  override readonly language: string | null = 'python'
+  override readonly language: RuntimeLanguage | null = 'python'
   seen: RunArgs[] = []
   result: RunResult = { stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 }
 
@@ -234,7 +234,7 @@ function scriptInstall(
   opts: {
     runtime?: string | null
     config?: Record<string, unknown> | null
-    language?: string
+    language?: RuntimeLanguage
     options?: Option[]
   } = {},
 ): CLIInstall {

@@ -29,7 +29,7 @@ from mirage.policy import GuardSpec
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
-from mirage.runtime.types import ScriptSource
+from mirage.runtime.types import Language, ScriptSource
 from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, Limit,
                           MountBackend, MountMode)
 from mirage.workspace.mount.spec import Mount
@@ -322,7 +322,7 @@ def _load_script_source(value: str) -> ScriptSource:
         raise ValueError("a config script must reference a .py/.js file "
                          f"(e.g. script: guard.py), got {value!r}")
     path = Path(value.strip())
-    language = "js" if path.suffix in (".js", ".mjs") else "python"
+    language: Language = ("js" if path.suffix in (".js", ".mjs") else "python")
     return ScriptSource(path.read_text(),
                         language=language,
                         module=path.suffix == ".mjs")

@@ -166,7 +166,6 @@ export class QuickJsRuntime extends Runtime implements Evaluator {
   readonly name = QUICKJS_RUNTIME
   override readonly language = 'js'
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage = 'js' as const
   static readonly commands: readonly string[] = ['node', 'js'] as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null

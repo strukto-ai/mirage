@@ -14,6 +14,13 @@
 
 import type { PolicyScript } from './policy/types.ts'
 
+/**
+ * The languages a runtime can interpret, one name for both doors (run
+ * and eval). A union, not string, so a typo is a type error instead of
+ * a selector that silently matches nothing and reports "no runtime".
+ */
+export type RuntimeLanguage = 'python' | 'js'
+
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {
   code: string

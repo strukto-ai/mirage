@@ -172,12 +172,23 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   }
 }
 
-/** The spec a snapshot entry restores: a registry key or a program. */
+/**
+ * The spec a snapshot entry restores: a registry key or a program.
+ *
+ * Throws when the captured script names a language no runtime can
+ * speak. The value comes from a file, so it is checked here rather than
+ * carried to the selector, which would report the world's runtimes for
+ * a language that never existed.
+ */
 function cliSpecFromEntry(entry: CLISnapshot): string | CLISpec {
   if (entry.script === undefined) return entry.spec
+  const language = entry.script.language
+  if (language !== 'python' && language !== 'js') {
+    throw new Error(`snapshot cli '${entry.spec}': unknown script language '${language}'`)
+  }
   return new CLISpec({
     name: entry.spec,
-    script: new ScriptSource(entry.script.source, entry.script.language, entry.script.module),
+    script: new ScriptSource(entry.script.source, language, entry.script.module),
     runtime: entry.runtime ?? null,
   })
 }

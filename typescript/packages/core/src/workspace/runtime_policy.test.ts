@@ -37,7 +37,7 @@ const DEC = new TextDecoder()
 
 class HangingEvaluator extends Runtime implements Evaluator {
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage = 'python' as const
+  override readonly language = 'python'
   readonly name = 'hang-eval'
 
   constructor() {
@@ -55,14 +55,14 @@ class HangingEvaluator extends Runtime implements Evaluator {
 
 class NamedEvaluator extends Runtime implements Evaluator {
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage: 'python' | 'js'
+  override readonly language: 'python' | 'js'
 
   constructor(
     readonly name: string,
-    evalLanguage: 'python' | 'js',
+    language: 'python' | 'js',
   ) {
     super({ captures: [] })
-    this.evalLanguage = evalLanguage
+    this.language = language
   }
 
   run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
@@ -304,6 +304,18 @@ describe('routing ladder', () => {
     expect(evaluatorOf([py, js])).toBe(py)
     expect(evaluatorOf([py], 'js')).toBe(py)
     expect(evaluatorOf([])).toBeNull()
+  })
+
+  it('one language attribute serves both doors', () => {
+    // The eval door and the run door read the same Runtime.language, so
+    // an engine cannot be picked as a js interpreter and a python
+    // evaluator at once. Two attributes could disagree, and the
+    // disagreement only showed up as an unexplained 127 or a policy
+    // script evaluated on the wrong engine.
+    const js = new NamedEvaluator('js-eval', 'js')
+    expect(evaluatorOf([js], 'js')).toBe(js)
+    expect(runtimeForLanguage([js], 'js')).toBe(js)
+    expect(runtimeForLanguage([js], 'python')).toBeNull()
   })
 
   it('runtimeForLanguage is first-match with no cross-language fallback', () => {

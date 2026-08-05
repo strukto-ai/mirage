@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
 from mirage.runtime.config import RuntimeConfig
-from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.types import Language, RunArgs, RunResult, ScriptSource
 
 
 class Runtime(ABC):
@@ -36,11 +36,14 @@ class Runtime(ABC):
 
     name: str
     captures: tuple[str, ...] = ()
-    # The language run() interprets ("python", "js"), None for engines
-    # that run whole lines or no code at all (vfs, sandboxes). A script
-    # CLI selects its interpreter by matching this
-    # (runtime_for_language), the run-side twin of eval_language.
-    language: str | None = None
+    # The language this runtime interprets, at both doors: run() for a
+    # script CLI (runtime_for_language) and eval() for a config-borne
+    # policy script (evaluator_of). One attribute, because two would
+    # let a runtime claim python at one door and js at the other, and
+    # the disagreement would only surface as an unexplained 127 or a
+    # policy evaluated on the wrong engine. None for engines that run
+    # whole lines or no code at all (vfs, sandboxes).
+    language: Language | None = None
     # Per-line admission script for the routing ladder, answering "do
     # I want this line": a callable taking a PolicyContext, or a
     # config-borne ScriptSource. None = always willing. Policy, not

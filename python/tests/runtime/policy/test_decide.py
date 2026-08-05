@@ -113,7 +113,6 @@ class JsEvaluator(Runtime, EvaluatorMixin):
     name = "js-eval"
     captures = ("node", )
     language = "js"
-    eval_language = "js"
 
     def __init__(self) -> None:
         super().__init__()
@@ -150,6 +149,18 @@ def test_evaluator_of_prefers_a_language_match():
     assert evaluator_of([monty, js]) is monty
     assert evaluator_of([monty], "js") is monty
     assert evaluator_of([], "js") is None
+
+
+def test_one_language_attribute_serves_both_doors():
+    # The eval door and the run door read the same Runtime.language, so
+    # an engine cannot be picked as a js interpreter and a python
+    # evaluator at once. Two attributes could disagree, and the
+    # disagreement only showed up as an unexplained 127 or a policy
+    # script evaluated on the wrong engine.
+    js = JsEvaluator()
+    assert evaluator_of([js], "js") is js
+    assert runtime_for_language([js], "js") is js
+    assert runtime_for_language([js], "python") is None
 
 
 def test_runtime_for_language_is_first_match_wins():
