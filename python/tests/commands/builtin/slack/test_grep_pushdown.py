@@ -173,5 +173,5 @@ async def test_grep_without_word_flag_skips_native_search():
                              i=True)
     fake_search.assert_not_awaited()
     assert out == b""
-    assert io.exit_code == 1
+    assert io.exit_code == 2
     assert b"No such file" in io.stderr

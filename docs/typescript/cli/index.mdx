@@ -6,10 +6,12 @@ icon: terminal
 
 Mounts make a service readable as files; CLIs make it actionable as a
 program. A CLI is a typed program tree (`CLISpec`) installed on the
-workspace by name, completely separate from any mount: it initializes
-from its own config, consults no mount, and takes no operand path. The
-shell dispatches a line to a CLI when its first word matches an
-installed name.
+workspace by name and separate from the mounts: an account CLI
+initializes from its own config, consults no mount, and takes no operand
+path. `git` is the credential-free tier, so it takes no config at all and
+reads the repository `-C` names through the mount ops. The shell
+dispatches a line to a CLI when its first word matches an installed
+name.
 
 ```typescript
 import { EmailResource, HIMALAYA, Workspace } from '@struktoai/mirage-node'
@@ -75,6 +77,7 @@ verb for it, so an agent cannot uninstall the tools it was given.
 | [discord](/typescript/cli/discord)       | Discord          | OpenClaw Discord actions (`send`, `poll`, …)|
 | [ntn](/typescript/cli/ntn)               | Notion           | official Notion CLI (`pages`, `datasources`)|
 | [linear](/typescript/cli/linear)         | Linear           | noun/verb (`issue create`, `team list`)     |
+| [git](/typescript/cli/git)               | git repositories | git (`status`, `log`, `add`, `commit`)      |
 
 Reading stays on the mount (`cat`, `grep`, `jq` over the virtual
 files); acting goes through the CLI. The mounted tree's

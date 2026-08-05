@@ -129,7 +129,7 @@ async def test_stat_size_matches_read_for_every_file(index):
     async def _list(_tm, path, **_kw):
         return tree[path]
 
-    async def _download(_tm, path):
+    async def _download(_tm, path, _range=None):
         return contents[path]
 
     accessor = make_accessor()

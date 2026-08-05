@@ -42,7 +42,43 @@ async def test_read_plain_file_downloads_by_id(accessor, index):
             return_value=b"hello",
     ) as mock_dl:
         assert await read(accessor, _spec("/a.txt"), index) == b"hello"
-    mock_dl.assert_awaited_once_with(accessor.token_manager, "200")
+    mock_dl.assert_awaited_once_with(accessor.token_manager, "200", None)
+
+
+@pytest.mark.asyncio
+async def test_a_ranged_read_asks_box_for_the_range(accessor, index):
+    await index.put(
+        "/a.txt",
+        IndexEntry(id="200",
+                   name="a.txt",
+                   resource_type="box/file",
+                   vfs_name="a.txt"))
+    with patch(
+            "mirage.core.box.read.download_file",
+            new_callable=AsyncMock,
+            return_value=b"ell",
+    ) as mock_dl:
+        got = await read(accessor, _spec("/a.txt"), index, offset=1, size=3)
+    assert got == b"ell"
+    mock_dl.assert_awaited_once_with(accessor.token_manager, "200",
+                                     "bytes=1-3")
+
+
+@pytest.mark.asyncio
+async def test_a_read_to_the_end_leaves_the_range_open(accessor, index):
+    await index.put(
+        "/a.txt",
+        IndexEntry(id="200",
+                   name="a.txt",
+                   resource_type="box/file",
+                   vfs_name="a.txt"))
+    with patch(
+            "mirage.core.box.read.download_file",
+            new_callable=AsyncMock,
+            return_value=b"llo",
+    ) as mock_dl:
+        assert await read(accessor, _spec("/a.txt"), index, offset=2) == b"llo"
+    mock_dl.assert_awaited_once_with(accessor.token_manager, "200", "bytes=2-")
 
 
 @pytest.mark.asyncio

@@ -377,3 +377,38 @@ describe('findChild / findNode', () => {
     expect(findNode(spec, ['bogus'])).toBeNull()
   })
 })
+
+describe('walk path-typed group options', () => {
+  it('resolves a relative value against the working directory', () => {
+    // A group option declared 'path' has to mean what it means on a leaf, or
+    // the type is a lie at exactly one level of the tree.
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ short: '-C', type: 'path' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const relative = walk('tool', spec, ['-C', 'build', 'run'], '/repo/src')
+    expect(relative.groupFlags).toEqual({ '-C': '/repo/src/build' })
+    const absolute = walk('tool', spec, ['-C', '/other', 'run'], '/repo/src')
+    expect(absolute.groupFlags).toEqual({ '-C': '/other' })
+  })
+
+  it('lands a default as the working directory', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ short: '-C', type: 'path', default: '.' })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    expect(walk('tool', spec, ['run'], '/repo/src').groupFlags).toEqual({ '-C': '/repo/src' })
+  })
+
+  it('resolves every value of a repeated option', () => {
+    const spec = new CLISpec({
+      name: 'tool',
+      options: [new Option({ long: '--dir', type: 'path', multiple: true })],
+      subcommands: [new CLISpec({ name: 'run', fn: verb })],
+    })
+    const result = walk('tool', spec, ['--dir', 'a', '--dir', '/b', 'run'], '/w')
+    expect(result.groupFlags).toEqual({ '--dir': ['/w/a', '/b'] })
+  })
+})

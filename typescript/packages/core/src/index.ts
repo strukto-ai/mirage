@@ -650,6 +650,7 @@ export {
   type WalkFlagBag,
   WalkResult,
   type WalkResultInit,
+  UsageStyle,
 } from './commands/cli/types.ts'
 export { cliSpecFor, registerCliSpec, unregisterCliSpec } from './commands/cli/specs.ts'
 export { GWS } from './commands/cli/builtin/gws/index.ts'
@@ -657,6 +658,7 @@ export { SLACK } from './commands/cli/builtin/slack/index.ts'
 export { DISCORD } from './commands/cli/builtin/discord/index.ts'
 export { NTN } from './commands/cli/builtin/ntn/index.ts'
 export { LINEAR } from './commands/cli/builtin/linear/index.ts'
+export { GIT } from './commands/cli/builtin/git/index.ts'
 export { nodeHelp, walk } from './commands/cli/walk.ts'
 export { CLIRegistry } from './workspace/cli/registry.ts'
 export type { CLIInstall } from './workspace/cli/types.ts'

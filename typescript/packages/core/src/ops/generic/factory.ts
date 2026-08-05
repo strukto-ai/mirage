@@ -15,6 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { extractWriteData } from '../write_args.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
 import type { PathSpec } from '../../types.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,6 +31,13 @@ type OpCoreFn = (...args: any[]) => unknown
 export interface OpsTable<A extends Accessor = Accessor> {
   readdir: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
   readBytes: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => Promise<Uint8Array>
+  readRange?: (
+    accessor: A,
+    path: PathSpec,
+    index: OpKwargs['index'],
+    offset: number,
+    size: number | null,
+  ) => Promise<Uint8Array>
   stat: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
   write?: OpCoreFn
   mkdir?: OpCoreFn
@@ -116,9 +124,27 @@ export function makeGenericOps<A extends Accessor>(
   const pickIndex = (kwargs: OpKwargs): OpKwargs['index'] =>
     options.forwardIndex === false ? undefined : kwargs.index
 
+  // A backend that can fetch a range natively does so, which is the whole
+  // point on an object store: one ranged GET instead of the whole file. Every
+  // other backend falls back to reading and slicing, which is the same answer
+  // at the same cost as before, and is the only meaningful behavior for a
+  // backend that renders its content rather than storing it, since there is no
+  // remote range to ask for. A zero-length read is answered here rather than
+  // sent anywhere: no store can express an empty range, and the answer is known.
   emit(
     'read',
-    (accessor, path, _args, kwargs) => table.readBytes(asA(accessor), path, pickIndex(kwargs)),
+    async (accessor, path, _args, kwargs) => {
+      const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
+      const size = typeof kwargs.size === 'number' ? kwargs.size : null
+      if (size === 0) return new Uint8Array(0)
+      const whole = offset === 0 && size === null
+      const native = table.readRange
+      if (native !== undefined && !whole) {
+        return native(asA(accessor), path, pickIndex(kwargs), offset, size)
+      }
+      const data = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
+      return whole ? data : sliceWindow(data, offset, size)
+    },
     false,
   )
   emit(

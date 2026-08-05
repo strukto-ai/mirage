@@ -22,6 +22,12 @@ export type StatOverlay = (path: string, stat: FileStat) => FileStat
 // whether a walk is possible at all.
 export type StatPath = (path: string) => Promise<FileStat | null>
 
+// The mount prefix serving a virtual path. A mount boundary is a filesystem
+// boundary, which is where git stops looking for a repository
+// (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an unrelated
+// backend.
+export type MountRoot = (path: string) => string
+
 // The symlink facts a command may consult, as one injected object.
 //
 // Symlinks live in the workspace namespace and no backend can see them,

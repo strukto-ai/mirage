@@ -23,6 +23,7 @@ from mirage.core.box.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.ranges import range_header
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,21 @@ async def read(
     accessor: BoxAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
+    offset: int = 0,
+    size: int | None = None,
 ) -> bytes:
+    """Read a file, optionally only a byte range of it.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, consulted for the file id.
+        offset (int): first byte to read.
+        size (int | None): how many bytes, or None for the rest.
+    """
     entry = await _resolve_entry(accessor, path, index)
-    return await download_file(accessor.token_manager, entry.id)
+    return await download_file(accessor.token_manager, entry.id,
+                               range_header(offset, size))
 
 
 async def stream(

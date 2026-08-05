@@ -14,6 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
+import { isMissingPath } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty, quietMatch } from '../../../io/stream.ts'
@@ -50,6 +51,7 @@ interface FlagSet {
   filesOnly: boolean
   wholeWord: boolean
   fixedString: boolean
+  basicRegexp: boolean
   onlyMatching: boolean
   maxCount: number | null
   quiet: boolean
@@ -73,6 +75,9 @@ function parseFlags(flags: Record<string, string | boolean | number | string[]>)
     filesOnly: flags.args_l === true || flags.l === true,
     wholeWord: flags.w === true,
     fixedString: flags.F === true,
+    // grep reads a basic expression unless -E says otherwise; -G asks for the
+    // default explicitly.
+    basicRegexp: flags.E !== true,
     onlyMatching: flags.o === true,
     maxCount: toInt(flags.m),
     quiet: flags.q === true,
@@ -108,7 +113,19 @@ function filesOnlyOpts(f: FlagSet, recursive: boolean): GrepFilesOnlyOptions {
     onlyMatching: f.onlyMatching,
     maxCount: f.maxCount,
     wholeWord: f.wholeWord,
+    basic: f.basicRegexp,
   }
+}
+
+// GNU grep's exit status. An operand grep could not search is exit 2, and it
+// outranks a match: GNU prints the lines it did find and still exits 2. The one
+// exception is -q, documented as exiting zero when a match is found "even if an
+// error was detected". Everything else is the familiar 0 for a match, 1 for
+// none.
+function exitCodeFor(matched: boolean, failed: boolean, quiet: boolean): number {
+  if (matched && quiet) return 0
+  if (failed) return 2
+  return matched ? 0 : 1
 }
 
 export async function grepGeneric(
@@ -170,32 +187,22 @@ export async function grepGeneric(
         for (const h of respellRaw(hits, p.virtual, p.rawPath)) results.push(h)
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
-      if (f.quiet)
+      // Under -c a result is a count, and a zero count is not a match, so
+      // emptiness alone cannot decide the exit status.
+      const hit = results.length > 0 && (!f.countOnly || countRecordsHaveMatches(results))
+      const code = exitCodeFor(hit, warnings.length > 0, f.quiet)
+      if (f.quiet || results.length === 0)
         return [
           new Uint8Array(0),
-          new IOResult({
-            exitCode: results.length > 0 ? 0 : 1,
-            ...(stderr !== undefined ? { stderr } : {}),
-          }),
+          new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
-      if (results.length === 0)
-        return [
-          new Uint8Array(0),
-          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
-        ]
-      // A failed operand fails the command (deliberate divergence: GNU
-      // grep uses exit 2 for errors, mirage flattens fs errors to 1);
-      // -q above keeps GNU's match-wins rule.
       return [
         ENC.encode(results.join('\n') + '\n'),
-        new IOResult({
-          exitCode: warnings.length > 0 ? 1 : 0,
-          ...(stderr !== undefined ? { stderr } : {}),
-        }),
+        new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
       ]
     }
 
-    const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
+    const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord, f.basicRegexp)
 
     if (recursive) {
       // OPTIMIZATION (see #207): this buffers every match into allResults and returns it
@@ -207,7 +214,14 @@ export async function grepGeneric(
       const warnings: string[] = []
       const allResults: string[] = []
       for (const p of paths) {
-        const s = await statFn(p.virtual)
+        let s: FileStat
+        try {
+          s = await statFn(p.virtual)
+        } catch (err) {
+          if (!isMissingPath(err)) throw err
+          warnings.push(`${name}: ${p.rawPath}: No such file or directory`)
+          continue
+        }
         if (s.type === FileType.DIRECTORY) {
           const res = await grepRecursive(
             readdirFn,
@@ -233,25 +247,15 @@ export async function grepGeneric(
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
       const matched = allResults.length > 0 && (!f.countOnly || countRecordsHaveMatches(allResults))
-      if (f.quiet)
+      const code = exitCodeFor(matched, warnings.length > 0, f.quiet)
+      if (f.quiet || allResults.length === 0)
         return [
           new Uint8Array(0),
-          new IOResult({
-            exitCode: matched ? 0 : 1,
-            ...(stderr !== undefined ? { stderr } : {}),
-          }),
-        ]
-      if (allResults.length === 0)
-        return [
-          new Uint8Array(0),
-          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
+          new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
       return [
         ENC.encode(allResults.join('\n') + '\n'),
-        new IOResult({
-          exitCode: matched && warnings.length === 0 ? 0 : 1,
-          ...(stderr !== undefined ? { stderr } : {}),
-        }),
+        new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
       ]
     }
 
@@ -263,11 +267,9 @@ export async function grepGeneric(
         try {
           s = await statFn(p.virtual)
         } catch (err) {
-          if ((err as { code?: string }).code === 'ENOENT') {
-            multiWarnings.push(`${name}: ${p.rawPath}: No such file or directory`)
-            continue
-          }
-          throw err
+          if (!isMissingPath(err)) throw err
+          multiWarnings.push(`${name}: ${p.rawPath}: No such file or directory`)
+          continue
         }
         if (s.type === FileType.DIRECTORY) {
           multiWarnings.push(`${name}: ${p.rawPath}: Is a directory`)
@@ -286,19 +288,12 @@ export async function grepGeneric(
         multiWarnings.length > 0 ? ENC.encode(multiWarnings.join('\n') + '\n') : undefined
       const multiMatched =
         allResults.length > 0 && (!f.countOnly || countRecordsHaveMatches(allResults))
-      if (f.quiet)
+      const multiCode = exitCodeFor(multiMatched, multiWarnings.length > 0, f.quiet)
+      if (f.quiet || allResults.length === 0)
         return [
           new Uint8Array(0),
           new IOResult({
-            exitCode: multiMatched ? 0 : 1,
-            ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
-          }),
-        ]
-      if (allResults.length === 0)
-        return [
-          new Uint8Array(0),
-          new IOResult({
-            exitCode: 1,
+            exitCode: multiCode,
             ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
           }),
         ]
@@ -306,18 +301,33 @@ export async function grepGeneric(
       return [
         out,
         new IOResult({
-          exitCode: multiMatched && multiWarnings.length === 0 ? 0 : 1,
+          exitCode: multiCode,
           ...(multiStderr !== undefined ? { stderr: multiStderr } : {}),
         }),
       ]
     }
 
-    const firstStat = await stat(first)
+    // An unreadable operand is grep's own error to report, not the
+    // dispatcher's: the shared handler flattens every filesystem error to
+    // exit 1, which is right for cat and wrong for grep.
+    let firstStat: FileStat
+    try {
+      firstStat = await stat(first)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      return [
+        new Uint8Array(0),
+        new IOResult({
+          exitCode: 2,
+          stderr: ENC.encode(`${name}: ${first.rawPath}: No such file or directory\n`),
+        }),
+      ]
+    }
     if (firstStat.type === FileType.DIRECTORY) {
       return [
         new Uint8Array(0),
         new IOResult({
-          exitCode: 1,
+          exitCode: 2,
           stderr: ENC.encode(`${name}: ${first.rawPath}: Is a directory\n`),
         }),
       ]
@@ -345,7 +355,7 @@ export async function grepGeneric(
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
   }
-  const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
+  const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord, f.basicRegexp)
   const matched = grepStream(source, pat, f)
   if (f.quiet) {
     const io = new IOResult({ exitCode: 1 })

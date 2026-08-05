@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { leafRefusal } from '../../../commands/cli/refusal.ts'
+import type { CommandDispatch } from '../../../commands/config.ts'
+import type { MountRoot, StatPath } from '../../../ops/types.ts'
 import { CLISpec } from '../../../commands/cli/types.ts'
 import { walk } from '../../../commands/cli/walk.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
@@ -41,6 +44,19 @@ function withInjectedHelp(leaf: CLISpec): CLISpec {
 }
 
 /**
+ * Workspace facts the dispatcher can offer but most CLIs do not want: an API
+ * client needs no filesystem, while `git` is nothing but one. Forwarded whole
+ * onto the leaf's opts bag, so a leaf that does not read them ignores them and
+ * there is no allowlist of filesystem-aware CLIs to keep in step (the same rule
+ * `links` follows for mount commands).
+ */
+export interface CliFacts {
+  dispatch?: CommandDispatch
+  statPath?: StatPath
+  mountRoot?: MountRoot
+}
+
+/**
  * Execute a line whose head word is an installed CLI.
  *
  * Dispatch is by NAME: the install resolves the program tree and the
@@ -57,6 +73,7 @@ export async function handleCli(
   parts: readonly (string | PathSpec)[],
   session: Session,
   stdin: ByteSource | null = null,
+  facts: CliFacts = {},
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   // Words re-enter string space as typed (wordText): the walk owns
   // interpretation, so a quoted "Lunch?" must not arrive as the
@@ -66,7 +83,7 @@ export async function handleCli(
   const cmdStr = words.join(' ')
   const argv = words.slice(1)
 
-  const result = walk(install.name, install.spec, argv)
+  const result = walk(install.name, install.spec, argv, session.cwd)
   if (result.leaf === null) {
     const stderr = result.stream === 'stderr' ? result.output : new Uint8Array(0)
     const stdout = result.stream === 'stdout' ? result.output : null
@@ -100,14 +117,13 @@ export async function handleCli(
     parsed[11],
   )
   if (refusal !== null) {
-    // Leaf usage errors exit 2 (argparse), regardless of the
-    // USAGE_EXIT table: prog is an installed name, never a GNU tool
-    // with its own pinned exit.
-    const [msg] = refusal
+    // The dialect is the root's, not the leaf's: a program answers in one
+    // voice at every level.
+    const [msg, code] = leafRefusal(install.spec.usageStyle, refusal[0], parsed[4])
     return [
       null,
-      new IOResult({ exitCode: 2, stderr: msg }),
-      new ExecutionNode({ command: cmdStr, exitCode: 2, stderr: msg }),
+      new IOResult({ exitCode: code, stderr: msg }),
+      new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
     ]
   }
 
@@ -137,7 +153,7 @@ export async function handleCli(
   let io = new IOResult()
   try {
     const out = await runWithTimeout(
-      Promise.resolve(fn(install.config, paths, texts, { stdin, flags })),
+      Promise.resolve(fn(install.config, paths, texts, { stdin, flags, ...facts })),
       timeout,
       prog,
     )

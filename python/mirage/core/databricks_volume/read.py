@@ -23,6 +23,7 @@ from mirage.core.databricks_volume.path import backend_path
 from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.ranges import range_header
 
 
 def _read_response_bytes(response) -> bytes:
@@ -37,28 +38,16 @@ def _read_response_bytes(response) -> bytes:
     return bytes(contents)
 
 
-def _range_header(offset: int, size: int | None) -> str | None:
-    if offset < 0:
-        raise ValueError("offset must be non-negative")
-    if size is not None and size < 0:
-        raise ValueError("size must be non-negative")
-    if offset == 0 and size is None:
-        return None
-    if size is None:
-        return f"bytes={offset}-"
-    return f"bytes={offset}-{offset + size - 1}"
-
-
 def _download_bytes_sync(
     accessor: DatabricksVolumeAccessor,
     remote_path: str,
-    range_header: str | None,
+    window: str | None,
 ) -> bytes:
-    if range_header is None:
+    if window is None:
         return _read_response_bytes(accessor.files.download(remote_path))
     headers = {
         "Accept": "application/octet-stream",
-        "Range": range_header,
+        "Range": window,
     }
     cfg = getattr(accessor.client.api_client, "_cfg", None)
     workspace_id = getattr(cfg, "workspace_id", None)
@@ -98,7 +87,7 @@ async def read_bytes(
             _download_bytes_sync,
             accessor,
             remote_path,
-            _range_header(offset, size),
+            range_header(offset, size),
         )
     except Exception as exc:
         if is_not_found(exc):

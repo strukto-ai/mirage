@@ -104,7 +104,7 @@ async def test_read_file_versioned_pinned(gdrive_accessor):
         reset_revisions(token)
     assert data == b"pinned"
     pinned_read.assert_awaited_once_with(gdrive_accessor.token_manager, "f1",
-                                         "r1")
+                                         "r1", None)
     live_read.assert_not_awaited()
 
 

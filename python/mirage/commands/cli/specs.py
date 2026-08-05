@@ -26,6 +26,7 @@ CLI_SPECS: dict[str, CLISpec] = {}
 # they must not import until the name is actually requested.
 BUILTIN_CLI_SPECS: dict[str, str] = {
     "discord": "mirage.commands.cli.builtin.discord:DISCORD",
+    "git": "mirage.commands.cli.builtin.git:GIT",
     "gws": "mirage.commands.cli.builtin.gws:GWS",
     "himalaya": "mirage.commands.cli.builtin.himalaya:HIMALAYA",
     "linear": "mirage.commands.cli.builtin.linear:LINEAR",

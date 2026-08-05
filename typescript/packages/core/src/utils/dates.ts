@@ -31,3 +31,14 @@ export function isoToEpoch(iso: string): number {
   const text = /(Z|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`
   return Math.floor(Date.parse(text) / 1000)
 }
+
+// A date the user typed, as an epoch second, or null when it is not a date at
+// all. Mirrors Python's isoTimestamp: an offset-less stamp is read as UTC and
+// anything unparseable is null rather than NaN, so a caller can tell "not a
+// date" from "the epoch".
+export function isoTimestamp(value: string | null | undefined): number | null {
+  if (value === undefined || value === null || value === '') return null
+  const text = /(Z|[+-]\d\d:?\d\d)$/.test(value) ? value : `${value}Z`
+  const ms = Date.parse(text)
+  return Number.isNaN(ms) ? null : ms / 1000
+}

@@ -58,9 +58,11 @@ describe('disk streaming commands on missing files', () => {
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
-  it('grep pat /missing.txt returns exit=1', async () => {
+  // GNU grep exits 2 for an operand it could not search, unlike the read
+  // commands around it, which exit 1.
+  it('grep pat /missing.txt returns exit=2', async () => {
     const res = await ws.execute('grep foo /disk/missing.txt')
-    expect(res.exitCode).toBe(1)
+    expect(res.exitCode).toBe(2)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 

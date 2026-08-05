@@ -129,6 +129,15 @@ class CommandIO:
     is_mounted: OperationFn
     local: bool = True
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
+    # Fetch a byte range without pulling the whole object. Absent means
+    # the generic read fetches everything and slices, which is correct
+    # everywhere and is the only meaningful behavior for a backend that
+    # renders its content rather than storing it: there is no remote
+    # range to ask for when the bytes do not exist until we make them.
+    # Called as (accessor, path, index, offset, size), so most backends
+    # point it at their own read_bytes, which already takes the window;
+    # disk needs a separate function because its read_bytes does not.
+    read_range: OperationFn | None = None
     write: OperationFn | None = None
     exists: OperationFn | None = None
     mkdir: OperationFn | None = None

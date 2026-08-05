@@ -29,6 +29,9 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-w"),
             Option(short="-F"),
             Option(short="-E"),
+            # -G asks for the basic expressions grep already reads by
+            # default, so it is accepted and changes nothing.
+            Option(short="-G"),
             Option(short="-o"),
             Option(short="-q"),
             Option(short="-H"),
@@ -149,6 +152,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-e", type="str", multiple=True),
             Option(short="-f", type="path", multiple=True),
             Option(short="-E"),
+            Option(short="-G"),
             Option(short="-F"),
             Option(short="-H"),
             Option(short="-h"),

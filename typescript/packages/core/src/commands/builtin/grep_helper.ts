@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { breToRegExp } from '../../utils/bre.ts'
+import { isMissingPath } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
@@ -112,16 +114,32 @@ export function mergePatternList(
   return parts.join('\n')
 }
 
-function buildPatternStr(pattern: string, fixedString = false, wholeWord = false): string {
+// One pattern's regex source, in the syntax it was written in.
+function sourceOf(part: string, fixedString: boolean, basic: boolean): string {
+  if (fixedString) return escapeRegex(part)
+  return basic ? breToRegExp(part) : part
+}
+
+// Build a regex source string from a POSIX pattern list. `basic` says the
+// patterns are basic regular expressions, which grep reads by default and which
+// invert most of the RegExp operators; false leaves them alone, which is right
+// for -E and for rg's own dialect.
+function buildPatternStr(
+  pattern: string,
+  fixedString = false,
+  wholeWord = false,
+  basic = false,
+): string {
   const parts = pattern.split('\n')
   if (parts.length === 1) {
-    let patStr = fixedString ? escapeRegex(pattern) : pattern
+    let patStr = sourceOf(pattern, fixedString, basic)
     if (wholeWord) patStr = `\\b${patStr}\\b`
     return patStr
   }
   const subs: string[] = []
   for (const part of parts) {
-    let sub = fixedString ? escapeRegex(part) : `(?:${part})`
+    const source = sourceOf(part, fixedString, basic)
+    let sub = fixedString ? source : `(?:${source})`
     if (wholeWord) sub = `\\b${sub}\\b`
     subs.push(sub)
   }
@@ -133,8 +151,9 @@ export function compilePattern(
   ignoreCase = false,
   fixedString = false,
   wholeWord = false,
+  basic = false,
 ): RegExp {
-  return new RegExp(buildPatternStr(pattern, fixedString, wholeWord), ignoreCase ? 'i' : '')
+  return new RegExp(buildPatternStr(pattern, fixedString, wholeWord, basic), ignoreCase ? 'i' : '')
 }
 
 export function isRegexPattern(pattern: string, fixedString: boolean): boolean {
@@ -434,6 +453,7 @@ export interface GrepFilesOnlyOptions {
   onlyMatching: boolean
   maxCount: number | null
   wholeWord: boolean
+  basic: boolean
 }
 
 export async function grepRecursive(
@@ -508,6 +528,36 @@ export async function grepRecursive(
   return results
 }
 
+// Whether an operand names a directory, asked on both channels. A failed read
+// proves nothing on its own: a keyed store cannot read a directory and does not
+// call it missing either. Both channels are tried because on a prefix store a
+// directory is the set of keys under it rather than an object, so stat can miss
+// one that readdir lists happily.
+async function operandIsDirectory(
+  readdirFn: AsyncReaddirFn,
+  statFn: AsyncStatFn,
+  path: string,
+): Promise<boolean> {
+  try {
+    return (await statFn(path)).type === FileType.DIRECTORY
+  } catch {
+    // Fall through to the other channel.
+  }
+  try {
+    await readdirFn(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// GNU's stderr line for an operand grep could not search.
+function operandError(path: string, err: unknown, isDir: boolean): string {
+  if (isDir) return `grep: ${path}: Is a directory`
+  if (isMissingPath(err)) return `grep: ${path}: No such file or directory`
+  return `grep: ${path}: ${err instanceof Error ? err.message : String(err)}`
+}
+
 export async function grepFilesOnly(
   readdirFn: AsyncReaddirFn,
   statFn: AsyncStatFn,
@@ -517,7 +567,13 @@ export async function grepFilesOnly(
   opts: GrepFilesOnlyOptions,
   warnings: string[] | null = null,
 ): Promise<string[]> {
-  const compiled = compilePattern(pattern, opts.ignoreCase, opts.fixedString, opts.wholeWord)
+  const compiled = compilePattern(
+    pattern,
+    opts.ignoreCase,
+    opts.fixedString,
+    opts.wholeWord,
+    opts.basic,
+  )
   if (opts.recursive) {
     // GNU only walks directory operands; a file operand under -r takes the
     // plain single-file scan (python grep_files_only parity). Stat failures
@@ -550,23 +606,12 @@ export async function grepFilesOnly(
     if (opts.countOnly) return [String(count)]
     return count > 0 ? [path] : []
   } catch (err) {
-    if (warnings !== null)
-      warnings.push(`grep: ${path}: ${err instanceof Error ? err.message : String(err)}`)
-  }
-  try {
-    const s = await statFn(path)
-    if (s.type === FileType.DIRECTORY) {
-      return await grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
-    }
-  } catch (err) {
-    if (warnings !== null)
-      warnings.push(`grep: ${path}: ${err instanceof Error ? err.message : String(err)}`)
-    try {
-      await readdirFn(path)
-      return await grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
-    } catch (err2) {
-      if (warnings !== null)
-        warnings.push(`grep: ${path}: ${err2 instanceof Error ? err2.message : String(err2)}`)
+    // The read failed. GNU names a directory operand and moves on without
+    // descending into it; only -r walks one, and that branch returned above.
+    // Walking here would make -l alone behave like -rl.
+    if (warnings !== null) {
+      const isDir = await operandIsDirectory(readdirFn, statFn, path)
+      warnings.push(operandError(path, err, isDir))
     }
   }
   return []

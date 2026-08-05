@@ -37,6 +37,9 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-w' }),
       new Option({ short: '-F' }),
       new Option({ short: '-E' }),
+      // -G asks for the basic expressions grep already reads by default, so it
+      // is accepted and changes nothing.
+      new Option({ short: '-G' }),
       new Option({ short: '-o' }),
       new Option({ short: '-q' }),
       new Option({ short: '-H' }),
@@ -135,6 +138,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-e', type: 'str', multiple: true }),
       new Option({ short: '-f', type: 'path', multiple: true }),
       new Option({ short: '-E' }),
+      new Option({ short: '-G' }),
       new Option({ short: '-F' }),
       new Option({ short: '-H' }),
       new Option({ short: '-h' }),

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from typing import Any
@@ -20,8 +19,8 @@ from typing import Any
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3._client import _client_kwargs, _key, async_session
-from mirage.core.s3.read import _fp_rev_from_response
-from mirage.observe.context import record, record_stream, revision_for
+from mirage.core.s3.read import _fp_rev_from_response, read_bytes
+from mirage.observe.context import record_stream, revision_for
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -86,41 +85,15 @@ async def read_stream(
 
 async def range_read(accessor: S3Accessor, path_spec: PathSpec, start: int,
                      end: int) -> bytes:
-    """Read a byte range from an S3 object.
+    """Read a byte range, in the resource API's end-exclusive spelling.
 
     Args:
         accessor (S3Accessor): S3 accessor.
         path_spec (PathSpec): Object path_spec.
-        start (int): Start byte offset.
-        end (int): End byte offset (exclusive).
+        start (int): first byte to read.
+        end (int): one past the last byte to read.
     """
-    virtual = path_spec.virtual
-    path = path_spec.mount_path
-    config = accessor.config
-    start_ms = int(time.monotonic() * 1000)
-    session = async_session(config)
-    async with session.client(**_client_kwargs(config)) as client:
-        kwargs: dict[str, Any] = {
-            "Bucket": config.bucket,
-            "Key": _key(path, config),
-            "Range": f"bytes={start}-{end - 1}",
-        }
-        pinned_revision = revision_for(virtual)
-        if pinned_revision is not None:
-            kwargs["VersionId"] = pinned_revision
-        try:
-            response = await client.get_object(**kwargs)
-        except Exception as exc:
-            if _is_not_found(exc):
-                raise enoent(virtual) from exc
-            raise
-        data = await response["Body"].read()
-        fingerprint, revision = _fp_rev_from_response(response)
-        record("read",
-               path,
-               "s3",
-               len(data),
-               start_ms,
-               fingerprint=fingerprint,
-               revision=revision)
-        return data
+    return await read_bytes(accessor,
+                            path_spec,
+                            offset=start,
+                            size=end - start)

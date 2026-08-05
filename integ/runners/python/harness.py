@@ -14,6 +14,8 @@
 
 import json
 import os
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,19 +54,48 @@ def load_cases(root: Path) -> list[dict]:
     return cases
 
 
+def build_fixture(
+        base: Path) -> tuple[Path, tempfile.TemporaryDirectory
+                             | None]:
+    """Where a fixture's files are, building them first if it says to.
+
+    A fixture holding a ``build.sh`` generates its own contents into a
+    temporary directory instead of shipping them. Only git needs this
+    so far, and it needs it absolutely: a repository cannot hold another
+    repository's ``.git``, because ``git add`` silently refuses any path
+    with a ``.git`` component, so a checked-in tree would look staged
+    and never be. Generating also keeps the fixture readable as a script
+    rather than as zlib blobs.
+
+    Args:
+        base (Path): the fixture directory under integ/fixtures.
+    """
+    script = base / "build.sh"
+    if not script.is_file():
+        return base, None
+    holder = tempfile.TemporaryDirectory(prefix="integ-fixture-")
+    built = Path(holder.name) / "root"
+    subprocess.run([str(script), str(built)], check=True)
+    return built, holder
+
+
 async def seed_fixture(ws, fixture: str | None, mount_path: str,
                        root: Path) -> None:
     if not fixture:
         return
-    base = root / "fixtures" / fixture
-    for src in sorted(base.rglob("*")):
-        if not src.is_file():
-            continue
-        rel = src.relative_to(base).as_posix()
-        dest = f"{mount_path.rstrip('/')}/{rel}"
-        parent = dest.rsplit("/", 1)[0]
-        await ws.execute(f"mkdir -p {parent}")
-        await ws.execute(f"tee {dest} > /dev/null", stdin=src.read_bytes())
+    base, holder = build_fixture(root / "fixtures" / fixture)
+    try:
+        for src in sorted(base.rglob("*")):
+            if not src.is_file():
+                continue
+            rel = src.relative_to(base).as_posix()
+            dest = f"{mount_path.rstrip('/')}/{rel}"
+            parent = dest.rsplit("/", 1)[0]
+            await ws.execute(f"mkdir -p {parent}")
+            await ws.execute(f"tee {dest} > /dev/null", stdin=src.read_bytes())
+    finally:
+        if holder is not None:
+            holder.cleanup()
 
 
 async def seed_mount_root(ws, mount_path: str) -> None:

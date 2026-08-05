@@ -50,6 +50,8 @@ import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.t
 import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
+import { pathStat } from './builtins/links.ts'
+import { mountRootOf } from './command/run.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -122,9 +124,15 @@ export async function handleCommand(
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
   // and above every mount branch (a CLI consults no mount).
+  // A CLI that works on files rather than an API (`git`) reaches the mount
+  // through the facts below; the rest never read them.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
-    return handleCli(cliInstall, parts, session, stdin)
+    return handleCli(cliInstall, parts, session, stdin, {
+      dispatch,
+      statPath: (path: string) => pathStat(dispatch, path, null),
+      mountRoot: (path: string) => mountRootOf(registry, path),
+    })
   }
 
   if (cmdName in CWD_DEFAULT_RAW) {

@@ -173,6 +173,7 @@ async def test_grep_files_only_recursive_scans_file_operands():
         only_matching=False,
         max_count=None,
         whole_word=False,
+        basic=True,
         warnings=[],
     )
     assert hits == ["/data/notes.txt"]

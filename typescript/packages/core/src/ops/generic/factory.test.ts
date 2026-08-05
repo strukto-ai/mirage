@@ -190,3 +190,66 @@ describe('makeGenericOps', () => {
     )
   })
 })
+
+const readOp = (table: OpsTable): ReturnType<typeof makeGenericOps>[number] => {
+  const op = makeGenericOps('x', table).find((o) => o.name === 'read')
+  if (op === undefined) throw new Error('no read op emitted')
+  return op
+}
+
+const DATA = new TextEncoder().encode('data')
+const bytes = (table: OpsTable): OpsTable =>
+  Object.assign(table, { readBytes: vi.fn(() => Promise.resolve(DATA)) })
+
+describe('the read op and byte ranges', () => {
+  it('never asks for a range on a whole-file read', async () => {
+    const table = bytes(makeTable())
+    expect(await readOp(table).fn(ACCESSOR, PATH, [], {})).toEqual(DATA)
+    expect(table.readBytes).toHaveBeenCalledOnce()
+  })
+
+  it('reads and slices for a backend without ranges', async () => {
+    // Correct everywhere, and the only meaningful answer for a backend that
+    // renders its bytes rather than storing them.
+    const table = bytes(makeTable())
+    const got = await readOp(table).fn(ACCESSOR, PATH, [], { offset: 1, size: 2 })
+    expect(got).toEqual(new TextEncoder().encode('at'))
+  })
+
+  it('runs to the end when slicing without a size', async () => {
+    const table = bytes(makeTable())
+    const got = await readOp(table).fn(ACCESSOR, PATH, [], { offset: 2 })
+    expect(got).toEqual(new TextEncoder().encode('ta'))
+  })
+
+  it('prefers a native range and skips the whole read', async () => {
+    // The point of the whole change: on an object store this is one ranged GET
+    // rather than fetching the object and throwing most away.
+    const native = vi.fn(() => Promise.resolve(new TextEncoder().encode('ng')))
+    const table = bytes(makeTable({ readRange: native }))
+    const got = await readOp(table).fn(ACCESSOR, PATH, [], { offset: 1, size: 2 })
+    expect(got).toEqual(new TextEncoder().encode('ng'))
+    expect(native).toHaveBeenCalledOnce()
+    expect(table.readBytes).not.toHaveBeenCalled()
+  })
+
+  it('bypasses a native range for a whole-file read', async () => {
+    const native = vi.fn(() => Promise.resolve(new TextEncoder().encode('ng')))
+    const table = bytes(makeTable({ readRange: native }))
+    expect(await readOp(table).fn(ACCESSOR, PATH, [], {})).toEqual(DATA)
+    expect(native).not.toHaveBeenCalled()
+  })
+
+  it('asks the backend nothing for a zero-length read', async () => {
+    // No store can express an empty range, and the answer is known, so it is
+    // served here rather than turned into a request that would either fetch the
+    // whole object or be refused.
+    const native = vi.fn(() => Promise.resolve(new TextEncoder().encode('ng')))
+    const table = bytes(makeTable({ readRange: native }))
+    expect(await readOp(table).fn(ACCESSOR, PATH, [], { offset: 1, size: 0 })).toEqual(
+      new Uint8Array(0),
+    )
+    expect(native).not.toHaveBeenCalled()
+    expect(table.readBytes).not.toHaveBeenCalled()
+  })
+})

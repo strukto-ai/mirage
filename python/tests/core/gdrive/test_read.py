@@ -88,6 +88,59 @@ async def test_read_file(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_a_ranged_read_of_a_binary_file_asks_drive_for_the_range(
+        accessor, index):
+    await index.put(
+        "/report.pdf",
+        IndexEntry(id="file123",
+                   name="report",
+                   resource_type="gdrive/file",
+                   vfs_name="report.pdf"))
+    with patch(
+            "mirage.core.gdrive.read.download_file",
+            new_callable=AsyncMock,
+            return_value=b"tent",
+    ) as mock_download:
+        result = await read(accessor,
+                            PathSpec(resource_path="report.pdf",
+                                     virtual="/report.pdf",
+                                     directory="/report.pdf"),
+                            index,
+                            offset=3,
+                            size=4)
+    assert result == b"tent"
+    mock_download.assert_awaited_once_with(accessor.token_manager, "file123",
+                                           "bytes=3-6")
+
+
+@pytest.mark.asyncio
+async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
+        accessor, index):
+    # A google-apps file has no bytes on Drive to range over: the JSON
+    # exists only once we build it, so the window comes off the result.
+    await index.put(
+        "/notes.gdoc",
+        IndexEntry(id="doc1",
+                   name="notes",
+                   resource_type="gdrive/gdoc",
+                   vfs_name="notes.gdoc"))
+    with patch(
+            "mirage.core.gdrive.read.read_doc",
+            new_callable=AsyncMock,
+            return_value=b'{"title": "notes"}',
+    ) as mock_doc:
+        result = await read(accessor,
+                            PathSpec(resource_path="notes.gdoc",
+                                     virtual="/notes.gdoc",
+                                     directory="/notes.gdoc"),
+                            index,
+                            offset=2,
+                            size=5)
+    assert result == b"title"
+    mock_doc.assert_awaited_once_with(accessor.token_manager, "doc1")
+
+
+@pytest.mark.asyncio
 async def test_read_shared_drive_raises_is_a_directory(accessor, index):
     await index.put(
         "/Team Drive",

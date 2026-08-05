@@ -14,11 +14,32 @@
 
 import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
-import type { CommandFnResult } from '../config.ts'
+import type { CommandDispatch, CommandFnResult } from '../config.ts'
+import type { MountRoot, StatPath } from '../../ops/types.ts'
 import { compileSpec } from '../spec/compile.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 
 import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
+
+/**
+ * Which program's usage-error dialect a CLI speaks.
+ *
+ * An installed CLI is not a GNU tool, so a leaf that refuses an option it does
+ * not declare answers in argparse's shape and exit code by default. A CLI that
+ * mimics an existing program has to answer in that program's shape instead:
+ * mirage implements a subset of git, so most of git's real options arrive
+ * undeclared, and an agent that reads the refusal should see what git would
+ * have said rather than learn that it is talking to a reimplementation.
+ *
+ * Covers the unknown-option refusal and the exit code, which is what an
+ * undeclared flag produces. Every other usage error (a missing value, an
+ * unparseable int) stays in argparse's shape for both styles, because those
+ * only happen for options a CLI does declare.
+ */
+export enum UsageStyle {
+  ARGPARSE = 'argparse',
+  GIT = 'git',
+}
 
 /**
  * The opts bag a CLI leaf receives: the parsed flags (group flags
@@ -29,6 +50,28 @@ import { CommandSpec, type CommandSpecInit } from '../spec/types.ts'
 export interface CLIVerbOpts {
   stdin: ByteSource | null
   flags: Record<string, string | boolean | number | string[]>
+  /**
+   * The workspace op dispatcher. A CLI routes by name rather than by operand,
+   * so nothing hands it an accessor; a verb that works over a mount (git over a
+   * checkout) reaches one through this instead. Absent only when a leaf is
+   * called directly in a unit test.
+   */
+  dispatch?: CommandDispatch
+  /**
+   * Dispatcher-backed stat of one path, asking both channels a backend can
+   * answer on. On a prefix store a directory is the set of keys under it rather
+   * than an object of its own, so a point lookup misses a `.git` that readdir
+   * reports; discovery needs the same two-channel answer `find` asks about its
+   * own start point.
+   */
+  statPath?: StatPath
+  /**
+   * The mount prefix serving a virtual path. A mount boundary is a filesystem
+   * boundary, which is where git stops looking for a repository
+   * (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an unrelated
+   * backend.
+   */
+  mountRoot?: MountRoot
 }
 
 /**
@@ -52,6 +95,7 @@ export interface CLISpecInit extends CommandSpecInit {
   write?: boolean
   limit?: Limit | null
   configModel?: CLIConfigModel | null
+  usageStyle?: UsageStyle
 }
 
 /**
@@ -86,6 +130,13 @@ export class CLISpec extends CommandSpec {
   readonly write: boolean
   readonly limit: Limit | null
   readonly configModel: CLIConfigModel | null
+  /**
+   * Root only. How a leaf refuses an option it does not declare. Defaults to
+   * argparse, which is right for a CLI mirage invented; a CLI that mimics an
+   * existing program sets the style that program uses, so an agent reading the
+   * message and the exit code sees what it would from the real one.
+   */
+  readonly usageStyle: UsageStyle
 
   constructor(init: CLISpecInit) {
     super(init)
@@ -96,6 +147,7 @@ export class CLISpec extends CommandSpec {
     this.write = init.write ?? false
     this.limit = init.limit ?? null
     this.configModel = init.configModel ?? null
+    this.usageStyle = init.usageStyle ?? UsageStyle.ARGPARSE
     if (this.name === '' || /\s/.test(this.name)) {
       throw new Error(`cli name '${this.name}' must be a single non-empty word`)
     }

@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -175,6 +177,26 @@ export function walkFiles(base: string): string[] {
   return out
 }
 
+/**
+ * Where a fixture's files are, building them first if it says to.
+ *
+ * A fixture holding a `build.sh` generates its own contents into a temporary
+ * directory instead of shipping them. Only git needs this so far, and it needs
+ * it absolutely: a repository cannot hold another repository's `.git`, because
+ * `git add` silently refuses any path with a `.git` component, so a checked-in
+ * tree would look staged and never be. Generating also keeps the fixture
+ * readable as a script rather than as zlib blobs.
+ *
+ * The caller owns the temporary directory when one is returned.
+ */
+export function buildFixture(base: string): [string, string | null] {
+  const script = join(base, 'build.sh')
+  if (!existsSync(script)) return [base, null]
+  const built = mkdtempSync(join(tmpdir(), 'mirage-integ-fixture-'))
+  execFileSync('bash', [script, join(built, 'repo')], { stdio: 'ignore' })
+  return [join(built, 'repo'), built]
+}
+
 export async function seedFixture(
   ws: ExecWorkspace,
   fixture: string | undefined,
@@ -182,7 +204,15 @@ export async function seedFixture(
   root: string,
 ): Promise<void> {
   if (!fixture) return
-  const base = join(root, 'fixtures', fixture)
+  const [base, built] = buildFixture(join(root, 'fixtures', fixture))
+  try {
+    await seedFrom(ws, base, mountPath)
+  } finally {
+    if (built !== null) rmSync(built, { recursive: true, force: true })
+  }
+}
+
+async function seedFrom(ws: ExecWorkspace, base: string, mountPath: string): Promise<void> {
   for (const file of walkFiles(base)) {
     const rel = relative(base, file).split(sep).join('/')
     const dest = `${mountPath.replace(/\/+$/, '')}/${rel}`

@@ -29,7 +29,7 @@
       ],
       "command": "grep x /data/missing.txt",
       "expect": {
-        "exit": 1,
+        "exit": 2,
         "stdout": "",
         "stderr": "grep: /data/missing.txt: No such file or directory\n"
       }
@@ -63,7 +63,7 @@
       ],
       "command": "(cd /data && grep -r x missing)",
       "expect": {
-        "exit": 1,
+        "exit": 2,
         "stdout": "",
         "stderr": "grep: missing: No such file or directory\n"
       }

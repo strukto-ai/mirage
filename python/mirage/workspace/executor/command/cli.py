@@ -17,6 +17,7 @@ from dataclasses import replace
 from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
                                                  maybe_with_timeout,
                                                  run_with_timeout)
+from mirage.commands.cli.refusal import leaf_refusal
 from mirage.commands.cli.walk import walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
@@ -25,13 +26,15 @@ from mirage.commands.spec.help import render_help
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.ops.types import MountRoot, StatPath
 from mirage.policy import resolve_limit
 from mirage.types import PathSpec, Producer, word_text
+from mirage.utils.params import accepts_kwarg
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.session import Session
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import DispatchFn, ExecutionNode
 
 
 async def handle_cli(
@@ -39,6 +42,9 @@ async def handle_cli(
     parts: list[str | PathSpec],
     session: Session,
     stdin: ByteSource | None = None,
+    dispatch: DispatchFn | None = None,
+    stat_path: StatPath | None = None,
+    mount_root: MountRoot | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a line whose head word is an installed CLI.
 
@@ -59,6 +65,14 @@ async def handle_cli(
         session (Session): shell session (cwd for path resolution).
         stdin (ByteSource | None): stdin data, injected as a kwarg the
             way mount command handlers receive it.
+        dispatch (DispatchFn | None): workspace op dispatcher, for a CLI
+            whose subject is files rather than an API.
+        stat_path (StatPath | None): dispatcher-backed stat asking both
+            channels a backend can answer on. Offered, not forced: a
+            leaf opts in by naming the parameter (see accepts_kwarg),
+            exactly as a mount command does.
+        mount_root (MountRoot | None): the mount prefix serving a path,
+            offered on the same terms.
     """
     # Words re-enter string space as typed (word_text): the walk owns
     # interpretation, so a quoted "Lunch?" must not arrive as the
@@ -68,7 +82,7 @@ async def handle_cli(
     argv = [word_text(p) for p in parts[1:]]
     stdout: ByteSource | None
 
-    result = walk(install.name, install.spec, argv)
+    result = walk(install.name, install.spec, argv, session.cwd)
     if result.leaf is None:
         stderr = result.output if result.stream == "stderr" else b""
         stdout = result.output if result.stream == "stdout" else None
@@ -94,12 +108,13 @@ async def handle_cli(
 
     refusal = option_error(prog, parsed)
     if refusal is not None:
-        msg, _code = refusal
-        # Leaf usage errors exit 2 (argparse), regardless of the
-        # USAGE_EXIT table: prog is an installed name, never a GNU tool
-        # with its own pinned exit.
-        refusal_io = IOResult(exit_code=2, stderr=msg)
-        refusal_node = ExecutionNode(command=cmd_str, exit_code=2, stderr=msg)
+        # The dialect is the root's, not the leaf's: a program answers
+        # in one voice at every level.
+        msg, code = leaf_refusal(install.spec.usage_style, refusal[0], parsed)
+        refusal_io = IOResult(exit_code=code, stderr=msg)
+        refusal_node = ExecutionNode(command=cmd_str,
+                                     exit_code=code,
+                                     stderr=msg)
         return None, refusal_io, refusal_node
 
     # Group flags merge into the one bag: ancestor/descendant collisions
@@ -119,6 +134,22 @@ async def handle_cli(
         # validate_cli guarantees fn XOR subcommands and walk only
         # returns fn-bearing nodes as leaf; reaching this is a bug.
         raise RuntimeError(f"walk returned a leaf without fn for {prog!r}")
+    # Workspace facts the dispatcher can offer but most CLIs do not
+    # want: an API client needs no filesystem, while `git` is nothing
+    # but one. A leaf opts in by naming the parameter, the same rule
+    # execute_cmd applies to mount commands, so a bare **flags stays an
+    # opaque bag of the user's typed flags rather than a place live
+    # workspace objects turn up.
+    offered = {
+        "dispatch": dispatch,
+        "stat_path": stat_path,
+        "mount_root": mount_root,
+    }
+    kw.update({
+        key: value
+        for key, value in offered.items()
+        if value is not None and accepts_kwarg(fn, key)
+    })
     # The leaf's declared limit bounds the handler body and its
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own

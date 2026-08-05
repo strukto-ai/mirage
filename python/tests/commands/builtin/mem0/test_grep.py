@@ -76,5 +76,5 @@ async def test_grep_bare_directory_is_a_directory():
     source, io = await _command(res, "grep")(res.accessor, [p],
                                              "bananas",
                                              index=res.index)
-    assert io.exit_code == 1
+    assert io.exit_code == 2
     assert b"Is a directory" in (io.stderr or b"")

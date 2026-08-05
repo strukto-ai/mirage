@@ -17,6 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
+from mirage.utils.ranges import slice_window
 
 
 def _make_read(fn: OpFn) -> OpFn:
@@ -27,6 +28,44 @@ def _make_read(fn: OpFn) -> OpFn:
                    index: IndexCacheStore | None = None,
                    **kwargs) -> bytes:
         return await fn(accessor, path, index)
+
+    return read
+
+
+def _make_ranged_read(table: OpsTable) -> OpFn:
+    """Build the ``read`` op, honoring a byte range when one is asked for.
+
+    A backend that can fetch a range natively does so, which is the whole
+    point on an object store: one ranged GET instead of the whole file.
+    Every other backend falls back to reading and slicing, which is the
+    same answer at the same cost as before, and is the only meaningful
+    behavior for a backend that renders its content rather than storing
+    it, since there is no remote range to ask for.
+
+    A zero-length read is answered here rather than sent anywhere: no
+    store can express an empty range, and the answer is known.
+
+    Args:
+        table (OpsTable): the backend's op table.
+    """
+
+    async def read(accessor: Accessor,
+                   path: PathSpec,
+                   *,
+                   index: IndexCacheStore | None = None,
+                   offset: int = 0,
+                   size: int | None = None,
+                   **kwargs) -> bytes:
+        if size == 0:
+            return b""
+        whole = not offset and size is None
+        native = table.read_range
+        if native is not None and not whole:
+            return await native(accessor, path, index, offset, size)
+        data = await table.read_bytes(accessor, path, index)
+        if whole:
+            return data
+        return slice_window(data, offset, size)
 
     return read
 
@@ -172,8 +211,7 @@ def make_generic_ops(
     skip = overrides or set()
     ops: list[RegisteredOp] = []
 
-    _emit(ops, resources, "read", _make_read(table.read_bytes), False, None,
-          skip)
+    _emit(ops, resources, "read", _make_ranged_read(table), False, None, skip)
     _emit(ops, resources, "readdir", _make_read(table.readdir), False, None,
           skip)
     _emit(ops, resources, "stat", _make_read(table.stat), False, None, skip)

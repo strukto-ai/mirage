@@ -1,0 +1,144 @@
+{
+  "cases": [
+    {
+      "id": "zgrep_bre_provision",
+      "seq": 500520,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/zbre && printf 'aab\\na+b\\n' > /data/zbre/both.txt && printf 'aab\\n' > /data/zbre/ere.txt && printf 'a+b\\n' > /data/zbre/bre.txt && gzip /data/zbre/both.txt /data/zbre/ere.txt /data/zbre/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_reads_a_basic_expression",
+      "seq": 500521,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep 'a+b' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "a+b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_E_reads_an_extended_expression",
+      "seq": 500522,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep -E 'a+b' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "aab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_G_asks_for_the_default_dialect",
+      "seq": 500523,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep -G 'a+b' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "a+b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_bre_backslash_plus_is_the_operator",
+      "seq": 500524,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep 'a\\+b' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "aab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_bre_pipe_is_literal",
+      "seq": 500525,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep 'aab|zzz' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_E_pipe_is_alternation",
+      "seq": 500526,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep -E 'aab|zzz' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "aab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_l_reads_the_same_dialect",
+      "seq": 500527,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep -l 'a+b' /data/zbre/ere.txt.gz /data/zbre/bre.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/zbre/bre.txt.gz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_c_reads_the_same_dialect",
+      "seq": 500528,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep -c 'a+b' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "zgrep_o_reads_the_same_dialect",
+      "seq": 500529,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "zgrep -o 'a+b' /data/zbre/both.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "a+b\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

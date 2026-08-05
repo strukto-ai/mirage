@@ -16,7 +16,7 @@ import pytest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.disk.read import read_bytes
+from mirage.core.disk.read import read_bytes, read_range
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -56,3 +56,51 @@ async def test_read_with_glob_scope_and_prefix(tmp_path):
                      directory="/disk/")
     result = await read_bytes(accessor, scope, index)
     assert result == b"\x00\x01\x02"
+
+
+@pytest.mark.asyncio
+async def test_read_range_seeks_instead_of_reading_the_whole_file(tmp_path):
+    (tmp_path / "big.bin").write_bytes(bytes(range(256)))
+    accessor = DiskAccessor(tmp_path)
+    result = await read_range(
+        accessor,
+        PathSpec(resource_path=mount_key("/big.bin", "/disk"),
+                 virtual="/big.bin",
+                 directory="/big.bin"), RAMIndexCacheStore(ttl=0), 10, 5)
+    assert result == bytes(range(10, 15))
+
+
+@pytest.mark.asyncio
+async def test_read_range_without_a_size_runs_to_the_end(tmp_path):
+    (tmp_path / "big.bin").write_bytes(bytes(range(256)))
+    accessor = DiskAccessor(tmp_path)
+    result = await read_range(
+        accessor,
+        PathSpec(resource_path=mount_key("/big.bin", "/disk"),
+                 virtual="/big.bin",
+                 directory="/big.bin"), RAMIndexCacheStore(ttl=0), 250)
+    assert result == bytes(range(250, 256))
+
+
+@pytest.mark.asyncio
+async def test_read_range_past_the_end_is_empty(tmp_path):
+    (tmp_path / "small.bin").write_bytes(b"abc")
+    accessor = DiskAccessor(tmp_path)
+    result = await read_range(
+        accessor,
+        PathSpec(resource_path=mount_key("/small.bin", "/disk"),
+                 virtual="/small.bin",
+                 directory="/small.bin"), RAMIndexCacheStore(ttl=0), 99, 5)
+    assert result == b""
+
+
+@pytest.mark.asyncio
+async def test_read_range_missing_file_raises(tmp_path):
+    accessor = DiskAccessor(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        await read_range(
+            accessor,
+            PathSpec(resource_path="missing.bin",
+                     virtual="/missing.bin",
+                     directory="/missing.bin"), RAMIndexCacheStore(ttl=0), 0,
+            5)

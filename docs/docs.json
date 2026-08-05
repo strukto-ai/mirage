@@ -391,7 +391,8 @@
               "python/cli/slack",
               "python/cli/discord",
               "python/cli/ntn",
-              "python/cli/linear"
+              "python/cli/linear",
+              "python/cli/git"
             ]
           },
           {
@@ -580,7 +581,8 @@
               "typescript/cli/slack",
               "typescript/cli/discord",
               "typescript/cli/ntn",
-              "typescript/cli/linear"
+              "typescript/cli/linear",
+              "typescript/cli/git"
             ]
           },
           {

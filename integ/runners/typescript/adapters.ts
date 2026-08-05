@@ -49,6 +49,7 @@ import {
   DISCORD,
   GWS,
   HIMALAYA,
+  GIT,
   LINEAR,
   NTN,
   SLACK,
@@ -159,6 +160,18 @@ function runId(): string {
   return `${String(process.pid)}-${String(Date.now())}`
 }
 
+/**
+ * Install the CLIs a mount-backed target declares.
+ *
+ * `git` is the first CLI here that talks to no API: it reads a repository out of
+ * a mount, which is what makes it installable from a bare name with no config at
+ * all, where every other one needs its mock service to hand over both the tree
+ * and the credentials pointing at itself.
+ */
+function installLocalClis(ws: { registerCli: (name: string, spec: unknown) => void }, target: Target): void {
+  if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
+}
+
 async function openRam(target: Target): Promise<Open> {
   const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
   const built: Record<string, RAMResource> = {}
@@ -178,6 +191,7 @@ async function openRam(target: Target): Promise<Open> {
     mode: MountMode.WRITE,
     ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
   })
+  installLocalClis(ws, target)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -191,6 +205,7 @@ async function openDisk(target: Target): Promise<Open> {
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     for (const root of roots) rmSync(root, { recursive: true, force: true })

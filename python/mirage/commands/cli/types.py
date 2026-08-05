@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
@@ -20,6 +21,28 @@ from pydantic import BaseModel
 from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
 from mirage.types import Limit
+
+
+class UsageStyle(Enum):
+    """Which program's usage-error dialect a CLI speaks.
+
+    An installed CLI is not a GNU tool, so a leaf that refuses an option
+    it does not declare answers in argparse's shape and exit code by
+    default. A CLI that mimics an existing program has to answer in that
+    program's shape instead: mirage implements a subset of git, so most
+    of git's real options arrive undeclared, and an agent that reads the
+    refusal should see what git would have said rather than learn that
+    it is talking to a reimplementation.
+
+    Covers the unknown-option refusal and the exit code, which is what
+    an undeclared flag produces. Every other usage error (a missing
+    value, an unparseable int) stays in argparse's shape for both
+    styles, because those only happen for options a CLI does declare.
+    """
+
+    ARGPARSE = "argparse"
+    GIT = "git"
+
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
@@ -69,12 +92,19 @@ class CLISpec(CommandSpec):
         config_model (type[BaseModel] | None): root only. Pydantic model
             validating an installation's config from YAML ``clis:`` or
             ``register_cli``; also the redaction schema for snapshots.
+        usage_style (UsageStyle): root only. How a leaf refuses an option
+            it does not declare. Defaults to argparse, which is right for
+            a CLI mirage invented; a CLI that mimics an existing program
+            sets the style that program uses, so an agent reading the
+            message and the exit code sees what it would from the real
+            one.
     """
     name: str = ""
     aliases: tuple[str, ...] = ()
     fn: Callable[..., Any] | None = None
     subcommands: tuple["CLISpec", ...] = ()
     write: bool = False
+    usage_style: UsageStyle = UsageStyle.ARGPARSE
     # hash=False: Limit is a mutable dataclass, and the
     # frozen CLISpec must stay hashable for compile_spec's per-spec
     # cache. Equality still compares the field; only the hash skips it

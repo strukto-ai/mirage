@@ -33,6 +33,7 @@ from mirage.core.dropbox.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_stream,
     stat=_stat,
     is_mounted=lambda a: True,

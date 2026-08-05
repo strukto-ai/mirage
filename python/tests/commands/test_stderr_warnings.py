@@ -200,7 +200,8 @@ def test_grep_command_stderr_on_missing_file():
 
     async def _run():
         result = await ws.execute("grep hello /nonexistent")
-        assert result.exit_code == 1
+        # GNU grep exits 2 for an operand it could not search.
+        assert result.exit_code == 2
         assert b"nonexistent" in await result.materialize_stderr()
 
     asyncio.run(_run())

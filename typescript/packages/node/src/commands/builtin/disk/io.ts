@@ -22,7 +22,7 @@ import { size as diskDu, entries as diskDuAll } from '../../../core/disk/du/inde
 import { exists as diskExists } from '../../../core/disk/exists.ts'
 import { find as diskFind } from '../../../core/disk/find.ts'
 import { mkdir as diskMkdir } from '../../../core/disk/mkdir.ts'
-import { read as diskRead } from '../../../core/disk/read.ts'
+import { read as diskRead, readRange as diskReadRange } from '../../../core/disk/read.ts'
 import { readdir as diskReaddir } from '../../../core/disk/readdir.ts'
 import { rename as diskRename } from '../../../core/disk/rename.ts'
 import { rmR as diskRmR } from '../../../core/disk/rm.ts'
@@ -37,6 +37,7 @@ import { writeBytes as diskWrite } from '../../../core/disk/write.ts'
 export const DISK_IO: CommandIO<DiskAccessor> = {
   readdir: diskReaddir,
   readBytes: diskRead,
+  readRange: diskReadRange,
   readStream: diskStream,
   stat: diskStat,
   isMounted: (a) => a.root !== '',
