@@ -444,6 +444,19 @@ export class MontyRuntime extends Runtime implements Evaluator {
         case 'Path.write_bytes':
         case 'Path.write_text':
           return writeBack(bridge, path, args[1])
+        case 'Path.mkdir':
+          return bridge('MKDIR', path).then(() => null)
+        case 'Path.rmdir':
+          return bridge('RMDIR', path).then(() => null)
+        case 'Path.unlink':
+          return bridge('UNLINK', path).then(() => null)
+        case 'Path.rename': {
+          const dst = pathArg(args[1])
+          // A destination outside the workspace has no mount to rename
+          // into; decline rather than half-apply the move.
+          if (dst === null || !this.underWorkspaceMount(dst)) return notHandled
+          return bridge('RENAME', path, undefined, dst).then(() => null)
+        }
         case 'Path.iterdir':
           return listEntries(bridge, path).then((entries) => entries.map((e) => e.path))
         case 'Path.is_dir':

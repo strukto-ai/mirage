@@ -26,10 +26,12 @@ function makeBridge(seed: Record<string, Uint8Array>): {
   dispatch: BridgeDispatchFn
   files: Map<string, Uint8Array>
   writes: [string, Uint8Array][]
+  mutations: string[]
 } {
   const files = new Map(Object.entries(seed))
   const writes: [string, Uint8Array][] = []
-  const dispatch: BridgeDispatchFn = (op, path, bytes) => {
+  const mutations: string[] = []
+  const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
     if (op === 'READ') {
       const data = files.get(path)
       if (data === undefined) {
@@ -45,6 +47,20 @@ function makeBridge(seed: Record<string, Uint8Array>): {
       writes.push([path, data])
       return Promise.resolve(undefined)
     }
+    if (op === 'MKDIR' || op === 'RMDIR' || op === 'UNLINK') {
+      if (op === 'UNLINK') files.delete(path)
+      mutations.push(`${op} ${path}`)
+      return Promise.resolve(undefined)
+    }
+    if (op === 'RENAME') {
+      const data = files.get(path)
+      if (data !== undefined && dst !== undefined) {
+        files.delete(path)
+        files.set(dst, data)
+      }
+      mutations.push(`RENAME ${path} ${dst ?? ''}`)
+      return Promise.resolve(undefined)
+    }
     const prefix = path
     const entries: { path: string; size: number; isDir: boolean }[] = []
     for (const [p, content] of files) {
@@ -56,7 +72,7 @@ function makeBridge(seed: Record<string, Uint8Array>): {
     if (entries.length === 0) return Promise.reject(new Error(`no such dir: ${prefix}`))
     return Promise.resolve(entries)
   }
-  return { dispatch, files, writes }
+  return { dispatch, files, writes, mutations }
 }
 
 function run(
@@ -241,6 +257,38 @@ describe('MontyRuntime', () => {
     expect(writes).toHaveLength(1)
     expect(writes[0]?.[0]).toBe('/s3/out.txt')
     expect(text(writes[0]?.[1] ?? new Uint8Array())).toBe('data')
+  }, 30_000)
+
+  // The bridge already carried these ops for the other runtimes; the
+  // monty callback declined them, so a mkdir or unlink on a mounted
+  // path died inside the sandbox's own in-memory tree and never
+  // reached the mount. The python runtime routes all four.
+  it('mkdir, rmdir and unlink route to the bridge', async () => {
+    const { dispatch, mutations, files } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
+    const rt = make(dispatch)
+    const result = await run(
+      rt,
+      "from pathlib import Path\nPath('/s3/sub').mkdir()\nPath('/s3/a.txt').unlink()\nPath('/s3/sub').rmdir()",
+    )
+    expect(result.exitCode).toBe(0)
+    expect(mutations).toEqual(['MKDIR /s3/sub', 'UNLINK /s3/a.txt', 'RMDIR /s3/sub'])
+    expect(files.has('/s3/a.txt')).toBe(false)
+  }, 30_000)
+
+  it('rename carries both paths to the bridge', async () => {
+    const { dispatch, mutations, files } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
+    const rt = make(dispatch)
+    const result = await run(rt, "from pathlib import Path\nPath('/s3/a.txt').rename('/s3/b.txt')")
+    expect(result.exitCode).toBe(0)
+    expect(mutations).toEqual(['RENAME /s3/a.txt /s3/b.txt'])
+    expect(files.has('/s3/b.txt')).toBe(true)
+  }, 30_000)
+
+  it('a rename leaving the mount view never reaches the bridge', async () => {
+    const { dispatch, mutations } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
+    const rt = make(dispatch, () => ['/s3/'])
+    await run(rt, "from pathlib import Path\nPath('/s3/a.txt').rename('/etc/b.txt')")
+    expect(mutations).toEqual([])
   }, 30_000)
 
   it('iterdir lists a virtual directory', async () => {
