@@ -53,6 +53,10 @@ def _is_writable_mode(mode):
             return True
     return False
 
+# close() only marks the path dirty on the bridge (a sync JS call): the
+# bytes are already in MEMFS, and awaiting the async flush op from these
+# sync WASM frames would need JSPI stack switching, which most engines do
+# not enable. The runtime flushes marked paths after the script returns.
 class _FlushOnClose(io.FileIO):
     def __init__(self, path, mode='r', closefd=True, opener=None):
         super().__init__(path, mode=mode, closefd=closefd, opener=opener)
@@ -78,9 +82,7 @@ class _FlushOnClose(io.FileIO):
         was_dirty = self._mirage_dirty and not self.closed
         super().close()
         if was_dirty:
-            with _open(self._mirage_path, 'rb') as src:
-                data = src.read()
-            run_sync(_mb.flush(self._mirage_path, data))
+            _mb.markDirty(self._mirage_path)
 
 def _strip_bt(mode):
     return mode.replace('b', '').replace('t', '')
@@ -105,6 +107,11 @@ def _to_bytes(data):
         return bytes(converted)
     return bytes(data)
 
+# The lazy backfill below is the shim's one JSPI-dependent surface:
+# run_sync suspends the WASM stack while the async bridge op settles, and
+# raises RuntimeError on engines without stack switching. Both callers
+# treat that as a miss (warn, return None), so without JSPI reads fall
+# back to whatever the host preloaded into MEMFS before the run.
 def _list_bridge(target):
     try:
         return run_sync(_mb.list(target))

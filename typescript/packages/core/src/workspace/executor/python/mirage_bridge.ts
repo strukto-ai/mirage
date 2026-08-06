@@ -52,15 +52,35 @@ export interface MirageBridge {
    * interpreter when mounts are added or removed.
    */
   prefixes(): string[]
+  /**
+   * Record a mount-prefixed path whose MEMFS content changed. This is the
+   * write half of the shim's contract and it is deliberately synchronous:
+   * Python's close() runs inside sync WASM frames where awaiting a bridge
+   * op needs JSPI stack switching, which most engines do not enable. The
+   * bytes already live in MEMFS, so close() only marks the path here and
+   * the runtime flushes after the script returns, where awaiting is free.
+   */
+  markDirty(path: string): void
+  /** Drain the dirty set: the recorded paths, in mark order, cleared. */
+  takeDirty(): string[]
 }
 
 export function createMirageBridge(
   dispatch: BridgeDispatchFn,
   listMounts: () => string[] = () => [],
 ): MirageBridge {
+  const dirty = new Set<string>()
   return {
     prefixes() {
       return listMounts().map((p) => (p.endsWith('/') ? p : p + '/'))
+    },
+    markDirty(path) {
+      dirty.add(path)
+    },
+    takeDirty() {
+      const out = [...dirty]
+      dirty.clear()
+      return out
     },
     async fetch(path) {
       const out = await dispatch('READ', path)

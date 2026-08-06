@@ -130,6 +130,27 @@ describe('PyodideRuntime mount visibility', () => {
     await rt.close()
   }, 60_000)
 
+  it('a failed flush surfaces on stderr and flips a clean exit to 1', async () => {
+    const dispatch: BridgeDispatchFn = (op) => {
+      if (op === 'WRITE') return Promise.reject(new Error('mount is read-only'))
+      if (op === 'READ') return Promise.resolve(new Uint8Array())
+      return Promise.resolve([])
+    }
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
+    const result = await rt.run({
+      code: `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`,
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    expect(result.exitCode).toBe(1)
+    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
+    expect(stderr).toContain('failed to flush /ram/out.txt')
+    expect(stderr).toContain('mount is read-only')
+    await rt.close()
+  }, 60_000)
+
   it('runtime without bridge still runs Python without the shim', async () => {
     const rt = new PyodideRuntime({})
     const result = await rt.run({

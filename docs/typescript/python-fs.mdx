@@ -29,7 +29,7 @@ open('/ram/notes.txt', 'w').write('hello')              # writes flush back to R
     open('/ram/out.txt', 'w').write('hello')
     open('/s3/icon.png', 'wb').write(png_bytes)
     ```
-    On `close()`, bytes flush back through the resource's `write` op.
+    `close()` marks the path dirty; when the script finishes, the final bytes flush back through the resource's `write` op (one write per path, however many times the script reopened it).
   </Tab>
   <Tab title="List a directory">
     ```python
@@ -93,7 +93,7 @@ open('/ram/notes.txt', 'w').write('hello')              # writes flush back to R
 
 ## How it works (one paragraph)
 
-Pyodide's in-memory FS (MEMFS) is the sync facade. At `addMount`, Mirage walks the prefix and copies files into MEMFS. Python reads hit MEMFS directly, fast, no network. On a **miss** (path not yet in MEMFS but the prefix is registered), the shim catches the error, calls back through the bridge via JSPI to fetch it, populates MEMFS, and retries. Writes are intercepted on `close()` and flushed back through Mirage's `write` op.
+Pyodide's in-memory FS (MEMFS) is the sync facade. Before each run, Mirage walks any newly mounted prefix and copies files into MEMFS. Python reads hit MEMFS directly, fast, no network. On a **miss** (path not yet in MEMFS but the prefix is registered), the shim catches the error, calls back through the bridge via JSPI to fetch it, populates MEMFS, and retries. Writes are intercepted on `close()`, which marks the path dirty in MEMFS; after the script returns, Mirage flushes each dirty path's final bytes back through Mirage's `write` op (no JSPI involved, and a flush failure lands on stderr with a nonzero exit).
 
 ```
 Python open() / listdir()
@@ -104,10 +104,12 @@ Python open() / listdir()
        miss
         │
         ▼
-   run_sync(_mirage_bridge.list/fetch)
+   run_sync(_mirage_bridge.list/fetch)   ← the one JSPI-dependent hop
         │
         ▼
    populate MEMFS, retry
+
+Python close()  ──►  mark dirty  ──►  script ends  ──►  flush to mount
 ```
 
 ## Quick start (TypeScript)
@@ -153,18 +155,16 @@ new Workspace({}, { python: { autoLoadFromImports: false } })
 
 ## Runtime requirements
 
-The shim uses [JSPI](https://github.com/WebAssembly/js-promise-integration) to bridge sync Python calls to async JS.
+None: preloaded reads, mounts added between runs, and writes all work on any engine. [JSPI](https://github.com/WebAssembly/js-promise-integration) only powers the shim's **lazy backfill**, the mid-run fetch of a path that appeared on the mount after its prefix was preloaded. With JSPI available that miss is filled in place; without it the miss stays a `FileNotFoundError` (a `console.warn: mirage lazy: ...` names the real reason).
 
-- **Chrome / Edge 137+** (May 2025): works out of the box
+Where JSPI is available:
+
+- **Chrome / Edge 137+** (May 2025): out of the box
 - **Firefox**: behind `javascript.options.wasm_js_promise_integration`
-- **Node 24+**: pass `--experimental-wasm-jspi` (vitest config already does this)
+- **Node**: pass `--experimental-wasm-jspi` (vitest config already does this; V8 flags cannot ride `NODE_OPTIONS`)
 - **Cloudflare Workers**: Python Workers with JSPI runtime
 
-<Note>
-Without JSPI, **reads** of preloaded files still work but **writes** throw `RuntimeError: Cannot stack switch` on `close()`.
-</Note>
-
-To run examples directly:
+To run examples with the lazy backfill enabled:
 
 ```bash
 node --experimental-wasm-jspi --import tsx/esm examples/typescript/pyodide/vfs.ts
@@ -176,7 +176,8 @@ node --experimental-wasm-jspi --import tsx/esm examples/typescript/pyodide/vfs.t
 |---|---|
 | `FileNotFoundError [Errno 44]` | Path isn't in MEMFS and lazy fetch failed too. Check the preceding `console.warn: mirage lazy: ...` for the real reason (auth, network, bad path). |
 | `console.warn: mirage lazy: list <path> failed` | The lazy backfill called `_mirage_bridge.list` and got rejected. Followed by `FileNotFoundError`. |
-| `RuntimeError: Cannot stack switch` | JSPI not enabled. Pass the Node flag or upgrade browser. |
+| `python3: failed to flush <path> to mount: ...` on stderr, exit 1 | The script finished but a dirty file could not be written back to its mount (auth, read-only mount, network). MEMFS still holds the bytes. |
+| `RuntimeError: WebAssembly stack switching not supported` in a lazy warn | JSPI not enabled, so a mid-run backfill could not suspend. Reads of preloaded content and all writes are unaffected. |
 | `console.warn: mirage preload: skipping <path>` | A single entry failed during initial preload, others continued. Usually harmless (synthetic listing entries). |
 
 ## See also

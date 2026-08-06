@@ -45,6 +45,16 @@ function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null 
   return bytes.length > 0 ? bytes : null
 }
 
+function appendStderrLines(stderr: Uint8Array | null, lines: string[]): Uint8Array | null {
+  if (lines.length === 0) return stderr
+  const extra = new TextEncoder().encode(lines.map((line) => line + '\n').join(''))
+  if (stderr === null) return extra
+  const out = new Uint8Array(stderr.length + extra.length)
+  out.set(stderr)
+  out.set(extra, stderr.length)
+  return out
+}
+
 // The eval wrapper ships python bytes as {'__mirage_bytes__': <b64>}
 // (bytes are valid EvalValues but not JSON); this reviver restores
 // them to Uint8Array while everything else parses as plain JSON.
@@ -135,6 +145,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
   private listMounts: () => string[] = () => []
   private readonly home: string | null
   private bridge: MirageBridge | null = null
+  private readonly preloadedPrefixes = new Set<string>()
   // The guest executes on this event loop, so only the watchdog-backed
   // interrupt buffer can stop a busy loop (see interrupt.ts); null
   // where SharedArrayBuffer/workers are unavailable (runs unbounded).
@@ -201,6 +212,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       if (armed?.disarm() === 'deadline') {
         throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
       }
+      const flushFailures = await this.drainDirty(pyodide)
       const resultProxy = pyodide.globals.get('_eval_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -217,18 +229,21 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       }
       const [valueJson, out, errBytes, ok, syntax] = arr
       if (!ok) {
+        for (const failure of flushFailures) console.warn(failure)
         const detail = new TextDecoder().decode(bridgeBytes(errBytes)).trim()
         throw new EvalError(detail !== '' ? detail : 'evaluation failed', { syntax })
       }
       return {
         value: JSON.parse(valueJson, reviveEvalValue) as EvalValue,
         stdout: bridgeBytes(out),
-        stderr: bridgeStderr(errBytes),
-        exitCode: 0,
+        stderr: appendStderrLines(bridgeStderr(errBytes), flushFailures),
+        exitCode: flushFailures.length > 0 ? 1 : 0,
         status: 'complete',
       }
     } catch (err) {
-      if (armed?.disarm() === 'deadline') {
+      const deadline = armed?.disarm() === 'deadline'
+      for (const failure of await this.drainDirty(pyodide)) console.warn(failure)
+      if (deadline) {
         throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`, {
           cause: err,
         })
@@ -258,6 +273,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     this.pyodide = null
     this.initPromise = null
     this.bridge = null
+    this.preloadedPrefixes.clear()
     this.interrupter?.close()
     this.interrupter = null
     this.interrupterTried = false
@@ -274,6 +290,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     if (this.pyodide !== null) {
       if (this.bootstrapPromise !== null) await this.bootstrapPromise
       await this.wireBridgeIfNeeded(this.pyodide)
+      await this.preloadNewPrefixes(this.pyodide)
       await this.wireInterruptIfNeeded(this.pyodide)
       return this.pyodide
     }
@@ -295,6 +312,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       await this.bootstrapPromise
     }
     await this.wireBridgeIfNeeded(this.pyodide)
+    await this.preloadNewPrefixes(this.pyodide)
     await this.wireInterruptIfNeeded(this.pyodide)
     return this.pyodide
   }
@@ -305,9 +323,53 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     pyodide.registerJsModule('_mirage_bridge', bridge)
     await pyodide.runPythonAsync(MIRAGE_FS_SHIM_PY)
     this.bridge = bridge
-    for (const prefix of bridge.prefixes()) {
-      await preloadInto(pyodide.FS, bridge, prefix)
+  }
+
+  /**
+   * Hydrate MEMFS for mount prefixes not yet preloaded, before every run.
+   * This is the host-side half of read visibility: a mount added after
+   * boot gets its tree here, where awaiting the bridge is free, instead
+   * of relying on the shim's lazy backfill, whose run_sync needs JSPI.
+   * Content changes under an already-preloaded prefix still ride the
+   * lazy path (a full re-list per run would be one API sweep per mount).
+   */
+  private async preloadNewPrefixes(pyodide: PyodideInterface): Promise<void> {
+    if (this.bridge === null) return
+    for (const prefix of this.bridge.prefixes()) {
+      if (this.preloadedPrefixes.has(prefix)) continue
+      this.preloadedPrefixes.add(prefix)
+      await preloadInto(pyodide.FS, this.bridge, prefix)
     }
+  }
+
+  /**
+   * Flush every path the shim marked dirty during the run. The guest
+   * cannot await the bridge from its sync WASM frames without JSPI, so
+   * close() only marks; MEMFS holds the final bytes, and one WRITE per
+   * path covers however many times the script reopened it. Returns one
+   * message per failed flush for the caller's stderr.
+   */
+  private async drainDirty(pyodide: PyodideInterface): Promise<string[]> {
+    if (this.bridge === null) return []
+    const failures: string[] = []
+    for (const path of this.bridge.takeDirty()) {
+      let bytes: Uint8Array
+      try {
+        bytes = pyodide.FS.readFile(path) as Uint8Array
+      } catch {
+        // closed then unlinked locally; unlink does not propagate, so
+        // the mount keeps its previous content
+        console.warn(`mirage flush: ${path} marked dirty but missing from MEMFS, skipped`)
+        continue
+      }
+      try {
+        await this.bridge.flush(path, bytes)
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        failures.push(`python3: failed to flush ${path} to mount: ${detail}`)
+      }
+    }
+    return failures
   }
 
   private async loadImports(pyodide: PyodideInterface, code: string): Promise<void> {
@@ -352,6 +414,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       if (armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
+      const flushFailures = await this.drainDirty(pyodide)
       const resultProxy = pyodide.globals.get('_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -366,19 +429,26 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       if (arr === undefined) {
         return {
           stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode('python3: runtime returned no result\n'),
+          stderr: appendStderrLines(
+            new TextEncoder().encode('python3: runtime returned no result\n'),
+            flushFailures,
+          ),
           exitCode: 1,
         }
       }
       return {
         stdout: bridgeBytes(arr[0]),
-        stderr: bridgeStderr(arr[1]),
-        exitCode: arr[2],
+        stderr: appendStderrLines(bridgeStderr(arr[1]), flushFailures),
+        exitCode: flushFailures.length > 0 && arr[2] === 0 ? 1 : arr[2],
       }
     } catch (err) {
       // The interrupt can also fire between wrapper statements, where
       // KeyboardInterrupt escapes as a rejection instead of a result.
-      if (armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
+      // Files closed before the failure are complete in MEMFS, so their
+      // marks still flush; failures can only be warned here.
+      const deadline = armed?.disarm() === 'deadline'
+      for (const failure of await this.drainDirty(pyodide)) console.warn(failure)
+      if (deadline && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
       throw err
@@ -419,6 +489,7 @@ export class PyodideRuntime extends Runtime implements Evaluator {
 
     try {
       await pyodide.runPythonAsync(PYTHON_REPL_WRAPPER)
+      const flushFailures = await this.drainDirty(pyodide)
       const resultProxy = pyodide.globals.get('_repl_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -433,15 +504,18 @@ export class PyodideRuntime extends Runtime implements Evaluator {
       if (arr === undefined) {
         return {
           stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode('python3: repl returned no result\n'),
+          stderr: appendStderrLines(
+            new TextEncoder().encode('python3: repl returned no result\n'),
+            flushFailures,
+          ),
           exitCode: 1,
           status: 'complete',
         }
       }
       return {
         stdout: bridgeBytes(arr[0]),
-        stderr: bridgeStderr(arr[1]),
-        exitCode: arr[2],
+        stderr: appendStderrLines(bridgeStderr(arr[1]), flushFailures),
+        exitCode: flushFailures.length > 0 && arr[2] === 0 ? 1 : arr[2],
         status: arr[3],
       }
     } finally {
