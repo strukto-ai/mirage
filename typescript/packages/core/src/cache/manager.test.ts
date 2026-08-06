@@ -96,4 +96,16 @@ describe('CacheManager', () => {
     await manager.dropPrefix()
     expect(await cache.exists('/data/arch/h.txt')).toBe(true)
   })
+
+  it('reaches every key on a root mount', async () => {
+    // A root mount strips to the empty prefix, so the eviction argument is '/'
+    // and matches every key rather than nothing.
+    const cache = new RAMFileCacheStore()
+    await cache.set('/a.txt', new TextEncoder().encode('x'))
+    await cache.set('/sub/b.txt', new TextEncoder().encode('y'))
+    const manager = new CacheManager(cache, null, '/', true)
+    await manager.dropPrefix()
+    expect(await cache.exists('/a.txt')).toBe(false)
+    expect(await cache.exists('/sub/b.txt')).toBe(false)
+  })
 })
