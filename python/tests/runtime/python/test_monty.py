@@ -14,6 +14,7 @@
 
 import asyncio
 
+import pydantic_monty
 import pytest
 
 from mirage.resource.ram import RAMResource
@@ -31,7 +32,10 @@ class FakeDispatch:
     def __init__(self, files: dict[str, bytes]) -> None:
         self.files = files
         self.writes: list[tuple[str, bytes]] = []
+        self.appends: list[tuple[str, bytes]] = []
         self.unlinked: list[str] = []
+        self.dirs: list[str] = []
+        self.renamed: list[tuple[str, str]] = []
 
     async def __call__(self, op, path, **kwargs):
         virtual = path.virtual
@@ -53,9 +57,26 @@ class FakeDispatch:
             self.files[virtual] = data
             self.writes.append((virtual, data))
             return None, None
+        if op == "append":
+            data = kwargs["data"]
+            self.files[virtual] = self.files.get(virtual, b"") + data
+            self.appends.append((virtual, data))
+            return None, None
         if op == "unlink":
             self.files.pop(virtual, None)
             self.unlinked.append(virtual)
+            return None, None
+        if op == "mkdir":
+            self.dirs.append(virtual)
+            return None, None
+        if op == "rmdir":
+            self.dirs = [d for d in self.dirs if d != virtual]
+            return None, None
+        if op == "rename":
+            dst = kwargs["dst"].virtual
+            if virtual in self.files:
+                self.files[dst] = self.files.pop(virtual)
+            self.renamed.append((virtual, dst))
             return None, None
         raise ValueError(f"unexpected op {op}")
 
@@ -217,16 +238,26 @@ def test_monty_write_flushes_through_dispatch():
     assert dispatch.files["/s3/out.txt"] == b"data"
 
 
-def test_monty_append_flushes_full_content():
+def test_monty_append_sends_only_the_new_bytes():
+    """An append must carry the delta, never the whole file.
+
+    Monty hands the append hook the new text alone, so re-sending the
+    accumulated content would make a write loop quadratic against the
+    backend: N appends shipping O(N^2) bytes over N round trips.
+    """
     dispatch = FakeDispatch({"/s3/log.txt": b"a"})
     runtime = MontyRuntime()
     runtime.attach(dispatch, lambda: [])
     result = asyncio.run(
         runtime.run(
-            RunArgs(code="with open('/s3/log.txt', 'a') as f:\n"
-                    "    f.write('b')")))
-    assert result.exit_code == 0
-    assert dispatch.files["/s3/log.txt"] == b"ab"
+            RunArgs(code="for part in ['b', 'c', 'd']:\n"
+                    "    with open('/s3/log.txt', 'a') as f:\n"
+                    "        f.write(part)")))
+    assert result.exit_code == 0, result.stderr
+    assert dispatch.files["/s3/log.txt"] == b"abcd"
+    assert dispatch.appends == [("/s3/log.txt", b"b"), ("/s3/log.txt", b"c"),
+                                ("/s3/log.txt", b"d")]
+    assert dispatch.writes == []
 
 
 def test_monty_iterdir_lists_virtual_dir():
@@ -252,6 +283,45 @@ def test_monty_unlink_routes_to_dispatch():
                     "Path('/s3/a.txt').unlink()")))
     assert result.exit_code == 0
     assert dispatch.unlinked == ["/s3/a.txt"]
+
+
+def test_monty_mkdir_routes_to_dispatch():
+    dispatch = FakeDispatch({})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/sub').mkdir()\n"
+                    "Path('/s3/sub/n.txt').write_text('deep')")))
+    assert result.exit_code == 0, result.stderr
+    assert "/s3/sub" in dispatch.dirs
+    assert dispatch.files["/s3/sub/n.txt"] == b"deep"
+
+
+def test_monty_rename_routes_to_dispatch():
+    dispatch = FakeDispatch({"/s3/a.txt": b"one"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/a.txt').rename('/s3/b.txt')")))
+    assert result.exit_code == 0, result.stderr
+    assert dispatch.renamed == [("/s3/a.txt", "/s3/b.txt")]
+    assert dispatch.files["/s3/b.txt"] == b"one"
+
+
+def test_monty_rmdir_routes_to_dispatch():
+    dispatch = FakeDispatch({"/s3/dir/keep.txt": b"x"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/dir').rmdir()")))
+    assert result.exit_code == 0, result.stderr
+    assert "/s3/dir" not in dispatch.dirs
 
 
 def test_monty_name():
@@ -347,3 +417,39 @@ async def test_eval_errors_carry_monty_diagnostics():
 
 def test_monty_is_an_evaluator():
     assert isinstance(MontyRuntime(), EvaluatorMixin)
+
+
+def test_upstream_entry_points_this_runtime_binds_to():
+    """Guard the pydantic-monty API surface run() and eval() use.
+
+    monty's API moves fast: 0.0.19 replaced the whole execution model
+    (`Monty` became a worker pool, `MontyRepl` disappeared, `run_async`
+    moved onto a checked-out session). eval() is also what the policy
+    layer evaluates config-borne scripts on, so a bump that shifts any
+    of these breaks python3 lines and script-source policies together.
+    Fail here, at the seam, rather than in every caller.
+    """
+    pool = pydantic_monty.AsyncMonty()
+    assert hasattr(pool, "__aenter__") and hasattr(pool, "__aexit__")
+    session = pool.checkout()
+    for attr in ("__aenter__", "__aexit__", "feed_run", "worker_pid"):
+        assert hasattr(session, attr), f"session lost {attr}"
+    assert hasattr(pydantic_monty.MontyCrashedError, "timed_out")
+
+
+@pytest.mark.asyncio
+async def test_eval_cancellation_reclaims_the_worker():
+    rt = MontyRuntime()
+    await rt.eval("x = 1", session="live")
+    task = asyncio.ensure_future(
+        rt.eval("n = 0\nwhile True:\n    n = n + 1", session="live"))
+    await asyncio.sleep(0.3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The killed worker took the session's heap with it, so the id is
+    # dropped and the next eval gets a fresh worker rather than a dead one.
+    assert "live" not in rt._eval_sessions
+    again = await rt.eval("6 * 7", session="live")
+    assert again.value == 42
+    await rt.close()

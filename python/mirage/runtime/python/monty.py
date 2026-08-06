@@ -15,6 +15,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+import signal
 from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any, Callable
@@ -26,6 +29,8 @@ from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.types import (EvalResult, EvalValue, RunArgs, RunResult,
                                   ScriptSource)
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 pydantic_monty: Any
 MemoryFile: Any
@@ -123,6 +128,27 @@ class _MirageOS(OSAccess):
                                      data=data))
         self._missing.discard(str(path))
 
+    def _append_remote(self, path: PurePosixPath, data: bytes) -> None:
+        """Send only the appended bytes, never the whole file.
+
+        Monty hands an append hook the new text alone, so the mount's
+        own append op carries it. Flushing instead would re-send every
+        byte written so far, which turns a write loop quadratic: 200
+        appends of one short line shipped 164 KB to build a 1.7 KB
+        file before this.
+
+        Args:
+            path (PurePosixPath): the file being appended to.
+            data (bytes): only the newly appended bytes.
+        """
+        if self._workspace_dispatch is None:
+            return
+        self._sync(
+            self._workspace_dispatch("append",
+                                     PathSpec.from_str_path(str(path)),
+                                     data=data))
+        self._missing.discard(str(path))
+
     def _insert_tree_dir(self, path: PurePosixPath) -> dict[str, Any] | None:
         subtree = self._tree
         for part in path.parts:
@@ -216,15 +242,49 @@ class _MirageOS(OSAccess):
                          data: str) -> int:
         self._ensure_file(path_from_arg(path))
         out = super().path_append_text(path, data)
-        self._flush(path_from_arg(path))
+        self._append_remote(path_from_arg(path), data.encode())
         return out
 
     def path_append_bytes(self, path: PurePosixPath | MontyFileHandle,
                           data: bytes) -> int:
         self._ensure_file(path_from_arg(path))
         out = super().path_append_bytes(path, data)
-        self._flush(path_from_arg(path))
+        self._append_remote(path_from_arg(path), bytes(data))
         return out
+
+    def path_mkdir(self, path: PurePosixPath, parents: bool,
+                   exist_ok: bool) -> None:
+        self._ensure_dir(path.parent)
+        if self._workspace_dispatch is not None:
+            self._sync(
+                self._workspace_dispatch("mkdir",
+                                         PathSpec.from_str_path(str(path))))
+            self._insert_tree_dir(path)
+            self._missing.discard(str(path))
+            return
+        super().path_mkdir(path, parents, exist_ok)
+
+    def path_rmdir(self, path: PurePosixPath) -> None:
+        self._ensure_dir(path)
+        if self._workspace_dispatch is not None:
+            self._sync(
+                self._workspace_dispatch("rmdir",
+                                         PathSpec.from_str_path(str(path))))
+            self._missing.add(str(path))
+        super().path_rmdir(path)
+
+    def path_rename(self, path: PurePosixPath, target: PurePosixPath) -> None:
+        self._ensure_file(path)
+        self._ensure_dir(path)
+        if self._workspace_dispatch is not None:
+            self._sync(
+                self._workspace_dispatch("rename",
+                                         PathSpec.from_str_path(str(path)),
+                                         dst=PathSpec.from_str_path(
+                                             str(target))))
+            self._missing.add(str(path))
+            self._missing.discard(str(target))
+        super().path_rename(path, target)
 
     def path_unlink(self, path: PurePosixPath) -> None:
         self._ensure_file(path)
@@ -239,14 +299,16 @@ class _MirageOS(OSAccess):
 class MontyRuntime(Runtime, EvaluatorMixin):
     """Run Python code on the Monty sandboxed interpreter.
 
-    Code executes in Monty's Rust interpreter: no host filesystem,
-    environment, or network access. File I/O and `os.environ` are
-    serviced through the injected workspace dispatch, so the code sees
-    the workspace mounts and nothing else. Command-line arguments are
-    exposed as the `argv` global (`argv[0]` is the script name) and
-    piped input as the `stdin` global (bytes, None when nothing was
-    piped). Monty implements a Python subset; host-only features
-    (`sys.stdin`, `sys.argv`, third-party imports) are unavailable —
+    Code executes in Monty's Rust interpreter, inside a pooled worker
+    subprocess: no host filesystem, environment, or network access, and
+    an interpreter crash costs a worker rather than this process. File
+    I/O and `os.environ` are serviced through the injected workspace
+    dispatch, so the code sees the workspace mounts and nothing else.
+    Command-line arguments are exposed as the `argv` global (`argv[0]`
+    is the script name) and piped input as the `stdin` global (bytes,
+    None when nothing was piped). Monty implements a Python subset;
+    host-only features (`sys.stdin`, `sys.argv`, third-party imports)
+    are unavailable, and the stdlib is json/re/math/datetime/typing —
     use the `local` runtime for those.
     """
 
@@ -266,41 +328,76 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         super().__init__(captures, config, script)
         self._workspace_dispatch: Callable[..., Any] | None = None
         self._eval_sessions: dict[str, Any] = {}
+        self._pool: Any = None
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:
         if self._workspace_dispatch is None:
             self._workspace_dispatch = dispatch
 
+    async def _ensure_pool(self) -> Any:
+        """The runtime's worker pool, spawned on first use.
+
+        One pool per runtime instance, which is one per workspace world:
+        it keeps `request_timeout` and the process cap per workspace
+        rather than global. The pool spawns `min_processes` workers
+        eagerly and reuses one across sequential checkouts, so an idle
+        workspace costs a single worker.
+        """
+        if self._pool is None:
+            pool = pydantic_monty.AsyncMonty()
+            await pool.__aenter__()
+            self._pool = pool
+        return self._pool
+
     async def run(self, args: RunArgs) -> RunResult:
-        # run_async executes on Monty's own tokio pool and returns an
-        # asyncio-compatible future: the loop stays free, and cancelling
-        # the future halts the interpreter (verified: CPU drops to zero),
-        # so a limit timeout reclaims the run instead of leaking a
-        # burning thread.
+        # Execution lives in a monty worker subprocess (0.0.19 moved it
+        # out of process so an interpreter crash cannot take the host
+        # with it). feed_run awaits off the event loop, so the loop
+        # stays free; a dead or timed-out worker surfaces as
+        # MontyCrashedError and the pool replaces it.
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
         bridge = _MirageOS(loop, self._workspace_dispatch, args.env)
-        try:
-            monty = pydantic_monty.Monty(args.code, inputs=["argv", "stdin"])
-        except pydantic_monty.MontySyntaxError as exc:
-            trace = exc.display(format="traceback") + "\n"
-            return RunResult(stdout=b"", stderr=trace.encode(), exit_code=1)
+        pool = await self._ensure_pool()
         # argv[0] is the program's own name when the caller has one (a
         # CLI install's head word), else the interpreter's placeholder.
         argv = [args.prog or "main.py", *args.args]
+        # Monty has no `sys.stdin`, so piped bytes ride in as a global
+        # the same way argv does: raw bytes, None when nothing was piped.
+        inputs = {"argv": argv, "stdin": args.stdin}
         try:
-            await monty.run_async(inputs={
-                "argv": argv,
-                "stdin": args.stdin
-            },
-                                  print_callback=collector,
-                                  os=bridge)
+            async with pool.checkout() as session:
+                # Read the pid before the turn starts: the getter reports
+                # None while a turn is in flight, and cancelling the await
+                # does NOT stop the worker (0.0.19 runs it in its own
+                # process). Without the kill, a safeguard timeout would
+                # report exit 124 and leave the worker spinning forever,
+                # and pool teardown would block on it uninterruptibly.
+                worker_pid = session.worker_pid
+                try:
+                    await session.feed_run(args.code,
+                                           inputs=inputs,
+                                           print_callback=collector,
+                                           os=bridge)
+                except asyncio.CancelledError:
+                    _kill_worker(worker_pid)
+                    raise
+        except pydantic_monty.MontySyntaxError as exc:
+            trace = exc.display(format="traceback") + "\n"
+            return RunResult(stdout=b"", stderr=trace.encode(), exit_code=1)
         except pydantic_monty.MontyRuntimeError as exc:
             stdout, stderr = _split_streams(collector)
             trace = exc.display(format="traceback") + "\n"
             return RunResult(stdout=stdout,
                              stderr=(stderr or b"") + trace.encode(),
+                             exit_code=1)
+        except pydantic_monty.MontyCrashedError as exc:
+            stdout, stderr = _split_streams(collector)
+            reason = ("timed out" if exc.timed_out else "crashed")
+            note = f"{self.name}: worker {reason}\n"
+            return RunResult(stdout=stdout,
+                             stderr=(stderr or b"") + note.encode(),
                              exit_code=1)
         stdout, stderr = _split_streams(collector)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=0)
@@ -310,14 +407,17 @@ class MontyRuntime(Runtime, EvaluatorMixin):
                    *,
                    inputs: dict[str, EvalValue] | None = None,
                    session: str | None = None) -> EvalResult:
-        """Evaluate code in-process; the last expression is the value.
+        """Evaluate code; the last expression is the value.
 
-        One-shot mode evaluates on a throwaway repl; a session id
-        keeps the repl (heap and namespace) alive per id, which is
-        the console. Inputs bind as globals via monty's native
-        mechanism, and the code sees workspace files through the same
-        bridge agent code uses. In-process, so the returned value is
-        the real object, not a serialized approximation.
+        One-shot mode checks a worker out for the feed and hands it
+        straight back; a session id keeps its own worker (heap and
+        namespace) alive per id, which is the console. Inputs bind as
+        globals via monty's native mechanism, and the code sees
+        workspace files through the same bridge agent code uses. The
+        value crosses the worker boundary as a converted Monty value:
+        dicts, lists, strings, numbers, bools and None arrive as their
+        Python equivalents, which is every shape a policy verdict
+        takes.
 
         Args:
             code (str): the python source.
@@ -332,17 +432,32 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
         bridge = _MirageOS(loop, self._workspace_dispatch, {})
+        pool = await self._ensure_pool()
         repl = self._eval_sessions.get(session) if session is not None \
             else None
+        # A checked-out session owns a worker for its lifetime, so the
+        # one-shot arm hands its worker back as soon as the feed ends
+        # while a console session keeps its own until close().
+        one_shot = repl is None and session is None
         if repl is None:
-            repl = pydantic_monty.MontyRepl()
+            repl = await pool.checkout().__aenter__()
             if session is not None:
                 self._eval_sessions[session] = repl
+        worker_pid = repl.worker_pid
         try:
-            value = await repl.feed_run_async(code,
-                                              inputs=dict(inputs or {}),
-                                              print_callback=collector,
-                                              os=bridge)
+            value = await repl.feed_run(code,
+                                        inputs=dict(inputs or {}),
+                                        print_callback=collector,
+                                        os=bridge)
+        except asyncio.CancelledError:
+            # Same reclaim as run(): cancelling the await leaves the
+            # worker running. A console session loses its heap with the
+            # worker, so drop it and let the next eval check out a
+            # fresh one rather than address a dead process.
+            _kill_worker(worker_pid)
+            if session is not None:
+                self._eval_sessions.pop(session, None)
+            raise
         except pydantic_monty.MontySyntaxError as exc:
             trace = exc.display(format="traceback")
             # Console continuation, not a broken program: the source
@@ -363,11 +478,35 @@ class MontyRuntime(Runtime, EvaluatorMixin):
                                   (trace + "\n").encode(),
                                   exit_code=1)
             raise EvalError(trace)
+        finally:
+            if one_shot:
+                await repl.__aexit__(None, None, None)
         stdout, stderr = _split_streams(collector)
         return EvalResult(value=value, stdout=stdout, stderr=stderr)
 
     async def close(self) -> None:
+        for repl in self._eval_sessions.values():
+            await repl.__aexit__(None, None, None)
         self._eval_sessions.clear()
+        if self._pool is not None:
+            await self._pool.__aexit__(None, None, None)
+            self._pool = None
+
+
+def _kill_worker(pid: int | None) -> None:
+    """Stop a monty worker whose turn was cancelled.
+
+    Args:
+        pid (int | None): the worker process id, None when the pool
+            had not attached one yet.
+    """
+    if pid is None:
+        return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        # Already gone: the turn finished between the cancel and here.
+        logger.debug("monty worker %s already exited", pid)
 
 
 def _split_streams(
