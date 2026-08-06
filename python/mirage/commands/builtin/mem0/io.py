@@ -24,7 +24,6 @@ IO = CommandIO(
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda _accessor: True,
-    is_dir_name=lambda _accessor, child: not child.endswith(".json"),
     local=False,
 )
 

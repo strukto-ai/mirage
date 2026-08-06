@@ -16,7 +16,7 @@ import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName, readdir } from './readdir.ts'
+import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
 // Same readdir/stat walk the generic fallback uses, wired as a find op
@@ -31,7 +31,6 @@ export function find(
     {
       readdir: (spec, index) => readdir(accessor, spec, index),
       stat: (spec, index) => stat(accessor, spec, index),
-      isDirName: (child) => isDirName(child),
     },
     options,
   )

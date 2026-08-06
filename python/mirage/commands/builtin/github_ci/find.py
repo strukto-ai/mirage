@@ -23,7 +23,7 @@ from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.github_ci.readdir import is_cross_run_root, is_dir_name
+from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
@@ -100,7 +100,6 @@ async def find(
         results.extend(await walk_find(search,
                                        readdir=partial(_readdir, accessor),
                                        stat=partial(_stat, accessor),
-                                       is_dir_name=is_dir_name,
                                        index=index,
                                        args=args,
                                        links=links,

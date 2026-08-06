@@ -25,13 +25,6 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def is_dir_name(child: str) -> bool:
-    # Entries are recognized by extension, so classification never needs the
-    # stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    return not (name.endswith(".json") or name.endswith(".jsonl"))
-
-
 async def readdir(
     accessor: MongoDBAccessor,
     path: PathSpec,

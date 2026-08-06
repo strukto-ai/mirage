@@ -24,7 +24,6 @@ from mirage.core.gdrive.exists import exists as _exists
 from mirage.core.gdrive.find import find as _find
 from mirage.core.gdrive.mkdir import mkdir as _mkdir
 from mirage.core.gdrive.read import read as _read
-from mirage.core.gdrive.readdir import is_dir_name as _is_dir_name
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.rename import rename as _rename
 from mirage.core.gdrive.rm import rm_r as _rm_r
@@ -45,7 +44,6 @@ IO = CommandIO(
     read_range=_read,
     read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
-    is_dir_name=lambda _accessor, child: _is_dir_name(child),
     is_mounted=lambda a: True,
     local=False,
     write=_write,

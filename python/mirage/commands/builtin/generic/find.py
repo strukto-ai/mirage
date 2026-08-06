@@ -523,7 +523,6 @@ async def _walk_collect(
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
     stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    is_dir_name: Callable[[str], bool | None],
     spec: PathSpec,
     index: IndexCacheStore,
     maxdepth: int | None,
@@ -540,21 +539,26 @@ async def _walk_collect(
         return
     prefix = mount_prefix_of(spec.virtual, spec.resource_path)
     for child in children:
-        hint = is_dir_name(child)
-        trimmed = child.rstrip("/") if child.endswith("/") else child
-        if hint is None:
+        # Classification is stat's job (an index lookup right after the
+        # readdir that populated it). The one in-band proof is a trailing
+        # slash on a cold listing: no backend renders a file with one.
+        # Name heuristics beyond that guessed wrong (attachments and
+        # uploads carry whatever name the sender gave them) and are gone.
+        if child.endswith("/"):
+            trimmed = child.rstrip("/")
+            is_dir = True
+        else:
+            trimmed = child
             st = await _stat_entry(stat, trimmed, prefix, index)
             is_dir = st is not None and st.type == FileType.DIRECTORY
-        else:
-            is_dir = hint
         acc.append((trimmed, "d" if is_dir else "f"))
         if is_dir:
             child_spec = PathSpec(virtual=trimmed,
                                   directory=trimmed,
                                   resolved=False,
                                   resource_path=mount_key(trimmed, prefix))
-            await _walk_collect(readdir, stat, is_dir_name, child_spec, index,
-                                maxdepth, depth + 1, acc)
+            await _walk_collect(readdir, stat, child_spec, index, maxdepth,
+                                depth + 1, acc)
 
 
 async def link_results(
@@ -651,7 +655,6 @@ async def walk_find(
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
     stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    is_dir_name: Callable[[str], bool | None],
     index: IndexCacheStore,
     args: FindArgs,
     links: LinkView | None = None,
@@ -671,8 +674,8 @@ async def walk_find(
     # readdir on it is either an error the walk would have to swallow
     # (Box answers ENOTDIR) or a wasted round trip everywhere else.
     if root_stat is None or root_stat.type == FileType.DIRECTORY:
-        await _walk_collect(readdir, stat, is_dir_name, search_path, index,
-                            args.maxdepth, 1, collected)
+        await _walk_collect(readdir, stat, search_path, index, args.maxdepth,
+                            1, collected)
     tree = prefix_path_nodes(args_to_tree(args), prefix)
     need_empty = tree_has_empty(tree)
     results: list[str] = []

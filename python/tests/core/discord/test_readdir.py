@@ -20,7 +20,7 @@ from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.discord.config import DiscordConfig
-from mirage.core.discord.readdir import is_dir_name, readdir
+from mirage.core.discord.readdir import readdir
 from mirage.core.discord.render import history_jsonl_bytes, member_json_bytes
 from mirage.types import PathSpec
 
@@ -269,18 +269,6 @@ async def test_readdir_members_sized(accessor, index):
 
     lookup = await index.get("/My Server/members/alice__U001.json")
     assert lookup.entry.size == len(member_json_bytes(members[0]))
-
-
-@pytest.mark.asyncio
-async def test_is_dir_name_classifies_attachments_as_files():
-    # An attachment keeps the uploader's extension, so classification is
-    # structural: everything inside a day's files/ directory is a file.
-    base = "/d/G/channels/c/2026-06-01"
-    assert is_dir_name(f"{base}/files") is True
-    assert is_dir_name(f"{base}/files/report.csv") is False
-    assert is_dir_name(f"{base}/files/archive.tar.gz") is False
-    assert is_dir_name(f"{base}/chat.jsonl") is False
-    assert is_dir_name("/d/G/channels/c") is True
 
 
 @pytest.mark.asyncio

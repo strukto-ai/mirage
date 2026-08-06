@@ -27,12 +27,11 @@ vi.mock('./stat.ts', async () => {
 })
 
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName } from './readdir.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
 
@@ -47,7 +46,6 @@ async function find(
     {
       readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
       stat: (spec, idx) => statMod.stat(accessor, spec, idx),
-      isDirName: (child) => isDirName(child),
     },
     options,
     index,
@@ -87,20 +85,29 @@ describe('gsheets core find', () => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
     // walkFind stats the start path to decide whether to emit it; no
-    // fixture entry for '/' keeps these walks root-less.
-    vi.mocked(statMod.stat).mockImplementation((_accessor, spec) =>
-      Promise.reject(enoent(spec.virtual)),
-    )
+    // fixture entry for '/' keeps these walks root-less. Children classify
+    // through stat: folders are directories, rendered files are TEXT.
+    vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
+      const dirs = new Set(['/owned', '/shared'])
+      if (dirs.has(spec.virtual)) {
+        const name = spec.virtual.split('/').pop() ?? ''
+        return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
+      }
+      if (spec.virtual === '/owned/Sheet_A__s1.gsheet.json') {
+        return Promise.resolve(
+          new FileStat({ name: 'Sheet_A__s1.gsheet.json', size: 1, type: FileType.TEXT }),
+        )
+      }
+      return Promise.reject(enoent(spec.virtual))
+    })
     mockTree(TREE)
   })
 
-  it('classifies .gsheet.json entries as files and the rest as dirs without stat', async () => {
+  it('classifies rendered files and folders via stat', async () => {
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
     expect(files).toEqual(['/owned/Sheet_A__s1.gsheet.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
     expect(dirs).toEqual(['/owned', '/shared'])
-    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
-    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('matches names with globs', async () => {
