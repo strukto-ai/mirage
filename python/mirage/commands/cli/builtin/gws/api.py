@@ -24,9 +24,10 @@ from mirage.commands.cli.builtin.gws.methods import (GWS_METHODS,
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView, Option
-from mirage.core.google._client import (TokenManager, google_delete,
-                                        google_get, google_get_bytes,
-                                        google_patch, google_post)
+from mirage.core.google._client import (TokenManager, drive_base,
+                                        google_delete, google_get,
+                                        google_get_bytes, google_patch,
+                                        google_post)
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -138,6 +139,55 @@ _CALLERS: dict[str, Callable[..., Awaitable[object]]] = {
 }
 
 
+def scoped_body(method: GwsMethod, config: GoogleConfig,
+                body: dict[str, Any]) -> dict[str, Any]:
+    """Default a create's parents to the installation's folder scope.
+
+    A folder-scoped install is pointed at one folder, which is the same
+    folder a gdrive mount sharing the config exposes. A create with no
+    parents would land in My Drive's root instead, outside the mount, so
+    the agent's own `ls` would never show what it just made. An explicit
+    parents array always wins.
+
+    Args:
+        method (GwsMethod): the Discovery method being wrapped.
+        config (GoogleConfig): the installation's config.
+        body (dict): the parsed --json request body.
+    """
+    if method.placement != "parents" or not config.folder_id:
+        return body
+    if body.get("parents"):
+        return body
+    return {**body, "parents": [config.folder_id]}
+
+
+async def place_in_scope(method: GwsMethod, token_manager: TokenManager,
+                         result: dict[str, Any]) -> None:
+    """Move a newly created editor file into the folder scope.
+
+    The Docs, Sheets and Slides create methods have no parents field at
+    all, so a new file always lands in My Drive's root; placing it takes a
+    second Drive call. Doing it here is what lets `gws sheets spreadsheets
+    create` put the file where the mount is, instead of leaving the caller
+    to know that placement was even a question.
+
+    Args:
+        method (GwsMethod): the Discovery method being wrapped.
+        token_manager (TokenManager): the installation's OAuth handle.
+        result (dict): the create response, carrying the new file's id.
+    """
+    folder_id = token_manager.config.folder_id
+    file_id = result.get(method.id_field)
+    if not folder_id or not isinstance(file_id, str):
+        return
+    await google_patch(token_manager,
+                       f"{drive_base(token_manager)}/files/{file_id}", {},
+                       params={
+                           "addParents": folder_id,
+                           "removeParents": "root",
+                       })
+
+
 async def run_gws_method(
     method: GwsMethod,
     config: GoogleConfig,
@@ -150,6 +200,7 @@ async def run_gws_method(
     body = _parse_json_flag(fl.as_str("json") or "", "--json")
     if method.needs_body and not body:
         raise UsageError("--json is required")
+    body = scoped_body(method, config, body)
     token_manager = TokenManager(config)
     path, query = fill_path(method.path, params)
     url = SERVICE_BASES[method.service](token_manager) + path
@@ -168,6 +219,8 @@ async def run_gws_method(
         return yield_bytes(out), IOResult()
     result = await _CALLERS[method.http](token_manager, url, body,
                                          query_params)
+    if method.placement == "relocate" and isinstance(result, dict):
+        await place_in_scope(method, token_manager, result)
     await invalidate_mount_listing()
     if result is _NO_CONTENT:
         return None, IOResult()

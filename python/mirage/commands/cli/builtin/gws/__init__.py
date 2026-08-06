@@ -27,6 +27,7 @@ from mirage.commands.cli.builtin.gws.sheets.write import write as sheets_write
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Option
 from mirage.core.google.config import GoogleConfig
+from mirage.types import ResourceName
 
 # The gws program tree, mirroring the official Google Workspace CLI:
 # one passthrough leaf per Discovery method (`gws drive files list`,
@@ -38,6 +39,8 @@ GWS = CLISpec(
     name="gws",
     description="Google Workspace API commands",
     config_model=GoogleConfig,
+    serves=(ResourceName.GDRIVE, ResourceName.GDOCS, ResourceName.GSHEETS,
+            ResourceName.GSLIDES, ResourceName.GMAIL),
     subcommands=(
         CLISpec(
             name="drive",

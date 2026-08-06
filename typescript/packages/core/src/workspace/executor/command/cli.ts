@@ -74,6 +74,7 @@ export async function handleCli(
   session: Session,
   stdin: ByteSource | null = null,
   facts: CliFacts = {},
+  dropListings: (() => Promise<void>) | null = null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   // Words re-enter string space as typed (wordText): the walk owns
   // interpretation, so a quoted "Lunch?" must not arrive as the
@@ -185,6 +186,12 @@ export async function handleCli(
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
     ]
   }
+  // An account CLI mutates its service by id, so no vfs path can be derived
+  // from the call and per-path invalidation has nothing to aim at: a newly
+  // created file has no cache entry to expire, which is the case that
+  // matters. Dropping the service's listings is what lets the agent's next
+  // `ls` see what it just made.
+  if (leaf.write && dropListings !== null) await dropListings()
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
   if (warnings.length > 0) {

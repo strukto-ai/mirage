@@ -1256,6 +1256,27 @@
       ]
     },
     {
+      "id": "cli-gws-scoped",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "clis": [
+        "gws"
+      ],
+      "cli_scope": "/data",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/scope"
+        }
+      ]
+    },
+    {
       "id": "cli-slack",
       "hosts": [
         "python",

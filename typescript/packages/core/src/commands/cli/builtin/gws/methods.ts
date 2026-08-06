@@ -38,6 +38,14 @@ export interface GwsMethod {
   path: string
   needsBody?: boolean
   rawBytes?: boolean
+  // Where a newly created file lands when the installation is scoped to a
+  // folder. 'parents' means the request body takes a parents array, so the
+  // scope is filled in there. 'relocate' means the API has no parents field
+  // at all (the editors' create methods), so the new file is moved
+  // afterwards with a Drive update. Absent means the method creates nothing.
+  placement?: 'parents' | 'relocate'
+  // Response key holding the new file's id, for 'relocate'.
+  idField?: string
 }
 
 export const GWS_METHODS: readonly GwsMethod[] = [
@@ -55,6 +63,8 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     http: 'POST',
     path: '/documents',
     needsBody: true,
+    placement: 'relocate',
+    idField: 'documentId',
   },
   {
     service: 'docs',
@@ -78,6 +88,8 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     http: 'POST',
     path: '/spreadsheets',
     needsBody: true,
+    placement: 'relocate',
+    idField: 'spreadsheetId',
   },
   {
     service: 'sheets',
@@ -101,6 +113,8 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     http: 'POST',
     path: '/presentations',
     needsBody: true,
+    placement: 'relocate',
+    idField: 'presentationId',
   },
   {
     service: 'slides',
@@ -119,6 +133,7 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     http: 'POST',
     path: '/files',
     needsBody: true,
+    placement: 'parents',
   },
   {
     service: 'drive',
@@ -134,6 +149,7 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     method: 'copy',
     http: 'POST',
     path: '/files/{fileId}/copy',
+    placement: 'parents',
   },
   {
     service: 'drive',

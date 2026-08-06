@@ -32,6 +32,26 @@
 // (and vice versa), every content write records a revision that /revisions
 // can list and serve, Gmail messages.insert honors
 // internalDateSource=dateHeader, and messages.trash swaps INBOX for TRASH.
+// Sheets keeps a declared grid per tab beside the sparse cell map, so an
+// insert/append grows rowCount the way the live API does; object ids are
+// unique across a whole presentation, so duplicating a slide re-keys its
+// elements; and replaceAllText is case-INSENSITIVE unless matchCase is set,
+// in both Docs and Slides.
+//
+// Known-absent surface, listed so a 404 here is read as "not built yet"
+// rather than "mirage sent the wrong request":
+//   - Gmail beyond labels.list and messages list/get/insert/send/trash:
+//     no messages.modify/untrash/delete/batchModify, no labels CRUD, and
+//     no threads or drafts resources at all
+//   - drive changes.list / changes.getStartPageToken (needs a change feed)
+//   - Sheets requests that need a cell format or style model
+//     (updateCells, repeatCell, copyPaste, conditional formats) and
+//     spreadsheets.getByDataFilter
+//   - Docs requests that need document structure beyond a text body
+//     (insertTable, insertInlineImage, updateTextStyle, bullets)
+//   - Slides presentations.pages.getThumbnail, and the shape/table/image
+//     geometry requests
+//   - Page has no pageType and Sheets no defaultFormat/spreadsheetTheme
 
 import { createHash } from 'node:crypto'
 import http from 'node:http'
@@ -81,6 +101,12 @@ interface SheetTab {
   sheetId: number
   title: string
   cells: Map<string, string>
+  // The declared grid, which insertDimension and appendDimension grow and
+  // deleteDimension shrinks. Kept beside the sparse cell map because the
+  // grid is independent of what has been written: a new tab reports 1000
+  // rows with nothing in it.
+  rows: number
+  cols: number
 }
 
 interface Spreadsheet {
@@ -250,7 +276,7 @@ function autoLink(item: DriveItem): void {
   } else if (item.mimeType === SHEET_MIME && !state.sheets.has(item.id)) {
     state.sheets.set(item.id, {
       title: item.name,
-      tabs: [{ sheetId: 0, title: 'Sheet1', cells: new Map() }],
+      tabs: [newTab(0, 'Sheet1')],
       nextSheetId: 1,
     })
   } else if (item.mimeType === SLIDE_MIME && !state.presentations.has(item.id)) {
@@ -489,6 +515,38 @@ function fmtDocument(id: string): Record<string, unknown> {
   }
 }
 
+// SubstringMatchCriteria.matchCase defaults to false, i.e. the search is
+// case-INSENSITIVE unless the caller opts in. Shared by the Docs and Slides
+// replaceAllText requests.
+//
+// Windows are compared at equal length rather than by lowercasing the whole
+// haystack: a lowercase mapping can change a string's length (İ), which
+// would misalign every index after it.
+function replaceAllText(
+  haystack: string,
+  needle: string,
+  replacement: string,
+  matchCase: boolean,
+): [string, number] {
+  if (needle === '') return [haystack, 0]
+  const find = matchCase ? needle : needle.toLowerCase()
+  let out = ''
+  let cursor = 0
+  let count = 0
+  while (cursor + needle.length <= haystack.length) {
+    const window = haystack.slice(cursor, cursor + needle.length)
+    if ((matchCase ? window : window.toLowerCase()) === find) {
+      out += replacement
+      cursor += needle.length
+      count += 1
+    } else {
+      out += haystack[cursor] as string
+      cursor += 1
+    }
+  }
+  return [out + haystack.slice(cursor), count]
+}
+
 function docsBatchUpdate(id: string, requests: Record<string, unknown>[]): [number, object] {
   const doc = state.docs.get(id)
   if (doc === undefined) return NOT_FOUND
@@ -515,12 +573,13 @@ function docsBatchUpdate(id: string, requests: Record<string, unknown>[]): [numb
         containsText?: { text?: string; matchCase?: boolean }
         replaceText?: string
       }
-      const needle = r.containsText?.text ?? ''
-      let occurrences = 0
-      if (needle !== '') {
-        occurrences = doc.text.split(needle).length - 1
-        doc.text = doc.text.split(needle).join(r.replaceText ?? '')
-      }
+      const [text, occurrences] = replaceAllText(
+        doc.text,
+        r.containsText?.text ?? '',
+        r.replaceText ?? '',
+        r.containsText?.matchCase ?? false,
+      )
+      doc.text = text
       replies.push({ replaceAllText: { occurrencesChanged: occurrences } })
     } else {
       return googleError(400, `Unsupported request: ${Object.keys(request).join(',')}`, 'INVALID_ARGUMENT')
@@ -536,6 +595,10 @@ function touchNative(id: string): void {
 }
 
 // --------------------------------------------------------------- sheets ---
+
+function newTab(sheetId: number, title: string, rows = GRID_ROWS, cols = GRID_COLUMNS): SheetTab {
+  return { sheetId, title, cells: new Map(), rows, cols }
+}
 
 function colLetterToIndex(letters: string): number {
   let n = 0
@@ -649,6 +712,19 @@ function writeValues(range: A1Range, values: string[][], startRow: number): numb
   return cells
 }
 
+// values.clear and values.batchClear drop the cells inside the rect but
+// leave the grid alone, which is what separates them from deleteDimension.
+function clearRange(range: A1Range): void {
+  const extent = tabExtent(range.tab)
+  const endRow = Math.min(range.endRow ?? extent.rows - 1, extent.rows - 1)
+  const endCol = Math.min(range.endCol ?? extent.cols - 1, extent.cols - 1)
+  for (let r = range.startRow; r <= endRow; r += 1) {
+    for (let c = range.startCol; c <= endCol; c += 1) {
+      range.tab.cells.delete(`${String(r)},${String(c)}`)
+    }
+  }
+}
+
 function rangeLabel(tab: SheetTab, startRow: number, startCol: number, values: string[][]): string {
   const rows = Math.max(1, values.length)
   const cols = Math.max(1, ...values.map((r) => r.length))
@@ -681,8 +757,8 @@ function scientific(value: number): string {
 function tabGrid(tab: SheetTab): { rows: number; cols: number } {
   const used = tabExtent(tab)
   return {
-    rows: Math.max(GRID_ROWS, used.rows),
-    cols: Math.max(GRID_COLUMNS, used.cols),
+    rows: Math.max(tab.rows, used.rows),
+    cols: Math.max(tab.cols, used.cols),
   }
 }
 
@@ -773,18 +849,110 @@ function fmtSpreadsheet(id: string, includeGridData = false): Record<string, unk
   }
 }
 
+type Dimension = 'ROWS' | 'COLUMNS'
+
+interface DimensionRange {
+  tab: SheetTab
+  dimension: Dimension
+  startIndex: number
+  endIndex: number
+}
+
+interface RawDimensionRange {
+  sheetId?: number
+  dimension?: string
+  startIndex?: number
+  endIndex?: number
+}
+
+// A DimensionRange with no endIndex is unbounded to the end of the grid,
+// and no startIndex means index 0, matching the real API's optional fields.
+function resolveDimensionRange(
+  sheet: Spreadsheet,
+  raw: RawDimensionRange | undefined,
+): DimensionRange | null {
+  const tab = sheet.tabs.find((t) => t.sheetId === (raw?.sheetId ?? 0))
+  if (tab === undefined) return null
+  const dimension: Dimension = raw?.dimension === 'COLUMNS' ? 'COLUMNS' : 'ROWS'
+  const limit = dimension === 'ROWS' ? tab.rows : tab.cols
+  const startIndex = Math.max(0, raw?.startIndex ?? 0)
+  const endIndex = Math.max(startIndex, raw?.endIndex ?? limit)
+  return { tab, dimension, startIndex, endIndex }
+}
+
+// Re-key the sparse cell map along one dimension. `mapIndex` returns the
+// index a row/column moves to, or null to drop it; every dimension request
+// is expressed as one such mapping so insert, delete and move cannot drift
+// apart.
+function remapCells(
+  tab: SheetTab,
+  dimension: Dimension,
+  mapIndex: (index: number) => number | null,
+): void {
+  const next = new Map<string, string>()
+  for (const [key, value] of tab.cells) {
+    const [row, col] = key.split(',').map(Number) as [number, number]
+    const moved = mapIndex(dimension === 'ROWS' ? row : col)
+    if (moved === null) continue
+    next.set(
+      dimension === 'ROWS' ? `${String(moved)},${String(col)}` : `${String(row)},${String(moved)}`,
+      value,
+    )
+  }
+  tab.cells = next
+}
+
+function growGrid(tab: SheetTab, dimension: Dimension, by: number): void {
+  if (dimension === 'ROWS') tab.rows = Math.max(1, tab.rows + by)
+  else tab.cols = Math.max(1, tab.cols + by)
+}
+
+function insertDimension(range: DimensionRange): void {
+  const count = range.endIndex - range.startIndex
+  remapCells(range.tab, range.dimension, (i) => (i >= range.startIndex ? i + count : i))
+  growGrid(range.tab, range.dimension, count)
+}
+
+function deleteDimension(range: DimensionRange): void {
+  const count = range.endIndex - range.startIndex
+  remapCells(range.tab, range.dimension, (i) => {
+    if (i >= range.startIndex && i < range.endIndex) return null
+    return i >= range.endIndex ? i - count : i
+  })
+  growGrid(range.tab, range.dimension, -count)
+}
+
+// destinationIndex is in the coordinate space *before* the source band is
+// lifted out, which is the one detail of moveDimension worth getting right:
+// a destination past the band lands `count` lower once the band is gone.
+function moveDimension(range: DimensionRange, destinationIndex: number): void {
+  const count = range.endIndex - range.startIndex
+  if (count === 0) return
+  if (destinationIndex >= range.startIndex && destinationIndex <= range.endIndex) return
+  const target =
+    destinationIndex > range.endIndex ? destinationIndex - count : Math.max(0, destinationIndex)
+  remapCells(range.tab, range.dimension, (i) => {
+    if (i >= range.startIndex && i < range.endIndex) return target + (i - range.startIndex)
+    const lifted = i >= range.endIndex ? i - count : i
+    return lifted >= target ? lifted + count : lifted
+  })
+}
+
 function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [number, object] {
   const sheet = state.sheets.get(id)
   if (sheet === undefined) return NOT_FOUND
   const replies: object[] = []
   for (const request of requests) {
     if ('addSheet' in request) {
-      const r = request.addSheet as { properties?: { title?: string } }
-      const tab: SheetTab = {
-        sheetId: sheet.nextSheetId,
-        title: r.properties?.title ?? `Sheet${String(sheet.tabs.length + 1)}`,
-        cells: new Map(),
+      const r = request.addSheet as {
+        properties?: { title?: string; gridProperties?: { rowCount?: number; columnCount?: number } }
       }
+      const tab = newTab(
+        sheet.nextSheetId,
+        r.properties?.title ?? `Sheet${String(sheet.tabs.length + 1)}`,
+        r.properties?.gridProperties?.rowCount ?? GRID_ROWS,
+        r.properties?.gridProperties?.columnCount ?? GRID_COLUMNS,
+      )
       sheet.nextSheetId += 1
       sheet.tabs.push(tab)
       // The live API replies with the whole SheetProperties, not just the
@@ -800,6 +968,58 @@ function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
       }
       const tab = sheet.tabs.find((t) => t.sheetId === r.properties?.sheetId)
       if (tab !== undefined && r.properties?.title !== undefined) tab.title = r.properties.title
+      replies.push({})
+    } else if ('duplicateSheet' in request) {
+      const r = request.duplicateSheet as {
+        sourceSheetId?: number
+        insertSheetIndex?: number
+        newSheetId?: number
+        newSheetName?: string
+      }
+      const src = sheet.tabs.find((t) => t.sheetId === (r.sourceSheetId ?? 0))
+      if (src === undefined) {
+        return googleError(400, 'Invalid sourceSheetId.', 'INVALID_ARGUMENT')
+      }
+      const copy: SheetTab = {
+        ...src,
+        sheetId: r.newSheetId ?? sheet.nextSheetId,
+        title: r.newSheetName ?? `Copy of ${src.title}`,
+        cells: new Map(src.cells),
+      }
+      if (r.newSheetId === undefined) sheet.nextSheetId += 1
+      const at = r.insertSheetIndex ?? sheet.tabs.length
+      sheet.tabs.splice(at, 0, copy)
+      replies.push({ duplicateSheet: { properties: tabProperties(copy, at) } })
+    } else if ('insertDimension' in request) {
+      const r = request.insertDimension as { range?: RawDimensionRange }
+      const range = resolveDimensionRange(sheet, r.range)
+      if (range === null) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+      insertDimension(range)
+      replies.push({})
+    } else if ('deleteDimension' in request) {
+      const r = request.deleteDimension as { range?: RawDimensionRange }
+      const range = resolveDimensionRange(sheet, r.range)
+      if (range === null) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+      deleteDimension(range)
+      replies.push({})
+    } else if ('appendDimension' in request) {
+      const r = request.appendDimension as {
+        sheetId?: number
+        dimension?: string
+        length?: number
+      }
+      const tab = sheet.tabs.find((t) => t.sheetId === (r.sheetId ?? 0))
+      if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+      growGrid(tab, r.dimension === 'COLUMNS' ? 'COLUMNS' : 'ROWS', r.length ?? 0)
+      replies.push({})
+    } else if ('moveDimension' in request) {
+      const r = request.moveDimension as {
+        source?: RawDimensionRange
+        destinationIndex?: number
+      }
+      const range = resolveDimensionRange(sheet, r.source)
+      if (range === null) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+      moveDimension(range, r.destinationIndex ?? 0)
       replies.push({})
     } else if ('updateSpreadsheetProperties' in request) {
       const r = request.updateSpreadsheetProperties as { properties?: { title?: string } }
@@ -817,11 +1037,134 @@ function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
   return [200, { spreadsheetId: id, replies }]
 }
 
+function batchGetValues(id: string, ranges: string[]): [number, object] {
+  const sheet = state.sheets.get(id)
+  if (sheet === undefined) return NOT_FOUND
+  const valueRanges: object[] = []
+  for (const rangeStr of ranges) {
+    const range = parseA1(sheet, rangeStr)
+    if (range === null) {
+      return googleError(400, `Unable to parse range: ${rangeStr}`, 'INVALID_ARGUMENT')
+    }
+    valueRanges.push({
+      range: rangeLabelFor(range, rangeStr),
+      majorDimension: 'ROWS',
+      values: rangeValues(range),
+    })
+  }
+  return [200, { spreadsheetId: id, valueRanges }]
+}
+
+// totalUpdatedRows/Columns count the distinct rows and columns holding at
+// least one updated cell, not the sum over the data entries, so two ranges
+// overlapping one row report that row once.
+function batchUpdateValues(
+  id: string,
+  data: { range?: string; values?: string[][] }[],
+): [number, object] {
+  const sheet = state.sheets.get(id)
+  if (sheet === undefined) return NOT_FOUND
+  const responses: object[] = []
+  const rows = new Set<string>()
+  const columns = new Set<string>()
+  const tabs = new Set<number>()
+  let totalCells = 0
+  for (const entry of data) {
+    const rangeStr = entry.range ?? ''
+    const range = parseA1(sheet, rangeStr)
+    if (range === null) {
+      return googleError(400, `Unable to parse range: ${rangeStr}`, 'INVALID_ARGUMENT')
+    }
+    const values = entry.values ?? []
+    const cells = writeValues(range, values, range.startRow)
+    for (let i = 0; i < values.length; i += 1) {
+      const row = values[i] as string[]
+      if (row.length > 0) rows.add(`${String(range.tab.sheetId)},${String(range.startRow + i)}`)
+      for (let j = 0; j < row.length; j += 1) {
+        columns.add(`${String(range.tab.sheetId)},${String(range.startCol + j)}`)
+      }
+    }
+    tabs.add(range.tab.sheetId)
+    totalCells += cells
+    responses.push({
+      spreadsheetId: id,
+      updatedRange: rangeLabel(range.tab, range.startRow, range.startCol, values),
+      updatedRows: values.length,
+      updatedColumns: values.length > 0 ? Math.max(...values.map((r) => r.length)) : 0,
+      updatedCells: cells,
+    })
+  }
+  touchNative(id)
+  return [
+    200,
+    {
+      spreadsheetId: id,
+      totalUpdatedRows: rows.size,
+      totalUpdatedColumns: columns.size,
+      totalUpdatedCells: totalCells,
+      totalUpdatedSheets: tabs.size,
+      responses,
+    },
+  ]
+}
+
+function batchClearValues(id: string, ranges: string[]): [number, object] {
+  const sheet = state.sheets.get(id)
+  if (sheet === undefined) return NOT_FOUND
+  const clearedRanges: string[] = []
+  for (const rangeStr of ranges) {
+    const range = parseA1(sheet, rangeStr)
+    if (range === null) {
+      return googleError(400, `Unable to parse range: ${rangeStr}`, 'INVALID_ARGUMENT')
+    }
+    clearRange(range)
+    clearedRanges.push(rangeLabelFor(range, rangeStr))
+  }
+  touchNative(id)
+  return [200, { spreadsheetId: id, clearedRanges }]
+}
+
+// sheets.copyTo copies one tab into another spreadsheet (or back into the
+// same one) and returns the new tab's SheetProperties, not a batch reply.
+function copySheetTo(sourceId: string, sheetId: number, destinationId: string): [number, object] {
+  const source = state.sheets.get(sourceId)
+  const destination = state.sheets.get(destinationId)
+  if (source === undefined || destination === undefined) return NOT_FOUND
+  const tab = source.tabs.find((t) => t.sheetId === sheetId)
+  if (tab === undefined) {
+    return googleError(400, `Invalid sheetId: ${String(sheetId)}`, 'INVALID_ARGUMENT')
+  }
+  const copy: SheetTab = {
+    ...tab,
+    sheetId: destination.nextSheetId,
+    title: `Copy of ${tab.title}`,
+    cells: new Map(tab.cells),
+  }
+  destination.nextSheetId += 1
+  destination.tabs.push(copy)
+  touchNative(destinationId)
+  return [200, tabProperties(copy, destination.tabs.length - 1)]
+}
+
 // --------------------------------------------------------------- slides ---
 
-function newSlide(): SlidePage {
-  const n = state.nextId('slide')
-  return { objectId: n, texts: new Map() }
+function newSlide(objectId?: string): SlidePage {
+  return { objectId: objectId ?? state.nextId('slide'), texts: new Map() }
+}
+
+// One Page resource, shared by presentations.get and presentations.pages.get
+// so the two can never render the same slide differently.
+function fmtPage(slide: SlidePage): Record<string, unknown> {
+  return {
+    objectId: slide.objectId,
+    pageElements: [...slide.texts.entries()].map(([objectId, text]) => ({
+      objectId,
+      shape: {
+        shapeType: 'TEXT_BOX',
+        text: { textElements: [{ textRun: { content: text, style: {} } }] },
+      },
+    })),
+  }
 }
 
 function fmtPresentation(id: string): Record<string, unknown> {
@@ -833,16 +1176,7 @@ function fmtPresentation(id: string): Record<string, unknown> {
       width: { magnitude: 9144000, unit: 'EMU' },
       height: { magnitude: 6858000, unit: 'EMU' },
     },
-    slides: pres.slides.map((slide) => ({
-      objectId: slide.objectId,
-      pageElements: [...slide.texts.entries()].map(([objectId, text]) => ({
-        objectId,
-        shape: {
-          shapeType: 'TEXT_BOX',
-          text: { textElements: [{ textRun: { content: text, style: {} } }] },
-        },
-      })),
-    })),
+    slides: pres.slides.map(fmtPage),
     revisionId: `rev-${String(pres.slides.length)}`,
   }
 }
@@ -853,8 +1187,11 @@ function slidesBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
   const replies: object[] = []
   for (const request of requests) {
     if ('createSlide' in request) {
-      const slide = newSlide()
-      pres.slides.push(slide)
+      const r = request.createSlide as { objectId?: string; insertionIndex?: number }
+      const slide = newSlide(r.objectId)
+      // insertionIndex places the slide; omitted means append, which is
+      // what every existing caller relies on.
+      pres.slides.splice(r.insertionIndex ?? pres.slides.length, 0, slide)
       replies.push({ createSlide: { objectId: slide.objectId } })
     } else if ('createShape' in request) {
       const r = request.createShape as {
@@ -866,6 +1203,9 @@ function slidesBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
       if (page === undefined) {
         return googleError(400, 'Invalid pageObjectId.', 'INVALID_ARGUMENT')
       }
+      if (pres.slides.some((s) => s.objectId === objectId || s.texts.has(objectId))) {
+        return googleError(400, `Object id already exists: ${objectId}`, 'INVALID_ARGUMENT')
+      }
       page.texts.set(objectId, '')
       replies.push({ createShape: { objectId } })
     } else if ('insertText' in request) {
@@ -876,6 +1216,90 @@ function slidesBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
         return googleError(400, 'Invalid insertText objectId.', 'INVALID_ARGUMENT')
       }
       page.texts.set(objectId, (page.texts.get(objectId) ?? '') + (r.text ?? ''))
+      replies.push({})
+    } else if ('deleteText' in request) {
+      const r = request.deleteText as {
+        objectId?: string
+        textRange?: { type?: string; startIndex?: number; endIndex?: number }
+      }
+      const objectId = r.objectId ?? ''
+      const page = pres.slides.find((s) => s.texts.has(objectId))
+      if (page === undefined) {
+        return googleError(400, 'Invalid deleteText objectId.', 'INVALID_ARGUMENT')
+      }
+      const text = page.texts.get(objectId) ?? ''
+      const type = r.textRange?.type ?? 'ALL'
+      if (type === 'ALL') {
+        page.texts.set(objectId, '')
+      } else if (type === 'FROM_START_INDEX') {
+        page.texts.set(objectId, text.slice(0, r.textRange?.startIndex ?? 0))
+      } else {
+        const start = r.textRange?.startIndex ?? 0
+        page.texts.set(objectId, text.slice(0, start) + text.slice(r.textRange?.endIndex ?? start))
+      }
+      replies.push({})
+    } else if ('replaceAllText' in request) {
+      const r = request.replaceAllText as {
+        containsText?: { text?: string; matchCase?: boolean }
+        replaceText?: string
+        pageObjectIds?: string[]
+      }
+      // pageObjectIds scopes the replace to those slides; absent means the
+      // whole presentation.
+      const scope =
+        r.pageObjectIds === undefined
+          ? pres.slides
+          : pres.slides.filter((s) => r.pageObjectIds?.includes(s.objectId) === true)
+      let occurrences = 0
+      for (const slide of scope) {
+        for (const [objectId, text] of slide.texts) {
+          const [next, changed] = replaceAllText(
+            text,
+            r.containsText?.text ?? '',
+            r.replaceText ?? '',
+            r.containsText?.matchCase ?? false,
+          )
+          slide.texts.set(objectId, next)
+          occurrences += changed
+        }
+      }
+      replies.push({ replaceAllText: { occurrencesChanged: occurrences } })
+    } else if ('duplicateObject' in request) {
+      const r = request.duplicateObject as {
+        objectId?: string
+        objectIds?: Record<string, string>
+      }
+      const source = pres.slides.find((s) => s.objectId === r.objectId)
+      if (source === undefined) {
+        return googleError(400, 'Invalid duplicateObject objectId.', 'INVALID_ARGUMENT')
+      }
+      // Object ids are unique across a whole presentation, so every copied
+      // element is re-keyed rather than carried over: two pages sharing an
+      // element id would make insertText and deleteText hit whichever page
+      // happens to come first. `objectIds` may pin the new names.
+      const renamed: [string, string][] = [...source.texts].map(([objectId, text]) => [
+        r.objectIds?.[objectId] ?? state.nextId('shape'),
+        text,
+      ])
+      const copy: SlidePage = {
+        objectId: r.objectIds?.[source.objectId] ?? state.nextId('slide'),
+        texts: new Map(renamed),
+      }
+      pres.slides.splice(pres.slides.indexOf(source) + 1, 0, copy)
+      replies.push({ duplicateObject: { objectId: copy.objectId } })
+    } else if ('updateSlidesPosition' in request) {
+      const r = request.updateSlidesPosition as {
+        slideObjectIds?: string[]
+        insertionIndex?: number
+      }
+      const ids = new Set(r.slideObjectIds ?? [])
+      const moving = pres.slides.filter((s) => ids.has(s.objectId))
+      if (moving.length !== ids.size) {
+        return googleError(400, 'Invalid slideObjectIds.', 'INVALID_ARGUMENT')
+      }
+      const rest = pres.slides.filter((s) => !ids.has(s.objectId))
+      rest.splice(Math.min(r.insertionIndex ?? rest.length, rest.length), 0, ...moving)
+      pres.slides = rest
       replies.push({})
     } else if ('deleteObject' in request) {
       const r = request.deleteObject as { objectId?: string }
@@ -1323,12 +1747,33 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   if (path === '/drive/v3/files' && method === 'GET') return listFiles(query)
   if (path === '/drive/v3/files' && method === 'POST') {
     const body = json(ctx)
+    // A caller may pin the id to one handed out by files.generateIds,
+    // which is the only reason that method is useful.
+    const pinned = typeof body.id === 'string' ? body.id : undefined
+    if (pinned !== undefined && state.files.has(pinned)) {
+      return googleError(409, 'A file with that id already exists.', 'ALREADY_EXISTS')
+    }
     const item = createDriveItem(
       String(body.name ?? 'Untitled'),
       String(body.mimeType ?? 'application/octet-stream'),
       Array.isArray(body.parents) ? (body.parents as string[]) : [],
+      Buffer.alloc(0),
+      pinned,
     )
     return [200, fmtFile(item)]
+  }
+  if (path === '/drive/v3/about' && method === 'GET') {
+    return [
+      200,
+      {
+        kind: 'drive#about',
+        user: { kind: 'drive#user', ...OWNER, permissionId: 'owner' },
+        storageQuota: {
+          limit: String(15 * 1024 * 1024 * 1024),
+          usage: String([...state.files.values()].reduce((n, f) => n + f.content.length, 0)),
+        },
+      },
+    ]
   }
   if (path === '/drive/v3/drives' && method === 'POST') {
     const body = json(ctx) as { name?: string }
@@ -1348,6 +1793,53 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
         drives: [...state.drives.values()].map((d) => ({ kind: 'drive#drive', ...d })),
       },
     ]
+  }
+  m = /^\/drive\/v3\/drives\/([^/:]+)$/.exec(path)
+  if (m !== null) {
+    const drive = state.drives.get(m[1] as string)
+    if (drive === undefined) return NOT_FOUND
+    if (method === 'GET') return [200, { kind: 'drive#drive', ...drive }]
+    if (method === 'PATCH') {
+      const body = json(ctx)
+      if (typeof body.name === 'string') {
+        drive.name = body.name
+        // The shared drive's root folder carries the same name, so a
+        // rename that touched only the drive record would leave the
+        // mounted tree showing the old one.
+        const root = state.files.get(drive.id)
+        if (root !== undefined) root.name = body.name
+      }
+      return [200, { kind: 'drive#drive', ...drive }]
+    }
+    if (method === 'DELETE') {
+      for (const item of [...state.files.values()]) {
+        if (item.driveId === drive.id) deleteTree(item.id)
+      }
+      state.drives.delete(drive.id)
+      return [204, null]
+    }
+  }
+
+  // files.generateIds and files.emptyTrash sit at fixed names under /files,
+  // so they must be matched before the files/{fileId} pattern below, which
+  // would otherwise read them as ids and 404.
+  if (path === '/drive/v3/files/generateIds' && method === 'GET') {
+    const count = Number.parseInt(query.get('count') ?? '10', 10)
+    const total = Number.isNaN(count) || count < 1 ? 10 : count
+    return [
+      200,
+      {
+        kind: 'drive#generatedIds',
+        space: query.get('space') ?? 'drive',
+        ids: Array.from({ length: total }, () => state.nextId('f')),
+      },
+    ]
+  }
+  if (path === '/drive/v3/files/trash' && method === 'DELETE') {
+    for (const item of [...state.files.values()]) {
+      if (item.trashed) deleteTree(item.id)
+    }
+    return [204, null]
   }
 
   m = /^\/drive\/v3\/files\/([^/:]+)$/.exec(path)
@@ -1460,6 +1952,16 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
       },
     ]
   }
+  if (m !== null && method === 'DELETE') {
+    const item = state.files.get(m[1] as string)
+    if (item === undefined) return NOT_FOUND
+    const before = item.revisions.length
+    item.revisions = item.revisions.filter((r) => r.id !== m?.[2])
+    if (item.revisions.length === before) {
+      return googleError(404, 'Revision not found.', 'NOT_FOUND')
+    }
+    return [204, null]
+  }
 
   m = /^\/drive\/v3\/files\/([^/]+)\/permissions$/.exec(path)
   if (m !== null) {
@@ -1481,15 +1983,27 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     }
   }
   m = /^\/drive\/v3\/files\/([^/]+)\/permissions\/([^/]+)$/.exec(path)
-  if (m !== null && method === 'DELETE') {
+  if (m !== null) {
     const item = state.files.get(m[1] as string)
     if (item === undefined) return NOT_FOUND
-    const before = item.permissions.length
-    item.permissions = item.permissions.filter((p) => p.id !== m?.[2])
-    if (item.permissions.length === before) {
-      return googleError(404, 'Permission not found.', 'NOT_FOUND')
+    const permission = item.permissions.find((p) => p.id === m?.[2])
+    if (method === 'GET') {
+      if (permission === undefined) return googleError(404, 'Permission not found.', 'NOT_FOUND')
+      return [200, { kind: 'drive#permission', ...permission }]
     }
-    return [204, null]
+    if (method === 'PATCH') {
+      if (permission === undefined) return googleError(404, 'Permission not found.', 'NOT_FOUND')
+      const body = json(ctx)
+      // permissions.update takes only role (and expiration/expose flags a
+      // mock has no model for); type is immutable on the live API.
+      if (typeof body.role === 'string') permission.role = body.role
+      return [200, { kind: 'drive#permission', ...permission }]
+    }
+    if (method === 'DELETE') {
+      if (permission === undefined) return googleError(404, 'Permission not found.', 'NOT_FOUND')
+      item.permissions = item.permissions.filter((p) => p.id !== m?.[2])
+      return [204, null]
+    }
   }
 
   if (path === '/v1/documents' && method === 'POST') {
@@ -1526,10 +2040,42 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     const body = json(ctx)
     return sheetsBatchUpdate(m[1] as string, (body.requests as Record<string, unknown>[]) ?? [])
   }
-  // A1 ranges legitimately contain ':' (Sheet1!A1:C1), so the :append
-  // suffix is stripped explicitly instead of pattern-matched.
+  // The values *batch* methods hang off `values:` with no range segment, so
+  // they must be matched before the `values/<range>` block below, whose
+  // pattern requires the slash and so can never reach them.
+  m = /^\/v4\/spreadsheets\/([^/:]+)\/values:batchGet$/.exec(path)
+  if (m !== null && method === 'GET') {
+    return batchGetValues(m[1] as string, query.getAll('ranges'))
+  }
+  m = /^\/v4\/spreadsheets\/([^/:]+)\/values:batchUpdate$/.exec(path)
+  if (m !== null && method === 'POST') {
+    const body = json(ctx)
+    return batchUpdateValues(
+      m[1] as string,
+      (body.data as { range?: string; values?: string[][] }[]) ?? [],
+    )
+  }
+  m = /^\/v4\/spreadsheets\/([^/:]+)\/values:batchClear$/.exec(path)
+  if (m !== null && method === 'POST') {
+    const body = json(ctx)
+    return batchClearValues(m[1] as string, (body.ranges as string[]) ?? [])
+  }
+  m = /^\/v4\/spreadsheets\/([^/:]+)\/sheets\/(\d+):copyTo$/.exec(path)
+  if (m !== null && method === 'POST') {
+    const body = json(ctx)
+    return copySheetTo(
+      m[1] as string,
+      Number.parseInt(m[2] as string, 10),
+      String(body.destinationSpreadsheetId ?? m[1]),
+    )
+  }
+  // A1 ranges legitimately contain ':' (Sheet1!A1:C1), so the :append and
+  // :clear suffixes are stripped explicitly instead of pattern-matched.
   const isAppend = path.endsWith(':append')
-  const valuesPath = isAppend ? path.slice(0, -':append'.length) : path
+  const isClear = path.endsWith(':clear')
+  let valuesPath = path
+  if (isAppend) valuesPath = path.slice(0, -':append'.length)
+  else if (isClear) valuesPath = path.slice(0, -':clear'.length)
   m = /^\/v4\/spreadsheets\/([^/]+)\/values\/(.+)$/.exec(valuesPath)
   if (m !== null) {
     const sheet = state.sheets.get(m[1] as string)
@@ -1548,6 +2094,11 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
           values: rangeValues(range),
         },
       ]
+    }
+    if (isClear && method === 'POST') {
+      clearRange(range)
+      touchNative(m[1] as string)
+      return [200, { spreadsheetId: m[1], clearedRange: rangeLabelFor(range, rangeStr) }]
     }
     const body = json(ctx)
     const values = (body.values ?? []) as string[][]
@@ -1605,6 +2156,13 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   if (m !== null && method === 'GET') {
     if (!state.presentations.has(m[1] as string)) return NOT_FOUND
     return [200, fmtPresentation(m[1] as string)]
+  }
+  m = /^\/v1\/presentations\/([^/:]+)\/pages\/([^/:]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const pres = state.presentations.get(m[1] as string)
+    const slide = pres?.slides.find((s) => s.objectId === m?.[2])
+    if (slide === undefined) return NOT_FOUND
+    return [200, fmtPage(slide)]
   }
   m = /^\/v1\/presentations\/([^/:]+):batchUpdate$/.exec(path)
   if (m !== null && method === 'POST') {

@@ -59,6 +59,9 @@ export interface Target {
   agentId?: string
   facet?: string
   clis?: string[]
+  // Scope an installed account CLI to this mount's folder, so the CLI and
+  // the mount are pointed at the same place.
+  cli_scope?: string
   mounts: Mount[]
   // Sessions a case can name via its `session` field. Grants take either the
   // mapping form ({ '/data': 'read' }) or the list form (['/data'], which

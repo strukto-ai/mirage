@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../io/types.ts'
-import type { Limit, PathSpec } from '../../types.ts'
+import type { Limit, PathSpec, ResourceName } from '../../types.ts'
 import type { CommandDispatch, CommandFnResult } from '../config.ts'
 import type { MountRoot, StatPath } from '../../ops/types.ts'
 import { compileSpec } from '../spec/compile.ts'
@@ -95,6 +95,7 @@ export interface CLISpecInit extends CommandSpecInit {
   write?: boolean
   limit?: Limit | null
   configModel?: CLIConfigModel | null
+  serves?: readonly ResourceName[]
   usageStyle?: UsageStyle
 }
 
@@ -131,6 +132,15 @@ export class CLISpec extends CommandSpec {
   readonly limit: Limit | null
   readonly configModel: CLIConfigModel | null
   /**
+   * Root only. The resources this CLI's service also backs as mounts. A write
+   * verb mutates that service by id, which no vfs path can be derived from, so
+   * those mounts drop their cached listings afterwards and the agent's next
+   * `ls` shows what it just made. Empty for a CLI with no mounted counterpart
+   * (`git` reaches mounts through the op dispatcher, which invalidates per
+   * path already).
+   */
+  readonly serves: readonly ResourceName[]
+  /**
    * Root only. How a leaf refuses an option it does not declare. Defaults to
    * argparse, which is right for a CLI mirage invented; a CLI that mimics an
    * existing program sets the style that program uses, so an agent reading the
@@ -147,6 +157,7 @@ export class CLISpec extends CommandSpec {
     this.write = init.write ?? false
     this.limit = init.limit ?? null
     this.configModel = init.configModel ?? null
+    this.serves = init.serves ?? []
     this.usageStyle = init.usageStyle ?? UsageStyle.ARGPARSE
     if (this.name === '' || /\s/.test(this.name)) {
       throw new Error(`cli name '${this.name}' must be a single non-empty word`)

@@ -503,9 +503,13 @@ class GwsService:
     analog, so the three mounts never see each other.
     """
 
-    def __init__(self, url: str, folder_ids: dict[str, str]) -> None:
+    def __init__(self, url: str, folder_ids: dict[str, str],
+                 cli_scope: str | None) -> None:
         self.url = url
         self.folder_ids = folder_ids
+        # A target may scope the gws install to one mount's folder, the
+        # configuration where the CLI and the mount are the same folder.
+        self.cli_scope = cli_scope
 
     @classmethod
     async def create(cls, run_id: str, target: dict) -> "GwsService":
@@ -547,7 +551,7 @@ class GwsService:
                 ).parents[2] / "fixtures" / f"{mail}.json"
                 await cls._seed_mail(session, url,
                                      json.loads(manifest.read_text()))
-        return cls(url, folder_ids)
+        return cls(url, folder_ids, target.get("cli_scope"))
 
     @staticmethod
     async def _seed_apps(session: aiohttp.ClientSession, url: str,
@@ -655,12 +659,13 @@ class GwsService:
             GmailConfig(client_id="integ", refresh_token="integ"))
 
     def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
-        return {
-            "gws": (cli_spec_for("gws"), {
-                "client_id": "integ",
-                "refresh_token": "integ",
-            }),
+        config: dict[str, object] = {
+            "client_id": "integ",
+            "refresh_token": "integ",
         }
+        if self.cli_scope is not None:
+            config["folder_id"] = self.folder_ids[self.cli_scope]
+        return {"gws": (cli_spec_for("gws"), config)}
 
     async def teardown(self) -> None:
         return None

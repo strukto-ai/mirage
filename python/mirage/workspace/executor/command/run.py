@@ -25,7 +25,7 @@ from mirage.ops.types import LinkView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.table import VfsRuntime
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, PathSpec, ResourceName
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
                                                       path_exists, path_stat)
@@ -154,6 +154,35 @@ def mount_root_of(registry: MountRegistry, virtual: str) -> str:
         return registry.mount_for(virtual).prefix
     except ValueError:
         return "/"
+
+
+async def drop_service_listings(registry: MountRegistry,
+                                serves: tuple[ResourceName, ...]) -> None:
+    """Drop cached listings for the mounts a CLI's service also backs.
+
+    An account CLI mutates its service by id, so no vfs path can be
+    derived from the call and per-path invalidation has nothing to aim
+    at: after `gws sheets spreadsheets create` the new file has no cache
+    entry to expire, which is exactly the case that matters. What is
+    known is the service, so the mounts it backs drop their listings and
+    the next readdir refetches.
+
+    Scoped by the spec's declared ``serves`` rather than a blanket
+    reset, so a Slack or S3 mount alongside keeps its cache. File
+    contents are left alone: a stale listing is what hides a newly
+    created file.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        serves (tuple[ResourceName, ...]): resources the CLI's service
+            backs; empty drops nothing.
+    """
+    if not serves:
+        return
+    wanted = set(serves)
+    for mount in registry.mounts():
+        if mount.resource.name in wanted:
+            await mount.resource.index.clear()
 
 
 def namespace_stat_overlay(namespace: Namespace, virtual: str,

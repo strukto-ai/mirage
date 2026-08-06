@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 
 from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
@@ -45,6 +46,7 @@ async def handle_cli(
     dispatch: DispatchFn | None = None,
     stat_path: StatPath | None = None,
     mount_root: MountRoot | None = None,
+    drop_listings: Callable[[], Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a line whose head word is an installed CLI.
 
@@ -73,6 +75,11 @@ async def handle_cli(
             exactly as a mount command does.
         mount_root (MountRoot | None): the mount prefix serving a path,
             offered on the same terms.
+        drop_listings (Callable | None): drop cached listings for the
+            mounts this CLI's service serves. Called after a write verb
+            succeeds, because an account CLI mutates its service by id
+            and no vfs path can be derived from that, so per-path
+            invalidation has nothing to aim at.
     """
     # Words re-enter string space as typed (word_text): the walk owns
     # interpretation, so a quoted "Lunch?" must not arrive as the
@@ -181,6 +188,8 @@ async def handle_cli(
         return None, err_io, ExecutionNode(command=cmd_str,
                                            exit_code=1,
                                            stderr=err_stderr)
+    if leaf.write and drop_listings is not None:
+        await drop_listings()
     if out is None:
         stdout, io = None, IOResult()
     else:

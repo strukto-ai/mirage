@@ -1231,6 +1231,7 @@ async function openGws(target: Target): Promise<Open> {
     GDriveResource | GDocsResource | GSheetsResource | GSlidesResource | GmailResource | RAMResource
   > = {}
   const driveIds: Record<string, string> = {}
+  const folderIds: Record<string, string> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
       mounts[m.path] = new RAMResource()
@@ -1261,6 +1262,7 @@ async function openGws(target: Target): Promise<Open> {
       refreshToken: 'integ',
       folderId: parent,
     })
+    folderIds[m.path] = parent
   }
   if (target.apps !== undefined) {
     const manifest = join(integRoot(), 'fixtures', `${target.apps}.json`)
@@ -1272,10 +1274,14 @@ async function openGws(target: Target): Promise<Open> {
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('gws') === true) {
+    // A target may scope the gws install to one mount's folder, the
+    // configuration where the CLI and the mount are the same folder.
+    const scope = target.cli_scope
     ws.registerCli('gws', GWS, {
       clientId: 'integ',
       clientSecret: 'integ',
       refreshToken: 'integ',
+      ...(scope !== undefined ? { folderId: folderIds[scope] } : {}),
     })
   }
   const cleanup = async (): Promise<void> => {

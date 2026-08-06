@@ -14,6 +14,7 @@
 
 import { z } from 'zod'
 import { GoogleConfigSchema, type GoogleConfig } from '../../../../core/google/config.ts'
+import { ResourceName } from '../../../../types.ts'
 import { registerCliSpec } from '../../specs.ts'
 import { CLISpec } from '../../types.ts'
 import { Option } from '../../../spec/types.ts'
@@ -50,6 +51,13 @@ export const GWS = new CLISpec({
   name: 'gws',
   description: 'Google Workspace API commands',
   configModel: GwsCliConfigSchema,
+  serves: [
+    ResourceName.GDRIVE,
+    ResourceName.GDOCS,
+    ResourceName.GSHEETS,
+    ResourceName.GSLIDES,
+    ResourceName.GMAIL,
+  ],
   subcommands: [
     new CLISpec({
       name: 'drive',

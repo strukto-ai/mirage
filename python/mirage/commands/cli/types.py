@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import CommandSpec
-from mirage.types import Limit
+from mirage.types import Limit, ResourceName
 
 
 class UsageStyle(Enum):
@@ -92,6 +92,13 @@ class CLISpec(CommandSpec):
         config_model (type[BaseModel] | None): root only. Pydantic model
             validating an installation's config from YAML ``clis:`` or
             ``register_cli``; also the redaction schema for snapshots.
+        serves (tuple[ResourceName, ...]): root only. The resources this
+            CLI's service also backs as mounts. A write verb mutates that
+            service by id, which no vfs path can be derived from, so
+            those mounts drop their cached listings afterwards and the
+            agent's next ``ls`` shows what it just made. Empty for a CLI
+            with no mounted counterpart (``git`` reaches mounts through
+            the op dispatcher, which invalidates per path already).
         usage_style (UsageStyle): root only. How a leaf refuses an option
             it does not declare. Defaults to argparse, which is right for
             a CLI mirage invented; a CLI that mimics an existing program
@@ -111,6 +118,7 @@ class CLISpec(CommandSpec):
     # (a collision is legal, a TypeError is not).
     limit: Limit | None = field(default=None, hash=False)
     config_model: type[BaseModel] | None = None
+    serves: tuple[ResourceName, ...] = ()
 
     def __post_init__(self) -> None:
         validate_cli(self)

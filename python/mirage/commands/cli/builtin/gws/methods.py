@@ -35,6 +35,14 @@ class GwsMethod:
     path: str
     needs_body: bool = False
     raw_bytes: bool = False
+    # Where a newly created file lands when the installation is scoped to a
+    # folder. "parents" means the request body takes a parents array, so the
+    # scope is filled in there. "relocate" means the API has no parents
+    # field at all (the editors' create methods), so the new file is moved
+    # afterwards with a Drive update. None means the method creates nothing.
+    placement: str | None = None
+    # Response key holding the new file's id, for "relocate".
+    id_field: str = "id"
 
 
 GWS_METHODS: tuple[GwsMethod, ...] = (
@@ -44,7 +52,9 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "create",
               "POST",
               "/documents",
-              needs_body=True),
+              needs_body=True,
+              placement="relocate",
+              id_field="documentId"),
     GwsMethod("docs",
               "documents",
               "batchUpdate",
@@ -58,7 +68,9 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "create",
               "POST",
               "/spreadsheets",
-              needs_body=True),
+              needs_body=True,
+              placement="relocate",
+              id_field="spreadsheetId"),
     GwsMethod("sheets",
               "spreadsheets",
               "batchUpdate",
@@ -72,7 +84,9 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "create",
               "POST",
               "/presentations",
-              needs_body=True),
+              needs_body=True,
+              placement="relocate",
+              id_field="presentationId"),
     GwsMethod("slides",
               "presentations",
               "batchUpdate",
@@ -81,14 +95,25 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               needs_body=True),
     GwsMethod("drive", "files", "list", "GET", "/files"),
     GwsMethod("drive", "files", "get", "GET", "/files/{fileId}"),
-    GwsMethod("drive", "files", "create", "POST", "/files", needs_body=True),
+    GwsMethod("drive",
+              "files",
+              "create",
+              "POST",
+              "/files",
+              needs_body=True,
+              placement="parents"),
     GwsMethod("drive",
               "files",
               "update",
               "PATCH",
               "/files/{fileId}",
               needs_body=True),
-    GwsMethod("drive", "files", "copy", "POST", "/files/{fileId}/copy"),
+    GwsMethod("drive",
+              "files",
+              "copy",
+              "POST",
+              "/files/{fileId}/copy",
+              placement="parents"),
     GwsMethod("drive", "files", "delete", "DELETE", "/files/{fileId}"),
     GwsMethod("drive",
               "files",

@@ -15,6 +15,7 @@
 import { invalidateAfterWrite } from '../../../../cache/context.ts'
 import { TokenManager } from '../../../../core/google/_client.ts'
 import {
+  driveBase,
   googleDelete,
   googleGet,
   googleGetBytes,
@@ -128,6 +129,52 @@ const CALLERS: Record<GwsMethod['http'], Caller> = {
   },
 }
 
+/**
+ * Default a create's parents to the installation's folder scope.
+ *
+ * A folder-scoped install is pointed at one folder, which is the same folder a
+ * gdrive mount sharing the config exposes. A create with no parents would land
+ * in My Drive's root instead, outside the mount, so the agent's own `ls` would
+ * never show what it just made. An explicit parents array always wins.
+ */
+function scopedBody(
+  method: GwsMethod,
+  config: GoogleConfig,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  if (method.placement !== 'parents') return body
+  const folderId = config.folderId
+  if (folderId === undefined || folderId === '') return body
+  const parents = body.parents
+  if (Array.isArray(parents) && parents.length > 0) return body
+  return { ...body, parents: [folderId] }
+}
+
+/**
+ * Move a newly created editor file into the folder scope.
+ *
+ * The Docs, Sheets and Slides create methods have no parents field at all, so a
+ * new file always lands in My Drive's root; placing it takes a second Drive
+ * call. Doing it here is what lets `gws sheets spreadsheets create` put the file
+ * where the mount is, instead of leaving the caller to know that placement was
+ * even a question.
+ */
+async function placeInScope(
+  method: GwsMethod,
+  tm: TokenManager,
+  result: Record<string, unknown>,
+): Promise<void> {
+  const folderId = tm.config.folderId
+  const fileId = result[method.idField ?? 'id']
+  if (folderId === undefined || folderId === '' || typeof fileId !== 'string') return
+  await googlePatch(
+    tm,
+    `${driveBase(tm)}/files/${fileId}`,
+    {},
+    { addParents: folderId, removeParents: 'root' },
+  )
+}
+
 export async function runGwsMethod(
   method: GwsMethod,
   config: GoogleConfig,
@@ -147,6 +194,7 @@ export async function runGwsMethod(
   if (method.needsBody === true && Object.keys(body).length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('--json is required\n') })]
   }
+  body = scopedBody(method, config, body)
   const tm = new TokenManager(config)
   let path: string
   let query: Record<string, unknown>
@@ -178,6 +226,9 @@ export async function runGwsMethod(
     return [out, new IOResult()]
   }
   const result = await CALLERS[method.http](tm, url, body, queryParams)
+  if (method.placement === 'relocate' && result !== NO_CONTENT && result !== null) {
+    await placeInScope(method, tm, result as Record<string, unknown>)
+  }
   await invalidateMountListing()
   if (result === NO_CONTENT) return [null, new IOResult()]
   return [ENC.encode(JSON.stringify(result)), new IOResult()]

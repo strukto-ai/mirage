@@ -17,7 +17,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import { assertMountAllowed, MountNotAllowedError } from '../../../context/session_context.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { FileStat } from '../../../types.ts'
+import type { FileStat, ResourceName } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { LinkView, StatOverlay, StatPath } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -124,6 +124,30 @@ function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileS
  */
 export function mountRootOf(registry: MountRegistry, virtual: string): string {
   return registry.mountFor(virtual)?.prefix ?? '/'
+}
+
+/**
+ * Drop cached listings for the mounts a CLI's service also backs.
+ *
+ * An account CLI mutates its service by id, so no vfs path can be derived from
+ * the call and per-path invalidation has nothing to aim at: after
+ * `gws sheets spreadsheets create` the new file has no cache entry to expire,
+ * which is exactly the case that matters. What is known is the service, so the
+ * mounts it backs drop their listings and the next readdir refetches.
+ *
+ * Scoped by the spec's declared `serves` rather than a blanket reset, so a
+ * Slack or S3 mount alongside keeps its cache. File contents are left alone: a
+ * stale listing is what hides a newly created file.
+ */
+export async function dropServiceListings(
+  registry: MountRegistry,
+  serves: readonly ResourceName[],
+): Promise<void> {
+  if (serves.length === 0) return
+  const wanted = new Set<string>(serves)
+  for (const mount of registry.allMounts()) {
+    if (wanted.has(mount.resource.kind)) await mount.resource.index?.clear()
+  }
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared

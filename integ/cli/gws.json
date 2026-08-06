@@ -299,6 +299,97 @@
         "stdout": "true\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_error_body_reaches_the_agent",
+      "seq": 563026,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files get --params '{\"fileId\": \"nope\"}' 2>&1 | grep -c 'File not found'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_error_body_names_the_bad_request",
+      "seq": 563027,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"bogusRequest\": {}}]}' 2>&1 | grep -c 'Unsupported request: bogusRequest'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_messages_list_passthrough",
+      "seq": 563028,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail users messages list --params '{\"userId\": \"me\", \"q\": \"standup\"}' | jq -r '.messages[].id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "msg0002\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_messages_get_passthrough",
+      "seq": 563029,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail users messages get --params '{\"userId\": \"me\", \"id\": \"msg0002\"}' | jq -r '.labelIds[]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "INBOX\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_attachment_get_passthrough",
+      "seq": 563030,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail users messages attachments get --params '{\"userId\": \"me\", \"messageId\": \"msg0001\", \"id\": \"att0001\"}' | jq -r .size",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_messages_send_passthrough",
+      "seq": 563031,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail users messages send --params '{\"userId\": \"me\"}' --json '{\"raw\": \"VG86IGRhbmFAZXhhbXBsZS5jb20NClN1YmplY3Q6IFJhdyBzZW5kDQoNCmhlbGxvIGZyb20gcmF3DQo=\"}' | jq -r '.labelIds[]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "SENT\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_reply_all_includes_cc",
+      "seq": 563032,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "M=$(gws gmail reply-all --message-id msg0003 --body 'ack' | jq -r .id) && gws gmail users messages get --params \"{\\\"userId\\\": \\\"me\\\", \\\"id\\\": \\\"$M\\\"}\" | jq -r '.payload.headers[] | select(.name==\"Cc\") | .value'",
+      "expect": {
+        "exit": 0,
+        "stdout": "marcus@example.com\n",
+        "stderr": ""
+      }
     }
   ]
 }
