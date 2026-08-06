@@ -27,6 +27,11 @@ export interface FileCache {
     options?: { fingerprint?: string | null; ttl?: number | null },
   ): Promise<boolean>
   remove(key: string): Promise<void>
+  // The path-unknown counterpart to remove(): a mutation that names no
+  // path (an account CLI writing to its service by id) cannot say which
+  // entries went stale, only which mount's keyspace did. Stores that own
+  // their keyspace remotely push the filter down rather than enumerating.
+  evictPrefix(prefix: string): Promise<void>
   exists(key: string | PathSpec): Promise<boolean>
   isFresh(key: string, remoteFingerprint: string): Promise<boolean>
   clear(): Promise<void>

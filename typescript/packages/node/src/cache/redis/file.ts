@@ -15,6 +15,7 @@
 import {
   type FileCache,
   defaultFingerprint,
+  globEscape,
   parseLimit,
   type PathSpec,
   validateMaxDrainBytes,
@@ -139,6 +140,22 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     const fp = await c.get(`${this.metaPrefix}${key}`)
     if (fp === null) return false
     return fp === remoteFingerprint
+  }
+
+  async evictPrefix(prefix: string): Promise<void> {
+    for (const key of [...this.drainTasks.keys()]) {
+      if (key.startsWith(prefix)) this.drainTasks.delete(key)
+    }
+    const escaped = globEscape(prefix)
+    const c = await this.cacheClient()
+    for (const base of [this.dataPrefix, this.metaPrefix]) {
+      const batch: string[] = []
+      for await (const k of c.scanIterator({ MATCH: `${base}${escaped}*` })) {
+        if (Array.isArray(k)) batch.push(...k)
+        else batch.push(k)
+      }
+      if (batch.length > 0) await c.del(batch)
+    }
   }
 
   async clear(): Promise<void> {

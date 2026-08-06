@@ -130,6 +130,12 @@ describe('Workspace custom cache option', () => {
       this.store.delete(key)
       return Promise.resolve()
     }
+    evictPrefix(prefix: string): Promise<void> {
+      for (const key of [...this.store.keys()]) {
+        if (key.startsWith(prefix)) this.store.delete(key)
+      }
+      return Promise.resolve()
+    }
     exists(key: string | PathSpec): Promise<boolean> {
       const k = typeof key === 'string' ? key : key.mountPath
       return Promise.resolve(this.store.has(k))

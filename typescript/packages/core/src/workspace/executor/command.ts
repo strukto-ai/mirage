@@ -51,7 +51,7 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links.ts'
-import { dropServiceListings, mountRootOf } from './command/run.ts'
+import { dropServiceCaches, mountRootOf } from './command/run.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -138,7 +138,7 @@ export async function handleCommand(
         statPath: (path: string) => pathStat(dispatch, path, null),
         mountRoot: (path: string) => mountRootOf(registry, path),
       },
-      () => dropServiceListings(registry, cliInstall.spec.serves),
+      () => dropServiceCaches(registry, cliInstall.spec.serves),
     )
   }
 

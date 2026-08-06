@@ -31,3 +31,19 @@ export function parseLimit(limit: string | number): number {
 export function defaultFingerprint(data: Uint8Array): string {
   return md5Hex(data)
 }
+
+/**
+ * Escape a literal for use inside a redis MATCH pattern.
+ *
+ * Cache keys are mount paths, and a path may legitimately contain the glob
+ * metacharacters redis SCAN interprets, so a prefix like `/data[1]/` would
+ * otherwise match nothing (or the wrong keys).
+ */
+export function globEscape(literal: string): string {
+  let out = ''
+  for (const ch of literal) {
+    if (ch === '*' || ch === '?' || ch === '[' || ch === ']' || ch === '\\') out += '\\'
+    out += ch
+  }
+  return out
+}

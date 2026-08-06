@@ -156,21 +156,25 @@ def mount_root_of(registry: MountRegistry, virtual: str) -> str:
         return "/"
 
 
-async def drop_service_listings(registry: MountRegistry,
-                                serves: tuple[ResourceName, ...]) -> None:
-    """Drop cached listings for the mounts a CLI's service also backs.
+async def drop_service_caches(registry: MountRegistry,
+                              serves: tuple[ResourceName, ...]) -> None:
+    """Drop cached listings and bodies for the mounts a CLI's service backs.
 
     An account CLI mutates its service by id, so no vfs path can be
     derived from the call and per-path invalidation has nothing to aim
     at: after `gws sheets spreadsheets create` the new file has no cache
     entry to expire, which is exactly the case that matters. What is
-    known is the service, so the mounts it backs drop their listings and
-    the next readdir refetches.
+    known is the service, so the mounts it backs drop their caches and
+    the next read refetches.
+
+    Both caches go, because the two hide different writes. A stale
+    listing hides a create or a delete; a stale body hides an edit, and
+    these resources cache reads, so a `cat` after `gws docs documents
+    batchUpdate` would otherwise keep serving the pre-edit content
+    without ever reaching Google.
 
     Scoped by the spec's declared ``serves`` rather than a blanket
-    reset, so a Slack or S3 mount alongside keeps its cache. File
-    contents are left alone: a stale listing is what hides a newly
-    created file.
+    reset, so a Slack or S3 mount alongside keeps its cache.
 
     Args:
         registry (MountRegistry): registry holding the mount table.
@@ -181,8 +185,11 @@ async def drop_service_listings(registry: MountRegistry,
         return
     wanted = set(serves)
     for mount in registry.mounts():
-        if mount.resource.name in wanted:
-            await mount.resource.index.clear()
+        if mount.resource.name not in wanted:
+            continue
+        await mount.resource.index.clear()
+        if mount.cache_manager is not None:
+            await mount.cache_manager.drop_prefix()
 
 
 def namespace_stat_overlay(namespace: Namespace, virtual: str,

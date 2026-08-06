@@ -41,6 +41,20 @@
       "targets": ["cli-gws-scoped"],
       "command": "gws drive files create --json '{\"name\": \"elsewhere.txt\", \"parents\": [\"root\"]}' | jq -r '.parents[]'",
       "expect": { "exit": 0, "stdout": "root\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_edit_warms_the_body_cache",
+      "seq": 563106,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws docs documents create --json '{\"title\": \"Stale\"}' > /dev/null && cat /data/Stale.gdoc.json | grep -c NEWTEXT",
+      "expect": { "exit": 1, "stdout": "0\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_edit_is_visible_through_the_mount",
+      "seq": 563107,
+      "targets": ["cli-gws-scoped"],
+      "command": "ID=$(gws drive files list | jq -r '.files[] | select(.name==\"Stale\") | .id') && gws docs documents batchUpdate --params \"{\\\"documentId\\\": \\\"$ID\\\"}\" --json '{\"requests\": [{\"insertText\": {\"location\": {\"index\": 1}, \"text\": \"NEWTEXT\"}}]}' > /dev/null && cat /data/Stale.gdoc.json | grep -c NEWTEXT",
+      "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
     }
   ]
 }

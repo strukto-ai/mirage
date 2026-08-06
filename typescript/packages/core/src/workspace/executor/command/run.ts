@@ -127,26 +127,32 @@ export function mountRootOf(registry: MountRegistry, virtual: string): string {
 }
 
 /**
- * Drop cached listings for the mounts a CLI's service also backs.
+ * Drop cached listings and bodies for the mounts a CLI's service backs.
  *
  * An account CLI mutates its service by id, so no vfs path can be derived from
  * the call and per-path invalidation has nothing to aim at: after
  * `gws sheets spreadsheets create` the new file has no cache entry to expire,
  * which is exactly the case that matters. What is known is the service, so the
- * mounts it backs drop their listings and the next readdir refetches.
+ * mounts it backs drop their caches and the next read refetches.
+ *
+ * Both caches go, because the two hide different writes. A stale listing hides
+ * a create or a delete; a stale body hides an edit, and these resources cache
+ * reads, so a `cat` after `gws docs documents batchUpdate` would otherwise keep
+ * serving the pre-edit content without ever reaching Google.
  *
  * Scoped by the spec's declared `serves` rather than a blanket reset, so a
- * Slack or S3 mount alongside keeps its cache. File contents are left alone: a
- * stale listing is what hides a newly created file.
+ * Slack or S3 mount alongside keeps its cache.
  */
-export async function dropServiceListings(
+export async function dropServiceCaches(
   registry: MountRegistry,
   serves: readonly ResourceName[],
 ): Promise<void> {
   if (serves.length === 0) return
   const wanted = new Set<string>(serves)
   for (const mount of registry.allMounts()) {
-    if (wanted.has(mount.resource.kind)) await mount.resource.index?.clear()
+    if (!wanted.has(mount.resource.kind)) continue
+    await mount.resource.index?.clear()
+    await mount.cacheManager?.dropPrefix()
   }
 }
 

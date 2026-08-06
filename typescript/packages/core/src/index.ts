@@ -435,7 +435,7 @@ export { Precision, ProvisionResult, type ProvisionResultInit } from './provisio
 export { IndexEntry, type IndexEntryInit, ResourceType } from './cache/index/config.ts'
 export { drainBudget, type FileCache, validateMaxDrainBytes } from './cache/file/mixin.ts'
 export { CacheEntry, type CacheEntryInit } from './cache/file/entry.ts'
-export { defaultFingerprint, parseLimit } from './cache/file/utils.ts'
+export { defaultFingerprint, globEscape, parseLimit } from './cache/file/utils.ts'
 export { RAMFileCacheStore } from './cache/file/ram.ts'
 export { applyIo, readFingerprint } from './cache/file/io.ts'
 export {

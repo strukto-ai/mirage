@@ -135,19 +135,33 @@ const CALLERS: Record<GwsMethod['http'], Caller> = {
  * A folder-scoped install is pointed at one folder, which is the same folder a
  * gdrive mount sharing the config exposes. A create with no parents would land
  * in My Drive's root instead, outside the mount, so the agent's own `ls` would
- * never show what it just made. An explicit parents array always wins.
+ * never show what it just made. An explicit parents array always wins, and
+ * "explicit" means the key is present, not that it holds anything:
+ * `"parents": []` is a caller saying where the file goes just as much as
+ * `"parents": ["root"]` is, and reading it as absent would silently relocate
+ * their file.
+ *
+ * The injected parent brings `supportsAllDrives` with it, because a folder scope
+ * may name a Shared Drive folder and Drive rejects a create into one from a
+ * client that has not declared itself shared drive aware. Only the injected case
+ * adds it: a caller who typed their own parents is making a passthrough call and
+ * owns its query, the same way the official CLI leaves it to them.
  */
-function scopedBody(
+function scopeRequest(
   method: GwsMethod,
   config: GoogleConfig,
   body: Record<string, unknown>,
-): Record<string, unknown> {
-  if (method.placement !== 'parents') return body
+  params: Record<string, unknown>,
+): [Record<string, unknown>, Record<string, unknown>] {
+  if (method.placement !== 'parents') return [body, params]
   const folderId = config.folderId
-  if (folderId === undefined || folderId === '') return body
-  const parents = body.parents
-  if (Array.isArray(parents) && parents.length > 0) return body
-  return { ...body, parents: [folderId] }
+  if (folderId === undefined || folderId === '') return [body, params]
+  if ('parents' in body) return [body, params]
+  // params last: an explicitly typed supportsAllDrives still wins.
+  return [
+    { ...body, parents: [folderId] },
+    { supportsAllDrives: true, ...params },
+  ]
 }
 
 /**
@@ -158,6 +172,11 @@ function scopedBody(
  * call. Doing it here is what lets `gws sheets spreadsheets create` put the file
  * where the mount is, instead of leaving the caller to know that placement was
  * even a question.
+ *
+ * `supportsAllDrives` rides along for the same reason every other Drive helper
+ * in the repo sends it: without it a scope naming a Shared Drive folder fails
+ * the move, and the create has already happened, so the file would be stranded
+ * in My Drive.
  */
 async function placeInScope(
   method: GwsMethod,
@@ -171,7 +190,7 @@ async function placeInScope(
     tm,
     `${driveBase(tm)}/files/${fileId}`,
     {},
-    { addParents: folderId, removeParents: 'root' },
+    { addParents: folderId, removeParents: 'root', supportsAllDrives: 'true' },
   )
 }
 
@@ -194,7 +213,7 @@ export async function runGwsMethod(
   if (method.needsBody === true && Object.keys(body).length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('--json is required\n') })]
   }
-  body = scopedBody(method, config, body)
+  ;[body, params] = scopeRequest(method, config, body, params)
   const tm = new TokenManager(config)
   let path: string
   let query: Record<string, unknown>

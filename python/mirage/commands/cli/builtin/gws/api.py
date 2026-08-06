@@ -139,26 +139,46 @@ _CALLERS: dict[str, Callable[..., Awaitable[object]]] = {
 }
 
 
-def scoped_body(method: GwsMethod, config: GoogleConfig,
-                body: dict[str, Any]) -> dict[str, Any]:
+def scope_request(
+    method: GwsMethod,
+    config: GoogleConfig,
+    body: dict[str, Any],
+    params: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Default a create's parents to the installation's folder scope.
 
     A folder-scoped install is pointed at one folder, which is the same
     folder a gdrive mount sharing the config exposes. A create with no
     parents would land in My Drive's root instead, outside the mount, so
     the agent's own `ls` would never show what it just made. An explicit
-    parents array always wins.
+    parents array always wins, and "explicit" means the key is present,
+    not that it holds anything: ``"parents": []`` is a caller saying
+    where the file goes just as much as ``"parents": ["root"]`` is, and
+    reading it as absent would silently relocate their file.
+
+    The injected parent brings ``supportsAllDrives`` with it, because a
+    folder scope may name a Shared Drive folder and Drive rejects a
+    create into one from a client that has not declared itself shared
+    drive aware. Only the injected case adds it: a caller who typed
+    their own parents is making a passthrough call and owns its query,
+    the same way the official CLI leaves it to them.
 
     Args:
         method (GwsMethod): the Discovery method being wrapped.
         config (GoogleConfig): the installation's config.
         body (dict): the parsed --json request body.
+        params (dict): the parsed --params object.
+
+    Returns:
+        tuple[dict, dict]: the (body, params) to send.
     """
     if method.placement != "parents" or not config.folder_id:
-        return body
-    if body.get("parents"):
-        return body
-    return {**body, "parents": [config.folder_id]}
+        return body, params
+    if "parents" in body:
+        return body, params
+    scoped = {**body, "parents": [config.folder_id]}
+    # params last: an explicitly typed supportsAllDrives still wins.
+    return scoped, {"supportsAllDrives": True, **params}
 
 
 async def place_in_scope(method: GwsMethod, token_manager: TokenManager,
@@ -170,6 +190,11 @@ async def place_in_scope(method: GwsMethod, token_manager: TokenManager,
     second Drive call. Doing it here is what lets `gws sheets spreadsheets
     create` put the file where the mount is, instead of leaving the caller
     to know that placement was even a question.
+
+    ``supportsAllDrives`` rides along for the same reason every other
+    Drive helper in the repo sends it: without it a scope naming a
+    Shared Drive folder fails the move, and the create has already
+    happened, so the file would be stranded in My Drive.
 
     Args:
         method (GwsMethod): the Discovery method being wrapped.
@@ -185,6 +210,7 @@ async def place_in_scope(method: GwsMethod, token_manager: TokenManager,
                        params={
                            "addParents": folder_id,
                            "removeParents": "root",
+                           "supportsAllDrives": "true",
                        })
 
 
@@ -200,7 +226,7 @@ async def run_gws_method(
     body = _parse_json_flag(fl.as_str("json") or "", "--json")
     if method.needs_body and not body:
         raise UsageError("--json is required")
-    body = scoped_body(method, config, body)
+    body, params = scope_request(method, config, body, params)
     token_manager = TokenManager(config)
     path, query = fill_path(method.path, params)
     url = SERVICE_BASES[method.service](token_manager) + path

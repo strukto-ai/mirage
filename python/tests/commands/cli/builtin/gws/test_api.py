@@ -209,3 +209,92 @@ async def test_files_export_returns_raw_bytes():
     assert await materialize(out) == b"%PDF-1.4"
     assert "/files/f1/export?mimeType=application/pdf" in \
         get_bytes.await_args.args[1]
+
+
+SCOPED = GoogleConfig(client_id="cid", refresh_token="rt", folder_id="F1")
+
+
+@pytest.mark.asyncio
+async def test_injected_parent_declares_shared_drive_support():
+    """An injected parent may name a Shared Drive folder, which Drive
+    rejects from a client that has not sent supportsAllDrives."""
+    method = METHODS[("drive", "files", "create")]
+    with patch(
+            "mirage.commands.cli.builtin.gws.api.google_post",
+            new_callable=AsyncMock,
+            return_value={"id": "f9"},
+    ) as post:
+        await run_gws_method(method, SCOPED, [], json='{"name": "n"}')
+    assert post.await_args.args[2] == {"name": "n", "parents": ["F1"]}
+    assert "supportsAllDrives=true" in post.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_explicit_parents_stay_a_passthrough():
+    """A caller who typed their own parents owns the query too, so
+    nothing is injected into either half of the request."""
+    method = METHODS[("drive", "files", "create")]
+    with patch(
+            "mirage.commands.cli.builtin.gws.api.google_post",
+            new_callable=AsyncMock,
+            return_value={"id": "f9"},
+    ) as post:
+        await run_gws_method(method,
+                             SCOPED, [],
+                             json='{"name": "n", "parents": ["OTHER"]}')
+    assert post.await_args.args[2] == {"name": "n", "parents": ["OTHER"]}
+    assert "supportsAllDrives" not in post.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_relocation_declares_shared_drive_support():
+    """The editor create has already happened by the time the move runs,
+    so a move that fails on a Shared Drive scope strands the new file."""
+    method = METHODS[("sheets", "spreadsheets", "create")]
+    with patch("mirage.commands.cli.builtin.gws.api.google_post",
+               new_callable=AsyncMock,
+               return_value={"spreadsheetId": "s1"}):
+        with patch(
+                "mirage.commands.cli.builtin.gws.api.google_patch",
+                new_callable=AsyncMock,
+                return_value={"id": "s1"},
+        ) as patch_call:
+            await run_gws_method(method,
+                                 SCOPED, [],
+                                 json='{"properties": {"title": "T"}}')
+    assert patch_call.await_args.kwargs["params"] == {
+        "addParents": "F1",
+        "removeParents": "root",
+        "supportsAllDrives": "true",
+    }
+
+
+@pytest.mark.asyncio
+async def test_unscoped_install_places_nothing():
+    method = METHODS[("sheets", "spreadsheets", "create")]
+    with patch("mirage.commands.cli.builtin.gws.api.google_post",
+               new_callable=AsyncMock,
+               return_value={"spreadsheetId": "s1"}):
+        with patch("mirage.commands.cli.builtin.gws.api.google_patch",
+                   new_callable=AsyncMock) as patch_call:
+            await run_gws_method(method,
+                                 CONFIG, [],
+                                 json='{"properties": {"title": "T"}}')
+    patch_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_explicitly_empty_parents_array_is_still_the_callers():
+    """`parents: []` states a placement as much as `parents: ["root"]`
+    does; reading it as absent would relocate the caller's file."""
+    method = METHODS[("drive", "files", "create")]
+    with patch(
+            "mirage.commands.cli.builtin.gws.api.google_post",
+            new_callable=AsyncMock,
+            return_value={"id": "f9"},
+    ) as post:
+        await run_gws_method(method,
+                             SCOPED, [],
+                             json='{"name": "n", "parents": []}')
+    assert post.await_args.args[2] == {"name": "n", "parents": []}
+    assert "supportsAllDrives" not in post.await_args.args[1]

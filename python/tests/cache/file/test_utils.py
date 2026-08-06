@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.file.utils import default_fingerprint, parse_limit
+from mirage.cache.file.utils import (default_fingerprint, glob_escape,
+                                     parse_limit)
 
 
 def test_parse_limit_bytes():
@@ -51,3 +52,17 @@ def test_default_fingerprint_deterministic():
 
 def test_default_fingerprint_different_data():
     assert default_fingerprint(b"a") != default_fingerprint(b"b")
+
+
+def test_glob_escape_leaves_an_ordinary_path_alone():
+    assert glob_escape("/data/") == "/data/"
+
+
+def test_glob_escape_neutralizes_redis_match_metacharacters():
+    """A mount prefix is a path, and a path may hold the characters SCAN
+    reads as wildcards."""
+    assert glob_escape("/da[1]*a?/") == "/da\\[1\\]\\*a\\?/"
+
+
+def test_glob_escape_escapes_the_escape_character():
+    assert glob_escape("a\\b") == "a\\\\b"

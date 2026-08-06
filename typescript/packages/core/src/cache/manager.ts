@@ -94,6 +94,24 @@ export class CacheManager {
     await this.invalidateParent(virtual)
   }
 
+  /**
+   * Drop every cached body under this mount, path unspecified.
+   *
+   * For a mutation that names no path: an account CLI writes to its service by
+   * id, so nothing here can say which file changed, only that this mount's
+   * bytes may no longer match the service. Clearing the listing alone is not
+   * enough, because an already-read body is served warm and would keep
+   * answering with the pre-write content.
+   *
+   * Over-evicts when this mount is the root and another mount sits beneath it,
+   * since keys are compared by prefix. That costs a refetch, which is the safe
+   * direction to be wrong in.
+   */
+  async dropPrefix(): Promise<void> {
+    if (!this.cachesReads || this.fileCache === null) return
+    await this.fileCache.evictPrefix(this.prefix + '/')
+  }
+
   private async invalidateParent(virtual: string): Promise<void> {
     if (this.index === null) return
     const lastSlash = virtual.lastIndexOf('/')

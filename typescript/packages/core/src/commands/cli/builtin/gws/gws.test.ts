@@ -291,3 +291,79 @@ describe('gws api passthrough', () => {
     expect(url).toContain('/files/f1/export?mimeType=application/pdf')
   })
 })
+
+describe('gws folder scope placement', () => {
+  const SCOPED: GoogleConfig = { clientId: 'cid', refreshToken: 'rt', folderId: 'F1' }
+
+  it('declares shared drive support alongside an injected parent', async () => {
+    vi.mocked(client.googlePost).mockReset().mockResolvedValue({ id: 'f9' })
+    await runGwsMethod(
+      method('drive.files.create'),
+      SCOPED,
+      [],
+      [],
+      makeOpts({ json: '{"name": "n"}' }),
+    )
+    const call = vi.mocked(client.googlePost).mock.calls.at(-1)
+    expect(call?.[2]).toEqual({ name: 'n', parents: ['F1'] })
+    expect(call?.[1]).toContain('supportsAllDrives=true')
+  })
+
+  it('leaves an explicit parents array a passthrough', async () => {
+    vi.mocked(client.googlePost).mockReset().mockResolvedValue({ id: 'f9' })
+    await runGwsMethod(
+      method('drive.files.create'),
+      SCOPED,
+      [],
+      [],
+      makeOpts({ json: '{"name": "n", "parents": ["OTHER"]}' }),
+    )
+    const call = vi.mocked(client.googlePost).mock.calls.at(-1)
+    expect(call?.[2]).toEqual({ name: 'n', parents: ['OTHER'] })
+    expect(call?.[1]).not.toContain('supportsAllDrives')
+  })
+
+  it('declares shared drive support on the relocation patch', async () => {
+    vi.mocked(client.googlePost).mockReset().mockResolvedValue({ spreadsheetId: 's1' })
+    vi.mocked(client.googlePatch).mockReset().mockResolvedValue({ id: 's1' })
+    await runGwsMethod(
+      method('sheets.spreadsheets.create'),
+      SCOPED,
+      [],
+      [],
+      makeOpts({ json: '{"properties": {"title": "T"}}' }),
+    )
+    expect(vi.mocked(client.googlePatch).mock.calls.at(-1)?.[3]).toEqual({
+      addParents: 'F1',
+      removeParents: 'root',
+      supportsAllDrives: 'true',
+    })
+  })
+
+  it("treats an explicitly empty parents array as the caller's", async () => {
+    vi.mocked(client.googlePost).mockReset().mockResolvedValue({ id: 'f9' })
+    await runGwsMethod(
+      method('drive.files.create'),
+      SCOPED,
+      [],
+      [],
+      makeOpts({ json: '{"name": "n", "parents": []}' }),
+    )
+    const call = vi.mocked(client.googlePost).mock.calls.at(-1)
+    expect(call?.[2]).toEqual({ name: 'n', parents: [] })
+    expect(call?.[1]).not.toContain('supportsAllDrives')
+  })
+
+  it('places nothing for an unscoped install', async () => {
+    vi.mocked(client.googlePost).mockReset().mockResolvedValue({ spreadsheetId: 's1' })
+    vi.mocked(client.googlePatch).mockReset()
+    await runGwsMethod(
+      method('sheets.spreadsheets.create'),
+      CONFIG,
+      [],
+      [],
+      makeOpts({ json: '{"properties": {"title": "T"}}' }),
+    )
+    expect(vi.mocked(client.googlePatch).mock.calls.length).toBe(0)
+  })
+})

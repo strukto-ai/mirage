@@ -109,4 +109,24 @@ describe('RAMFileCacheStore', () => {
     expect(c.cacheSize).toBe(0)
     expect(await c.get('/a')).toBeNull()
   })
+
+  it('evictPrefix drops only matching keys', async () => {
+    const c = new RAMFileCacheStore({ limit: 1024 })
+    await c.set('/data/a.txt', encode('a'))
+    await c.set('/data/sub/b.txt', encode('bb'))
+    await c.set('/other/c.txt', encode('ccc'))
+    await c.evictPrefix('/data/')
+    expect(await c.exists('/data/a.txt')).toBe(false)
+    expect(await c.exists('/data/sub/b.txt')).toBe(false)
+    expect(await c.exists('/other/c.txt')).toBe(true)
+  })
+
+  it('evictPrefix reclaims the evicted bytes', async () => {
+    const c = new RAMFileCacheStore({ limit: 1024 })
+    await c.set('/data/a.txt', encode('12345'))
+    await c.set('/other/c.txt', encode('xy'))
+    await c.evictPrefix('/data/')
+    expect(c.cacheSize).toBe(2)
+    expect(c.cacheEntries).toBe(1)
+  })
 })

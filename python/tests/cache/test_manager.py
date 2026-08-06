@@ -155,3 +155,35 @@ async def _no_index_case() -> bool:
 
 def test_null_index_is_tolerated():
     assert _run(_no_index_case()) is False
+
+
+async def _drop_prefix_case() -> tuple[bool, bool, bool]:
+    cache, index = _stores()
+    await _seed(cache, index)
+    await cache.set("/other/keep.txt", b"safe\n")
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.drop_prefix()
+    return (await cache.exists("/data/arch/h.txt"), await
+            cache.exists("/other/keep.txt"), manager._caches_reads)
+
+
+def test_drop_prefix_evicts_this_mount_only():
+    """A path-unknown mutation drops the mount's bodies without reaching
+    into a neighbouring mount's keyspace."""
+    dropped, kept, _ = _run(_drop_prefix_case())
+    assert dropped is False
+    assert kept is True
+
+
+async def _drop_prefix_local_case() -> bool:
+    cache, index = _stores()
+    await _seed(cache, index)
+    manager = CacheManager(cache, index, "/data/", False)
+    await manager.drop_prefix()
+    return await cache.exists("/data/arch/h.txt")
+
+
+def test_drop_prefix_leaves_a_non_caching_mount_alone():
+    """A mount that does not cache reads owns no entries here, so the
+    keys under its prefix belong to whoever put them there."""
+    assert _run(_drop_prefix_local_case()) is True

@@ -68,6 +68,38 @@ gws drive permissions create \
   --json '{"role": "reader", "type": "anyone"}'
 ```
 
+### Folder scope
+
+A config carrying `folderId` scopes what the CLI **creates**, so a file
+it makes lands in the same folder a `GDriveResource` sharing that config
+mounts, and the agent's own `ls` shows what it just made:
+
+```typescript
+const config = { clientId: '...', refreshToken: '...', folderId: 'FOLDER_ID' }
+const ws = new Workspace({ '/data': new GDriveResource(config) })
+ws.registerCli('gws', GWS, config)
+```
+
+```bash
+gws sheets spreadsheets create --json '{"properties": {"title": "Q3"}}'
+ls /data                                   # Q3.gsheet.json
+```
+
+Three things worth knowing:
+
+- **Two divergences from the official CLI's passthrough.** `drive files
+  create` and `copy` get `parents` defaulted into the request body, and
+  the Docs/Sheets/Slides `create` methods have no `parents` field at all,
+  so mirage issues a second Drive call to move the new file. Both also
+  send `supportsAllDrives`, which is what lets a scope name a Shared
+  Drive folder.
+- **An explicit `parents` array always wins**, and then nothing is
+  injected into the query either: you typed the call, you own it. The key
+  being present is what counts, so `"parents": []` is honored too rather
+  than read as absent.
+- **Reads are not scoped.** `gws drive files list` still sees the whole
+  account. The scope is about where new files go, not a fence.
+
 ### Helpers
 
 | Helper                    | Description                                    |

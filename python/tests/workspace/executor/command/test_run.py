@@ -15,8 +15,12 @@
 import pytest
 
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
+from mirage.resource.disk import DiskResource
+from mirage.types import MountMode, ResourceName
 from mirage.utils.params import accepts_kwarg
-from mirage.workspace.executor.command.run import link_view, listed_names
+from mirage.workspace import Workspace
+from mirage.workspace.executor.command.run import (drop_service_caches,
+                                                   link_view, listed_names)
 
 _LONG_ROW = "-rw-r--r-- 1 user user 6 Aug  2 18:54 real.txt"
 _DEGRADED_ROW = "d\t-\t-\tsub"
@@ -114,3 +118,53 @@ def test_stat_overlay_is_gated_by_the_same_rule():
     """The overlay used to carry its own list of command names."""
     named = {b.name for b in _BUILDERS if accepts_kwarg(b.fn, "stat_overlay")}
     assert named == {"ls", "stat", "cp", "mv", "find"}
+
+
+async def _cli_write_case(tmp_path) -> tuple[str, str]:
+    """A CLI write mutates the service out of band, exactly as gws does
+    by file id, then drops the caches for the mounts that service backs."""
+    (tmp_path / "a.txt").write_bytes(b"v1\n")
+    disk = DiskResource(root=str(tmp_path))
+    disk.caches_reads = True
+    ws = Workspace({"/data/": disk}, mode=MountMode.WRITE)
+    await (await ws.execute("cat /data/a.txt")).stdout_str()
+    (tmp_path / "a.txt").write_bytes(b"v2\n")
+    (tmp_path / "new.txt").write_bytes(b"fresh\n")
+    await drop_service_caches(ws._registry, (ResourceName.DISK, ))
+    second = await (await ws.execute("cat /data/a.txt")).stdout_str()
+    listing = await (await ws.execute("ls /data")).stdout_str()
+    return second, listing
+
+
+@pytest.mark.asyncio
+async def test_a_cli_write_drops_bodies_as_well_as_listings(tmp_path):
+    """A stale listing hides a create; a stale body hides an edit. The
+    cached body is the one that answers without reaching the service, so
+    clearing the index alone leaves `cat` serving pre-write content."""
+    body, listing = await _cli_write_case(tmp_path)
+    assert body == "v2\n"
+    assert "new.txt" in listing
+
+
+@pytest.mark.asyncio
+async def test_a_cli_that_serves_nothing_drops_nothing(tmp_path):
+    (tmp_path / "a.txt").write_bytes(b"v1\n")
+    disk = DiskResource(root=str(tmp_path))
+    disk.caches_reads = True
+    ws = Workspace({"/data/": disk}, mode=MountMode.WRITE)
+    await ws.execute("cat /data/a.txt")
+    (tmp_path / "a.txt").write_bytes(b"v2\n")
+    await drop_service_caches(ws._registry, ())
+    assert await (await ws.execute("cat /data/a.txt")).stdout_str() == "v1\n"
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_service_keeps_its_cache(tmp_path):
+    (tmp_path / "a.txt").write_bytes(b"v1\n")
+    disk = DiskResource(root=str(tmp_path))
+    disk.caches_reads = True
+    ws = Workspace({"/data/": disk}, mode=MountMode.WRITE)
+    await ws.execute("cat /data/a.txt")
+    (tmp_path / "a.txt").write_bytes(b"v2\n")
+    await drop_service_caches(ws._registry, (ResourceName.GDRIVE, ))
+    assert await (await ws.execute("cat /data/a.txt")).stdout_str() == "v1\n"

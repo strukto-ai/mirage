@@ -80,4 +80,20 @@ describe('CacheManager', () => {
     await manager.invalidateAfterWrite('/a.txt')
     expect(await cache.exists('/data/a.txt')).toBe(false)
   })
+
+  it("drops this mount's bodies without touching a neighbour", async () => {
+    const [cache, index] = await seeded()
+    await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
+    const manager = new CacheManager(cache, index, '/data/', true)
+    await manager.dropPrefix()
+    expect(await cache.exists('/data/arch/h.txt')).toBe(false)
+    expect(await cache.exists('/other/keep.txt')).toBe(true)
+  })
+
+  it('leaves a non-caching mount alone', async () => {
+    const [cache, index] = await seeded()
+    const manager = new CacheManager(cache, index, '/data/', false)
+    await manager.dropPrefix()
+    expect(await cache.exists('/data/arch/h.txt')).toBe(true)
+  })
 })
