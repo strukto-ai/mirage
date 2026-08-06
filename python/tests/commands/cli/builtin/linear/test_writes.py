@@ -22,6 +22,7 @@ from mirage.commands.cli.builtin.linear.issue.create import create
 from mirage.commands.cli.builtin.linear.issue.set_priority import set_priority
 from mirage.commands.cli.builtin.linear.issue.set_project import set_project
 from mirage.commands.cli.builtin.linear.issue.transition import transition
+from mirage.commands.cli.types import CLIInvocation
 from mirage.core.linear.config import LinearConfig
 from mirage.io.types import materialize
 
@@ -52,10 +53,13 @@ async def test_create_resolves_team_and_reads_stdin(monkeypatch):
     monkeypatch.setitem(create.__globals__, "resolve_team", fake_resolve_team)
     monkeypatch.setitem(create.__globals__, "issue_create", fake_issue_create)
     monkeypatch.setitem(create.__globals__, "normalize_issue", fake_normalize)
-    out, _io = await create(CONFIG, [],
-                            stdin=b"body from stdin",
-                            team="ENG",
-                            title="Title")
+    out, _io = await create(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "team": "ENG",
+                          "title": "Title"
+                      },
+                      stdin=b"body from stdin"))
     data = await _json(out)
     assert data["team_id"] == "team-1"
     assert data["description"] == "body from stdin"
@@ -93,7 +97,10 @@ async def test_transition_resolves_state_name(monkeypatch):
     resolve_state = transition.__globals__["resolve_state_id"]
     monkeypatch.setitem(resolve_state.__globals__, "list_teams",
                         fake_list_teams)
-    out, _io = await transition(CONFIG, [], "ENG-42", state_name="In Review")
+    out, _io = await transition(
+        CLIInvocation(CONFIG,
+                      texts=("ENG-42", ),
+                      flags={"state_name": "In Review"}))
     assert (await _json(out))["state_id"] == "state-2"
 
 
@@ -116,7 +123,8 @@ async def test_set_priority_forwards_int(monkeypatch):
                         fake_issue_update)
     monkeypatch.setitem(set_priority.__globals__, "normalize_issue",
                         fake_normalize)
-    out, _io = await set_priority(CONFIG, [], "ENG-42", priority="2")
+    out, _io = await set_priority(
+        CLIInvocation(CONFIG, texts=("ENG-42", ), flags={"priority": "2"}))
     assert (await _json(out))["priority"] == 2
 
 
@@ -159,7 +167,8 @@ async def test_add_label_resolves_label_name(monkeypatch):
     resolve_label = add_label.__globals__["resolve_label_id"]
     monkeypatch.setitem(resolve_label.__globals__, "list_team_labels",
                         fake_list_team_labels)
-    out, _io = await add_label(CONFIG, [], "ENG-42", label_name="bug")
+    out, _io = await add_label(
+        CLIInvocation(CONFIG, texts=("ENG-42", ), flags={"label_name": "bug"}))
     assert (await _json(out))["label_ids"] == ["lbl-old", "lbl-bug"]
 
 
@@ -193,7 +202,10 @@ async def test_set_project_resolves_project_name(monkeypatch):
     resolve_project = set_project.__globals__["resolve_project_id"]
     monkeypatch.setitem(resolve_project.__globals__, "list_team_projects",
                         fake_list_team_projects)
-    out, _io = await set_project(CONFIG, [], "ENG-42", project_name="Search")
+    out, _io = await set_project(
+        CLIInvocation(CONFIG,
+                      texts=("ENG-42", ),
+                      flags={"project_name": "Search"}))
     assert (await _json(out))["project_id"] == "prj-search"
 
 
@@ -206,4 +218,4 @@ async def test_comment_add_requires_body(monkeypatch):
     monkeypatch.setitem(comment_add.__globals__, "resolve_issue",
                         fake_resolve_issue)
     with pytest.raises(ValueError, match="comment body is required"):
-        await comment_add(CONFIG, [], "ENG-42")
+        await comment_add(CLIInvocation(CONFIG, texts=("ENG-42", )))

@@ -30,11 +30,11 @@ from mirage.commands.cli.builtin.git.util import fatal
 from mirage.commands.cli.builtin.git.worktree import (UNTRACKED_ALL,
                                                       UNTRACKED_NO,
                                                       UNTRACKED_NORMAL)
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
+from mirage.ops.types import StatPath
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,14 +98,7 @@ async def render_report(dispatch: Callable[..., Any], stat_path: StatPath,
 
 
 async def status(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+        inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Show the working tree status.
 
     Three sources, compared pairwise: HEAD's tree against the index says
@@ -114,14 +107,16 @@ async def status(
     of those two answers, or a path neither side knows about.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): pathspec operands.
-        stat_path (StatPath | None): dispatcher-backed stat asking both
-            channels, for repository discovery and the working-tree walk.
-        mount_root (MountRoot | None): the mount prefix serving a path,
-            which bounds the discovery walk.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    flags = inv.flags
     fl = FlagView(flags)
     try:
         if stat_path is None or mount_root is None or dispatch is None:

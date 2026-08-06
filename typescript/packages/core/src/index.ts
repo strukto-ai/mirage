@@ -646,7 +646,7 @@ export {
   type CLISpecInit,
   type CLIVerbFn,
   type CLIConfigModel,
-  type CLIVerbOpts,
+  type CLIInvocation,
   type WalkFlagBag,
   WalkResult,
   type WalkResultInit,

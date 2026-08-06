@@ -16,9 +16,8 @@ import { FlagView } from '../../../spec/types.ts'
 import { searchPages } from '../../../../core/notion/pages.ts'
 import { extractTitle } from '../../../../core/notion/normalize.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { notionTransport } from './util.ts'
 
 const ENC = new TextEncoder()
@@ -27,15 +26,15 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-export async function search(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function search(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const limit = fl.asInt('limit') ?? 20
-  const pages = await searchPages(notionTransport(config), fl.asStr('query') ?? '', limit, limit)
+  const pages = await searchPages(
+    notionTransport(inv.config),
+    fl.asStr('query') ?? '',
+    limit,
+    limit,
+  )
   const results = pages.slice(0, limit).map((page) => {
     const parent = page.parent as Record<string, unknown> | undefined
     const title = extractTitle(page)

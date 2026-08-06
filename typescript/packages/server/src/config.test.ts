@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  CLISpec,
   RAMNamespaceStore,
   RAMWorkspaceStateStore,
   RedisFileCacheStore,
@@ -462,5 +463,78 @@ describe('clis section', () => {
       clis: { sl: { cli: 'slack', mode: 'write' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown keys: mode/)
+  })
+
+  it('a script entry synthesizes a spec', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'pager.py'), "print('page')")
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\n' +
+        'clis:\n  pager:\n    script: pager.py\n    runtime: monty\n' +
+        '    config:\n      page_size: 20\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    const [spec, config] = args.options.clis?.pager ?? []
+    expect(spec).toBeInstanceOf(CLISpec)
+    expect((spec as CLISpec).name).toBe('pager')
+    expect((spec as CLISpec).script).toEqual(new ScriptSource("print('page')"))
+    expect((spec as CLISpec).runtime).toBe('monty')
+    expect(config).toEqual({ page_size: 20 })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('a .mjs script stamps the language and the module bit', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'pager.mjs'), "console.log('page')")
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nclis:\n  pager:\n    script: pager.mjs\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    const [spec] = args.options.clis?.pager ?? []
+    // The module bit rides on the spec because the path is gone once
+    // the source is embedded, and an ES module needs the engine's
+    // module mode or `import` fails.
+    expect((spec as CLISpec).script).toEqual(new ScriptSource("console.log('page')", 'js', true))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('a plain .js script is not a module', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cfg-'))
+    writeFileSync(join(dir, 'pager.js'), "console.log('page')")
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nclis:\n  pager:\n    script: pager.js\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    const [spec] = args.options.clis?.pager ?? []
+    expect((spec as CLISpec).script?.language).toBe('js')
+    expect((spec as CLISpec).script?.module).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('a clis entry takes exactly one of cli or script', async () => {
+    const both = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { sl: { cli: 'slack', script: 'pager.py' } },
+    })
+    await expect(configToWorkspaceArgs(both)).rejects.toThrow(/exactly one of cli or script/)
+    const neither = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { sl: { config: { token: 'x' } } },
+    })
+    await expect(configToWorkspaceArgs(neither)).rejects.toThrow(/exactly one of cli or script/)
+  })
+
+  it('runtime takes script', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { sl: { cli: 'slack', runtime: 'monty' } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
   })
 })

@@ -42,11 +42,10 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import HEAD, check_operands, fatal
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -197,14 +196,7 @@ async def _switch(dispatch: Callable[..., Any], repo: BaseRepo,
 
 
 async def checkout(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+        inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Switch the working tree to another branch or commit.
 
     Refuses rather than overwriting when the switch would destroy work
@@ -215,13 +207,17 @@ async def checkout(
     there is no reflog here to get it back from.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands, unused.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    texts = inv.texts
+    flags = inv.flags
     fl = FlagView(flags)
     try:
         if stat_path is None or mount_root is None or dispatch is None:

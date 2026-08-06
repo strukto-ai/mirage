@@ -14,10 +14,26 @@
 
 import type { PolicyScript } from './policy/types.ts'
 
+/**
+ * The languages a runtime can interpret, one name for both doors (run
+ * and eval). A union, not string, so a typo is a type error instead of
+ * a selector that silently matches nothing and reports "no runtime".
+ */
+export type RuntimeLanguage = 'python' | 'js'
+
 /** One interpreter execution request, language-agnostic. */
 export interface RunArgs {
   code: string
   args: string[]
+  /**
+   * The program's own name, for the argv slot a program reads to prefix
+   * its messages. Set by the CLI script tier (the installed head word,
+   * so a renamed install names itself), absent for the interpreter
+   * commands, which keep their engine's own spelling. A runtime that
+   * assembles argv itself fills slot 0 with it; where a real
+   * interpreter defines that slot (CPython under `-c`) it cannot apply.
+   */
+  prog?: string
   env: Record<string, string>
   stdin: Uint8Array | null
   /**

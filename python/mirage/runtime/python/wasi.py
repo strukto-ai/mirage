@@ -68,6 +68,7 @@ class WasiRuntime(Runtime):
 
     name = "wasi"
     captures = ("python3", "python")
+    language = "python"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig

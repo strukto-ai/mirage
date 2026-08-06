@@ -21,13 +21,14 @@ import pytest
 from pydantic import BaseModel, SecretStr
 
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.resource.secrets import REDACTED_SECRET
-from mirage.types import CLIKey, MountMode, StateKey
+from mirage.runtime.types import ScriptSource
+from mirage.types import CLIKey, MountMode, ScriptKey, StateKey
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
@@ -465,8 +466,9 @@ class _CliCfg(BaseModel):
     channel: str = "general"
 
 
-async def _cli_echo(config, paths, *texts, **flags):
-    return f"tok={config.token.get_secret_value()}\n".encode(), IOResult()
+async def _cli_echo(inv: CLIInvocation):
+    return (f"tok={inv.config.token.get_secret_value()}\n".encode(),
+            IOResult())
 
 
 _CLI_SPEC = CLISpec(name="snapcli",
@@ -549,8 +551,9 @@ class _NestedCfg(BaseModel):
     auth: _NestedAuth
 
 
-async def _nested_echo(config, paths, *texts, **flags):
-    return f"tok={config.auth.token.get_secret_value()}\n".encode(), IOResult()
+async def _nested_echo(inv: CLIInvocation):
+    return (f"tok={inv.config.auth.token.get_secret_value()}\n".encode(),
+            IOResult())
 
 
 _NESTED_SPEC = CLISpec(name="nestcli",
@@ -581,3 +584,70 @@ async def test_nested_cli_secrets_redact_and_demand_an_override():
         await clone.close()
     finally:
         unregister_cli_spec("nestcli")
+
+
+@pytest.mark.asyncio
+async def test_script_cli_survives_a_tar_snapshot(tmp_path):
+    # A script install resolves under no registry name, so the embedded
+    # program rides in the snapshot and load rebuilds the spec from it.
+    # The install also proves the manifest carries the clis key at all.
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    spec = CLISpec(name="pager",
+                   script=ScriptSource(
+                       "import os\n"
+                       "print(argv[1], os.environ['MIRAGE_CLI_CONFIG'])"))
+    ws.register_cli("pager", spec, config={"width": 80})
+    path = tmp_path / "snap.tar"
+    await ws.snapshot(str(path))
+    with tarfile.open(path) as tf:
+        manifest = json.loads(tf.extractfile("manifest.json").read())
+    entry = manifest[StateKey.CLIS][0]
+    assert entry[CLIKey.SPEC] == "pager"
+    assert entry[CLIKey.SCRIPT][ScriptKey.LANGUAGE] == "python"
+    assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is False
+
+    restored = await Workspace.load(str(path))
+    io = await restored.execute("pager b.txt")
+    assert io.exit_code == 0
+    assert io.stdout == b'b.txt {"width": 80}\n'
+    await ws.close()
+    await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_script_cli_config_captures_verbatim_without_a_schema():
+    # A script spec declares no config_model, so nothing declares which
+    # keys are secret: the mapping is captured as-is rather than
+    # crashing on model_dump or being guessed at.
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    spec = CLISpec(name="pager", script=ScriptSource("print('hi')"))
+    ws.register_cli("pager", spec, config={"width": 80})
+    state = await to_state_dict(ws)
+    assert state[StateKey.CLIS][0][CLIKey.CONFIG] == {"width": 80}
+    # copy() reveals secrets through the same helper, so it must not
+    # crash on a mapping config either.
+    clone = await ws.copy()
+    io = await clone.execute("pager")
+    assert io.exit_code == 0
+    await ws.close()
+    await clone.close()
+
+
+@pytest.mark.asyncio
+async def test_script_cli_runtime_pin_and_module_bit_round_trip():
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    spec = CLISpec(name="pager",
+                   script=ScriptSource("x", language="js", module=True),
+                   runtime="quickjs")
+    ws.register_cli("pager", spec, config=None)
+    state = await to_state_dict(ws)
+    entry = state[StateKey.CLIS][0]
+    assert entry[CLIKey.RUNTIME] == "quickjs"
+    assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is True
+    restored = await Workspace.from_state(state)
+    install = restored.clis()["pager"]
+    assert install.spec.runtime == "quickjs"
+    assert install.spec.script.module is True
+    assert install.spec.script.language == "js"
+    await ws.close()
+    await restored.close()

@@ -14,10 +14,11 @@
 
 from mirage.commands.cli.specs import (cli_spec_for, register_cli_spec,
                                        unregister_cli_spec)
-from mirage.commands.cli.types import CLISpec, WalkResult
+from mirage.commands.cli.types import CLIInvocation, CLISpec, WalkResult
 from mirage.commands.cli.walk import node_help, walk
 
 __all__ = [
+    "CLIInvocation",
     "CLISpec",
     "WalkResult",
     "cli_spec_for",

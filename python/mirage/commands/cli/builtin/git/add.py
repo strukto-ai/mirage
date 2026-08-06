@@ -14,7 +14,6 @@
 
 import posixpath
 from dataclasses import dataclass
-from typing import Any, Callable
 
 from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
@@ -33,10 +32,11 @@ from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
                                                   start_point)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.ops.types import StatPath
+from mirage.types import FileStat, FileType
 
 # git records one of two modes for a regular file and reads only the
 # owner execute bit to choose. A mount that reports no mode at all
@@ -206,15 +206,7 @@ async def _resolve(stat_path: StatPath, location: RepoLocation, start: str,
     return stage, remove
 
 
-async def add(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Stage working-tree content into the index.
 
     Every path is hashed and written as a loose object, then recorded in
@@ -227,14 +219,17 @@ async def add(
     too, ``-u`` only what the index already holds.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands, unused; pathspecs arrive
-            as text so they can be resolved against ``-C``.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    texts = inv.texts
+    flags = inv.flags
     fl = FlagView(flags)
     try:
         if stat_path is None or mount_root is None or dispatch is None:

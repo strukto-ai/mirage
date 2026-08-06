@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import search_envelopes
 from mirage.commands.cli.builtin.himalaya.query import QueryError
+from mirage.commands.cli.types import CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
@@ -59,20 +60,22 @@ def patched(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_query_tokens_rejoin_before_parsing(patched):
-    await search_envelopes(CONFIG, [], "from", "alice", "and", "subject",
-                           "invoice")
+    await search_envelopes(
+        CLIInvocation(CONFIG,
+                      texts=("from", "alice", "and", "subject", "invoice")))
     assert patched["criteria"] == '(FROM "alice" SUBJECT "invoice")'
 
 
 @pytest.mark.asyncio
 async def test_no_query_searches_everything(patched):
-    await search_envelopes(CONFIG, [])
+    await search_envelopes(CLIInvocation(CONFIG))
     assert patched["criteria"] == "ALL"
 
 
 @pytest.mark.asyncio
 async def test_sort_clause_orders_the_results_client_side(patched):
-    out, io = await search_envelopes(CONFIG, [], "order", "by", "subject")
+    out, io = await search_envelopes(
+        CLIInvocation(CONFIG, texts=("order", "by", "subject")))
     assert io.exit_code == 0
     data = json.loads(await materialize(out))
     assert [d["uid"] for d in data] == ["2", "1"]
@@ -80,10 +83,13 @@ async def test_sort_clause_orders_the_results_client_side(patched):
 
 @pytest.mark.asyncio
 async def test_mailbox_and_paging_flags_apply(patched):
-    out, _ = await search_envelopes(CONFIG, [],
-                                    mailbox="Archive",
-                                    page=2,
-                                    page_size=1)
+    out, _ = await search_envelopes(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "mailbox": "Archive",
+                          "page": 2,
+                          "page_size": 1
+                      }))
     assert patched["folder"] == "Archive"
     data = json.loads(await materialize(out))
     assert [d["uid"] for d in data] == ["1"]
@@ -92,17 +98,20 @@ async def test_mailbox_and_paging_flags_apply(patched):
 @pytest.mark.asyncio
 async def test_a_bad_query_never_reaches_the_server(patched):
     with pytest.raises(QueryError):
-        await search_envelopes(CONFIG, [], "sender", "alice")
+        await search_envelopes(CLIInvocation(CONFIG,
+                                             texts=("sender", "alice")))
     assert "criteria" not in patched
 
 
 @pytest.mark.asyncio
 async def test_the_default_order_only_fetches_the_pages_asked_for(patched):
-    await search_envelopes(CONFIG, [],
-                           "subject",
-                           "alpha",
-                           page=2,
-                           page_size=10)
+    await search_envelopes(
+        CLIInvocation(CONFIG,
+                      texts=("subject", "alpha"),
+                      flags={
+                          "page": 2,
+                          "page_size": 10
+                      }))
     assert patched["budget"] == 20
 
 
@@ -111,5 +120,6 @@ async def test_an_explicit_sort_widens_the_fetch_to_the_account_window(
         patched):
     # `order by` is unrelated to arrival order, so the newest N is not
     # enough to know what belongs on page one.
-    await search_envelopes(CONFIG, [], "order", "by", "subject")
+    await search_envelopes(
+        CLIInvocation(CONFIG, texts=("order", "by", "subject")))
     assert patched["budget"] == CONFIG.max_messages

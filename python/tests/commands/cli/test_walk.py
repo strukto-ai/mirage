@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli import CLISpec, walk
-from mirage.commands.cli.walk import find_child, find_node
+from mirage.commands.cli.walk import (find_child, find_node, node_help,
+                                      owns_argv)
 from mirage.commands.spec.types import Option
+from mirage.runtime.types import ScriptSource
 
 
 async def _verb(config, paths, *texts, **flags):
@@ -340,6 +342,36 @@ def test_find_node_with_no_verbs_is_the_root():
 def test_find_node_misses_on_an_unknown_verb():
     assert find_node(_tree(), ["gmail", "bogus"]) is None
     assert find_node(_tree(), ["bogus"]) is None
+
+
+def test_script_root_terminates_the_walk_with_argv_verbatim():
+    # A script node is a terminal leaf like an fn node: the walk hands
+    # back every token so the program can re-parse argv natively.
+    spec = CLISpec(name="pager", script=ScriptSource("print('hi')"))
+    result = walk("pager", spec, ["--frobnicate", "report.txt"])
+    assert result.leaf is spec
+    assert result.path == ()
+    assert result.argv == ("--frobnicate", "report.txt")
+    assert result.exit_code == 0
+
+
+def test_owns_argv_only_for_a_grammarless_script_root():
+    source = ScriptSource("print('hi')")
+    assert owns_argv(CLISpec(name="pager", script=source))
+    declared = CLISpec(name="pager",
+                       script=source,
+                       options=(Option(long="--width", type="int"), ))
+    assert not owns_argv(declared)
+    assert not owns_argv(CLISpec(name="prog", fn=_verb))
+
+
+def test_manual_of_a_grammarless_script_omits_the_help_row():
+    # man renders from the spec, so it must not advertise a --help the
+    # program answers itself.
+    text = node_help("pager",
+                     CLISpec(name="pager", script=ScriptSource("print(1)")))
+    assert text.startswith("pager\n")
+    assert "--help" not in text
 
 
 def test_path_typed_group_option_resolves_against_cwd():

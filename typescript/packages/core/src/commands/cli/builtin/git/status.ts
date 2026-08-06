@@ -14,10 +14,9 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { StatPath } from '../../../../ops/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { collect } from './changes.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { short } from './format.ts'
@@ -85,13 +84,11 @@ export async function renderReport(
  * leave behind. Everything the report prints is one of those two answers, or a
  * path neither side knows about.
  */
-export async function status(
-  _config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const fl = new FlagView(inv.flags)
   try {
     const dispatch = opts.dispatch
     const statPath = opts.statPath

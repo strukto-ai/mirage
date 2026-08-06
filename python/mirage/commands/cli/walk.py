@@ -73,6 +73,24 @@ def find_node(spec: CLISpec,
     return node, path
 
 
+def owns_argv(node: CLISpec) -> bool:
+    """True when the node parses its own command line instead of mirage.
+
+    A script root that declares no grammar is the only such node: the
+    embedded program is the parser, so its flags are not mirage's to
+    recognize, and a generated help page would document nothing. Mirage
+    forwards the whole line to it (a pass-through rest operand) and
+    leaves ``--help`` to the program. A script root that does declare
+    options or operands opts back into the ordinary machinery, which
+    then renders truthful help and refuses undeclared flags.
+
+    Args:
+        node (CLISpec): the node whose line is about to be parsed.
+    """
+    return (node.script is not None and not node.options
+            and not node.positional and node.rest is None)
+
+
 def node_help(name: str, node: CLISpec) -> str:
     """A group node's help: the ordinary command help plus Commands rows.
 
@@ -91,8 +109,11 @@ def node_help(name: str, node: CLISpec) -> str:
             for child in node.subcommands]
     # --help is a registered option everywhere (argparse add_help, click
     # add_help_option, withHelpSupport for leaves), so the listing shows
-    # it unless the node declares its own.
-    if any(option.long == "--help" for option in node.options):
+    # it unless the node declares its own or answers the flag itself
+    # (owns_argv), where advertising it would promise a page mirage no
+    # longer renders.
+    if any(option.long == "--help"
+           for option in node.options) or owns_argv(node):
         listed = node
     else:
         listed = replace(node, options=node.options + (HELP_OPTION, ))
@@ -338,7 +359,10 @@ def walk(head: str,
     flags: FlagBag = {}
     i = 0
     while True:
-        if node.fn is not None:
+        # A script node terminates the walk exactly like an fn leaf:
+        # its remaining argv rides the ordinary spec machinery for
+        # validation, then passes to the program verbatim.
+        if node.fn is not None or node.script is not None:
             return WalkResult(leaf=node,
                               path=path,
                               group_flags=flags,

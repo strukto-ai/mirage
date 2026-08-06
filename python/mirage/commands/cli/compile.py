@@ -27,10 +27,11 @@ def validate_cli(node: "CLISpec") -> None:
     raises ValueError at import time, never at dispatch. Children were
     validated by their own construction (a nested literal builds bottom
     up), so each call checks one level: the name is a single word with no
-    whitespace, a node takes fn or subcommands (never both, never
-    neither), a group declares no positional/rest (its operand is the
-    subcommand word), child names are unique, and only a tree's root may
-    declare config_model.
+    whitespace, a node takes exactly one of fn, subcommands, or script
+    (a script root stands alone: the program re-parses argv natively),
+    runtime only rides a script, a group declares no positional/rest
+    (its operand is the subcommand word), child names are unique, and
+    only a tree's root may declare config_model or script.
 
     Args:
         node (CLISpec): the freshly constructed node.
@@ -42,11 +43,22 @@ def validate_cli(node: "CLISpec") -> None:
         if not alias or any(ch.isspace() for ch in alias):
             raise ValueError(f"cli {node.name!r}: alias {alias!r} must be "
                              f"a single non-empty word")
+    if node.script is not None and node.fn is not None:
+        raise ValueError(
+            f"cli {node.name!r}: a node takes fn or script, not both")
+    if node.script is not None and node.subcommands:
+        raise ValueError(
+            f"cli {node.name!r}: a script serves the whole program; "
+            f"subcommands belong to fn trees")
+    if node.runtime is not None and node.script is None:
+        raise ValueError(f"cli {node.name!r}: runtime names the entry that "
+                         f"runs script; it takes script")
     if node.fn is not None and node.subcommands:
         raise ValueError(
             f"cli {node.name!r}: a node takes fn or subcommands, not both")
-    if node.fn is None and not node.subcommands:
-        raise ValueError(f"cli {node.name!r}: a node needs fn or subcommands")
+    if node.fn is None and not node.subcommands and node.script is None:
+        raise ValueError(
+            f"cli {node.name!r}: a node needs fn, subcommands, or script")
     if node.subcommands and (node.positional or node.rest is not None):
         raise ValueError(
             f"cli {node.name!r}: a group's operand is its subcommand "
@@ -64,6 +76,10 @@ def validate_cli(node: "CLISpec") -> None:
             raise ValueError(
                 f"cli {node.name!r}: subcommand {child.name!r} declares "
                 f"config_model; only the root of a tree may")
+        if child.script is not None:
+            raise ValueError(
+                f"cli {node.name!r}: subcommand {child.name!r} declares "
+                f"script; only the root of a tree may")
     if node.options and node.subcommands:
         own = set(compile_spec(node).dest.values())
         for child in node.subcommands:

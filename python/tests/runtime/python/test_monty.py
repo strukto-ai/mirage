@@ -91,6 +91,32 @@ def test_monty_argv_global():
     assert result.stdout == b"['a', 'b']\n"
 
 
+def test_monty_argv0_is_prog_when_named():
+    # A named caller (a CLI install) owns argv[0]; without one the
+    # interpreter's own placeholder stands, as `python3 -c` expects.
+    runtime = MontyRuntime()
+    result = asyncio.run(
+        runtime.run(RunArgs(code="print(argv[0])", args=["a"], prog="pager")))
+    assert (result.exit_code, result.stdout) == (0, b"pager\n")
+    plain = asyncio.run(runtime.run(RunArgs(code="print(argv[0])")))
+    assert plain.stdout == b"main.py\n"
+
+
+def test_monty_stdin_global():
+    runtime = MontyRuntime()
+    result = asyncio.run(
+        runtime.run(RunArgs(code="print(stdin.decode())", stdin=b"piped")))
+    assert result.exit_code == 0
+    assert result.stdout == b"piped\n"
+
+
+def test_monty_stdin_global_none_without_pipe():
+    runtime = MontyRuntime()
+    result = asyncio.run(runtime.run(RunArgs(code="print(stdin is None)")))
+    assert result.exit_code == 0
+    assert result.stdout == b"True\n"
+
+
 def test_monty_env_isolated_to_run_env():
     runtime = MontyRuntime()
     result = asyncio.run(
@@ -98,6 +124,57 @@ def test_monty_env_isolated_to_run_env():
             RunArgs(code="import os; print(os.environ.get('MY_VAR', 'unset'))",
                     env={"MY_VAR": "v1"})))
     assert result.stdout == b"v1\n"
+
+
+def test_monty_environ_is_a_dict_of_the_run_env():
+    # The surface the TS host must match: same nine reads, same output
+    # (its bridge answered os.getenv only and raised on os.environ).
+    runtime = MontyRuntime()
+    code = "\n".join((
+        "import os",
+        "print(os.environ.get('K'))",
+        "print(os.environ.get('nope', 'dflt'))",
+        "print(os.environ['K'])",
+        "print('K' in os.environ, 'nope' in os.environ)",
+        "print(sorted(os.environ))",
+        "print(sorted(os.environ.items()))",
+        "print(len(os.environ))",
+        "print(type(os.environ).__name__)",
+    ))
+    result = asyncio.run(
+        runtime.run(RunArgs(code=code, env={
+            "K": "v",
+            "OTHER": "w"
+        })))
+    assert result.exit_code == 0
+    assert result.stdout == (b"v\n"
+                             b"dflt\n"
+                             b"v\n"
+                             b"True False\n"
+                             b"['K', 'OTHER']\n"
+                             b"[('K', 'v'), ('OTHER', 'w')]\n"
+                             b"2\n"
+                             b"dict\n")
+
+
+def test_monty_missing_environ_key_raises_key_error():
+    runtime = MontyRuntime()
+    code = ("import os\n"
+            "try:\n"
+            "    os.environ['nope']\n"
+            "except KeyError as e:\n"
+            "    print('KeyError', e)")
+    result = asyncio.run(runtime.run(RunArgs(code=code, env={"K": "v"})))
+    assert (result.exit_code, result.stdout) == (0, b"KeyError 'nope'\n")
+
+
+def test_monty_environ_mutation_cannot_reach_the_host_env():
+    runtime = MontyRuntime()
+    code = ("import os\n"
+            "os.environ['K'] = 'guest'\n"
+            "print(os.getenv('K'))")
+    result = asyncio.run(runtime.run(RunArgs(code=code, env={"K": "v"})))
+    assert (result.exit_code, result.stdout) == (0, b"v\n")
 
 
 def test_monty_host_filesystem_invisible():

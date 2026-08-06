@@ -32,11 +32,10 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
 from mirage.commands.cli.builtin.git.util import HEAD, check_operands, fatal
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
 
 HEADS_PREFIX = b"refs/heads/"
 REMOTES_PREFIX = b"refs/remotes/"
@@ -166,14 +165,7 @@ async def _delete(dispatch: Callable[..., Any], repo: BaseRepo,
 
 
 async def branch(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+        inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """List, create or delete branches.
 
     A name operand creates a branch, ``-d`` deletes one, and neither
@@ -185,13 +177,17 @@ async def branch(
     both; local names sort together and remotes follow.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    texts = inv.texts
+    flags = inv.flags
     fl = FlagView(flags)
     remotes_only = fl.as_bool("r")
     include_remotes = remotes_only or fl.as_bool("a")

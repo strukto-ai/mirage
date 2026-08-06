@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { headEntries, workChanges } from './changes.ts'
 import {
   AmbiguousArgumentError,
@@ -76,13 +75,12 @@ export function restored(oid: string, mode: number): StagedEntry {
  * A pathspec limits the reset to those paths, which is how a single file is
  * unstaged.
  */
-export async function reset(
-  _config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const texts = [...inv.texts]
+  const fl = new FlagView(inv.flags)
   let unstaged: Map<string, string>
   try {
     const dispatch = opts.dispatch

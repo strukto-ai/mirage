@@ -17,6 +17,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import {
   buildResource,
+  CLISpec,
   Limit,
   ConsistencyPolicy,
   KERNEL_BACKENDS,
@@ -67,7 +68,7 @@ function loadScriptSource(value: string): ScriptSource {
   }
   const path = value.trim()
   const language = path.endsWith('.js') || path.endsWith('.mjs') ? 'js' : 'python'
-  return new ScriptSource(readFileSync(path, 'utf-8'), language)
+  return new ScriptSource(readFileSync(path, 'utf-8'), language, path.endsWith('.mjs'))
 }
 
 function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
@@ -333,13 +334,19 @@ interface StoreBlock {
 
 /**
  * One `clis:` entry: install a named CLISpec with its own config. The
- * section key is the installed head word; `cli` names the registered
- * spec tree; `config` validates through that spec's configModel at
+ * section key is the installed head word. Exactly one handler source:
+ * `cli` names a registered spec tree; `script` references a program
+ * file whose content is embedded at load (the docker build-context
+ * model). `runtime` optionally pins the world runtime entry that runs
+ * the script; unset picks the first entry speaking the script's
+ * language. `config` validates through the spec's configModel at
  * install time (fail loud). A CLI never takes a mode and never shares
  * a mount's credentials: a binary has no mode, the credential does.
  */
 interface CLIBlock {
-  cli: string
+  cli?: string
+  script?: string
+  runtime?: string
   config?: Record<string, unknown>
 }
 
@@ -399,13 +406,23 @@ function absolutizeScripts(raw: WorkspaceConfigRaw, base: string): void {
   if (typeof policy === 'string' && isScriptPath(policy) && !isAbsolute(policy.trim())) {
     raw.policy = join(base, policy.trim())
   }
-  if (!Array.isArray(raw.runtimes)) return
-  for (const entry of raw.runtimes) {
-    if (typeof entry === 'string') continue
-    const script = entry.script
-    if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
-      entry.script = join(base, script.trim())
+  if (Array.isArray(raw.runtimes)) {
+    for (const entry of raw.runtimes) {
+      if (typeof entry !== 'string') absolutizeScriptKey(entry, base)
     }
+  }
+  if (raw.clis !== undefined && raw.clis !== null) {
+    for (const block of Object.values(raw.clis)) {
+      absolutizeScriptKey(block as Record<string, unknown>, base)
+    }
+  }
+}
+
+/** Rebase one runtimes/clis entry's relative `script` path onto `base`. */
+function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void {
+  const script = entry.script
+  if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
+    entry.script = join(base, script.trim())
   }
 }
 
@@ -437,7 +454,7 @@ export interface WorkspaceArgs {
     runtimes?: RuntimeEntry[]
     policy?: ScriptSource
     guards?: GuardSpec[]
-    clis?: Record<string, [string, Record<string, unknown> | null]>
+    clis?: Record<string, [string | CLISpec, Record<string, unknown> | null]>
   }
   kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
@@ -546,22 +563,41 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
 
 function buildCliEntries(
   clis: Record<string, CLIBlock>,
-): Record<string, [string, Record<string, unknown> | null]> {
-  const out: Record<string, [string, Record<string, unknown> | null]> = {}
+): Record<string, [string | CLISpec, Record<string, unknown> | null]> {
+  const out: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
+  const known = new Set(['cli', 'script', 'runtime', 'config'])
   for (const [name, block] of Object.entries(clis as Record<string, unknown>)) {
     // The raw config arrives as unvalidated YAML: the CLIBlock type is
     // a claim, not a guarantee, so validate the shape here.
-    if (!isPlainObject(block) || typeof block.cli !== 'string') {
-      throw new Error(`clis entry '${name}' requires a string \`cli\` key`)
+    if (!isPlainObject(block)) {
+      throw new Error(`clis entry '${name}' must be a mapping`)
     }
-    const unknown = Object.keys(block).filter((k) => k !== 'cli' && k !== 'config')
+    const unknown = Object.keys(block).filter((k) => !known.has(k))
     if (unknown.length > 0) {
       throw new Error(`clis entry '${name}': unknown keys: ${unknown.sort().join(', ')}`)
+    }
+    const hasCli = typeof block.cli === 'string'
+    const hasScript = typeof block.script === 'string'
+    if (hasCli === hasScript) {
+      throw new Error(`clis entry '${name}' takes exactly one of cli or script`)
+    }
+    if (block.runtime !== undefined && !hasScript) {
+      throw new Error(`clis entry '${name}': runtime pins the script's runtime; it takes script`)
+    }
+    if (block.runtime !== undefined && typeof block.runtime !== 'string') {
+      throw new Error(`clis entry '${name}': runtime must be a string`)
     }
     if (block.config !== undefined && !isPlainObject(block.config)) {
       throw new Error(`clis entry '${name}': config must be a mapping`)
     }
-    out[name] = [block.cli, block.config ?? {}]
+    const entry = hasScript
+      ? new CLISpec({
+          name,
+          script: loadScriptSource(block.script as string),
+          runtime: block.runtime ?? null,
+        })
+      : (block.cli as string)
+    out[name] = [entry, block.config ?? {}]
   }
   return out
 }

@@ -23,7 +23,9 @@ from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyDeny,
                                    PolicyError, RouteResult, ScriptSource,
                                    decide_line, evaluate_policy,
                                    evaluate_script, evaluator_of,
-                                   parse_verdict, parsed_commands)
+                                   parse_verdict, parsed_commands,
+                                   runtime_for_language)
+from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.table import VfsRuntime
 from mirage.runtime.types import RunArgs, RunResult
@@ -110,7 +112,7 @@ def test_evaluator_of_picks_first_evaluator_entry():
 class JsEvaluator(Runtime, EvaluatorMixin):
     name = "js-eval"
     captures = ("node", )
-    eval_language = "js"
+    language = "js"
 
     def __init__(self) -> None:
         super().__init__()
@@ -147,6 +149,36 @@ def test_evaluator_of_prefers_a_language_match():
     assert evaluator_of([monty, js]) is monty
     assert evaluator_of([monty], "js") is monty
     assert evaluator_of([], "js") is None
+
+
+def test_one_language_attribute_serves_both_doors():
+    # The eval door and the run door read the same Runtime.language, so
+    # an engine cannot be picked as a js interpreter and a python
+    # evaluator at once. Two attributes could disagree, and the
+    # disagreement only showed up as an unexplained 127 or a policy
+    # script evaluated on the wrong engine.
+    js = JsEvaluator()
+    assert evaluator_of([js], "js") is js
+    assert runtime_for_language([js], "js") is js
+    assert runtime_for_language([js], "python") is None
+
+
+def test_runtime_for_language_is_first_match_wins():
+    monty, local, js = MontyRuntime(), LocalRuntime(), JsEvaluator()
+    assert runtime_for_language([monty, local, js], "python") is monty
+    assert runtime_for_language([local, monty, js], "python") is local
+    assert runtime_for_language([monty, js], "js") is js
+
+
+def test_runtime_for_language_has_no_cross_language_fallback():
+    # evaluator_of serves the first evaluator when nothing matches; the
+    # run selector must not: a python program cannot run on a js
+    # engine. Captures do not count either (alpha captures python3 but
+    # declares no language), and an empty world selects nothing.
+    assert runtime_for_language([JsEvaluator()], "python") is None
+    assert runtime_for_language([AlphaRuntime(), VfsRuntime()],
+                                "python") is None
+    assert runtime_for_language([], "js") is None
 
 
 @pytest.mark.asyncio

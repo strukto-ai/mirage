@@ -99,7 +99,7 @@ class QuickJsRuntime(Runtime, EvaluatorMixin):
 
     name = "quickjs"
     captures = ("node", "js")
-    eval_language = "js"
+    language = "js"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig
@@ -138,7 +138,11 @@ class QuickJsRuntime(Runtime, EvaluatorMixin):
         argv = ["qjs", "--std"]
         if args.flags.get("module"):
             argv.append("-m")
-        argv += ["-e", args.code, *args.args]
+        # A named program takes scriptArgs[0], the slot qjs fills with a
+        # script's path when it runs a file; unnamed -e leaves the args
+        # alone, so the js command keeps its spelling.
+        named = [args.prog] if args.prog else []
+        argv += ["-e", args.code, *named, *args.args]
         bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
                   if self._dispatch is not None else None)
         fs = GuestFs(bridge=bridge, mount_prefixes=self._mount_prefixes)

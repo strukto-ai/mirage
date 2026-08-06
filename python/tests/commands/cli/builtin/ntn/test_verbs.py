@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
 from mirage.commands.cli.builtin.ntn.pages.trash import trash
 from mirage.commands.cli.builtin.ntn.search import search
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.core.notion.config import NotionConfig
 from mirage.io.types import materialize
@@ -42,7 +43,7 @@ async def test_pages_get(monkeypatch):
         return {"id": page_id}
 
     monkeypatch.setitem(get.__globals__, "get_page", fake_get)
-    out, _io = await get(CONFIG, [], page="P1")
+    out, _io = await get(CLIInvocation(CONFIG, flags={"page": "P1"}))
     assert (await _json(out))["id"] == "P1"
 
 
@@ -56,8 +57,13 @@ async def test_pages_edit_and_trash(monkeypatch):
 
     monkeypatch.setitem(edit.__globals__, "update_page", fake_update)
     monkeypatch.setitem(trash.__globals__, "update_page", fake_update)
-    await edit(CONFIG, [], page="P1", json='{"archived":true}')
-    await trash(CONFIG, [], page="P2")
+    await edit(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "page": "P1",
+                          "json": '{"archived":true}'
+                      }))
+    await trash(CLIInvocation(CONFIG, flags={"page": "P2"}))
     assert calls == [
         ("P1", {
             "archived": True
@@ -76,8 +82,16 @@ async def test_blocks_append_requires_children(monkeypatch):
 
     monkeypatch.setitem(append.__globals__, "append_blocks", fake_append)
     with pytest.raises(UsageError, match="must contain children"):
-        await append(CONFIG, [], block="B1", json='{"foo":1}')
-    out, _io = await append(CONFIG, [], block="B1", json='{"children":[]}')
+        await append(
+            CLIInvocation(CONFIG, flags={
+                "block": "B1",
+                "json": '{"foo":1}'
+            }))
+    out, _io = await append(
+        CLIInvocation(CONFIG, flags={
+            "block": "B1",
+            "json": '{"children":[]}'
+        }))
     assert await _json(out) == {"results": []}
 
 
@@ -90,9 +104,12 @@ async def test_comments_create_requires_parent(monkeypatch):
     monkeypatch.setitem(comment_create.__globals__, "create_comment",
                         fake_comment)
     with pytest.raises(UsageError, match="must contain parent"):
-        await comment_create(CONFIG, [], json='{"rich_text":[]}')
+        await comment_create(
+            CLIInvocation(CONFIG, flags={"json": '{"rich_text":[]}'}))
     out, _io = await comment_create(
-        CONFIG, [], json='{"parent":{"page_id":"P1"},"rich_text":[]}')
+        CLIInvocation(
+            CONFIG,
+            flags={"json": '{"parent":{"page_id":"P1"},"rich_text":[]}'}))
     assert (await _json(out))["id"] == "C1"
 
 
@@ -105,9 +122,12 @@ async def test_datasources_query_forwards_filter(monkeypatch):
         return [{"id": "row1"}]
 
     monkeypatch.setitem(query.__globals__, "query_database", fake_query)
-    out, _io = await query(CONFIG, [],
-                           datasource="D1",
-                           json='{"filter":{"x":1}}')
+    out, _io = await query(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "datasource": "D1",
+                          "json": '{"filter":{"x":1}}'
+                      }))
     assert calls == [("D1", {"filter": {"x": 1}})]
     assert await _json(out) == [{"id": "row1"}]
 
@@ -134,7 +154,7 @@ async def test_search_normalizes_rows(monkeypatch):
         }]
 
     monkeypatch.setitem(search.__globals__, "search_pages", fake_search)
-    out, _io = await search(CONFIG, [], query="doc")
+    out, _io = await search(CLIInvocation(CONFIG, flags={"query": "doc"}))
     rows = await _json(out)
     assert rows[0]["page_id"] == "P1"
     assert rows[0]["parent_type"] == "workspace"

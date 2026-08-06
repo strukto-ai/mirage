@@ -13,22 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.ntn.util import parse_json_flag
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import to_json_bytes
 from mirage.core.notion.pages import update_page
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def edit(
-    config: NotionConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
+    fl = FlagView(inv.flags)
     body = parse_json_flag(fl.as_str("json"), "--json")
-    page = await update_page(config, fl.as_str("page") or "", body)
+    page = await update_page(inv.config, fl.as_str("page") or "", body)
     return yield_bytes(to_json_bytes(page)), IOResult()

@@ -16,9 +16,8 @@ import {
   FlagView,
   IOResult,
   type ByteSource,
-  type CLIVerbOpts,
+  type CLIInvocation,
   type CommandFnResult,
-  type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/_client.ts'
@@ -29,17 +28,12 @@ export const DEFAULT_PAGE_SIZE = 25
 
 const ENC = new TextEncoder()
 
-export async function listEnvelopes(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function listEnvelopes(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
   const page = fl.asInt('page') ?? 1
   const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
-  const account = config as EmailConfig
+  const account = inv.config as EmailConfig
   const budget = uidBudget(page, pageSize, [], account.maxMessages)
   const accessor = new EmailAccessor(account)
   let headers

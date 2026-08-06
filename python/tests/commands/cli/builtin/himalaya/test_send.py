@@ -19,6 +19,7 @@ from email.policy import default as default_policy
 import pytest
 
 from mirage.commands.cli.builtin.himalaya import send
+from mirage.commands.cli.types import CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
@@ -40,7 +41,7 @@ def sent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_reads_the_message_from_stdin(sent):
-    out, io = await send(CONFIG, [], stdin=RAW)
+    out, io = await send(CLIInvocation(CONFIG, stdin=RAW))
     assert io.exit_code == 0
     assert sent["raw"] == RAW
     assert json.loads(await materialize(out)) == {
@@ -52,18 +53,19 @@ async def test_send_reads_the_message_from_stdin(sent):
 
 @pytest.mark.asyncio
 async def test_send_takes_an_inline_message_with_escaped_newlines(sent):
-    await send(CONFIG, [], "From:", "me@x", "\\n\\n", "body")
+    await send(CLIInvocation(CONFIG,
+                             texts=("From:", "me@x", "\\n\\n", "body")))
     assert sent["raw"] == b"From: me@x \n\n body"
 
 
 @pytest.mark.asyncio
 async def test_inline_message_wins_over_stdin(sent):
-    await send(CONFIG, [], "From:", "me@x", stdin=RAW)
+    await send(CLIInvocation(CONFIG, texts=("From:", "me@x"), stdin=RAW))
     assert sent["raw"] == b"From: me@x"
 
 
 @pytest.mark.asyncio
 async def test_an_empty_message_is_refused_before_smtp(sent):
     with pytest.raises(ValueError, match="no message provided"):
-        await send(CONFIG, [], stdin=b"   \n ")
+        await send(CLIInvocation(CONFIG, stdin=b"   \n "))
     assert "raw" not in sent

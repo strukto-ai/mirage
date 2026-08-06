@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Runtime, VfsRuntime } from './executor/runtime.ts'
 import { EVALUATOR, type Evaluator } from './executor/runtime_mixin.ts'
 import type { EvalResult } from './executor/runtime_types.ts'
-import { POLICY_EVAL_TIMEOUT, evaluatorOf } from './executor/policy/index.ts'
+import { POLICY_EVAL_TIMEOUT, evaluatorOf, runtimeForLanguage } from './executor/policy/index.ts'
 import type { RunArgs, RunResult } from './executor/runtime_types.ts'
 import { MontyRuntime } from './executor/python/runtimes/monty.ts'
 import { QuickJsRuntime } from './executor/js/quickjs.ts'
@@ -37,7 +37,7 @@ const DEC = new TextDecoder()
 
 class HangingEvaluator extends Runtime implements Evaluator {
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage = 'python' as const
+  override readonly language = 'python'
   readonly name = 'hang-eval'
 
   constructor() {
@@ -55,14 +55,14 @@ class HangingEvaluator extends Runtime implements Evaluator {
 
 class NamedEvaluator extends Runtime implements Evaluator {
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage: 'python' | 'js'
+  override readonly language: 'python' | 'js'
 
   constructor(
     readonly name: string,
-    evalLanguage: 'python' | 'js',
+    language: 'python' | 'js',
   ) {
     super({ captures: [] })
-    this.evalLanguage = evalLanguage
+    this.language = language
   }
 
   run(): Promise<{ stdout: Uint8Array; stderr: null; exitCode: number }> {
@@ -304,6 +304,31 @@ describe('routing ladder', () => {
     expect(evaluatorOf([py, js])).toBe(py)
     expect(evaluatorOf([py], 'js')).toBe(py)
     expect(evaluatorOf([])).toBeNull()
+  })
+
+  it('one language attribute serves both doors', () => {
+    // The eval door and the run door read the same Runtime.language, so
+    // an engine cannot be picked as a js interpreter and a python
+    // evaluator at once. Two attributes could disagree, and the
+    // disagreement only showed up as an unexplained 127 or a policy
+    // script evaluated on the wrong engine.
+    const js = new NamedEvaluator('js-eval', 'js')
+    expect(evaluatorOf([js], 'js')).toBe(js)
+    expect(runtimeForLanguage([js], 'js')).toBe(js)
+    expect(runtimeForLanguage([js], 'python')).toBeNull()
+  })
+
+  it('runtimeForLanguage is first-match with no cross-language fallback', () => {
+    const monty = new MontyRuntime()
+    const quickjs = new QuickJsRuntime()
+    expect(runtimeForLanguage([monty, quickjs], 'python')).toBe(monty)
+    expect(runtimeForLanguage([monty, quickjs], 'js')).toBe(quickjs)
+    // Captures do not count (the fake captures python3 but declares no
+    // language), and unlike evaluatorOf there is no any-language
+    // fallback: a python program cannot run on a js engine.
+    expect(runtimeForLanguage([new NamedFakeRuntime('alpha')], 'python')).toBeNull()
+    expect(runtimeForLanguage([quickjs], 'python')).toBeNull()
+    expect(runtimeForLanguage([], 'js')).toBeNull()
   })
 
   it('a JS policy script reads mounted content through the fs bridge', async () => {

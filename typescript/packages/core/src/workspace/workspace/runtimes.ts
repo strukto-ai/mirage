@@ -84,6 +84,9 @@ export class Runtimes {
     if (init.registry.vfsRuntime instanceof VfsRuntime) {
       init.registry.vfsRuntime.bindLineExecutor(init.lineExecutor)
     }
+    // The live array: add() pushes into it, so the registry view never
+    // goes stale (Python re-assigns per add instead).
+    init.registry.runtimeEntries = this.entries
     for (const entry of this.entries) {
       if (typeof entry.script === 'string')
         throw scriptStringError(`runtime '${entry.name}' script`)

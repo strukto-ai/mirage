@@ -77,6 +77,12 @@ class MountRegistry:
         # Catch-all when its captures are empty; explicit captures make
         # unclaimed commands an admission failure (126).
         self.vfs_runtime: Runtime | None = None
+        # The ordered runtime world, set by Workspace after
+        # construction and refreshed on add(). The CLI script arm
+        # selects an interpreter from it (a runtime: pin or the
+        # script's language), which the bindings dict cannot answer:
+        # an entry behind another capturer never binds a command.
+        self.runtime_entries: list[Runtime] = []
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing
         # extra) record their construction error per captured command,

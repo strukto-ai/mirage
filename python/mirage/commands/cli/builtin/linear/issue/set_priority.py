@@ -13,24 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.linear.util import first_text, resolve_issue
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.linear._client import issue_update
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_issue, to_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def set_priority(
-    config: LinearConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[LinearConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    issue_id = await resolve_issue(config, first_text(texts, "issue key"))
-    issue = await issue_update(config,
+    fl = FlagView(inv.flags)
+    issue_id = await resolve_issue(inv.config,
+                                   first_text(inv.texts, "issue key"))
+    issue = await issue_update(inv.config,
                                issue_id=issue_id,
                                title=None,
                                description=None,

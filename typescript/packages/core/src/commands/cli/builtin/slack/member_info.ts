@@ -15,21 +15,15 @@
 import { FlagView } from '../../../spec/types.ts'
 import { getUserProfile } from '../../../../core/slack/users.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { slackAccessor } from './accessor.ts'
 
 const ENC = new TextEncoder()
 
-export async function memberInfo(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const user = await getUserProfile(slackAccessor(config), fl.asStr('user') ?? '')
+export async function memberInfo(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const user = await getUserProfile(slackAccessor(inv.config), fl.asStr('user') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(user))
   return [out, new IOResult()]
 }

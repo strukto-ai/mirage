@@ -15,10 +15,9 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import {
   BranchExistsError,
   BranchNameRequiredError,
@@ -131,13 +130,12 @@ async function remove(
  * remote-tracking branches instead of local ones and `-a` lists both; local
  * names sort together and remotes follow.
  */
-export async function branch(
-  _config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const texts = [...inv.texts]
+  const fl = new FlagView(inv.flags)
   const remotesOnly = fl.asBool('r')
   const includeRemotes = remotesOnly || fl.asBool('a')
   let refs: ReadonlyMap<string, string>

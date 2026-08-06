@@ -27,7 +27,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { CLISpec } from '../../types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { Option } from '../../../spec/types.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
 import { GWS_METHODS, SERVICE_BASES, gwsMethodDescription } from './methods.ts'
@@ -196,16 +196,13 @@ async function placeInScope(
 
 export async function runGwsMethod(
   method: GwsMethod,
-  config: GoogleConfig,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
+  inv: CLIInvocation<GoogleConfig>,
 ): Promise<CommandFnResult> {
   let params: Record<string, unknown>
   let body: Record<string, unknown>
   try {
-    params = parseJsonFlag(opts.flags.params, '--params')
-    body = parseJsonFlag(opts.flags.json, '--json')
+    params = parseJsonFlag(inv.flags.params, '--params')
+    body = parseJsonFlag(inv.flags.json, '--json')
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
@@ -213,8 +210,8 @@ export async function runGwsMethod(
   if (method.needsBody === true && Object.keys(body).length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('--json is required\n') })]
   }
-  ;[body, params] = scopeRequest(method, config, body, params)
-  const tm = new TokenManager(config)
+  ;[body, params] = scopeRequest(method, inv.config, body, params)
+  const tm = new TokenManager(inv.config)
   let path: string
   let query: Record<string, unknown>
   try {
@@ -232,7 +229,7 @@ export async function runGwsMethod(
   if (method.http === 'GET') {
     let pageLimit: number | null
     try {
-      pageLimit = parsePageLimit(opts.flags.page_limit)
+      pageLimit = parsePageLimit(inv.flags.page_limit)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
@@ -304,8 +301,7 @@ function methodLeaf(method: GwsMethod): CLISpec {
   return new CLISpec({
     name: method.method,
     description: gwsMethodDescription(method),
-    fn: (config, paths, texts, opts) =>
-      runGwsMethod(method, config as GoogleConfig, paths, texts, opts),
+    fn: (inv: CLIInvocation) => runGwsMethod(method, inv as CLIInvocation<GoogleConfig>),
     write: method.http !== 'GET',
     options: [...API_OPTIONS],
   })

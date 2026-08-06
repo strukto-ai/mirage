@@ -1,0 +1,54 @@
+{
+  "suite": "script_cli_js",
+  "requires": {
+    "python": ["env:MIRAGE_QUICKJS_HOME"],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "js_program_is_named_and_gets_its_flags",
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "console.log('prog', scriptArgs[0]);\nconsole.log('args', JSON.stringify(scriptArgs.slice(1)));\n",
+            "language": "js"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager --width 80 report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "prog pager\nargs [\"--width\",\"80\",\"report.txt\"]\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "js_pin_to_a_python_runtime_exits_127",
+      "world": {
+        "runtimes": ["monty", "quickjs", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "console.log('unreachable');\n",
+            "language": "js",
+            "runtime": "monty"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr_contains": "does not run js scripts"
+          }
+        }
+      ]
+    }
+  ]
+}

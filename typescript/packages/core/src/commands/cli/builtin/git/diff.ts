@@ -15,10 +15,9 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { GitError, InvalidOptionError } from './errors.ts'
 import { treeDiff } from './patch.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
@@ -41,13 +40,12 @@ async function treeOf(repo: Repo, revision: string): Promise<string> {
  * working tree is not a party to this yet: comparing against it needs the index
  * and the worktree scan, which is where unstaged and staged diffs live.
  */
-export async function diff(
-  _config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const texts = [...inv.texts]
+  const fl = new FlagView(inv.flags)
   const first = texts[0]
   if (first === undefined) return [null, new IOResult()]
   try {

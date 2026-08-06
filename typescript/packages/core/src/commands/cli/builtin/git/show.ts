@@ -15,10 +15,9 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { GitError } from './errors.ts'
 import { entry } from './format.ts'
 import { treeDiff } from './patch.ts'
@@ -37,13 +36,12 @@ const MERGE_PARENTS = 1
 // patch git would never print.
 
 /** Show one commit: its log entry, then its diff against its parent. */
-export async function show(
-  _config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const texts = [...inv.texts]
+  const fl = new FlagView(inv.flags)
   try {
     checkOperands(texts)
     const repo = await opened(fl, opts.statPath, opts.mountRoot, opts.dispatch)

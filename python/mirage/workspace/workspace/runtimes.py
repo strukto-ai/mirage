@@ -120,6 +120,7 @@ class Runtimes:
         entry.attach(self._dispatch, self._mount_prefixes)
         self._entries = candidate
         self._registry.runtime_bindings = bindings
+        self._registry.runtime_entries = candidate
         return entry
 
     def whole_line(self, ast: Any,

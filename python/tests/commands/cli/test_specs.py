@@ -12,16 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib.metadata
+import textwrap
+
 import pytest
 
+from mirage.commands.cli import specs
 from mirage.commands.cli.specs import (cli_spec_for, register_cli_spec,
                                        unregister_cli_spec)
-from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
 
 
-async def noop(config, paths, *texts, **flags):
+async def noop(inv: CLIInvocation):
     return None, IOResult()
+
+
+EP_SPEC = CLISpec(name="eptest", subcommands=(CLISpec(name="run", fn=noop), ))
+
+
+@pytest.fixture
+def clean_entry_points(monkeypatch):
+    monkeypatch.setattr(specs, "_ENTRY_POINT_SPECS", {})
+    monkeypatch.setattr(specs, "_entry_points_loaded", False)
 
 
 def test_register_resolve_unregister():
@@ -74,3 +87,73 @@ def test_builtin_name_cannot_be_shadowed():
 def test_unknown_key_lists_builtins():
     with pytest.raises(ValueError, match="himalaya"):
         cli_spec_for("spectest5")
+
+
+def test_reference_form_loads_a_module_dotpath():
+    spec = cli_spec_for("tests.commands.cli.test_specs:EP_SPEC")
+    assert spec is EP_SPEC
+
+
+def test_reference_form_loads_a_script_file(tmp_path):
+    script = tmp_path / "pager.py"
+    script.write_text(
+        textwrap.dedent("""\
+            from mirage.commands.cli.types import CLIInvocation, CLISpec
+            from mirage.io import IOResult
+
+
+            async def page(inv: CLIInvocation):
+                return None, IOResult()
+
+
+            PAGER = CLISpec(name="pager",
+                            subcommands=(CLISpec(name="on", fn=page), ))
+            """))
+    spec = cli_spec_for(f"{script}:PAGER")
+    assert isinstance(spec, CLISpec)
+    assert spec.name == "pager"
+
+
+def test_reference_to_a_non_spec_fails_loud():
+    with pytest.raises(TypeError, match="is not a CLISpec"):
+        cli_spec_for("tests.commands.cli.test_specs:noop")
+
+
+def test_entry_point_discovery(clean_entry_points, monkeypatch):
+    ep = importlib.metadata.EntryPoint(
+        name="epcli",
+        value="tests.commands.cli.test_specs:EP_SPEC",
+        group="mirage.clis",
+    )
+
+    def fake_entry_points(*, group):
+        assert group == "mirage.clis"
+        return [ep]
+
+    monkeypatch.setattr(importlib.metadata, "entry_points", fake_entry_points)
+    assert cli_spec_for("epcli") is EP_SPEC
+
+
+def test_entry_point_does_not_shadow_builtin(clean_entry_points, monkeypatch):
+    ep = importlib.metadata.EntryPoint(
+        name="himalaya",
+        value="tests.commands.cli.test_specs:EP_SPEC",
+        group="mirage.clis",
+    )
+    monkeypatch.setattr(importlib.metadata, "entry_points",
+                        lambda *, group: [ep])
+    spec = cli_spec_for("himalaya")
+    assert spec is not EP_SPEC
+    assert spec.name == "himalaya"
+
+
+def test_unknown_key_lists_entry_points(clean_entry_points, monkeypatch):
+    ep = importlib.metadata.EntryPoint(
+        name="epcli",
+        value="tests.commands.cli.test_specs:EP_SPEC",
+        group="mirage.clis",
+    )
+    monkeypatch.setattr(importlib.metadata, "entry_points",
+                        lambda *, group: [ep])
+    with pytest.raises(ValueError, match="epcli"):
+        cli_spec_for("spectest6")

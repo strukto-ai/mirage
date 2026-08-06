@@ -135,11 +135,91 @@ describe('MontyRuntime', () => {
     expect(text(result.stdout)).toBe("['a', 'b']\n")
   }, 30_000)
 
+  it('argv[0] is prog when the caller names the program', async () => {
+    // A named caller (a CLI install) owns argv[0]; without one the
+    // interpreter's own placeholder stands, as `python3 -c` expects.
+    const named = await make().run({
+      code: 'print(argv[0])',
+      args: ['a'],
+      prog: 'pager',
+      env: {},
+      stdin: null,
+    })
+    expect([named.exitCode, text(named.stdout)]).toEqual([0, 'pager\n'])
+    const plain = await run(make(), 'print(argv[0])')
+    expect(text(plain.stdout)).toBe('main.py\n')
+  }, 30_000)
+
+  it('exposes piped input as the stdin global', async () => {
+    const result = await make().run({
+      code: 'print(stdin.decode())',
+      args: [],
+      env: {},
+      stdin: new TextEncoder().encode('piped'),
+    })
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toBe('piped\n')
+  }, 30_000)
+
+  it('the stdin global is None without a pipe', async () => {
+    const result = await run(make(), 'print(stdin is None)')
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toBe('True\n')
+  }, 30_000)
+
   it('serves os.getenv from the run env only', async () => {
     const result = await run(make(), "import os\nprint(os.getenv('MY_VAR', 'unset'))", [], {
       MY_VAR: 'v1',
     })
     expect(text(result.stdout)).toBe('v1\n')
+  }, 30_000)
+
+  it('serves os.environ as a dict of the run env', async () => {
+    // The same nine reads the python host answers, so a program can be
+    // written against either. Declining the engine's os.environ call
+    // used to raise "not supported in this environment" here only.
+    const code = [
+      'import os',
+      "print(os.environ.get('K'))",
+      "print(os.environ.get('nope', 'dflt'))",
+      "print(os.environ['K'])",
+      "print('K' in os.environ, 'nope' in os.environ)",
+      'print(sorted(os.environ))',
+      'print(sorted(os.environ.items()))',
+      'print(len(os.environ))',
+      'print(type(os.environ).__name__)',
+    ].join('\n')
+    const result = await run(make(), code, [], { K: 'v', OTHER: 'w' })
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toBe(
+      [
+        'v',
+        'dflt',
+        'v',
+        'True False',
+        "['K', 'OTHER']",
+        "[('K', 'v'), ('OTHER', 'w')]",
+        '2',
+        'dict',
+      ]
+        .map((line) => line + '\n')
+        .join(''),
+    )
+  }, 30_000)
+
+  it('a missing os.environ key raises KeyError, not a runtime error', async () => {
+    const code =
+      "import os\ntry:\n    os.environ['nope']\nexcept KeyError as e:\n    print('KeyError', e)"
+    const result = await run(make(), code, [], { K: 'v' })
+    expect([result.exitCode, text(result.stdout)]).toEqual([0, "KeyError 'nope'\n"])
+  }, 30_000)
+
+  it('mutating os.environ cannot reach the host env', async () => {
+    // The callback hands back a copy, like python's
+    // OSAccess(environ=dict(environ)).
+    const code = "import os\nos.environ['K'] = 'guest'\nprint(os.getenv('K'))"
+    const result = await run(make(), code, [], { K: 'v' })
+    expect([result.exitCode, text(result.stdout)]).toEqual([0, 'v\n'])
   }, 30_000)
 
   it('reads a virtual file through the bridge via pathlib', async () => {
@@ -290,6 +370,7 @@ describe('monty unavailable', () => {
     const runtime = {
       name: 'monty',
       captures: ['python3', 'python'],
+      language: 'python' as const,
       runsLines: false,
       config: {},
       attach: () => undefined,

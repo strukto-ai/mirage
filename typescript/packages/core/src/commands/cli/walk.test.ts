@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ScriptSource } from '../../workspace/executor/policy/types.ts'
 import { Option } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
-import { findChild, findNode, walk } from './walk.ts'
+import { findChild, findNode, nodeHelp, ownsArgv, walk } from './walk.ts'
 
 const verb: CLIVerbFn = () => null
 
@@ -375,6 +376,39 @@ describe('findChild / findNode', () => {
     expect(findNode(spec, [])).toEqual({ node: spec, path: [] })
     expect(findNode(spec, ['gmail', 'bogus'])).toBeNull()
     expect(findNode(spec, ['bogus'])).toBeNull()
+  })
+})
+
+describe('a script root', () => {
+  it('terminates the walk with argv verbatim', () => {
+    // A script node is a terminal leaf like an fn node: the walk hands
+    // back every token so the program can re-parse argv natively.
+    const spec = new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") })
+    const result = walk('pager', spec, ['--frobnicate', 'report.txt'])
+    expect(result.leaf).toBe(spec)
+    expect(result.path).toEqual([])
+    expect(result.argv).toEqual(['--frobnicate', 'report.txt'])
+    expect(result.exitCode).toBe(0)
+  })
+
+  it('owns its argv only when it declares no grammar', () => {
+    const script = new ScriptSource("print('hi')")
+    expect(ownsArgv(new CLISpec({ name: 'pager', script }))).toBe(true)
+    const declared = new CLISpec({
+      name: 'pager',
+      script,
+      options: [new Option({ long: '--width', type: 'int' })],
+    })
+    expect(ownsArgv(declared)).toBe(false)
+    expect(ownsArgv(new CLISpec({ name: 'prog', fn: verb }))).toBe(false)
+  })
+
+  it('promises no --help in its manual', () => {
+    // man renders from the spec, so it must not advertise a --help the
+    // program answers itself.
+    const text = nodeHelp('pager', new CLISpec({ name: 'pager', script: new ScriptSource('1') }))
+    expect(text.startsWith('pager\n')).toBe(true)
+    expect(text).not.toContain('--help')
   })
 })
 

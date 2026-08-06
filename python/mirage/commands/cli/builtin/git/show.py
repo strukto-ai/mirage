@@ -14,7 +14,6 @@
 
 import asyncio
 from io import BytesIO
-from typing import Any, Callable
 
 from dulwich.objects import Commit
 from dulwich.patch import write_tree_diff
@@ -27,11 +26,10 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
                                                   revision_arg)
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
 
 MERGE_PARENTS = 1
 
@@ -71,25 +69,21 @@ def _render(repo: BaseRepo, revision: str) -> bytes:
     return header + b"\n" + body
 
 
-async def show(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Show one commit: its log entry, then its diff against its parent.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    texts = inv.texts
+    flags = inv.flags
     fl = FlagView(flags)
     try:
         check_operands(texts)

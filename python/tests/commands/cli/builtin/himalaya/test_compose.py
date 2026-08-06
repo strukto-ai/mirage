@@ -20,6 +20,7 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
+from mirage.commands.cli.types import CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
@@ -43,7 +44,13 @@ def sent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_compose_writes_mime_to_stdout_without_send(sent):
-    out, io = await compose(CONFIG, [], to="a@b.com", subject="Hi", body="yo")
+    out, io = await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": "a@b.com",
+                          "subject": "Hi",
+                          "body": "yo"
+                      }))
     assert io.exit_code == 0
     assert "raw" not in sent
     message = BytesParser(policy=default_policy).parsebytes(await
@@ -56,11 +63,14 @@ async def test_compose_writes_mime_to_stdout_without_send(sent):
 
 @pytest.mark.asyncio
 async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
-    out, io = await compose(CONFIG, [],
-                            to="a@b.com",
-                            subject="Hi",
-                            body="yo",
-                            send=True)
+    out, io = await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": "a@b.com",
+                          "subject": "Hi",
+                          "body": "yo",
+                          "send": True
+                      }))
     assert io.exit_code == 0
     assert b"Subject: Hi" in sent["raw"]
     assert json.loads(await materialize(out)) == {
@@ -72,11 +82,14 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
 
 @pytest.mark.asyncio
 async def test_recipients_accept_repeats_and_comma_lists(sent):
-    out, _ = await compose(CONFIG, [],
-                           to=["a@x, b@x", "c@x"],
-                           cc="d@x",
-                           subject="Hi",
-                           body="yo")
+    out, _ = await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": ["a@x, b@x", "c@x"],
+                          "cc": "d@x",
+                          "subject": "Hi",
+                          "body": "yo"
+                      }))
     message = BytesParser(policy=default_policy).parsebytes(await
                                                             materialize(out))
     assert message["To"] == "a@x, b@x, c@x"
@@ -85,10 +98,13 @@ async def test_recipients_accept_repeats_and_comma_lists(sent):
 
 @pytest.mark.asyncio
 async def test_body_falls_back_to_stdin(sent):
-    out, _ = await compose(CONFIG, [],
-                           stdin=b"piped body",
-                           to="a@x",
-                           subject="Hi")
+    out, _ = await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": "a@x",
+                          "subject": "Hi"
+                      },
+                      stdin=b"piped body"))
     message = BytesParser(policy=default_policy).parsebytes(await
                                                             materialize(out))
     assert message.get_content().strip() == "piped body"
@@ -96,7 +112,12 @@ async def test_body_falls_back_to_stdin(sent):
 
 @pytest.mark.asyncio
 async def test_from_flag_overrides_the_account_username(sent):
-    out, _ = await compose(CONFIG, [], to="a@x", body="yo", **{"from": "x@y"})
+    out, _ = await compose(
+        CLIInvocation(CONFIG, flags={
+            "to": "a@x",
+            "body": "yo",
+            "from": "x@y"
+        }))
     message = BytesParser(policy=default_policy).parsebytes(await
                                                             materialize(out))
     assert message["From"] == "x@y"
@@ -105,4 +126,8 @@ async def test_from_flag_overrides_the_account_username(sent):
 @pytest.mark.asyncio
 async def test_compose_without_a_recipient_is_refused(sent):
     with pytest.raises(ValueError, match="no recipient"):
-        await compose(CONFIG, [], subject="Hi", body="yo")
+        await compose(
+            CLIInvocation(CONFIG, flags={
+                "subject": "Hi",
+                "body": "yo"
+            }))

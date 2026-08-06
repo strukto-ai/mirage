@@ -106,8 +106,8 @@ async def handle_command(
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
-    # works on files rather than an API (`git`) opts into the two
-    # workspace facts it needs by naming them; the rest never see them.
+    # works on files rather than an API (`git`) reads the workspace
+    # facts it needs off `inv.ops`; the rest never look.
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
         return await handle_cli(
@@ -115,6 +115,7 @@ async def handle_command(
             parts,
             session,
             stdin,
+            entries=registry.runtime_entries,
             dispatch=dispatch,
             stat_path=(functools.partial(path_stat, dispatch)
                        if dispatch is not None else None),

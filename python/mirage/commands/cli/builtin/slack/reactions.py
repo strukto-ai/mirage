@@ -14,23 +14,19 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.react import get_reactions
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def reactions(
-    config: SlackConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
+        inv: CLIInvocation[SlackConfig]) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(inv.flags)
     message = await get_reactions(
-        config,
+        inv.config,
         fl.as_str("channel") or "",
         fl.as_str("ts") or "",
     )

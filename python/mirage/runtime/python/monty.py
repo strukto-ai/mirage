@@ -243,14 +243,16 @@ class MontyRuntime(Runtime, EvaluatorMixin):
     environment, or network access. File I/O and `os.environ` are
     serviced through the injected workspace dispatch, so the code sees
     the workspace mounts and nothing else. Command-line arguments are
-    exposed as the `argv` global (`argv[0]` is the script name). Monty
-    implements a Python subset; host-only features (`sys.stdin`,
-    `sys.argv`, third-party imports) are unavailable — use the `local`
-    runtime for those.
+    exposed as the `argv` global (`argv[0]` is the script name) and
+    piped input as the `stdin` global (bytes, None when nothing was
+    piped). Monty implements a Python subset; host-only features
+    (`sys.stdin`, `sys.argv`, third-party imports) are unavailable —
+    use the `local` runtime for those.
     """
 
     name = "monty"
     captures = ("python3", "python")
+    language = "python"
 
     def __init__(
             self,
@@ -280,13 +282,18 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         collector = pydantic_monty.CollectStreams()
         bridge = _MirageOS(loop, self._workspace_dispatch, args.env)
         try:
-            monty = pydantic_monty.Monty(args.code, inputs=["argv"])
+            monty = pydantic_monty.Monty(args.code, inputs=["argv", "stdin"])
         except pydantic_monty.MontySyntaxError as exc:
             trace = exc.display(format="traceback") + "\n"
             return RunResult(stdout=b"", stderr=trace.encode(), exit_code=1)
-        argv = ["main.py", *args.args]
+        # argv[0] is the program's own name when the caller has one (a
+        # CLI install's head word), else the interpreter's placeholder.
+        argv = [args.prog or "main.py", *args.args]
         try:
-            await monty.run_async(inputs={"argv": argv},
+            await monty.run_async(inputs={
+                "argv": argv,
+                "stdin": args.stdin
+            },
                                   print_callback=collector,
                                   os=bridge)
         except pydantic_monty.MontyRuntimeError as exc:

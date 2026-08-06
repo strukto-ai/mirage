@@ -15,3 +15,10 @@
 // git prints usage errors at tree levels with exit 129; leaf spec errors
 // keep the GNU exit-2 machinery they already ride.
 export const USAGE_EXIT = 129
+
+// The environment variable carrying an install's config to a script CLI
+// (JSON). Deliberately not MIRAGE_CONFIG: that one already names the
+// workspace config file for the server and mcp entry points, and a
+// script CLI that shells back into mirage must not find a config blob
+// where a path belongs.
+export const CLI_CONFIG_ENV = 'MIRAGE_CLI_CONFIG'

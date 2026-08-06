@@ -15,10 +15,9 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { headEntries } from './changes.ts'
 import {
   GitError,
@@ -167,13 +166,11 @@ async function buildCommit(
  * mount has no way to offer, and inventing a message would put an unreviewed one
  * into history.
  */
-export async function commit(
-  _config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const fl = new FlagView(inv.flags)
   try {
     const dispatch = opts.dispatch
     const statPath = opts.statPath

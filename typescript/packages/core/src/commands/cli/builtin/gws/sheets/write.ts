@@ -17,9 +17,8 @@ import { TokenManager } from '../../../../../core/google/_client.ts'
 import type { GoogleConfig } from '../../../../../core/google/config.ts'
 import { updateValues } from '../../../../../core/gsheets/write.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../../commands/config.ts'
-import type { CLIVerbOpts } from '../../../../../commands/cli/types.ts'
+import type { CLIInvocation } from '../../../../../commands/cli/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -34,15 +33,10 @@ export function valuesJsonFromFlags(fl: FlagView): string {
   throw new Error('--values or --json-values is required')
 }
 
-export async function write(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function write(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const result = await updateValues(
-    new TokenManager(config as GoogleConfig),
+    new TokenManager(inv.config as GoogleConfig),
     fl.asStr('spreadsheet') ?? '',
     fl.asStr('range') ?? '',
     valuesJsonFromFlags(fl),

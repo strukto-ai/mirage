@@ -14,21 +14,17 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.pins import list_pins as list_pins_core
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def list_pins(
-    config: SlackConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    items = await list_pins_core(config, fl.as_str("channel") or "")
+        inv: CLIInvocation[SlackConfig]) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(inv.flags)
+    items = await list_pins_core(inv.config, fl.as_str("channel") or "")
     out = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

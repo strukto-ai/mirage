@@ -31,7 +31,7 @@ mounts:
     config: { ... }
 clis:
   himalaya:
-    spec: himalaya
+    cli: himalaya
     config: { ... }
 ```
 
@@ -39,6 +39,101 @@ Every level of the tree answers `--help`, unknown verbs fail with git's
 wording (exit 1), and missing required flags fail with argparse's
 wording (exit 2). Two installs under different head words are two
 accounts.
+
+## Authoring your own CLI
+
+A CLI is code you point at, the same way a mount points at a resource.
+In application code you build a `CLISpec`, and each leaf takes the
+line's one `CLIInvocation`:
+
+```typescript
+import { CLISpec, IOResult, type CLIInvocation } from '@struktoai/mirage-core'
+
+function send(inv: CLIInvocation): [Uint8Array, IOResult] {
+  const to = String(inv.flags.to)
+  return [new TextEncoder().encode(`sent to ${to}\n`), new IOResult()]
+}
+
+const TREE = new CLISpec({
+  name: 'mine',
+  configModel: MyConfigSchema,
+  subcommands: [new CLISpec({ name: 'send', fn: send })],
+})
+```
+
+The record carries both views of the line: the process view (`argv`,
+`stdin`, `env`) and the parsed view (`config`, `paths`, `texts`,
+`flags`).
+
+In YAML, `cli:` references that spec by builtin or registered name.
+Unlike the Python package there is no string loader, so a spec written
+in TypeScript is registered from code (`registerCliSpec`) rather than
+named by module path.
+
+### A CLI as a script
+
+`script:` points at an ordinary program instead of a spec tree, so a CLI
+can be authored with no mirage import at all:
+
+```yaml
+clis:
+  pager:
+    script: ./cli/pager.py
+    config: { width: 80 }
+```
+
+The file's content is embedded at load (relative paths resolve next to
+the config file) and the program runs on the workspace's runtime world:
+`.py` on the first Python runtime, `.js`/`.mjs` on the first JavaScript
+one. What it gets is what a native binary would get. The words after the
+head arrive verbatim, piped input arrives on standard input, the
+install's config arrives as `MIRAGE_CLI_CONFIG` in the environment as JSON,
+and the workspace mounts are visible as ordinary files through the
+runtime's bridge. Its exit code becomes the line's `$?` and its stderr
+reaches the shell.
+
+A Python program reads that variable either way the language spells it,
+`os.getenv('MIRAGE_CLI_CONFIG')` or `os.environ['MIRAGE_CLI_CONFIG']`, on
+every Python runtime and on both host languages.
+
+How arguments and input are spelled is the runtime's own contract, the
+same one the `python3` and `node` commands follow:
+
+| Runtime           | Arguments             | Standard input      |
+| ----------------- | --------------------- | ------------------- |
+| pyodide (default) | `sys.argv`            | `sys.stdin`         |
+| monty             | `argv` global         | `stdin` global      |
+| quickjs           | `scriptArgs`          | `std.in`            |
+
+Slot 0 is the installed name, so `pager --width 80` reads as
+`['pager', '--width', '80']` and a program's own messages can say
+`pager:` like any other tool. Two installs of one program are told apart
+the same way. Arguments therefore start at index 1 on every runtime. The
+exception is `local`, where a real CPython runs the code as `-c` and
+defines `sys.argv[0]` itself; mirage cannot fill that slot, so it stays
+`-c`.
+
+A script CLI is one program rather than a verb tree, so it parses its
+own arguments, and mirage stays out of the way: it recognizes no flags
+of its own, so `pager --width 80` reaches the program instead of being
+refused, and `pager --help` is the program's to answer. A spec that
+declares `options` or `positional` opts back in, and then mirage parses
+the line, renders `--help` and `man` from the declaration, and refuses
+an undeclared flag; that is only reachable in code, since a YAML entry
+declares no grammar.
+
+`runtime:` pins which entry runs it, and `runtime: local`
+(from `@struktoai/mirage-node`) escalates a Python script to the host
+interpreter, where third-party packages are available. The sandboxed
+runtimes are files plus compute: no sockets, and no Node builtins on
+quickjs.
+
+Snapshots carry a script CLI by value: the embedded program travels in
+the snapshot and `Workspace.load` rebuilds the install from it, because
+there is no name for the loading process to resolve. Its config travels
+verbatim, since a script CLI declares no config model and so declares
+no secrets; keep credentials in the environment rather than the install
+config, or supply them through `clis` on load.
 
 ## Discovering an installed CLI
 

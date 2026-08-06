@@ -21,7 +21,8 @@ import { RAMResource, type RAMResourceState } from '../../resource/ram/ram.ts'
 import { z } from 'zod'
 
 import type { CLIInstall } from '../cli/types.ts'
-import type { CLISpec } from '../../commands/cli/types.ts'
+import { CLISpec } from '../../commands/cli/types.ts'
+import { ScriptSource } from '../executor/policy/types.ts'
 
 /**
  * Per-name overrides for restoring installed CLIs: a plain mapping is a
@@ -113,11 +114,26 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
       agent: j.agent,
       session_id: j.sessionId,
     }))
-  const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) => ({
-    name,
-    spec: install.spec.name,
-    config: captureCliConfig(install),
-  }))
+  const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) => {
+    const entry: CLISnapshot = {
+      name,
+      spec: install.spec.name,
+      config: captureCliConfig(install),
+    }
+    // A script install has no name to resolve (the spec is synthesized
+    // from a yaml `script:`), so its embedded program rides along and
+    // load rebuilds the spec from it.
+    const script = install.spec.script
+    if (script !== null) {
+      entry.script = {
+        source: script.source,
+        language: script.language,
+        module: script.module,
+      }
+      entry.runtime = install.spec.runtime
+    }
+    return entry
+  })
   const historyEvents = (await ws.observer.events()).filter(
     (e) => e.type === EVENT_COMMAND || e.type === EVENT_CLEAR || e.type === EVENT_DELETE,
   )
@@ -154,6 +170,27 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     nodes,
     clis: clisState,
   }
+}
+
+/**
+ * The spec a snapshot entry restores: a registry key or a program.
+ *
+ * Throws when the captured script names a language no runtime can
+ * speak. The value comes from a file, so it is checked here rather than
+ * carried to the selector, which would report the world's runtimes for
+ * a language that never existed.
+ */
+function cliSpecFromEntry(entry: CLISnapshot): string | CLISpec {
+  if (entry.script === undefined) return entry.spec
+  const language = entry.script.language
+  if (language !== 'python' && language !== 'js') {
+    throw new Error(`snapshot cli '${entry.spec}': unknown script language '${language}'`)
+  }
+  return new CLISpec({
+    name: entry.spec,
+    script: new ScriptSource(entry.script.source, language, entry.script.module),
+    runtime: entry.runtime ?? null,
+  })
 }
 
 function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
@@ -225,7 +262,7 @@ export function buildMountArgs(
       // round trip like a shared live resource.
       cliArgs[e.name] = override
     } else {
-      cliArgs[e.name] = [e.spec, override ?? e.config]
+      cliArgs[e.name] = [cliSpecFromEntry(e), override ?? e.config]
     }
   }
 

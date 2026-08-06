@@ -121,8 +121,8 @@ const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends Runtime implements Evaluator {
   readonly name = PYODIDE_RUNTIME
+  override readonly language = 'python'
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
@@ -325,7 +325,9 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     const pyodide = await this.ensureLoaded()
     await this.loadImports(pyodide, args.code)
     const mergedEnv = { ...runtimeEnv(), ...args.env }
-    const argv = ['-c', ...args.args]
+    // sys.argv[0] is the program's own name when the caller has one (a
+    // CLI install's head word), else CPython's own -c spelling.
+    const argv = [args.prog ?? '-c', ...args.args]
     const stdinBytes = args.stdin ?? new Uint8Array()
 
     const mergedEnvPy = pyodide.toPy(mergedEnv)

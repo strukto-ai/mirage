@@ -61,8 +61,11 @@ agent discovers state, the CLI is how it acts.
   through the op dispatcher like any command. That is what makes `git` work on a
   RAM mount, a disk mount or an object store without knowing which. It reaches
   the dispatcher through `CLIVerbOpts` (`dispatch`, `stat_path`, `mount_root`),
-  which `handle_cli`/`handleCli` supplies; a verb that does not declare them
-  cannot touch a mount, so this stays opt-in per verb rather than ambient.
+  which `handle_cli`/`handleCli` puts on `inv.ops`; the field is None/absent
+  outside a workspace, and a verb that never reads it cannot touch a mount, so
+  this stays opt-in per verb rather than ambient. The door is one field read
+  rather than a parameter list the dispatcher inspects, because every leaf takes
+  exactly one `CLIInvocation` and nothing is threaded through keyword injection.
   Do not give an account CLI a mount, and do not give `git` a `config_model`.
 
 - **The lifecycle is host-side only.** `register_cli`/`unregister_cli`

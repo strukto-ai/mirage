@@ -102,21 +102,19 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       const wid = body.id ?? args.options.workspaceId ?? newWorkspaceId()
       let ws: Workspace
       try {
+        // Every option the config produced rides through: enumerating
+        // them by hand silently dropped `clis` and `guards`, so a yaml
+        // clis block parsed, validated, and then installed nothing.
+        // Only identity and the store default are the daemon's to
+        // decide.
         ws = new Workspace(resourceMap, {
-          mode: args.options.mode,
-          consistency: args.options.consistency,
-          ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
-          ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
+          ...args.options,
           workspaceId: wid,
           // Daemon default is disk (a created workspace survives restart
           // with zero infrastructure, like git init); the library default
           // stays ram. An explicit store always wins.
           store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
           ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
-          ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-          ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-          ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
-          ...(args.options.policy !== undefined ? { policy: args.options.policy } : {}),
         })
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })

@@ -75,20 +75,13 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
     resources[prefix] = [resource, mode]
     if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
   }
+  // Every option the config produced rides through, so a new config
+  // knob needs no edit here (the hand-written list is what dropped
+  // `clis` on the daemon's own create route).
   const workspace = new Workspace(resources, {
-    mode: args.options.mode,
-    consistency: args.options.consistency,
-    ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
-    ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
+    ...args.options,
     workspaceId: args.options.workspaceId ?? newWorkspaceId(),
-    ...(args.options.store !== undefined ? { store: args.options.store } : {}),
     ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
-    ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-    ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-    ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
-    ...(args.options.policy !== undefined ? { policy: args.options.policy } : {}),
-    ...(args.options.guards !== undefined ? { guards: args.options.guards } : {}),
-    ...(args.options.clis !== undefined ? { clis: args.options.clis } : {}),
   })
   try {
     for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {

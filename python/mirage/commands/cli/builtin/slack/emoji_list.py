@@ -14,19 +14,15 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.emoji import list_emoji
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def emoji_list(
-    config: SlackConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    emoji = await list_emoji(config)
+        inv: CLIInvocation[SlackConfig]) -> tuple[ByteSource | None, IOResult]:
+    emoji = await list_emoji(inv.config)
     out = json.dumps(emoji, ensure_ascii=False, separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

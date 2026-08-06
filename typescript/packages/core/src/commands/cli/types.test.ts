@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ScriptSource } from '../../workspace/executor/policy/types.ts'
 import { CommandSpec, Operand, Option } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
 
@@ -106,7 +107,45 @@ describe('CLISpec', () => {
   })
 
   it('rejects a node with neither fn nor subcommands', () => {
-    expect(() => new CLISpec({ name: 'gws' })).toThrow(/needs fn or subcommands/)
+    expect(() => new CLISpec({ name: 'gws' })).toThrow(/needs fn, subcommands, or script/)
+  })
+
+  it('a script root stands alone', () => {
+    const spec = new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") })
+    expect(spec.fn).toBeNull()
+    expect(spec.subcommands).toEqual([])
+  })
+
+  it('script excludes fn and subcommands', () => {
+    expect(() => new CLISpec({ name: 'pager', fn: verb, script: new ScriptSource('1') })).toThrow(
+      /fn or script, not both/,
+    )
+    expect(
+      () =>
+        new CLISpec({
+          name: 'pager',
+          script: new ScriptSource('1'),
+          subcommands: [new CLISpec({ name: 'send', fn: verb })],
+        }),
+    ).toThrow(/subcommands belong to fn trees/)
+  })
+
+  it('runtime takes script', () => {
+    expect(() => new CLISpec({ name: 'pager', fn: verb, runtime: 'monty' })).toThrow(
+      /it takes script/,
+    )
+    const spec = new CLISpec({ name: 'pager', script: new ScriptSource('1'), runtime: 'monty' })
+    expect(spec.runtime).toBe('monty')
+  })
+
+  it('script is root only', () => {
+    expect(
+      () =>
+        new CLISpec({
+          name: 'gws',
+          subcommands: [new CLISpec({ name: 'pager', script: new ScriptSource('1') })],
+        }),
+    ).toThrow(/only the root of a tree may/)
   })
 
   it('rejects positional or rest on a group', () => {

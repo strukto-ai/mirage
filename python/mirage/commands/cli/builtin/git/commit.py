@@ -14,7 +14,6 @@
 
 import asyncio
 import time
-from typing import Any, Callable
 
 from dulwich.index import commit_tree
 from dulwich.objects import Commit, ObjectID
@@ -36,11 +35,10 @@ from mirage.commands.cli.builtin.git.status import render_report
 from mirage.commands.cli.builtin.git.summary import report
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.commands.cli.builtin.git.util import fatal
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
 
 # git tags the first commit on a branch so the reflog reads
 # "commit (initial): ..." rather than plain "commit: ...".
@@ -108,14 +106,7 @@ def build_commit(repo: BaseRepo, state: IndexState, message: str,
 
 
 async def commit(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+        inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Record the index as a new commit on the current branch.
 
     The message must come from ``-m``: git would otherwise open an
@@ -123,13 +114,16 @@ async def commit(
     would put an unreviewed one into history.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands, unused.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    flags = inv.flags
     fl = FlagView(flags)
     try:
         if stat_path is None or mount_root is None or dispatch is None:

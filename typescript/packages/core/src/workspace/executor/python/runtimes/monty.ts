@@ -121,19 +121,22 @@ function toEvalValue(value: unknown): EvalValue {
  * Run Python code on the Monty sandboxed interpreter (`@pydantic/monty`).
  *
  * Code executes in a crash-isolated Monty worker: no host filesystem,
- * environment, or network access. `pathlib` I/O and `os.getenv` are
- * serviced through the workspace bridge, so the code sees the workspace
- * mounts and nothing else. Command-line arguments are exposed as the
- * `argv` global (`argv[0]` is the script name). Monty implements a
- * Python subset; host-only features (`sys.stdin`, `sys.argv`,
+ * environment, or network access. `pathlib` I/O is serviced through the
+ * workspace bridge, so the code sees the workspace mounts and nothing
+ * else, and the run's env is readable both ways python's monty spells
+ * it: `os.getenv` and `os.environ` (a dict copy, so the two hosts run
+ * the same program). Command-line arguments are exposed as the
+ * `argv` global (`argv[0]` is the script name) and piped input as the
+ * `stdin` global (bytes, None when nothing was piped). Monty implements
+ * a Python subset; host-only features (`sys.stdin`, `sys.argv`,
  * third-party imports) are unavailable, and the builtin `open()` is not
  * bridgeable yet (the JS binding cannot return a file handle from an
  * `os` callback) — use `pathlib` for file I/O, or the pyodide runtime.
  */
 export class MontyRuntime extends Runtime implements Evaluator {
   readonly name = MONTY_RUNTIME
+  override readonly language = 'python'
   readonly [EVALUATOR] = true as const
-  readonly evalLanguage = 'python' as const
   static readonly commands: readonly string[] = ['python3', 'python'] as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: () => string[] = () => []
@@ -373,7 +376,9 @@ export class MontyRuntime extends Runtime implements Evaluator {
     const out: string[] = []
     const err: string[] = []
     const options: Record<string, unknown> = {
-      inputs: { argv: ['main.py', ...args.args] },
+      // argv[0] is the program's own name when the caller has one (a
+      // CLI install's head word), else the interpreter's placeholder.
+      inputs: { argv: [args.prog ?? 'main.py', ...args.args], stdin: args.stdin },
       printCallback: (stream: 'stdout' | 'stderr', text: string) => {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
@@ -414,6 +419,19 @@ export class MontyRuntime extends Runtime implements Evaluator {
         if (Object.hasOwn(env, key)) return env[key]
         return args.length > 1 ? args[1] : null
       }
+      if (name === 'os.environ') {
+        // The engine asks for the whole mapping as one call; a plain
+        // object arrives in the guest as a dict, so `.get`, `[...]`,
+        // `in`, iteration and len all work, and a missing key raises
+        // KeyError. Declining instead raised "'os.environ' is not
+        // supported in this environment", which made a program written
+        // against the python host fail here (integ/runtime caught it).
+        // A copy, like python's OSAccess(environ=dict(environ)): a
+        // guest that mutates it cannot reach the session's own env.
+        return { ...env }
+      }
+      // Everything below serves a path through the workspace bridge;
+      // the env doors above need no mount.
       if (bridge === null) return notHandled
       const path = pathArg(args[0])
       if (path === null) return notHandled

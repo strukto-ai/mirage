@@ -15,22 +15,16 @@
 import { FlagView } from '../../../spec/types.ts'
 import { searchGuild } from '../../../../core/discord/search.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { discordAccessor } from './accessor.ts'
 
 const ENC = new TextEncoder()
 
-export async function search(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function search(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const results = await searchGuild(
-    discordAccessor(config),
+    discordAccessor(inv.config),
     fl.asStr('guild') ?? '',
     fl.asStr('query') ?? '',
     fl.asStr('channel') ?? undefined,

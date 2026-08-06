@@ -14,23 +14,20 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.threads import create_thread
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def thread_create(
-    config: DiscordConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[DiscordConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
+    fl = FlagView(inv.flags)
     result = await create_thread(
-        config,
+        inv.config,
         fl.as_str("channel") or "",
         fl.as_str("name") or "",
         message_id=fl.as_str("message"),

@@ -40,12 +40,14 @@ export const POLICY_EVAL_TIMEOUT = { seconds: 10 }
  *
  * Config-borne policy scripts run on it; any runtime implementing
  * Evaluator qualifies (monty/pyodide in the default worlds, or a user
- * runtime in any language). The first evaluator whose evalLanguage
- * matches the script's language wins, so a .js policy runs on quickjs
- * even when a python evaluator sits earlier in the world; with no
- * language (or no match) the first evaluator serves. Null when the
- * world has no evaluator, which only matters once a ScriptSource
- * actually needs one.
+ * runtime in any language). The first evaluator whose `language`
+ * matches the script's wins, so a .js policy runs on quickjs even when
+ * a python evaluator sits earlier in the world; with no language (or no
+ * match) the first evaluator serves. Null when the world has no
+ * evaluator, which only matters once a ScriptSource actually needs one.
+ * The attribute read here is the one `run` answers for too
+ * (Runtime.language), so an engine cannot speak one language at this
+ * door and another at that one.
  */
 export function evaluatorOf(
   entries: readonly Runtime[],
@@ -55,10 +57,22 @@ export function evaluatorOf(
   for (const entry of entries) {
     if (isEvaluator(entry)) {
       first ??= entry
-      if (language !== undefined && entry.evalLanguage === language) return entry
+      if (language !== undefined && entry.language === language) return entry
     }
   }
   return first
+}
+
+/**
+ * The world's interpreter for a script CLI, evaluatorOf's run twin.
+ *
+ * The first entry whose `run` speaks the language wins, the same
+ * first-match rule. Unlike evaluatorOf there is no any-language
+ * fallback: a python program cannot run on a js engine, so no match
+ * means null and the caller reports the world's entries.
+ */
+export function runtimeForLanguage(entries: readonly Runtime[], language: string): Runtime | null {
+  return entries.find((entry) => entry.language === language) ?? null
 }
 
 /**

@@ -14,23 +14,20 @@
 
 import json
 
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.gdocs.write import append_text
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 async def write(
-    config: GoogleConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    result = await append_text(TokenManager(config),
+    fl = FlagView(inv.flags)
+    result = await append_text(TokenManager(inv.config),
                                fl.as_str("document") or "",
                                fl.as_str("text") or "")
     out = json.dumps(result, ensure_ascii=False,

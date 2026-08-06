@@ -33,6 +33,16 @@ function isDict(v: unknown): v is AnyDict {
   return typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Uint8Array)
 }
 
+/**
+ * The state as a JSON-safe manifest plus the bytes it referenced.
+ *
+ * The manifest IS the state, minus the four keys that hold bytes: those
+ * are rewritten with blob references and everything else rides through
+ * untouched. It is built that way round on purpose. An allowlist of keys
+ * silently dropped whatever it forgot from every tar snapshot while
+ * leaving in-memory snapshots (which never pass through here) green,
+ * which is exactly how installed CLIs went missing.
+ */
 export function splitManifestAndBlobs(state: AnyDict): [AnyDict, Record<string, Uint8Array>] {
   const a = new BlobAllocator()
   const cache = (state[StateKey.CACHE] as AnyDict | undefined) ?? {}
@@ -40,57 +50,44 @@ export function splitManifestAndBlobs(state: AnyDict): [AnyDict, Record<string, 
   const jobs = (state[StateKey.JOBS] as AnyDict[] | undefined) ?? []
   const mounts = (state[StateKey.MOUNTS] as AnyDict[] | undefined) ?? []
 
-  const manifest: AnyDict = {
-    [StateKey.VERSION]: state[StateKey.VERSION],
-    [StateKey.MIRAGE_VERSION]: state[StateKey.MIRAGE_VERSION],
-    [StateKey.DEFAULT_SESSION_ID]: state[StateKey.DEFAULT_SESSION_ID],
-    [StateKey.DEFAULT_AGENT_ID]: state[StateKey.DEFAULT_AGENT_ID],
-    [StateKey.CURRENT_AGENT_ID]: state[StateKey.CURRENT_AGENT_ID],
-    [StateKey.SESSIONS]: state[StateKey.SESSIONS] ?? [],
-    [StateKey.HISTORY]: historyToManifest(state[StateKey.HISTORY], a),
-    [StateKey.MOUNTS]: [],
-    [StateKey.CACHE]: {
-      [CacheKey.LIMIT]: cache[CacheKey.LIMIT],
-      [CacheKey.MAX_DRAIN_BYTES]: cache[CacheKey.MAX_DRAIN_BYTES],
-      [CacheKey.ENTRIES]: [],
-    },
-    [StateKey.JOBS]: [],
-    [StateKey.FINGERPRINTS]: state[StateKey.FINGERPRINTS] ?? [],
-    [StateKey.LIVE_ONLY_MOUNTS]: state[StateKey.LIVE_ONLY_MOUNTS] ?? [],
-    [StateKey.NODES]: state[StateKey.NODES] ?? {},
+  const manifest: AnyDict = { ...state }
+  manifest[StateKey.HISTORY] = historyToManifest(state[StateKey.HISTORY], a)
+  manifest[StateKey.MOUNTS] = mounts.map((m) => mountToManifest(m, a))
+  manifest[StateKey.CACHE] = {
+    ...cache,
+    [CacheKey.ENTRIES]: cacheEntries.map((e) => cacheEntryToManifest(e, a)),
   }
-
-  for (const m of mounts) {
-    ;(manifest[StateKey.MOUNTS] as AnyDict[]).push(mountToManifest(m, a))
-  }
-
-  for (const entry of cacheEntries) {
-    const e = { ...entry }
-    const data = e[CacheKey.DATA]
-    if (data instanceof Uint8Array) {
-      const tarPath = 'cache/blobs/' + a.alloc('_cache')
-      a.blobs[tarPath] = data
-      e[CacheKey.DATA] = { [BLOB_REF_KEY]: tarPath }
-    }
-    ;((manifest[StateKey.CACHE] as AnyDict)[CacheKey.ENTRIES] as AnyDict[]).push(e)
-  }
-
-  for (const job of jobs) {
-    const j = { ...job }
-    for (const f of [JobKey.STDOUT, JobKey.STDERR] as const) {
-      const data = j[f]
-      if (data instanceof Uint8Array && data.byteLength > 0) {
-        const tarPath = 'jobs/blobs/' + a.alloc('_jobs')
-        a.blobs[tarPath] = data
-        j[f] = { [BLOB_REF_KEY]: tarPath }
-      } else if (data instanceof Uint8Array) {
-        j[f] = ''
-      }
-    }
-    ;(manifest[StateKey.JOBS] as AnyDict[]).push(j)
-  }
+  manifest[StateKey.JOBS] = jobs.map((j) => jobToManifest(j, a))
 
   return [manifest, a.blobs]
+}
+
+/** One cache entry with its data stashed as a blob reference. */
+function cacheEntryToManifest(entry: AnyDict, a: BlobAllocator): AnyDict {
+  const e = { ...entry }
+  const data = e[CacheKey.DATA]
+  if (data instanceof Uint8Array) {
+    const tarPath = 'cache/blobs/' + a.alloc('_cache')
+    a.blobs[tarPath] = data
+    e[CacheKey.DATA] = { [BLOB_REF_KEY]: tarPath }
+  }
+  return e
+}
+
+/** One job with its streams stashed as blob references. */
+function jobToManifest(job: AnyDict, a: BlobAllocator): AnyDict {
+  const j = { ...job }
+  for (const f of [JobKey.STDOUT, JobKey.STDERR] as const) {
+    const data = j[f]
+    if (data instanceof Uint8Array && data.byteLength > 0) {
+      const tarPath = 'jobs/blobs/' + a.alloc('_jobs')
+      a.blobs[tarPath] = data
+      j[f] = { [BLOB_REF_KEY]: tarPath }
+    } else if (data instanceof Uint8Array) {
+      j[f] = ''
+    }
+  }
+  return j
 }
 
 function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {

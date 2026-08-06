@@ -32,10 +32,12 @@ class CLIInstall:
         name (str): installed head word (the YAML ``clis:`` key or the
             first argument of ``register_cli``).
         spec (CLISpec): the program tree the head dispatches into.
-        config (BaseModel | None): the installation's validated
-            ``config_model`` instance, handed to every leaf ``fn``;
-            None when the spec declares no ``config_model``.
+        config (BaseModel | dict[str, object] | None): the
+            installation's validated ``config_model`` instance, handed
+            to every leaf ``fn``; a script spec has no model, so its
+            mapping passes through as-is (the program consumes it);
+            None without either.
     """
     name: str
     spec: CLISpec
-    config: BaseModel | None = None
+    config: "BaseModel | dict[str, object] | None" = None

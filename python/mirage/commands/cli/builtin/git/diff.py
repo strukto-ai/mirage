@@ -14,7 +14,6 @@
 
 import asyncio
 from io import BytesIO
-from typing import Any, Callable
 
 from dulwich.patch import write_tree_diff
 from dulwich.repo import BaseRepo
@@ -23,11 +22,10 @@ from mirage.commands.cli.builtin.git.errors import GitError, InvalidOptionError
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import check_operands, fatal
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
 
 HEAD = "HEAD"
 
@@ -67,15 +65,7 @@ def _render(repo: BaseRepo, old_rev: str, new_rev: str) -> bytes:
     return out.getvalue()
 
 
-async def diff(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Diff two commits.
 
     One revision diffs it against HEAD's tree, two diff against each
@@ -84,13 +74,17 @@ async def diff(
     unstaged and staged diffs live.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    texts = inv.texts
+    flags = inv.flags
     fl = FlagView(flags)
     if not texts:
         return None, IOResult()

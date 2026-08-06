@@ -15,21 +15,15 @@
 import { FlagView } from '../../../../spec/types.ts'
 import { getPage } from '../../../../../core/notion/pages.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIVerbOpts } from '../../../types.ts'
+import type { CLIInvocation } from '../../../types.ts'
 import { notionTransport } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function get(
-  config: unknown,
-  _paths: PathSpec[],
-  _texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const page = await getPage(notionTransport(config), fl.asStr('page') ?? '')
+export async function get(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const page = await getPage(notionTransport(inv.config), fl.asStr('page') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(page))
   return [out, new IOResult()]
 }

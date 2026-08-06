@@ -18,7 +18,7 @@ import type { NotionTransport } from '../../../../core/notion/_client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import { NTN } from './index.ts'
 import { append } from './blocks/append.ts'
 import { create } from './pages/create.ts'
@@ -53,8 +53,8 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   return result
 }
 
-function makeOpts(flags: CLIVerbOpts['flags']): CLIVerbOpts {
-  return { stdin: null, flags }
+function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
+  return { config, argv: [], paths: [], texts: [], flags, stdin: null, env: {} }
 }
 
 function leaf(...path: string[]) {
@@ -93,25 +93,25 @@ describe('ntn tree', () => {
 describe('ntn verbs', () => {
   it('pages create requires a parent and posts the body', async () => {
     CALLS.length = 0
-    const [, io] = unwrap(await create({}, [], [], makeOpts({ json: '{"properties":{}}' })))
+    const [, io] = unwrap(await create(makeInv({}, { json: '{"properties":{}}' })))
     expect(io.exitCode).toBe(2)
     const [out] = unwrap(
-      await create({}, [], [], makeOpts({ json: '{"parent":{"page_id":"root"},"properties":{}}' })),
+      await create(makeInv({}, { json: '{"parent":{"page_id":"root"},"properties":{}}' })),
     )
     expect(CALLS[0]?.name).toBe('API-post-page')
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ id: 'P1' })
   })
 
   it('malformed --json is a usage error with the shared wording', async () => {
-    const [, io] = unwrap(await create({}, [], [], makeOpts({ json: '{not json' })))
+    const [, io] = unwrap(await create(makeInv({}, { json: '{not json' })))
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('--json must be valid JSON\n')
   })
 
   it('pages edit and trash PATCH the page', async () => {
     CALLS.length = 0
-    await edit({}, [], [], makeOpts({ page: 'P1', json: '{"archived":true}' }))
-    await trash({}, [], [], makeOpts({ page: 'P2' }))
+    await edit(makeInv({}, { page: 'P1', json: '{"archived":true}' }))
+    await trash(makeInv({}, { page: 'P2' }))
     expect(CALLS[0]).toEqual({
       name: 'API-patch-page',
       args: { archived: true, page_id: 'P1' },
@@ -120,7 +120,7 @@ describe('ntn verbs', () => {
   })
 
   it('blocks append requires children', async () => {
-    const [, io] = unwrap(await append({}, [], [], makeOpts({ block: 'B1', json: '{"foo":1}' })))
+    const [, io] = unwrap(await append(makeInv({}, { block: 'B1', json: '{"foo":1}' })))
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('--json must contain children\n')
   })
@@ -128,7 +128,7 @@ describe('ntn verbs', () => {
   it('datasources query forwards the filter body', async () => {
     CALLS.length = 0
     RESPONSE = { results: [], has_more: false }
-    await query({}, [], [], makeOpts({ datasource: 'D1', json: '{"filter":{"x":1}}' }))
+    await query(makeInv({}, { datasource: 'D1', json: '{"filter":{"x":1}}' }))
     expect(CALLS[0]?.name).toBe('API-post-database-query')
     expect(CALLS[0]?.args).toMatchObject({ database_id: 'D1', filter: { x: 1 } })
     RESPONSE = { id: 'P1' }

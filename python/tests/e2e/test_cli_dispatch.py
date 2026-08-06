@@ -12,16 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+from pathlib import Path
+
 import pytest
 from pydantic import BaseModel
 
-from mirage import CLISpec, Workspace
+from mirage import CLIInvocation, CLISpec, Workspace
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.spec.types import Operand, Option
 from mirage.config import load_config
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.resource.ram import RAMResource
+from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
+from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode
 
 
@@ -29,10 +34,10 @@ class TokenConfig(BaseModel):
     token: str
 
 
-async def send(config, paths, *texts, **flags):
-    body = " ".join(texts)
-    to = flags.get("to")
-    return f"sent[{config.token}] to={to}: {body}\n".encode(), IOResult()
+async def send(inv: CLIInvocation[TokenConfig]):
+    body = " ".join(inv.texts)
+    to = inv.flags.get("to")
+    return f"sent[{inv.config.token}] to={to}: {body}\n".encode(), IOResult()
 
 
 def make_tree() -> CLISpec:
@@ -143,6 +148,42 @@ async def test_yaml_clis_section_installs_through_load_config():
 
 
 @pytest.mark.asyncio
+async def test_yaml_cli_reference_form_installs(tmp_path):
+    # `cli:` points at code like `resource:` does: a ./file.py:ATTR
+    # reference loads the CLISpec straight from the script.
+    script = tmp_path / "slackish.py"
+    script.write_text(
+        "from mirage import CLIInvocation, CLISpec\n"
+        "from mirage.io import IOResult\n"
+        "from pydantic import BaseModel\n\n\n"
+        "class TokenConfig(BaseModel):\n"
+        "    token: str\n\n\n"
+        "async def send(inv: CLIInvocation[TokenConfig]):\n"
+        "    return f'sent[{inv.config.token}]\\n'.encode(), IOResult()\n\n\n"
+        "TREE = CLISpec(name='slackish', config_model=TokenConfig,\n"
+        "               subcommands=(CLISpec(name='send', fn=send), ))\n")
+    cfg = load_config({
+        "mounts": {
+            "/data": {
+                "resource": "ram"
+            }
+        },
+        "clis": {
+            "sl": {
+                "cli": f"{script}:TREE",
+                "config": {
+                    "token": "ref"
+                }
+            }
+        },
+    })
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    code, out, _ = await run(ws, "sl send")
+    assert (code, out) == (0, b"sent[ref]\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_yaml_unknown_cli_key_fails_loud():
     cfg = load_config({
         "mounts": {
@@ -182,3 +223,158 @@ async def test_policy_sees_the_cli_fact():
     io = await workspace.execute("echo unaffected")
     assert io.exit_code == 0
     assert denied[-1] is None
+
+
+def _quickjs_home() -> str | None:
+    root = os.environ.get(QUICKJS_HOME_ENV)
+    if root and (Path(root) / "qjs-wasi.wasm").is_file():
+        return root
+    return None
+
+
+live_quickjs = pytest.mark.skipif(
+    _quickjs_home() is None,
+    reason=f"{QUICKJS_HOME_ENV} does not point at a qjs-wasi.wasm build")
+
+
+def pager_spec(source: str, language: str = "python") -> CLISpec:
+    return CLISpec(name="pager",
+                   script=ScriptSource(source, language=language))
+
+
+@pytest.mark.asyncio
+async def test_script_cli_runs_on_monty_with_verbatim_argv(ws):
+    ws.register_cli("pager", pager_spec("print('paged', argv[1])"))
+    code, out, err = await run(ws, "pager report.txt")
+    assert (code, out, err) == (0, b"paged report.txt\n", b"")
+
+
+@pytest.mark.asyncio
+async def test_script_cli_reads_config_from_mirage_config_env(ws):
+    ws.register_cli(
+        "pager",
+        pager_spec("import os\n"
+                   "print(os.environ.get('MIRAGE_CLI_CONFIG'))"),
+        {"width": 80})
+    code, out, _ = await run(ws, "pager")
+    assert (code, out) == (0, b'{"width": 80}\n')
+
+
+@pytest.mark.asyncio
+async def test_script_cli_reads_piped_stdin(ws):
+    ws.register_cli("pager", pager_spec("print(stdin.decode())"))
+    code, out, _ = await run(ws, "echo body | pager")
+    assert (code, out) == (0, b"body\n\n")
+
+
+@pytest.mark.asyncio
+async def test_script_cli_exit_code_reaches_the_shell(ws):
+    # A crashing program's traceback and nonzero exit surface as the
+    # line's stderr and $?, like any command.
+    ws.register_cli("pager", pager_spec("raise ValueError('nope')"))
+    code, _, err = await run(ws, "pager")
+    assert code == 1
+    assert b"ValueError" in err
+    code, out, _ = await run(ws, "pager; echo status=$?")
+    assert b"status=1" in out
+
+
+@pytest.mark.asyncio
+async def test_script_cli_line_records_in_history(ws):
+    ws.register_cli("pager", pager_spec("print('hi')"))
+    await run(ws, "pager report.txt")
+    code, out, _ = await run(ws, "history 2")
+    assert code == 0
+    assert b"pager report.txt" in out
+
+
+@pytest.mark.asyncio
+async def test_shell_function_shadows_a_script_cli(ws):
+    # The one agent-side override, bash's own rule: function beats CLI,
+    # reversible with unset -f.
+    ws.register_cli("pager", pager_spec("print('from-script')"))
+    await run(ws, "pager() { echo from-function; }")
+    code, out, _ = await run(ws, "pager")
+    assert (code, out) == (0, b"from-function\n")
+    await run(ws, "unset -f pager")
+    code, out, _ = await run(ws, "pager")
+    assert (code, out) == (0, b"from-script\n")
+
+
+@pytest.mark.asyncio
+async def test_script_cli_pinned_to_local_runs_on_the_host(ws):
+    # sys.argv only exists on a host interpreter (monty has no sys
+    # bridge), so output proves the runtime: pin escalated to local.
+    ws.add_runtime("local")
+    spec = CLISpec(name="pager",
+                   script=ScriptSource("import sys\n"
+                                       "print('local', sys.argv[1])"),
+                   runtime="local")
+    ws.register_cli("pager", spec)
+    code, out, _ = await run(ws, "pager report.txt")
+    assert (code, out) == (0, b"local report.txt\n")
+
+
+@pytest.mark.asyncio
+@live_quickjs
+async def test_script_cli_js_runs_on_quickjs(ws):
+    # scriptArgs[0] is the installed name, like a qjs script's path.
+    ws.register_cli(
+        "pager",
+        pager_spec("console.log('paged-js', scriptArgs[0], scriptArgs[1])",
+                   "js"))
+    code, out, _ = await run(ws, "pager report.txt")
+    assert (code, out) == (0, b"paged-js pager report.txt\n")
+
+
+@pytest.mark.asyncio
+async def test_script_cli_receives_its_own_flags(ws):
+    # A yaml clis entry declares no grammar, so mirage must not refuse
+    # flags on the program's behalf; the program is the parser.
+    ws.register_cli("pager", pager_spec("print('paged', argv[1:])"))
+    code, out, err = await run(ws, "pager --width 80 -n report.txt")
+    assert (code, err) == (0, b"")
+    assert out == b"paged ['--width', '80', '-n', 'report.txt']\n"
+
+
+@pytest.mark.asyncio
+async def test_script_cli_answers_its_own_help(ws):
+    ws.register_cli("pager", pager_spec("print('program usage', argv[1:])"))
+    code, out, _ = await run(ws, "pager --help")
+    assert (code, out) == (0, b"program usage ['--help']\n")
+
+
+@pytest.mark.asyncio
+async def test_man_of_a_script_cli_promises_no_help_flag(ws):
+    ws.register_cli("pager", pager_spec("print('hi')"))
+    code, out, _ = await run(ws, "man pager")
+    assert code == 0
+    assert out.startswith(b"pager\n")
+    assert b"--help" not in out
+
+
+@pytest.mark.asyncio
+async def test_yaml_script_entry_executes_end_to_end(tmp_path):
+    script = tmp_path / "pager.py"
+    script.write_text(
+        "import os\n"
+        "print('yaml', argv[1], os.environ.get('MIRAGE_CLI_CONFIG'))\n")
+    cfg = load_config({
+        "mounts": {
+            "/data": {
+                "resource": "ram"
+            }
+        },
+        "clis": {
+            "pager": {
+                "script": str(script),
+                "config": {
+                    "width": 80
+                }
+            }
+        },
+    })
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    code, out, _ = await run(ws, "pager report.txt")
+    assert (code, out) == (0, b'yaml report.txt {"width": 80}\n')
+    await ws.close()

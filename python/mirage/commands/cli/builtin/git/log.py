@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from typing import Any, Callable
 
 from dulwich.objects import Commit
 from dulwich.repo import BaseRepo
@@ -27,11 +26,10 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
                                                   revision_arg)
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountRoot, StatPath
-from mirage.types import PathSpec
 
 
 def _collect(repo: BaseRepo, revision: str, flags: LogFlags) -> list[Commit]:
@@ -49,25 +47,21 @@ def _collect(repo: BaseRepo, revision: str, flags: LogFlags) -> list[Commit]:
     return select(repo, resolve_commit(repo, revision), flags)
 
 
-async def log(
-    config: None,
-    paths: list[PathSpec],
-    *texts: str,
-    stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
+async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     """Show commit logs.
 
     Args:
-        config (None): git declares no config_model.
-        paths (list[PathSpec]): path operands.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        inv (CLIInvocation[None]): the line's invocation record.
+            git declares no config_model, and the workspace doors
+            it reads (dispatch, stat_path, mount_root) ride
+            ``inv.ops``.
     """
+    ops = inv.ops or CLIVerbOpts()
+    dispatch = ops.dispatch
+    stat_path = ops.stat_path
+    mount_root = ops.mount_root
+    texts = inv.texts
+    flags = inv.flags
     fl = FlagView(flags)
     try:
         check_operands(texts)

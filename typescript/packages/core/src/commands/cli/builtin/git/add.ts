@@ -16,10 +16,10 @@ import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { StatPath } from '../../../../ops/types.ts'
-import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
+import { FileType, type FileStat } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
-import type { CLIVerbOpts } from '../../types.ts'
+import type { CLIInvocation } from '../../types.ts'
 import {
   GitError,
   IgnoredPathsError,
@@ -181,13 +181,12 @@ async function resolve(
  * what they will stage: `-A` takes untracked files too, `-u` only what the index
  * already holds.
  */
-export async function add(
-  _config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
+  // The mount doors ride the one record; `opts` keeps its name so
+  // the body reads the same as when they were a parameter.
+  const opts = inv.ops ?? {}
+  const texts = [...inv.texts]
+  const fl = new FlagView(inv.flags)
   try {
     const dispatch = opts.dispatch
     const statPath = opts.statPath

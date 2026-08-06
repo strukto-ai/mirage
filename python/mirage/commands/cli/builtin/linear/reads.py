@@ -16,6 +16,7 @@ import functools
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.cli.builtin.linear.util import first_text, resolve_issue
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.linear._client import (get_issue, list_issue_comments,
                                         list_team_cycles, list_team_documents,
@@ -31,7 +32,6 @@ from mirage.core.linear.normalize import (normalize_comment, normalize_cycle,
                                           to_json_bytes)
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
 
 def _require_team(fl: FlagView) -> str:
@@ -237,14 +237,10 @@ Runner = Callable[[LinearConfig, tuple[str, ...], FlagView], Awaitable[bytes]]
 
 
 async def _dispatch(
-    runner: Runner,
-    config: LinearConfig,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: object,
+        runner: Runner, inv: CLIInvocation[LinearConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags)
-    data = await runner(config, texts, fl)
+    fl = FlagView(inv.flags)
+    data = await runner(inv.config, inv.texts, fl)
     return yield_bytes(data), IOResult()
 
 

@@ -16,23 +16,17 @@ import { issueUpdate } from '../../../../../core/linear/_client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/types.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIVerbOpts } from '../../../types.ts'
+import type { CLIInvocation } from '../../../types.ts'
 import { firstText, linearTransport, resolveIssue, textOrStdin } from '../util.ts'
 
-export async function update(
-  config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
-  const transport = linearTransport(config)
-  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
+export async function update(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const transport = linearTransport(inv.config)
+  const issueId = await resolveIssue(transport, firstText(inv.texts, 'issue key'))
   let description: string | null = null
-  if (fl.asStr('description') !== undefined || opts.stdin !== null) {
-    description = await textOrStdin(fl.asStr('description'), opts.stdin, 'description is required')
+  if (fl.asStr('description') !== undefined || inv.stdin !== null) {
+    description = await textOrStdin(fl.asStr('description'), inv.stdin, 'description is required')
   }
   const issue = await issueUpdate(transport, {
     issueId,

@@ -26,36 +26,55 @@ from mirage.runtime.policy.types import (DenyResult, PolicyContext,
                                          PolicyResult, PolicyScript,
                                          RouteResult, ScriptSource)
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
-from mirage.runtime.types import EvalValue
+from mirage.runtime.types import EvalValue, Language
 
 POLICY_EVAL_TIMEOUT_SECONDS = 10.0
 
 
 def evaluator_of(entries: list[Runtime],
-                 language: str | None = None) -> EvaluatorMixin | None:
+                 language: Language | None = None) -> EvaluatorMixin | None:
     """The world's policy engine for a script.
 
     Config-borne policy scripts run on it; any runtime inheriting
     EvaluatorMixin qualifies (monty in the default world, or a user
-    runtime in any language). The first evaluator whose eval_language
-    matches the script's language wins, so a .js policy runs on
-    quickjs even when a python evaluator sits earlier in the world;
-    with no language (or no match) the first evaluator serves. None
-    when the world has no evaluator, which only matters once a
-    ScriptSource actually needs one.
+    runtime in any language). The first evaluator whose ``language``
+    matches the script's wins, so a .js policy runs on quickjs even
+    when a python evaluator sits earlier in the world; with no
+    language (or no match) the first evaluator serves. None when the
+    world has no evaluator, which only matters once a ScriptSource
+    actually needs one. The attribute read here is the one ``run``
+    answers for too (Runtime.language), so an engine cannot speak one
+    language at this door and another at that one.
 
     Args:
         entries (list[Runtime]): the workspace's ordered world.
-        language (str | None): the script's language, if known.
+        language (Language | None): the script's language, if known.
     """
     first: EvaluatorMixin | None = None
     for entry in entries:
         if isinstance(entry, EvaluatorMixin):
             if first is None:
                 first = entry
-            if language is not None and entry.eval_language == language:
+            if language is not None and entry.language == language:
                 return entry
     return first
+
+
+def runtime_for_language(entries: list[Runtime],
+                         language: Language) -> Runtime | None:
+    """The world's interpreter for a script CLI, evaluator_of's run twin.
+
+    The first entry whose ``run`` speaks the language wins, the same
+    first-match rule. Unlike evaluator_of there is no any-language
+    fallback: a python program cannot run on a js engine, so no match
+    means None and the caller reports the world's entries.
+
+    Args:
+        entries (list[Runtime]): the workspace's ordered world.
+        language (Language): the script's language ("python" or "js").
+    """
+    return next((entry for entry in entries if entry.language == language),
+                None)
 
 
 async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],

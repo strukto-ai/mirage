@@ -16,9 +16,8 @@ import {
   FlagView,
   IOResult,
   type ByteSource,
-  type CLIVerbOpts,
+  type CLIInvocation,
   type CommandFnResult,
-  type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/_client.ts'
@@ -28,20 +27,15 @@ import { pageSlice, parseQuery, sortHeaders, uidBudget } from './query.ts'
 
 const ENC = new TextEncoder()
 
-export async function searchEnvelopes(
-  config: unknown,
-  _paths: PathSpec[],
-  texts: string[],
-  opts: CLIVerbOpts,
-): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags)
+export async function searchEnvelopes(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
   const page = fl.asInt('page') ?? 1
   const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
   // The shell already split the query; upstream joins argv the same way
   // before parsing, so a pattern with spaces needs literal quotes.
-  const query = parseQuery(texts.join(' '))
-  const account = config as EmailConfig
+  const query = parseQuery(inv.texts.join(' '))
+  const account = inv.config as EmailConfig
   const budget = uidBudget(page, pageSize, query.sorters, account.maxMessages)
   const accessor = new EmailAccessor(account)
   let headers
