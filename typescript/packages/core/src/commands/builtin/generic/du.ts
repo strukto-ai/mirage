@@ -63,6 +63,8 @@ export interface DuFlags {
   h: boolean
   /** -c, append a grand total. */
   c: boolean
+  /** -S/--separate-dirs, directories exclude subdirectory sizes. */
+  S: boolean
   /** --max-depth/-d, deepest level to print. */
   maxDepth: number | null
   /** A non-fatal diagnostic GNU prints before the output. */
@@ -122,6 +124,7 @@ export function parseDuFlags(opts: CommandOpts): DuFlags {
     a,
     h: fl.asBool('h'),
     c: fl.asBool('c'),
+    S: fl.asBool('separate_dirs'),
     maxDepth,
     ...(warning === undefined ? {} : { warning }),
   }
@@ -242,6 +245,18 @@ export function toVirtual(entries: [string, number][], path: PathSpec): [string,
 }
 
 /**
+ * Sum of leaves whose parent is the operand (GNU `-S` total).
+ */
+export function separateTotal(entries: [string, number][], root: string): number {
+  const rootKey = norm(root)
+  let total = 0
+  for (const [leaf, size] of entries) {
+    if (parentOf(norm(leaf)) === rootKey) total += size
+  }
+  return total
+}
+
+/**
  * Derive GNU's per-directory lines from a flat list of leaf files.
  *
  * Backends report only files, but GNU `du` prints a line per directory
@@ -251,16 +266,20 @@ export function toVirtual(entries: [string, number][], path: PathSpec): [string,
  * siblings sorted by name. GNU walks in readdir order, which is unspecified,
  * so sorting is a deterministic choice within the same shape.
  *
+ * With `-S`/`--separate-dirs` a directory only counts files that sit
+ * directly in it: a leaf still forces every ancestor directory to appear
+ * (possibly at size 0), but only the immediate parent gets its bytes.
  * The operand's own line is not included; the caller renders it with the
  * operand as typed.
  */
 export function rollup(
   entries: [string, number][],
   root: string,
-  opts: { all: boolean; maxDepth: number | null },
+  opts: { all: boolean; maxDepth: number | null; separateDirs?: boolean },
 ): [string, number][] {
   const rootKey = norm(root)
   const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
+  const separateDirs = opts.separateDirs === true
   const sizes = new Map<string, number>()
   const files = new Map<string, number>()
   for (const [leaf, size] of entries) {
@@ -268,8 +287,18 @@ export function rollup(
     if (node === rootKey || !node.startsWith(prefix)) continue
     files.set(node, size)
     let parent = parentOf(node)
+    let first = true
     while (parent !== rootKey && parent.startsWith(prefix)) {
-      sizes.set(parent, (sizes.get(parent) ?? 0) + size)
+      if (separateDirs) {
+        if (first) {
+          sizes.set(parent, (sizes.get(parent) ?? 0) + size)
+          first = false
+        } else if (!sizes.has(parent)) {
+          sizes.set(parent, 0)
+        }
+      } else {
+        sizes.set(parent, (sizes.get(parent) ?? 0) + size)
+      }
       parent = parentOf(parent)
     }
   }
@@ -343,13 +372,13 @@ async function duOne(
   const leaves = linkLeaves(links, path.virtual)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (flags.s) {
+  if (flags.s && !flags.S) {
     const total = (await computeSize(path)) + linkTotal
     return [[`${fmt(total)}\t${label}`], total]
   }
 
   const [raw, rawTotal] = await computeEntries(path)
-  const total = rawTotal + linkTotal
+  let total = rawTotal + linkTotal
   if (raw.length === 0 && leaves.length === 0) {
     const fallback = await computeSize(path)
     return [[`${fmt(fallback)}\t${label}`], fallback]
@@ -357,6 +386,7 @@ async function duOne(
 
   const entries = toVirtual(raw, path).concat(leaves)
   const rootKey = norm(path.virtual)
+  if (flags.S) total = separateTotal(entries, path.virtual)
   // A file operand walks to itself. GNU prints it once, with or without -a,
   // never as a leaf line plus a roll-up line.
   const first = entries[0]
@@ -364,7 +394,15 @@ async function duOne(
     return [[`${fmt(first[1])}\t${label}`], total]
   }
 
-  const rows = rollup(entries, path.virtual, { all: flags.a, maxDepth: flags.maxDepth })
+  if (flags.s) {
+    return [[`${fmt(total)}\t${label}`], total]
+  }
+
+  const rows = rollup(entries, path.virtual, {
+    all: flags.a,
+    maxDepth: flags.maxDepth,
+    separateDirs: flags.S,
+  })
   const shown = respellRaw(
     rows.map(([p]) => p),
     path.virtual,

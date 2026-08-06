@@ -71,6 +71,7 @@ async def du(
     max_depth: str | None = None,
     d: str | None = None,
     c: bool = False,
+    separate_dirs: bool = False,
     index: IndexCacheStore,
     cwd: PathSpec | str = "/",
     L: bool = False,
@@ -90,6 +91,7 @@ async def du(
         c=c,
         max_depth=max_depth,
         d=d,
+        separate_dirs=separate_dirs,
         links=None if L else links,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

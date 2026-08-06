@@ -22,6 +22,7 @@ import {
   parseDuFlags,
   rollup,
   runDu,
+  separateTotal,
   toVirtual,
 } from './du.ts'
 import { PathSpec } from '../../../types.ts'
@@ -51,7 +52,7 @@ function opts(flags: Record<string, string | boolean> = {}): CommandOpts {
 }
 
 function flags(over: Partial<DuFlags> = {}): DuFlags {
-  return { s: false, a: false, h: false, c: false, maxDepth: null, ...over }
+  return { s: false, a: false, h: false, c: false, S: false, maxDepth: null, ...over }
 }
 
 /** Build (computeSize, computeEntries) over a mount-relative in-memory tree. */
@@ -99,6 +100,38 @@ describe('duGeneric', () => {
     })
     const out = await duGeneric([spec('/dir', 'dir')], flags(), size, entries)
     expect(DEC.decode(out.stdout)).toBe('1\t/dir/sub/deep\n3\t/dir/sub\n6\t/dir\n')
+  })
+
+  it('excludes subdirectory sizes under -S', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n')
+  })
+
+  it('summarises only direct files under -Ss', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ s: true, S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('3\t/dir\n')
+  })
+
+  it('lists files under -Sa with separate directory totals', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ a: true, S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe(
+      '3\t/dir/a.txt\n2\t/dir/sub/b.txt\n1\t/dir/sub/deep/c.txt\n1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n',
+    )
   })
 
   it('lists files then directories post-order under -a', async () => {
@@ -375,6 +408,34 @@ describe('rollup', () => {
     const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null }))
     expect(rows.get('/d/sub')).toBe(3)
     expect(rows.get('/d/sub/deep')).toBe(1)
+  })
+
+  it('separateDirs counts only direct files', () => {
+    const entries: [string, number][] = [
+      ['/d/a.txt', 3],
+      ['/d/sub/b.txt', 2],
+      ['/d/sub/deep/c.txt', 1],
+    ]
+    const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null, separateDirs: true }))
+    expect(rows.get('/d/sub/deep')).toBe(1)
+    expect(rows.get('/d/sub')).toBe(2)
+    expect(rows.has('/d/a.txt')).toBe(false)
+  })
+
+  it('separateDirs keeps empty ancestor directories at size 0', () => {
+    const entries: [string, number][] = [['/d/sub/deep/c.txt', 4]]
+    const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null, separateDirs: true }))
+    expect(rows.get('/d/sub/deep')).toBe(4)
+    expect(rows.get('/d/sub')).toBe(0)
+  })
+
+  it('separateTotal sums only direct children', () => {
+    const entries: [string, number][] = [
+      ['/d/a.txt', 3],
+      ['/d/sub/b.txt', 2],
+      ['/d/sub/deep/c.txt', 1],
+    ]
+    expect(separateTotal(entries, '/d')).toBe(3)
   })
 
   it('keeps the sum over a directory marker under -a', () => {

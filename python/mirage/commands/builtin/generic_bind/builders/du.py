@@ -149,6 +149,7 @@ async def du(
     d: str | None = None,
     c: bool = False,
     L: bool = False,
+    separate_dirs: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
     links: LinkView | None = None,
@@ -180,6 +181,7 @@ async def du(
         c=c,
         max_depth=max_depth,
         d=d,
+        separate_dirs=separate_dirs,
         truncated=lambda: budget.hit,
         # -L dereferences: the operand was already rewritten at
         # dispatch, and withholding the link table stops the links below

@@ -3,7 +3,8 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.builtin.generic.du import (DuFlags, _depth, du,
                                                 parse_depth, parse_flags,
-                                                rollup, run_du, to_virtual)
+                                                rollup, run_du, separate_total,
+                                                to_virtual)
 from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.errors import UsageError
 from mirage.resource.disk import DiskResource
@@ -89,6 +90,50 @@ async def test_subdirectories_get_their_own_line():
                    compute_entries=compute_entries,
                    flags=DuFlags())
     assert out.stdout == b"1\t/dir/sub/deep\n3\t/dir/sub\n6\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_excludes_subdirectory_sizes():
+    """GNU -S: parent totals omit children that are directories."""
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(S=True))
+    assert out.stdout == b"1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_with_summarize_uses_direct_files_only():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(s=True, S=True))
+    assert out.stdout == b"3\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_with_all_lists_files():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(a=True, S=True))
+    assert out.stdout == (b"3\t/dir/a.txt\n"
+                          b"2\t/dir/sub/b.txt\n"
+                          b"1\t/dir/sub/deep/c.txt\n"
+                          b"1\t/dir/sub/deep\n"
+                          b"2\t/dir/sub\n"
+                          b"3\t/dir\n")
+
+
+def test_separate_total_sums_direct_children_only():
+    entries = [("/d/a.txt", 3), ("/d/sub/b.txt", 2), ("/d/sub/deep/c.txt", 1)]
+    assert separate_total(entries, "/d") == 3
 
 
 @pytest.mark.asyncio
@@ -433,6 +478,25 @@ def test_rollup_totals_are_recursive():
     rows = dict(rollup(entries, "/d", a=False, max_depth=None))
     assert rows["/d/sub"] == 3
     assert rows["/d/sub/deep"] == 1
+
+
+def test_rollup_separate_dirs_counts_only_direct_files():
+    """GNU -S: a directory omits subdirectory sizes (pinned coreutils 9.7)."""
+    entries = [("/d/a.txt", 3), ("/d/sub/b.txt", 2), ("/d/sub/deep/c.txt", 1)]
+    rows = dict(
+        rollup(entries, "/d", a=False, max_depth=None, separate_dirs=True))
+    assert rows["/d/sub/deep"] == 1
+    assert rows["/d/sub"] == 2
+    assert "/d/a.txt" not in rows
+
+
+def test_rollup_separate_dirs_keeps_empty_ancestor_dirs():
+    """A directory with only subdirs still prints, at size 0."""
+    entries = [("/d/sub/deep/c.txt", 4)]
+    rows = dict(
+        rollup(entries, "/d", a=False, max_depth=None, separate_dirs=True))
+    assert rows["/d/sub/deep"] == 4
+    assert rows["/d/sub"] == 0
 
 
 def test_rollup_a_keeps_the_sum_over_a_directory_marker():

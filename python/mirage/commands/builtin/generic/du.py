@@ -34,6 +34,7 @@ class DuFlags:
         a (bool): -a, list files as well as directories.
         h (bool): -h, human-readable sizes.
         c (bool): -c, append a grand total.
+        S (bool): -S/--separate-dirs, directories exclude subdirectory sizes.
         max_depth (int | None): --max-depth/-d, deepest level to print.
         warning (str | None): a non-fatal diagnostic GNU prints before the
             output, without failing the command.
@@ -43,6 +44,7 @@ class DuFlags:
     a: bool = False
     h: bool = False
     c: bool = False
+    S: bool = False
     max_depth: int | None = None
     warning: str | None = None
 
@@ -89,8 +91,13 @@ def parse_depth(text: str) -> int | None:
     return None
 
 
-def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
-                max_depth: str | None) -> DuFlags:
+def parse_flags(*,
+                s: bool,
+                a: bool,
+                h: bool,
+                c: bool,
+                max_depth: str | None,
+                separate_dirs: bool = False) -> DuFlags:
     """Validate a ``du`` command line the way GNU does, before any I/O.
 
     GNU parses ``--max-depth`` as each option is read, so a bad depth is
@@ -103,6 +110,7 @@ def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
         h (bool): -h.
         c (bool): -c.
         max_depth (str | None): raw --max-depth/-d text, unparsed.
+        separate_dirs (bool): -S/--separate-dirs.
 
     Raises:
         UsageError: on a bad depth or a conflicting combination.
@@ -126,7 +134,13 @@ def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
                 f"--max-depth={depth}\n{USAGE_HINT}", 1)
         warning = ("du: warning: summarizing is the same as using "
                    "--max-depth=0")
-    return DuFlags(s=s, a=a, h=h, c=c, max_depth=depth, warning=warning)
+    return DuFlags(s=s,
+                   a=a,
+                   h=h,
+                   c=c,
+                   S=separate_dirs,
+                   max_depth=depth,
+                   warning=warning)
 
 
 def cwd_spec(cwd: PathSpec | str) -> PathSpec:
@@ -269,8 +283,24 @@ def to_virtual(entries: Sequence[tuple[str, int]],
             for entry, size in entries]
 
 
-def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
-           max_depth: int | None) -> list[tuple[str, int]]:
+def separate_total(entries: Sequence[tuple[str, int]], root: str) -> int:
+    """Sum of leaves whose parent is the operand (GNU ``-S`` total).
+
+    Args:
+        entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
+        root (str): the operand's absolute virtual path.
+    """
+    root_key = _norm(root)
+    return sum(size for leaf, size in entries
+               if _parent(_norm(leaf)) == root_key)
+
+
+def rollup(entries: Sequence[tuple[str, int]],
+           root: str,
+           *,
+           a: bool,
+           max_depth: int | None,
+           separate_dirs: bool = False) -> list[tuple[str, int]]:
     """Derive GNU's per-directory lines from a flat list of leaf files.
 
     Backends report only files, but GNU ``du`` prints a line per
@@ -281,14 +311,18 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
     readdir order, which is unspecified, so sorting is a deterministic
     choice within the same shape.
 
-    The operand's own line is not included; the caller renders it with
-    the operand as typed.
+    With ``-S``/``--separate-dirs`` a directory only counts files that
+    sit directly in it: a leaf still forces every ancestor directory to
+    appear (possibly at size 0), but only the immediate parent gets its
+    bytes. The operand's own line is not included; the caller renders it
+    with the operand as typed.
 
     Args:
         entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
         root (str): the operand's absolute virtual path.
         a (bool): -a, keep the file lines as well as the directories.
         max_depth (int | None): drop nodes deeper than this many levels.
+        separate_dirs (bool): -S, exclude subdirectory sizes.
 
     Returns:
         list[tuple[str, int]]: (virtual path, size) in GNU's print order.
@@ -303,8 +337,16 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
             continue
         files[node] = size
         parent = _parent(node)
+        first = True
         while parent != root_key and parent.startswith(prefix):
-            sizes[parent] = sizes.get(parent, 0) + size
+            if separate_dirs:
+                if first:
+                    sizes[parent] = sizes.get(parent, 0) + size
+                    first = False
+                else:
+                    sizes.setdefault(parent, 0)
+            else:
+                sizes[parent] = sizes.get(parent, 0) + size
             parent = _parent(parent)
 
     # Keyed backends (S3, GridFS) carry a zero-byte marker object for a
@@ -374,7 +416,7 @@ async def _du_one(
     leaves = link_leaves(links, path.virtual)
     link_total = sum(size for _, size in leaves)
 
-    if flags.s:
+    if flags.s and not flags.S:
         total = await compute_size(path) + link_total
         return [_line(total, flags.h, label)], total
 
@@ -386,12 +428,21 @@ async def _du_one(
 
     virtual = to_virtual(entries, path) + leaves
     root_key = _norm(path.virtual)
+    if flags.S:
+        total = separate_total(virtual, path.virtual)
     # A file operand walks to itself. GNU prints it once, with or
     # without -a, never as a leaf line plus a roll-up line.
     if len(virtual) == 1 and _norm(virtual[0][0]) == root_key:
         return [_line(virtual[0][1], flags.h, label)], total
 
-    rows = rollup(virtual, path.virtual, a=flags.a, max_depth=flags.max_depth)
+    if flags.s:
+        return [_line(total, flags.h, label)], total
+
+    rows = rollup(virtual,
+                  path.virtual,
+                  a=flags.a,
+                  max_depth=flags.max_depth,
+                  separate_dirs=flags.S)
     shown = respell_raw([node for node, _ in rows], path.virtual, label)
     lines = [
         _line(size, flags.h, name) for name, (_, size) in zip(shown, rows)
@@ -414,6 +465,7 @@ async def run_du(
     c: bool = False,
     max_depth: str | None = None,
     d: str | None = None,
+    separate_dirs: bool = False,
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
 ) -> DuOutput:
@@ -437,6 +489,7 @@ async def run_du(
         c (bool): -c.
         max_depth (str | None): raw --max-depth text.
         d (str | None): raw -d text, the short spelling of --max-depth.
+        separate_dirs (bool): -S/--separate-dirs.
         truncated (Callable[[], bool] | None): whether a walk was cut off.
         links (LinkView | None): the namespace's symlink facts.
 
@@ -447,7 +500,8 @@ async def run_du(
                         a=a,
                         h=h,
                         c=c,
-                        max_depth=max_depth if max_depth is not None else d)
+                        max_depth=max_depth if max_depth is not None else d,
+                        separate_dirs=separate_dirs)
     present, missing = await du_operands(paths,
                                          cwd,
                                          resolve_glob,
