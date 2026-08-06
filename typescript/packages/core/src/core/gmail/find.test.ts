@@ -96,7 +96,7 @@ describe('gmail core find', () => {
         const name = spec.virtual.split('/').pop() ?? ''
         return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
       }
-      if (spec.virtual !== '/' && TREE['/INBOX/2026-06-01/Hello__m1'].includes(spec.virtual)) {
+      if (spec.virtual === '/INBOX/2026-06-01/Hello__m1/report.pdf') {
         return Promise.resolve(new FileStat({ name: 'report.pdf', size: 3, type: FileType.PDF }))
       }
       if (spec.virtual === '/INBOX/2026-06-01/Hello__m1.gmail.json') {
