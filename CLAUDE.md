@@ -130,9 +130,9 @@ they bite:
   derives the link-aware names from the generic builders and fails naming any
   registered command that shadows one without accepting `links`. TypeScript
   needs no equivalent because wrappers forward the whole `opts` object, so a
-  generic reads `opts.links` whatever the wrapper declares; the one command
-  that walks its own tree (`email/find`) calls `linkResults` directly for the
-  same reason.
+  generic reads `opts.links` whatever the wrapper declares; the bespoke email
+  find routes through `findGeneric`/`walkFind` like the factory, so no TS
+  command walks its own tree any more.
 - **Merge links in the generic, above the native-op/walk fork.** `find` and `du`
   each have two paths: a backend with a native op (`find_core`, `du_size`/
   `du_entries`) and a backend walked by `readdir`. Link merging lives in one
