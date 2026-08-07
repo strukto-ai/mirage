@@ -26,12 +26,6 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-def is_dir_name(child: str) -> bool | None:
-    # Cold listings mark folders with a trailing slash; warm index-cache
-    # entries are slash-less, so classification falls back to stat.
-    return True if child.endswith("/") else None
-
-
 def unique_shared_drive_name(name: str, existing_names: set[str]) -> str:
     if name not in existing_names:
         return name

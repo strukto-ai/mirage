@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName, readdir } from './readdir.ts'
+import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
 // Same readdir/stat walk the generic fallback uses, wired as a find op
@@ -26,13 +27,17 @@ export function find(
   path: PathSpec,
   options: FindOptions,
 ): Promise<string[]> {
+  // An index-less dropbox stat hits files/get_metadata per child, so a
+  // bare walk is an N+1 API sweep. Walk with a scratch index that the
+  // readdirs populate as the walk descends, like the Box find does.
+  const idx = new RAMIndexCacheStore({ ttl: 86_400 })
   return walkFind(
     path,
     {
       readdir: (spec, index) => readdir(accessor, spec, index),
       stat: (spec, index) => stat(accessor, spec, index),
-      isDirName: (child) => isDirName(child),
     },
     options,
+    idx,
   )
 }

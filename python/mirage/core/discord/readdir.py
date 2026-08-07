@@ -392,14 +392,3 @@ async def readdir(
     if _is_leaf(parts):
         raise enotdir(raw_path)
     raise enoent(raw_path)
-
-
-def is_dir_name(child: str) -> bool:
-    # Classification is structural, not by extension: an attachment carries
-    # whatever extension the uploader gave it, so everything inside a day's
-    # files/ directory is a file.
-    parts = child.strip("/").split("/")
-    if len(parts) >= 2 and parts[-2] == "files":
-        return False
-    name = parts[-1] if parts else ""
-    return not (name.endswith(".json") or name.endswith(".jsonl"))

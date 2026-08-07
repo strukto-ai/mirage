@@ -15,7 +15,7 @@
 import type { SlackAccessor } from '../../../accessor/slack.ts'
 import { read as slackRead } from '../../../core/slack/read.ts'
 import { DU_MAX_ENTRIES } from '../../../core/slack/constants.ts'
-import { isDirName, readdir as slackReaddir } from '../../../core/slack/readdir.ts'
+import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
@@ -26,7 +26,6 @@ export const SLACK_IO: CommandIO<SlackAccessor> = {
   readStream: (a, p, i) => streamFromBytes(slackRead, a, p, i),
   stat: slackStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
   maxDuEntries: DU_MAX_ENTRIES,
 }

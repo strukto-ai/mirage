@@ -19,7 +19,6 @@ from mirage.core.dropbox.exists import exists as _exists
 from mirage.core.dropbox.mkdir import mkdir as _mkdir
 from mirage.core.dropbox.read import read as _read
 from mirage.core.dropbox.read import stream as _stream
-from mirage.core.dropbox.readdir import is_dir_name as _is_dir_name
 from mirage.core.dropbox.readdir import readdir as _readdir
 from mirage.core.dropbox.rename import rename as _rename
 from mirage.core.dropbox.rm import rm_r as _rm_r
@@ -37,7 +36,6 @@ IO = CommandIO(
     read_stream=_stream,
     stat=_stat,
     is_mounted=lambda a: True,
-    is_dir_name=lambda a, child: _is_dir_name(child),
     local=False,
     write=_write,
     exists=_exists,

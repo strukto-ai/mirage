@@ -236,6 +236,45 @@
       }
     },
     {
+      "id": "em_find_attachment_type_f",
+      "seq": 540204,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX -type f -name '*.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_find_attachment_dir_type_d",
+      "seq": 540205,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX -type d -name 'Q2_Budget_Review__1'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_find_type_d_bare",
+      "seq": 540206,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX/2026-01-05 -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "em_rg_folder",
       "seq": 540018,
       "targets": [

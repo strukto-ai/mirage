@@ -23,12 +23,6 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def is_dir_name(child: str) -> bool | None:
-    # Cold reads mark folders with a trailing slash; warm index-cache hits
-    # return slash-less keys, so classification falls back to stat.
-    return True if child.endswith("/") else None
-
-
 def _resource_type(entry: dict[str, Any]) -> str:
     if entry.get(".tag") == "folder":
         return "dropbox/folder"

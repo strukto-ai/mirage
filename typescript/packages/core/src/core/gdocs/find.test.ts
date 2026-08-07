@@ -32,7 +32,6 @@ import type { TokenManager } from '../google/_client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName } from './readdir.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
 
@@ -47,7 +46,6 @@ async function find(
     {
       readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
       stat: (spec, idx) => statMod.stat(accessor, spec, idx),
-      isDirName: (child) => isDirName(child),
     },
     options,
     index,
@@ -74,7 +72,9 @@ function mockTree(tree: Record<string, string[]>): void {
   })
 }
 
-function mockStats(stats: Record<string, { size?: number | null; modified?: string }>): void {
+function mockStats(
+  stats: Record<string, { size?: number | null; modified?: string; dir?: boolean }>,
+): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
     const entry = stats[spec.virtual]
     if (entry === undefined) return Promise.reject(enoent(spec.virtual))
@@ -84,7 +84,7 @@ function mockStats(stats: Record<string, { size?: number | null; modified?: stri
         name,
         size: entry.size ?? null,
         modified: entry.modified ?? null,
-        type: FileType.TEXT,
+        type: entry.dir === true ? FileType.DIRECTORY : FileType.TEXT,
       }),
     )
   })
@@ -99,7 +99,9 @@ const TREE: Record<string, string[]> = {
   '/shared': [],
 }
 
-const STATS: Record<string, { size?: number | null; modified?: string }> = {
+const STATS: Record<string, { size?: number | null; modified?: string; dir?: boolean }> = {
+  '/owned': { dir: true },
+  '/shared': { dir: true },
   '/owned/Big__d2.gdoc.json': { size: 2048, modified: OLD },
   '/owned/Doc_A__d1.gdoc.json': { size: null, modified: RECENT },
 }
@@ -114,13 +116,11 @@ describe('gdocs core find', () => {
     mockStats(STATS)
   })
 
-  it('classifies .gdoc.json entries as files and the rest as dirs without stat', async () => {
+  it('classifies rendered docs as files and folders as dirs via stat', async () => {
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
     expect(files).toEqual(['/owned/Big__d2.gdoc.json', '/owned/Doc_A__d1.gdoc.json'])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
     expect(dirs).toEqual(['/owned', '/shared'])
-    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
-    expect([...new Set(statted)]).toEqual(['/'])
   })
 
   it('treats a null size as 0 for size filters, dirs contribute 0 too', async () => {

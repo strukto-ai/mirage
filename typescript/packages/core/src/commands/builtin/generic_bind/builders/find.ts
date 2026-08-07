@@ -22,7 +22,7 @@ export const FIND_BUILDER: Builder = {
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const { find, isDirName } = ops
+    const { find } = ops
     // Whether a directory start point holds nothing, for `-empty`. Asked
     // once, for the start point, and only when the expression mentions it.
     const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
@@ -44,8 +44,8 @@ export const FIND_BUILDER: Builder = {
         dirEmpty,
       )
     }
-    // No backend find op: walk readdir/stat, classifying directories by the
-    // isDirName hint when the backend provides one.
+    // No backend find op: walk readdir/stat; the walk classifies entries
+    // through stat (see walkFind).
     return findGeneric(
       resolved,
       texts,
@@ -61,7 +61,6 @@ export const FIND_BUILDER: Builder = {
               const st = await ops.stat(accessor, spec, i)
               return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
             },
-            isDirName: isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
             // A namespace symlink is an entry `-empty` must count and no
             // backend readdir can see.
             links: opts.links ?? null,

@@ -69,6 +69,67 @@ async def test_size_is_honored_dirs_count_as_zero():
     assert lines == []
 
 
+ATTACHMENT_HEADERS = [{
+    "uid":
+    "7",
+    "subject":
+    "Report",
+    "date":
+    "Mon, 04 Aug 2026 10:00:00 +0000",
+    "attachments": [{
+        "filename": "invoice.pdf",
+        "size": 123
+    }],
+}]
+
+
+@pytest.mark.asyncio
+async def test_type_f_lists_attachments():
+    with patch("mirage.core.email.readdir.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.stat.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.readdir.list_message_uids",
+               new_callable=AsyncMock,
+               return_value=["7"]), \
+         patch("mirage.core.email.readdir.fetch_headers",
+               new_callable=AsyncMock,
+               return_value=ATTACHMENT_HEADERS):
+        stdout, _io = await find(_accessor(), [_spec("/")],
+                                 type="f",
+                                 index=RAMIndexCacheStore())
+    lines = (stdout
+             if isinstance(stdout, bytes) else b"").decode().splitlines()
+    assert "/INBOX/2026-08-04/Report__7.email.json" in lines
+    assert "/INBOX/2026-08-04/Report__7/invoice.pdf" in lines
+    assert "/INBOX/2026-08-04/Report__7" not in lines
+
+
+@pytest.mark.asyncio
+async def test_type_d_lists_attachment_dir_not_attachment():
+    with patch("mirage.core.email.readdir.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.stat.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.readdir.list_message_uids",
+               new_callable=AsyncMock,
+               return_value=["7"]), \
+         patch("mirage.core.email.readdir.fetch_headers",
+               new_callable=AsyncMock,
+               return_value=ATTACHMENT_HEADERS):
+        stdout, _io = await find(_accessor(), [_spec("/")],
+                                 type="d",
+                                 index=RAMIndexCacheStore())
+    lines = (stdout
+             if isinstance(stdout, bytes) else b"").decode().splitlines()
+    assert "/INBOX/2026-08-04/Report__7" in lines
+    assert "/INBOX/2026-08-04/Report__7/invoice.pdf" not in lines
+
+
 @pytest.mark.asyncio
 async def test_name_only_folder_level_pushes_down_to_imap_search():
     search = AsyncMock(return_value=[])

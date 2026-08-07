@@ -18,16 +18,11 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { globToModifiedRange } from '../google/date_glob.ts'
-import { GoogleFileSuffix, listAllFiles } from '../google/drive.ts'
+import { listAllFiles } from '../google/drive.ts'
 import { makeFilename } from '../../resource/gdocs/doc_entry.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 const MIME = 'application/vnd.google-apps.document'
-
-export function isDirName(child: string): boolean {
-  // readdir emits only folders and rendered *.gdoc.json files.
-  return !child.endsWith(GoogleFileSuffix.GDOC)
-}
 
 export async function readdir(
   accessor: GDocsAccessor,

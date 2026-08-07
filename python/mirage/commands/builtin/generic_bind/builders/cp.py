@@ -40,7 +40,6 @@ async def _walk_find(readdir: OperationFn,
     results = await walk_find(src,
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda _name: None,
                               index=index,
                               args=parse_find_args((), type=type))
     return [

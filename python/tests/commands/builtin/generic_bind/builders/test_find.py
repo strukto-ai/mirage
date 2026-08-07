@@ -26,7 +26,7 @@ TREE = {
 DIRS = {"/mnt", "/mnt/table1"}
 
 
-def _ops(stat_calls: list[str], is_dir_name=None, find_op=None) -> CommandIO:
+def _ops(stat_calls: list[str], find_op=None) -> CommandIO:
 
     async def readdir(_accessor, path, _index):
         return TREE.get(path.virtual.rstrip("/") or "/", [])
@@ -56,7 +56,6 @@ def _ops(stat_calls: list[str], is_dir_name=None, find_op=None) -> CommandIO:
                      stat=stat,
                      is_mounted=lambda _a: True,
                      local=False,
-                     is_dir_name=is_dir_name,
                      find=find_op)
 
 
@@ -74,27 +73,15 @@ async def _lines(ops: CommandIO) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_walk_without_hint_stats_children():
+async def test_walk_stats_children_to_classify():
     stat_calls: list[str] = []
     ops = _ops(stat_calls)
     lines = await _lines(ops)
     assert "/mnt/notes.txt" in lines
     assert "/mnt/table1/rows.jsonl" in lines
     assert "/mnt/table1" in lines
-    # no hint: every child entry is stat'ed to classify it
+    # classification comes from stat, an index lookup right after readdir
     assert len(stat_calls) > 1
-
-
-@pytest.mark.asyncio
-async def test_is_dir_name_hint_skips_child_stats():
-    stat_calls: list[str] = []
-    ops = _ops(stat_calls,
-               is_dir_name=lambda _a, name: name.rstrip("/") in DIRS)
-    lines = await _lines(ops)
-    assert "/mnt/notes.txt" in lines
-    assert "/mnt/table1/rows.jsonl" in lines
-    # hint answers directory-ness by name; only the search root is stat'ed
-    assert stat_calls == ["/mnt"]
 
 
 @pytest.mark.asyncio
