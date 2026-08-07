@@ -31,6 +31,21 @@ interface MirageStat {
   mtimeMs: number
 }
 
+/**
+ * One guest mutation, recorded in the order the script performed it.
+ * `write` and `append` carry their bytes because the drain runs after the
+ * script returns, when MEMFS holds only the final state: an atomic-write
+ * (write a temp file, rename it into place) would otherwise replay as a
+ * read of a path the rename already moved.
+ */
+export type MirageMutation =
+  | { readonly kind: 'write'; readonly path: string; readonly bytes: Uint8Array }
+  | { readonly kind: 'append'; readonly path: string; readonly bytes: Uint8Array }
+  | { readonly kind: 'mkdir'; readonly path: string }
+  | { readonly kind: 'unlink'; readonly path: string }
+  | { readonly kind: 'rmdir'; readonly path: string }
+  | { readonly kind: 'rename'; readonly path: string; readonly dst: string }
+
 export interface MirageBridge {
   fetch(path: string): Promise<Uint8Array>
   flush(path: string, bytes: Uint8Array): Promise<void>
@@ -48,34 +63,81 @@ export interface MirageBridge {
    */
   prefixes(): string[]
   /**
-   * Record a mount-prefixed path whose MEMFS content changed. This is the
-   * write half of the shim's contract and it is deliberately synchronous:
-   * Python's close() runs inside sync WASM frames where awaiting a bridge
-   * op needs JSPI stack switching, which most engines do not enable. The
-   * bytes already live in MEMFS, so close() only marks the path here and
-   * the runtime flushes after the script returns, where awaiting is free.
+   * Record one guest mutation. Every mark is deliberately synchronous:
+   * the guest's close(), os.mkdir() and os.rename() run inside sync WASM
+   * frames where awaiting a bridge op needs JSPI stack switching, which
+   * most engines do not enable. The guest records here and the runtime
+   * replays after the script returns, where awaiting is free.
+   *
+   * Args:
+   *   path: mount-prefixed path the mutation names.
+   *   bytes: the whole file for a write, the new tail for an append.
    */
-  markDirty(path: string): void
-  /** Drain the dirty set: the recorded paths, in mark order, cleared. */
-  takeDirty(): string[]
+  markWrite(path: string, bytes: Uint8Array): void
+  markAppend(path: string, bytes: Uint8Array): void
+  markMkdir(path: string): void
+  markUnlink(path: string): void
+  markRmdir(path: string): void
+  markRename(src: string, dst: string): void
+  /** Drain the journal: every mutation in guest order, cleared. */
+  takeMutations(): MirageMutation[]
+}
+
+function concatBytes(head: Uint8Array, tail: Uint8Array): Uint8Array {
+  const out = new Uint8Array(head.length + tail.length)
+  out.set(head, 0)
+  out.set(tail, head.length)
+  return out
 }
 
 export function createMirageBridge(
   dispatch: BridgeDispatchFn,
   listMounts: () => string[] = () => [],
 ): MirageBridge {
-  const dirty = new Set<string>()
+  const journal: MirageMutation[] = []
   return {
     prefixes() {
       return listMounts().map((p) => (p.endsWith('/') ? p : p + '/'))
     },
-    markDirty(path) {
-      dirty.add(path)
+    markWrite(path, bytes) {
+      // A guest buffer handed over by pyodide can be a view into WASM
+      // memory, which relocates when the heap grows; copy on arrival so
+      // the journal owns bytes that stay valid until the drain.
+      const owned = new Uint8Array(bytes)
+      const last = journal[journal.length - 1]
+      if (last?.kind === 'write' && last.path === path) {
+        journal[journal.length - 1] = { kind: 'write', path, bytes: owned }
+        return
+      }
+      journal.push({ kind: 'write', path, bytes: owned })
     },
-    takeDirty() {
-      const out = [...dirty]
-      dirty.clear()
-      return out
+    markAppend(path, bytes) {
+      const owned = new Uint8Array(bytes)
+      const last = journal[journal.length - 1]
+      if (last?.kind === 'append' && last.path === path) {
+        journal[journal.length - 1] = {
+          kind: 'append',
+          path,
+          bytes: concatBytes(last.bytes, owned),
+        }
+        return
+      }
+      journal.push({ kind: 'append', path, bytes: owned })
+    },
+    markMkdir(path) {
+      journal.push({ kind: 'mkdir', path })
+    },
+    markUnlink(path) {
+      journal.push({ kind: 'unlink', path })
+    },
+    markRmdir(path) {
+      journal.push({ kind: 'rmdir', path })
+    },
+    markRename(src, dst) {
+      journal.push({ kind: 'rename', path: src, dst })
+    },
+    takeMutations() {
+      return journal.splice(0, journal.length)
     },
     async fetch(path) {
       const out = await dispatch('READ', path)
@@ -134,6 +196,59 @@ export function createMirageBridge(
       }
       return out as MirageEntry[]
     },
+  }
+}
+
+/**
+ * Extend a mount file by `tail`.
+ *
+ * Read-modify-write, because no transport op appends yet: the whole file
+ * goes back over the wire per call, which is why the append-amplification
+ * conformance row stays marked. Correctness does not depend on that:
+ * the tail is only ever added to what the mount already holds.
+ *
+ * Args:
+ *   bridge: the mount bridge to read and write through.
+ *   path: mount path being extended.
+ *   tail: bytes the guest appended.
+ */
+async function appendOnMount(bridge: MirageBridge, path: string, tail: Uint8Array): Promise<void> {
+  let base: Uint8Array = new Uint8Array()
+  try {
+    base = await bridge.fetch(path)
+  } catch (err) {
+    // Absent is the normal case: an append may create the file. Any
+    // other cause (denied, backend down) fails the write below as well,
+    // so it still reaches the caller instead of quietly replacing the
+    // file's content with the tail alone.
+    console.warn(
+      `mirage append: ${path} has no base to extend: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+  await bridge.flush(path, concatBytes(base, tail))
+}
+
+/**
+ * Replay one recorded guest mutation against the mounts.
+ *
+ * Args:
+ *   bridge: the mount bridge to apply through.
+ *   mutation: the journal entry to apply.
+ */
+export async function applyMutation(bridge: MirageBridge, mutation: MirageMutation): Promise<void> {
+  switch (mutation.kind) {
+    case 'write':
+      return bridge.flush(mutation.path, mutation.bytes)
+    case 'append':
+      return appendOnMount(bridge, mutation.path, mutation.bytes)
+    case 'mkdir':
+      return bridge.mkdir(mutation.path)
+    case 'unlink':
+      return bridge.unlink(mutation.path)
+    case 'rmdir':
+      return bridge.rmdir(mutation.path)
+    case 'rename':
+      return bridge.rename(mutation.path, mutation.dst)
   }
 }
 

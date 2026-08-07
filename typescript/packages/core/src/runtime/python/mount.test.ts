@@ -146,7 +146,7 @@ describe('PyodideRuntime mount visibility', () => {
     })
     expect(result.exitCode).toBe(1)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
-    expect(stderr).toContain('failed to flush /ram/out.txt')
+    expect(stderr).toContain('failed to write /ram/out.txt')
     expect(stderr).toContain('mount is read-only')
     await rt.close()
   }, 60_000)

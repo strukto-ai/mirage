@@ -43,14 +43,10 @@ const MONTY_OPEN_UNSUPPORTED =
 // reaches the mount: a pre-boot file succeeds silently (exit 0), a
 // post-boot file fails with the MEMFS miss. Either way the mount never
 // changes.
-const PYODIDE_MUTATIONS_DROPPED =
-  'ts pyodide: mutation spellings are not intercepted, the mount never changes'
 
 // A writable open never backfills, so appending to a file the MEMFS
 // has not seen starts from empty and the close-flush overwrites the
 // mount content the run never read.
-const PYODIDE_APPEND_CLOBBERS =
-  'ts pyodide: open-for-append on an unseen file clobbers the mount content'
 
 // The workspace bridge has no APPEND op, so every append close
 // re-flushes the whole file: n appends ship O(n^2) bytes.
@@ -169,21 +165,18 @@ const PYODIDE_ROWS: Row[] = [
     spelling: 'os.mkdir',
     line: `python3 -c "import os; os.mkdir('/data/m1')"`,
     checks: [['ls /data', 'm1']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'mkdir',
     spelling: 'os.makedirs',
     line: `python3 -c "import os; os.makedirs('/data/m2/deep')"`,
     checks: [['ls /data/m2', 'deep']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'mkdir',
     spelling: 'Path.mkdir',
     line: `python3 -c "from pathlib import Path; Path('/data/m3').mkdir()"`,
     checks: [['ls /data', 'm3']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'unlink',
@@ -191,7 +184,6 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "import os; os.remove('/data/f1.txt')"`,
     setup: ['echo -n x > /data/f1.txt'],
     checks: [['ls /data', '!f1.txt']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'unlink',
@@ -199,7 +191,6 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "from pathlib import Path; Path('/data/f2.txt').unlink()"`,
     setup: ['echo -n x > /data/f2.txt'],
     checks: [['ls /data', '!f2.txt']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'rmdir',
@@ -207,7 +198,6 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "import os; os.rmdir('/data/d1')"`,
     setup: ['mkdir /data/d1'],
     checks: [['ls /data', '!d1']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'rmdir',
@@ -215,7 +205,6 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "import shutil; shutil.rmtree('/data/d3')"`,
     setup: ['mkdir /data/d3', 'echo -n x > /data/d3/inner.txt'],
     checks: [['ls /data', '!d3']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'rename',
@@ -226,7 +215,6 @@ const PYODIDE_ROWS: Row[] = [
       ['cat /data/b1.txt', 'one'],
       ['ls /data', '!a1.txt'],
     ],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
     capability: 'rename',
@@ -234,13 +222,11 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "from pathlib import Path; Path('/data/a3.txt').rename('/data/b3.txt')"`,
     setup: ['echo -n one > /data/a3.txt'],
     checks: [['cat /data/b3.txt', 'one']],
-    broken: PYODIDE_MUTATIONS_DROPPED,
   },
   {
-    // Refused today only because the unpatched os.rename misses in
-    // MEMFS (the file was seeded after boot); there is no cross-mount
-    // guard behind it. The observable contract still holds: nonzero
-    // exit, source intact, nothing lands on the other mount.
+    // The shim's patched os.rename compares the mount of each side and
+    // raises EXDEV, so this is a deliberate refusal rather than a
+    // MEMFS miss: nonzero exit, source intact, nothing on the other mount.
     capability: 'rename-cross',
     spelling: 'os.rename',
     line: `python3 -c "import os; os.rename('/data/c.txt', '/other/c.txt')"`,
@@ -290,7 +276,6 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "\nfor part in ['b', 'c', 'd']:\n    with open('/data/log.txt', 'a') as f:\n        f.write(part)\n"`,
     setup: ['echo -n a > /data/log.txt'],
     checks: [['cat /data/log.txt', 'abcd']],
-    broken: PYODIDE_APPEND_CLOBBERS,
   },
   {
     capability: 'append-preserves',
@@ -298,7 +283,6 @@ const PYODIDE_ROWS: Row[] = [
     line: `python3 -c "f = open('/data/keep.txt', 'a'); f.write('Z'); f.close()"`,
     setup: ['echo -n a > /data/keep.txt'],
     checks: [['cat /data/keep.txt', 'aZ']],
-    broken: PYODIDE_APPEND_CLOBBERS,
   },
 ]
 
