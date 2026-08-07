@@ -298,6 +298,13 @@ class _MirageOS(OSAccess):
         and backends differ on whether creating an existing directory
         raises at all.
 
+        `exist_ok` forgives an existing *directory* only. A file at the
+        target still raises, which is pathlib's rule and monty's own
+        base implementation's: `_is_file` is checked before `exist_ok`
+        is consulted. The file is materialized first so one already
+        read into the tree and one still only on the mount answer the
+        same; the probe costs a read that `_missing` then caches.
+
         Args:
             path (PurePosixPath): the directory to create.
             parents (bool): create missing ancestors too.
@@ -307,9 +314,11 @@ class _MirageOS(OSAccess):
         if self._workspace_dispatch is None:
             super().path_mkdir(path, parents, exist_ok)
             return
-        exists = (self._get_entry(path) is not None
-                  or self._list_remote(str(path)) is not None)
-        if exists:
+        self._ensure_file(path)
+        entry = self._get_entry(path)
+        if entry is not None and not isinstance(entry, dict):
+            raise FileExistsError(f"[Errno 17] File exists: {str(path)!r}")
+        if entry is not None or self._list_remote(str(path)) is not None:
             if exist_ok:
                 self._insert_tree_dir(path)
                 return

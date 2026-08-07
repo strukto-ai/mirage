@@ -382,6 +382,56 @@ describe('MontyRuntime', () => {
     expect(text(result.stdout)).toContain('/ram/nope.txt')
   }, 30_000)
 
+  it('a failed mutation raises the typed guest exception, not a bare Error', async () => {
+    // The real dispatcher rejects with coded fs errors (pinned in
+    // dispatcher.test.ts), and monty picks the guest exception from
+    // `err.name`, so an untranslated rejection is uncatchable.
+    const failing =
+      (code: string): BridgeDispatchFn =>
+      (op, path) => {
+        if (op === 'LIST') return Promise.resolve([])
+        return Promise.reject(Object.assign(new Error(path), { code }))
+      }
+    const missing = await run(
+      make(failing('ENOENT')),
+      'from pathlib import Path\n' +
+        'try:\n' +
+        "    Path('/ram/gone.txt').unlink()\n" +
+        'except FileNotFoundError as exc:\n' +
+        "    print('typed:', exc)\n",
+    )
+    expect(missing.exitCode).toBe(0)
+    expect(text(missing.stdout)).toContain('typed:')
+
+    const taken = await run(
+      make(failing('EEXIST')),
+      'from pathlib import Path\n' +
+        'try:\n' +
+        "    Path('/ram/d').mkdir()\n" +
+        'except FileExistsError as exc:\n' +
+        "    print('typed:', exc)\n",
+    )
+    expect(taken.exitCode).toBe(0)
+    expect(text(taken.stdout)).toContain('typed:')
+  }, 30_000)
+
+  it('a cross-mount rename raises a catchable OSError with EXDEV', async () => {
+    const { dispatch, mutations } = makeBridge({ '/a/f.txt': new Uint8Array([1]) })
+    const rt = make(dispatch, () => ['/a/', '/b/'])
+    const result = await run(
+      rt,
+      'from pathlib import Path\n' +
+        'try:\n' +
+        "    Path('/a/f.txt').rename('/b/f.txt')\n" +
+        'except OSError as exc:\n' +
+        "    print('typed:', exc)\n",
+    )
+    expect(result.exitCode).toBe(0)
+    expect(text(result.stdout)).toContain('Errno 18')
+    expect(text(result.stdout)).toContain('Invalid cross-device link')
+    expect(mutations).toEqual([])
+  }, 30_000)
+
   it('a missing virtual file surfaces as an error without poisoning the runtime', async () => {
     const { dispatch } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch)

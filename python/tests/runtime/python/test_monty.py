@@ -518,6 +518,40 @@ def test_monty_mkdir_without_exist_ok_raises_on_an_existing_dir():
     assert dispatch.dirs == []
 
 
+def test_monty_mkdir_on_a_file_raises_even_under_exist_ok():
+    """`exist_ok` forgives a directory, never a file.
+
+    Pinned against CPython: `Path('a.txt').mkdir(exist_ok=True)` over a
+    regular file raises FileExistsError, and only an existing directory
+    is quiet.
+    """
+    dispatch = FakeDispatch({"/s3/a.txt": b"hi"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: ["/s3/"])
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/a.txt').read_text()\n"
+                    "Path('/s3/a.txt').mkdir(exist_ok=True)")))
+    assert result.exit_code == 1
+    assert b"FileExistsError" in result.stderr
+    assert dispatch.dirs == []
+
+
+def test_monty_mkdir_on_an_unread_mount_file_still_raises():
+    """The file need not be in the tree yet for mkdir to refuse it."""
+    dispatch = FakeDispatch({"/s3/a.txt": b"hi"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: ["/s3/"])
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/a.txt').mkdir(exist_ok=True)")))
+    assert result.exit_code == 1
+    assert b"FileExistsError" in result.stderr
+    assert dispatch.dirs == []
+
+
 def test_monty_rename_across_mounts_raises_exdev():
     """The dispatcher resolves the mount from the source alone.
 
