@@ -14,7 +14,7 @@
 
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import { read as langfuseRead } from '../../../core/langfuse/read.ts'
-import { isDirName, readdir as langfuseReaddir } from '../../../core/langfuse/readdir.ts'
+import { readdir as langfuseReaddir } from '../../../core/langfuse/readdir.ts'
 import { stat as langfuseStat } from '../../../core/langfuse/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
@@ -25,6 +25,5 @@ export const LANGFUSE_IO: CommandIO<LangfuseAccessor> = {
   readStream: (a, p, i) => streamFromBytes(langfuseRead, a, p, i),
   stat: langfuseStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

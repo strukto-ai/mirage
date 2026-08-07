@@ -86,10 +86,6 @@ async def find(
                               follow=L)
 
 
-def _no_dir_hint(_name: str) -> bool | None:
-    return None
-
-
 async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
                         index: IndexCacheStore, search: PathSpec) -> bool:
     """Whether a directory start point holds nothing, for ``-empty``.
@@ -142,8 +138,6 @@ async def _find_walk(
                            path=path,
                            mindepth=mindepth,
                            empty=empty)
-    hint = (partial(ops.is_dir_name, accessor)
-            if ops.is_dir_name is not None else _no_dir_hint)
     stat_fn = partial(ops.stat, accessor)
     if stat_overlay is not None:
         stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
@@ -169,7 +163,6 @@ async def _find_walk(
         walked = await walk_find(search,
                                  readdir=partial(ops.readdir, accessor),
                                  stat=stat_fn,
-                                 is_dir_name=hint,
                                  index=index,
                                  args=args,
                                  links=links,

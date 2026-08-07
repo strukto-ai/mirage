@@ -8,6 +8,5 @@ export const MEM0_IO: CommandIO<Mem0Accessor> = {
   readStream: stream,
   stat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => !child.endsWith('.json'),
   local: false,
 }

@@ -150,7 +150,6 @@ class CommandIO:
     create: OperationFn | None = None
     truncate: OperationFn | None = None
     find: OperationFn | None = None
-    is_dir_name: OperationFn | None = None
     du: DuOps | None = None
     max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     append: OperationFn | None = None

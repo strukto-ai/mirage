@@ -17,7 +17,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName, readdir } from './readdir.ts'
+import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
 export function find(
@@ -35,7 +35,6 @@ export function find(
     {
       readdir: (spec, i) => readdir(accessor, spec, i),
       stat: (spec, i) => stat(accessor, spec, i),
-      isDirName: (child) => isDirName(child),
     },
     options,
     idx,

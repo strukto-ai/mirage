@@ -32,12 +32,6 @@ def resource_type_for(item: dict[str, Any]) -> str:
     return "box/file"
 
 
-def is_dir_name(child: str) -> bool | None:
-    # Cold listings mark folders with a trailing slash; warm index-cache
-    # entries are slash-less, so classification falls back to stat.
-    return True if child.endswith("/") else None
-
-
 async def readdir(
     accessor: BoxAccessor,
     path_spec: PathSpec,

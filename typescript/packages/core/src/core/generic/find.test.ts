@@ -46,7 +46,6 @@ function makeDeps(
         }),
       )
     },
-    isDirName: (child) => (child.endsWith('/') ? true : null),
   }
 }
 
@@ -142,8 +141,7 @@ describe('walkFind', () => {
         '/full-dir/a.txt': { size: 1 },
       },
     )
-    const withHint: WalkFindDeps = { ...deps, isDirName: (child) => child.endsWith('dir') }
-    expect(await walkFind(ROOT, withHint, { empty: true })).toEqual(['/empty-dir', '/empty.txt'])
+    expect(await walkFind(ROOT, deps, { empty: true })).toEqual(['/empty-dir', '/empty.txt'])
   })
 
   it('strips the mount prefix from returned keys', async () => {
@@ -183,15 +181,13 @@ describe('walkFind', () => {
     const base = makeDeps({ '/': ['/a.json'] })
     const deps: WalkFindDeps = {
       ...base,
-      isDirName: () => false,
       stat: () => Promise.reject(new Error('rate limited')),
     }
     await expect(walkFind(ROOT, deps, { minSize: 1 })).rejects.toThrow('rate limited')
   })
 
   it('drops entries whose stat raises ENOENT during size filtering', async () => {
-    const base = makeDeps({ '/': ['/a.json'] })
-    const deps: WalkFindDeps = { ...base, isDirName: () => false }
+    const deps = makeDeps({ '/': ['/a.json'] })
     expect(await walkFind(ROOT, deps, { minSize: 1 })).toEqual([])
   })
 })

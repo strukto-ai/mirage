@@ -38,7 +38,7 @@ const ALL_DRIVES_FIELDS = `incompleteSearch,${FIELDS}`
 const DRIVE_FIELDS = 'nextPageToken,drives(id,name)'
 
 // Rendered vfs filename suffixes; readdir emits only folders and these.
-export const GoogleFileSuffix = Object.freeze({
+const GoogleFileSuffix = Object.freeze({
   GDOC: '.gdoc.json',
   GSHEET: '.gsheet.json',
   GSLIDE: '.gslide.json',

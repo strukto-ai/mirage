@@ -20,7 +20,7 @@ import { exists as dropboxExists } from '../../../core/dropbox/exists.ts'
 import { find as dropboxFind } from '../../../core/dropbox/find.ts'
 import { mkdir as dropboxMkdir } from '../../../core/dropbox/mkdir.ts'
 import { read as dropboxRead, stream as dropboxStream } from '../../../core/dropbox/read.ts'
-import { isDirName, readdir as dropboxReaddir } from '../../../core/dropbox/readdir.ts'
+import { readdir as dropboxReaddir } from '../../../core/dropbox/readdir.ts'
 import { rename as dropboxRename } from '../../../core/dropbox/rename.ts'
 import { rmR as dropboxRmR } from '../../../core/dropbox/rm.ts'
 import { rmdir as dropboxRmdir } from '../../../core/dropbox/rmdir.ts'
@@ -35,7 +35,6 @@ export const DROPBOX_IO: CommandIO<DropboxAccessor> = {
   readStream: dropboxStream,
   stat: dropboxStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
   du: { size: dropboxDu, entries: dropboxDuAll },
   write: dropboxWrite,

@@ -24,7 +24,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.email._client import fetch_headers
-from mirage.core.email.readdir import _date_from_header, _sanitize, is_dir_name
+from mirage.core.email.readdir import _date_from_header, _sanitize
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import search_messages
@@ -118,7 +118,6 @@ async def find(
         results.extend(await walk_find(search,
                                        readdir=partial(_readdir, accessor),
                                        stat=partial(_stat, accessor),
-                                       is_dir_name=is_dir_name,
                                        index=index,
                                        args=args,
                                        links=links,

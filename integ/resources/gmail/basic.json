@@ -223,6 +223,19 @@
       }
     },
     {
+      "id": "gm_find_attachment_type_f",
+      "seq": 530204,
+      "targets": [
+        "gmail"
+      ],
+      "command": "find /mail/INBOX -type f -name '*.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "gm_rg_label",
       "seq": 530017,
       "targets": [

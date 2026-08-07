@@ -75,8 +75,6 @@ type FindOp<A extends Accessor = Accessor> = FindFn<
   [accessor: A, path: PathSpec, options: FindOptions]
 >
 
-type IsDirNameOp<A extends Accessor = Accessor> = (accessor: A, child: string) => boolean | null
-
 type DuSizeOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
@@ -143,7 +141,6 @@ export interface CommandIO<A extends Accessor = Accessor> {
   create?: PathOp<A>
   truncate?: (accessor: A, path: PathSpec, length: number) => Promise<void>
   find?: FindOp<A>
-  isDirName?: IsDirNameOp<A>
   du?: DuOps<A>
   maxDuEntries?: number
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,9 +1,8 @@
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.qdrant.readdir import _blob_size, is_dir_name, readdir
+from mirage.core.qdrant.readdir import _blob_size, readdir
 from mirage.core.qdrant.render import blob_bytes, render_json, render_text
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import PathSpec
 
 
@@ -69,15 +68,3 @@ def test_blob_size_leaves_undecodable_values_unknown():
     # the whole directory listing down with it.
     assert _blob_size("UE5HLTE=") == 5
     assert _blob_size(42) is None
-
-
-def test_is_dir_name_classifies_row_files():
-    cfg = QdrantConfig(text_field="name", blob_field="img", blob_ext="png")
-    assert is_dir_name("/animals/cat", config=cfg) is True
-    assert is_dir_name("/animals/cat/big/1.json", config=cfg) is False
-    assert is_dir_name("/animals/cat/big/1.txt", config=cfg) is False
-    assert is_dir_name("/animals/cat/big/1.png", config=cfg) is False
-    no_extra = QdrantConfig()
-    assert is_dir_name("/animals/cat/big/1.png", config=no_extra) is True
-    assert is_dir_name("/animals/cat/big/1.txt", config=no_extra) is True
-    assert is_dir_name("/animals/cat/big/1.json", config=no_extra) is False

@@ -429,12 +429,3 @@ export async function readdir(
   if (isLeaf(parts)) throw enotdir(rawPath)
   throw enoent(rawPath)
 }
-export function isDirName(child: string): boolean {
-  // Classification is structural, not by extension: an attachment carries
-  // whatever extension the uploader gave it, so everything inside a day's
-  // files/ directory is a file.
-  const parts = child.replace(/^\/+|\/+$/g, '').split('/')
-  if (parts.length >= 2 && parts[parts.length - 2] === 'files') return false
-  const name = parts[parts.length - 1] ?? ''
-  return !(name.endsWith('.json') || name.endsWith('.jsonl'))
-}

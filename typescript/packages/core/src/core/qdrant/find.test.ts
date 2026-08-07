@@ -32,7 +32,6 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName } from './readdir.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
 
@@ -47,7 +46,6 @@ async function find(
     {
       readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
       stat: (spec, idx) => statMod.stat(accessor, spec, idx),
-      isDirName: (child) => isDirName(child, accessor.config),
     },
     options,
     index,
@@ -104,11 +102,18 @@ describe('qdrant core find', () => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
     // walkFind stats the start path to decide whether to emit it; no
-    // fixture entry for '/' keeps these walks root-less.
-    mockStats({})
+    // fixture entry for '/' keeps these walks root-less. Children classify
+    // through stat: group dirs are directories, row files carry a size.
+    mockStats({
+      '/col': {},
+      '/col/grp': {},
+      '/col/a.json': { size: 1 },
+      '/col/b.json': { size: 1 },
+      '/col/grp/c.json': { size: 1 },
+    })
   })
 
-  it('walks recursively classifying row files by extension', async () => {
+  it('walks recursively classifying rows and groups via stat', async () => {
     mockTree(TREE)
     const out = await find(makeAccessor(), ROOT)
     expect(out).toEqual(['/col', '/col/a.json', '/col/b.json', '/col/grp', '/col/grp/c.json'])
@@ -118,13 +123,15 @@ describe('qdrant core find', () => {
     expect(dirs).toEqual(['/col', '/col/grp'])
   })
 
-  it('stats only the start path, never entries for classification', async () => {
+  it('classifies every entry through stat', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT)
     const statted = vi
       .mocked(statMod.stat)
       .mock.calls.map((c) => (typeof c[1] === 'string' ? c[1] : c[1].virtual))
-    expect([...new Set(statted)]).toEqual(['/'])
+    expect(new Set(statted)).toEqual(
+      new Set(['/', '/col', '/col/a.json', '/col/b.json', '/col/grp', '/col/grp/c.json']),
+    )
   })
 
   it('keeps a child whose readdir raises ENOENT but stops descending', async () => {
@@ -139,6 +146,7 @@ describe('qdrant core find', () => {
       if (key === '/') return Promise.resolve(['/bad'])
       return Promise.reject(new Error('rate limited'))
     })
+    mockStats({ '/bad': {} })
     await expect(find(makeAccessor(), ROOT)).rejects.toThrow('rate limited')
   })
 

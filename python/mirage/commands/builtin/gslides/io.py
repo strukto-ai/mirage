@@ -17,7 +17,6 @@ from functools import partial
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.gslides.read import read as _read
-from mirage.core.gslides.readdir import is_dir_name as _is_dir_name
 from mirage.core.gslides.readdir import readdir as _readdir
 from mirage.core.gslides.stat import stat as _stat
 
@@ -29,7 +28,6 @@ IO = CommandIO(
     read_bytes=_read,
     read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
-    is_dir_name=lambda _accessor, child: _is_dir_name(child),
     is_mounted=lambda a: True,
     local=False,
 )

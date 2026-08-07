@@ -238,7 +238,6 @@ async def test_walk_find_tolerates_not_found_readdir():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: None,
                               index=None,
                               args=FindArgs())
     assert results == []
@@ -251,7 +250,6 @@ async def test_walk_find_emits_start_path_at_depth_zero():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: False,
                               index=None,
                               args=FindArgs(maxdepth=0))
     assert results == ["/"]
@@ -268,7 +266,6 @@ async def test_walk_find_propagates_non_not_found_readdir_errors():
         await walk_find(_root_spec(),
                         readdir=readdir,
                         stat=stat,
-                        is_dir_name=lambda c: None,
                         index=None,
                         args=FindArgs())
 
@@ -280,7 +277,6 @@ async def test_walk_find_stat_fallback_treats_not_found_as_file():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: None,
                               index=None,
                               args=FindArgs(type=FindType.FILE))
     assert results == ["/mystery"]
@@ -315,7 +311,6 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: c.endswith("dir"),
                               index=None,
                               args=parse_find_args(("-empty", )))
     assert results == ["/empty-dir", "/empty.txt"]
@@ -335,7 +330,6 @@ async def test_walk_find_not_negates_predicate():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: False,
                               index=None,
                               args=parse_find_args(("-not", "-name", "*.txt")))
     assert results == ["/", "/b.md"]
@@ -349,7 +343,6 @@ async def test_walk_find_stat_fallback_propagates_other_errors():
         await walk_find(_root_spec(),
                         readdir=readdir,
                         stat=stat,
-                        is_dir_name=lambda c: None,
                         index=None,
                         args=FindArgs())
 
@@ -361,7 +354,6 @@ async def test_walk_find_size_filter_drops_not_found_entries():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: False,
                               index=None,
                               args=FindArgs(min_size=1))
     assert results == []
@@ -375,7 +367,6 @@ async def test_walk_find_size_filter_propagates_other_stat_errors():
         await walk_find(_root_spec(),
                         readdir=readdir,
                         stat=stat,
-                        is_dir_name=lambda c: False,
                         index=None,
                         args=FindArgs(min_size=1))
 

@@ -30,7 +30,6 @@ import { rstripSlash } from '../../utils/slash.ts'
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
   stat: (spec: PathSpec, index?: IndexCacheStore) => Promise<FileStat>
-  isDirName: (child: string) => boolean | null
   // `-empty` asks whether a directory has entries, and a namespace symlink
   // is one that no backend readdir can see. Without this a directory
   // holding only a link reads as empty.
@@ -120,11 +119,16 @@ async function walk(
     throw err
   }
   for (const child of children) {
-    const hint = deps.isDirName(child)
+    // Classification is stat's job (an index lookup right after the readdir
+    // that populated it). The one in-band proof is a trailing slash on a
+    // cold listing: no backend renders a file with one. Name heuristics
+    // beyond that guessed wrong (attachments and uploads carry whatever
+    // name the sender gave them) and are gone.
     const trimmed = child.endsWith('/') ? rstripSlash(child) : child
     let isFolder: boolean
-    if (hint === null) {
-      // Warm index-cache entries carry no trailing slash, so fall back to stat.
+    if (child.endsWith('/')) {
+      isFolder = true
+    } else {
       const s = await statEntry(
         deps,
         trimmed,
@@ -132,8 +136,6 @@ async function walk(
         index,
       )
       isFolder = s !== null && s.type === FileType.DIRECTORY
-    } else {
-      isFolder = hint
     }
     out.push({ path: trimmed, depth, file: !isFolder })
     if (isFolder) {

@@ -26,13 +26,7 @@ import {
   listMessages,
   messageJsonBytes,
 } from './messages.ts'
-import { GoogleFileSuffix } from '../google/drive.ts'
 import { enoent } from '../../utils/errors.ts'
-
-export function isDirName(child: string): boolean {
-  // readdir emits only label/date dirs and rendered *.gmail.json files.
-  return !child.endsWith(GoogleFileSuffix.GMAIL)
-}
 
 const TITLE_MAX = 80
 const UNSAFE = /[^\w\s\-.]/g

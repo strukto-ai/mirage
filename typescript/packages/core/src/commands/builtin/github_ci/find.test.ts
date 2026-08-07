@@ -18,15 +18,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../../core/github_ci/readdir.ts', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   readdir: vi.fn(),
-  isDirName: (child: string) => {
-    const name = child.split('/').pop() ?? ''
-    return !(
-      name.endsWith('.json') ||
-      name.endsWith('.jsonl') ||
-      name.endsWith('.log') ||
-      name.endsWith('.zip')
-    )
-  },
 }))
 vi.mock('../../../core/github_ci/stat.ts', () => ({ stat: vi.fn() }))
 

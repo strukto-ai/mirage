@@ -78,7 +78,7 @@ async function runFind(
 }
 
 describe('linear factory find', () => {
-  it('classifies directories via stat without an isDirName hint', async () => {
+  it('classifies directories via stat', async () => {
     const lines = await runFind([spec('/')], { maxdepth: '2' })
     expect(lines).toContain('/teams')
     expect(lines).toContain(TEAM_DIR)
