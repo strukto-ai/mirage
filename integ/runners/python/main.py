@@ -115,6 +115,7 @@ async def main() -> None:
         selected = args.targets or list(manifest)
     report = None if args.emit else harness.Report()
     emit: list[dict] | None = [] if args.emit else None
+    ran = 0
     for target_id in selected:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
@@ -178,6 +179,15 @@ async def main() -> None:
             print(f"skip [{target_id}]: LANGFUSE_URL not set", file=sys.stderr)
             continue
         await run_target(target, cases, root, report, emit)
+        ran += 1
+
+    # A skip is one line on stderr and exit 0, so a facet whose service
+    # never came up (or whose env var got renamed in the workflow)
+    # reports green having tested nothing. Every facet has targets on
+    # both hosts, so zero of them running is always a broken job.
+    if args.facet and ran == 0:
+        print(f"facet {args.facet!r} ran no targets", file=sys.stderr)
+        sys.exit(2)
 
     if args.emit:
         Path(args.emit).write_text(json.dumps(emit))

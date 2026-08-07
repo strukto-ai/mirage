@@ -421,8 +421,10 @@ async function openEmail(target: Target): Promise<Open> {
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('himalaya') === true) {
-    // The same snake_case block the Python runner installs; the CLI
-    // registry normalizes it, so one YAML config serves both hosts.
+    // Every registerCli in this file installs the same snake_case block
+    // the Python runner does, so the cli facet proves one YAML config
+    // serves both hosts rather than only that each host has some config
+    // it accepts. The registry camelizes onto declared fields.
     ws.registerCli('himalaya', HIMALAYA, {
       imap_host: host,
       imap_port: EMAIL_IMAP_PORT,
@@ -692,8 +694,8 @@ async function openNotion(target: Target): Promise<Open> {
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('ntn') === true) {
     ws.registerCli('ntn', NTN, {
-      apiKey: 'integ-test',
-      baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+      api_key: 'integ-test',
+      base_url: `http://127.0.0.1:${String(port)}/v1`,
     })
   }
   const cleanup = async (): Promise<void> => {
@@ -1243,8 +1245,6 @@ async function openGws(target: Target): Promise<Open> {
   if (target.clis?.includes('gws') === true) {
     // A target may scope the gws install to one mount's folder, the
     // configuration where the CLI and the mount are the same folder.
-    // The block is the same snake_case mapping the Python runner
-    // installs, pinning that one config serves both hosts.
     const scope = target.cli_scope
     ws.registerCli('gws', GWS, {
       client_id: 'integ',
@@ -1285,8 +1285,8 @@ async function openSlack(target: Target): Promise<Open> {
   if (target.clis?.includes('slack') === true) {
     ws.registerCli('slack', SLACK, {
       token: 'xoxb-integ',
-      searchToken: 'xoxp-integ-search',
-      baseUrl: `${base}/api`,
+      search_token: 'xoxp-integ-search',
+      base_url: `${base}/api`,
     })
   }
   const cleanup = async (): Promise<void> => {
@@ -1395,7 +1395,7 @@ async function openDiscord(target: Target): Promise<Open> {
   if (target.clis?.includes('discord') === true) {
     ws.registerCli('discord', DISCORD, {
       token: 'integ-bot-token',
-      baseUrl: `${endpoint}/api/v10`,
+      base_url: `${endpoint}/api/v10`,
     })
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
@@ -1423,7 +1423,7 @@ async function openLinear(target: Target): Promise<Open> {
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('linear') === true) {
-    ws.registerCli('linear', LINEAR, { apiKey: 'integ-key', baseUrl: endpoint })
+    ws.registerCli('linear', LINEAR, { api_key: 'integ-key', base_url: endpoint })
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }

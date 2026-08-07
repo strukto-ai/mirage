@@ -55,13 +55,7 @@ export class DropboxResource extends BaseResource implements Resource {
   constructor(config: DropboxConfig) {
     super()
     this.config = config
-    const tm = new DropboxTokenManager({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      refreshToken: config.refreshToken,
-      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-    })
+    const tm = new DropboxTokenManager(config)
     this.accessor = new DropboxAccessor({
       tokenManager: tm,
       ...(config.rootPath !== undefined ? { rootPath: config.rootPath } : {}),

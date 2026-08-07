@@ -129,6 +129,7 @@ async function main(): Promise<void> {
   }
   const report = emitPath ? null : new Report()
   const emit: EmitRow[] | null = emitPath ? [] : null
+  let ran = 0
   for (const id of ids) {
     const target = manifest.get(id)
     if (!target) throw new Error(`unknown target: ${id}`)
@@ -228,8 +229,17 @@ async function main(): Promise<void> {
       continue
     }
     await runTarget(target, cases, root, report, emit)
+    ran += 1
   }
 
+  // A skip is one line on stderr and exit 0, so a facet whose service
+  // never came up (or whose env var got renamed in the workflow) reports
+  // green having tested nothing. Every facet has targets on both hosts,
+  // so zero of them running is always a broken job, never a valid run.
+  if (facet !== undefined && ran === 0) {
+    process.stderr.write(`facet '${facet}' ran no targets\n`)
+    process.exit(2)
+  }
   if (emitPath) {
     writeFileSync(emitPath, JSON.stringify(emit))
     return

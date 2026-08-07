@@ -18,6 +18,12 @@ import { z } from 'zod'
 
 import { CLISpec, type CLIConfigModel } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { DISCORD } from '../../commands/cli/builtin/discord/index.ts'
+import { GIT } from '../../commands/cli/builtin/git/index.ts'
+import { GWS } from '../../commands/cli/builtin/gws/index.ts'
+import { LINEAR } from '../../commands/cli/builtin/linear/index.ts'
+import { NTN } from '../../commands/cli/builtin/ntn/index.ts'
+import { SLACK } from '../../commands/cli/builtin/slack/index.ts'
 import { CLIRegistry } from './registry.ts'
 
 // Mirrors python/tests/workspace/cli/test_registry.py.
@@ -153,6 +159,22 @@ describe('CLIRegistry zod config schemas', () => {
     )
   })
 
+  it('rejects both spellings of one field', () => {
+    const reg = new CLIRegistry()
+    const model = z.object({ imapHost: z.string() })
+    expect(() => reg.install('prog', tree(model), { imap_host: 'x', imapHost: 'y' })).toThrow(
+      /duplicates field 'imapHost'/,
+    )
+  })
+
+  it('does not read prototype members as declared fields', () => {
+    const reg = new CLIRegistry()
+    const model = z.object({ token: z.string() })
+    expect(() => reg.install('prog', tree(model), { token: 'x', constructor: 'y' })).toThrow(
+      /unknown config keys: constructor/,
+    )
+  })
+
   it('keeps undeclared keys verbatim under a loose schema', () => {
     const reg = new CLIRegistry()
     const install = reg.install('prog', tree(z.looseObject({ imapHost: z.string() })), {
@@ -188,4 +210,50 @@ describe('CLIRegistry zod config schemas', () => {
       ),
     ).toThrow(/must return an object or null/)
   })
+})
+
+// The per-CLI cases above use hand-written schemas, which cannot notice a
+// real builtin declaring a field no snake_case spelling reaches (an
+// acronym like `baseURL` camelizes from `base_url` as `baseUrl`). This
+// walks the shipped specs instead, so a CLI added later is covered
+// without editing the mechanism's tests.
+const BUILTIN_CLIS: readonly (readonly [string, CLISpec])[] = [
+  ['gws', GWS],
+  ['slack', SLACK],
+  ['discord', DISCORD],
+  ['ntn', NTN],
+  ['linear', LINEAR],
+  ['git', GIT],
+]
+
+const SAMPLES: readonly unknown[] = ['x', 1, true, ['x']]
+
+// Capital runs collapse to one word (baseURL -> base_url), because that
+// is the spelling a Python config writer uses; per-capital splitting
+// (base_u_r_l) would round-trip onto the acronym field and hide it.
+function snakeOf(field: string): string {
+  return field.replace(/[A-Z]+/g, (run) => `_${run.toLowerCase()}`)
+}
+
+function sampleFor(schema: z.ZodType): unknown {
+  for (const value of SAMPLES) {
+    if (schema.safeParse(value).success) return value
+  }
+  throw new Error('no sample value satisfies this field')
+}
+
+describe('builtin CLI configs install from the python spelling', () => {
+  for (const [name, spec] of BUILTIN_CLIS) {
+    const model = spec.configModel
+    if (!(model instanceof z.ZodObject)) continue
+    it(`${name} accepts every declared field as snake_case`, () => {
+      const fields = Object.keys(model.shape).filter((f) => f !== 'refreshFn')
+      const config: Record<string, unknown> = {}
+      for (const field of fields) {
+        config[snakeOf(field)] = sampleFor(model.shape[field] as z.ZodType)
+      }
+      const install = new CLIRegistry().install(name, spec, config)
+      expect(Object.keys(install.config as Record<string, unknown>).sort()).toEqual(fields.sort())
+    })
+  }
 })

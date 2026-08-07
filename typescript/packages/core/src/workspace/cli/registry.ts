@@ -99,18 +99,31 @@ export class CLIRegistry {
       // field is delivered there. Keys that resolve to no field keep the
       // caller's spelling: an unknown key is then reported as typed, and
       // a loose schema's passthrough data stays verbatim like pydantic
-      // extra="allow".
-      const norm: Record<string, unknown> = {}
+      // extra="allow". hasOwn, not `in`: the shape is a plain object, so
+      // `in` would read 'constructor'/'toString' off Object.prototype as
+      // declared fields, and fromEntries keeps a '__proto__' key an own
+      // property instead of silently reassigning the prototype.
+      const pairs: [string, unknown][] = []
+      const taken = new Set<string>()
       for (const [key, value] of Object.entries(config ?? {})) {
         const camel = snakeToCamel(key)
-        norm[camel in model.shape ? camel : key] = value
+        const target = Object.hasOwn(model.shape, camel) ? camel : key
+        // Both spellings of one field is ambiguous, and pydantic already
+        // rejects it (the camelCase one is an unknown key there), so the
+        // zod arm must not silently keep whichever came last.
+        if (taken.has(target)) {
+          throw new Error(`CLI '${name}': config key '${key}' duplicates field '${target}'`)
+        }
+        taken.add(target)
+        pairs.push([target, value])
       }
+      const norm = Object.fromEntries(pairs)
       // Unknown keys fail loud (a typo'd YAML key must not be silently
       // ignored), mirroring the Python pydantic arm; a schema that
       // declares its own extra-key policy (strict/passthrough/catchall)
       // enforces it through parse instead, like pydantic extra="allow".
       if (model.def.catchall === undefined) {
-        const unknown = Object.keys(norm).filter((k) => !(k in model.shape))
+        const unknown = [...taken].filter((k) => !Object.hasOwn(model.shape, k))
         if (unknown.length > 0) {
           throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
         }
