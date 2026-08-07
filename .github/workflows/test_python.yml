@@ -247,6 +247,13 @@ jobs:
           MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: uv run pytest tests/runtime/js/ -v --no-cov
 
+      - name: Run the runtime conformance suite
+        working-directory: python
+        env:
+          MIRAGE_WASI_HOME: /tmp/cpython-wasi
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: uv run pytest tests/runtime/test_conformance.py -v --no-cov
+
       - name: Install base package without the monty extra
         working-directory: python
         run: |
