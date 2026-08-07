@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "unzip_p_member_selects",
+      "seq": 601332,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzm && printf one > /data/punzm/a.txt && printf two > /data/punzm/b.txt && zip -q -j /data/punzm/mz.zip /data/punzm/a.txt /data/punzm/b.txt && unzip -p /data/punzm/mz.zip a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "one",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "unzip_p_member_missing_exits_11",
+      "seq": 601333,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzn && printf one > /data/punzn/a.txt && zip -q -j /data/punzn/nz.zip /data/punzn/a.txt && unzip -p /data/punzn/nz.zip NOSUCHFILE.xml",
+      "expect": {
+        "exit": 11,
+        "stdout": "",
+        "stderr": "caution: filename not matched:  NOSUCHFILE.xml\n"
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "unzip_p_member_hit_and_miss",
+      "seq": 601334,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzh && printf one > /data/punzh/a.txt && printf two > /data/punzh/b.txt && zip -q -j /data/punzh/hz.zip /data/punzh/a.txt /data/punzh/b.txt && unzip -p /data/punzh/hz.zip a.txt NOSUCHFILE.xml",
+      "expect": {
+        "exit": 11,
+        "stdout": "one",
+        "stderr": "caution: filename not matched:  NOSUCHFILE.xml\n"
+      },
+      "flags": [
+        "p"
+      ]
+    }
+  ]
+}

@@ -46,6 +46,7 @@ async def unzip(
         read_bytes=bound_op(ops.read_bytes, accessor, index),
         write_bytes=partial(ops.require(Operation.WRITE), accessor),
         mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
+        members=texts,
         o=o,
         args_l=args_l,
         d=d,

@@ -167,10 +167,16 @@
       "value_optional": false
     }
   ],
-  "positional": [],
+  "positional": [
+    {
+      "provided_by": [],
+      "text_when": [],
+      "type": "path"
+    }
+  ],
   "rest": {
     "provided_by": [],
     "text_when": [],
-    "type": "path"
+    "type": "str"
   }
 }

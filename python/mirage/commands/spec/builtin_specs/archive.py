@@ -80,7 +80,11 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-p"),
             Option(short="-t"),
         ),
-        rest=Operand(type="path"),
+        # The archive is the only path operand; everything after it is an
+        # Info-ZIP member pattern matched against archive entry names,
+        # never a filesystem path.
+        positional=(Operand(type="path"), ),
+        rest=Operand(type="str"),
     ),
     'zcat':
     CommandSpec(rest=Operand(type="path")),
