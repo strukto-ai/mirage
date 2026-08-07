@@ -419,6 +419,10 @@ async function runRow(ws: Workspace, row: Row): Promise<void> {
   if (row.lineOut !== undefined) expect(stdoutStr(io)).toContain(row.lineOut)
   for (const [cmd, want] of row.checks ?? []) {
     const check = await ws.execute(cmd)
+    // An absence assertion over the stdout of a command that failed is
+    // vacuous: a mount the mutation damaged answers nothing, and "x is
+    // gone" then holds for every x.
+    expect(check.exitCode, `check failed: ${cmd} -> ${stderrStr(check)}`).toBe(0)
     const out = stdoutStr(check)
     if (want.startsWith('!')) {
       expect(out, `${cmd} still shows ${want.slice(1)}`).not.toContain(want.slice(1))

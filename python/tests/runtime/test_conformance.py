@@ -73,6 +73,8 @@ class Row:
         line_out (str | None): substring expected on the line's stdout.
         checks (tuple[tuple[str, str], ...]): shell verifications as
             (command, want) pairs; a want of "!x" asserts x is absent.
+            Every command must itself exit 0, or an absence want would
+            be satisfied by the empty stdout of a failed check.
     """
 
     capability: str
@@ -449,7 +451,11 @@ async def test_capability_reaches_the_mount(runtime: str, row: Row):
         if row.line_out is not None:
             assert row.line_out in out
         for cmd, want in row.checks:
-            _, seen = await _sh(ws, cmd)
+            code, seen = await _sh(ws, cmd)
+            # An absence assertion over the stdout of a command that
+            # failed is vacuous: a mount the mutation damaged answers
+            # nothing, and "x is gone" then holds for every x.
+            assert code == 0, f"check failed: {cmd}: exit {code}: {seen}"
             if want.startswith("!"):
                 assert want[1:] not in seen, f"{cmd}: unexpected {want[1:]}"
             else:
