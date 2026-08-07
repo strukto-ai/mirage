@@ -455,6 +455,18 @@ export class MontyRuntime extends Runtime implements Evaluator {
           // A destination outside the workspace has no mount to rename
           // into; decline rather than half-apply the move.
           if (dst === null || !this.underWorkspaceMount(dst)) return notHandled
+          // The dispatcher picks the mount from the source alone and
+          // reads the destination against that same backend, so a
+          // cross-mount rename would drop the source and write the
+          // target into the wrong store. POSIX answers this with
+          // EXDEV, which is also what tells a caller to copy instead.
+          if (this.mountOf(path) !== this.mountOf(dst)) {
+            return Promise.reject(
+              Object.assign(new Error(`Invalid cross-device link: '${path}' -> '${dst}'`), {
+                code: 'EXDEV',
+              }),
+            )
+          }
           return bridge('RENAME', path, undefined, dst).then(() => null)
         }
         case 'Path.iterdir':
@@ -495,6 +507,22 @@ export class MontyRuntime extends Runtime implements Evaluator {
       const norm = p.endsWith('/') ? p : p + '/'
       return path.startsWith(norm) || path === norm.slice(0, -1)
     })
+  }
+
+  /**
+   * The mount prefix serving `path`, longest match first, or null when
+   * none does. Two paths belong to the same mount only when this
+   * agrees for both, which is what a rename needs to know.
+   */
+  private mountOf(path: string): string | null {
+    let best: string | null = null
+    for (const p of this.listMounts()) {
+      const norm = p.endsWith('/') ? p : p + '/'
+      if (path.startsWith(norm) || path === norm.slice(0, -1)) {
+        if (best === null || norm.length > best.length) best = norm
+      }
+    }
+    return best
   }
 }
 

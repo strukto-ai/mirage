@@ -284,6 +284,26 @@ describe('MontyRuntime', () => {
     expect(files.has('/s3/b.txt')).toBe(true)
   }, 30_000)
 
+  // The dispatcher resolves the mount from the source alone and reads
+  // the destination against that same backend, so a cross-mount rename
+  // would drop the source and write the target into the wrong store.
+  it('a rename across two mounts is refused, not dispatched', async () => {
+    const { dispatch, mutations, files } = makeBridge({ '/a/f.txt': new Uint8Array([1]) })
+    const rt = make(dispatch, () => ['/a/', '/b/'])
+    const result = await run(rt, "from pathlib import Path\nPath('/a/f.txt').rename('/b/f.txt')")
+    expect(result.exitCode).toBe(1)
+    expect(mutations).toEqual([])
+    expect(files.has('/a/f.txt')).toBe(true)
+  }, 30_000)
+
+  it('a rename inside one mount still dispatches', async () => {
+    const { dispatch, mutations } = makeBridge({ '/a/f.txt': new Uint8Array([1]) })
+    const rt = make(dispatch, () => ['/a/', '/b/'])
+    const result = await run(rt, "from pathlib import Path\nPath('/a/f.txt').rename('/a/g.txt')")
+    expect(result.exitCode).toBe(0)
+    expect(mutations).toEqual(['RENAME /a/f.txt /a/g.txt'])
+  }, 30_000)
+
   it('a rename leaving the mount view never reaches the bridge', async () => {
     const { dispatch, mutations } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch, () => ['/s3/'])

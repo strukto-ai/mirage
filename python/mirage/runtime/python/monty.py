@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import os
 import signal
@@ -29,6 +30,7 @@ from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.types import (EvalResult, EvalValue, RunArgs, RunResult,
                                   ScriptSource)
 from mirage.types import PathSpec
+from mirage.utils.errors import OperationNotSupportedError
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +76,35 @@ class _MirageOS(OSAccess):
     1s-I/O runs finish in ~2s at 64 workers versus ~8s at 14).
     """
 
-    def __init__(self, loop: asyncio.AbstractEventLoop,
-                 dispatch: Callable[..., Any] | None,
-                 environ: dict[str, str]) -> None:
+    def __init__(
+            self,
+            loop: asyncio.AbstractEventLoop,
+            dispatch: Callable[..., Any] | None,
+            environ: dict[str, str],
+            mount_prefixes: Callable[[], list[str]] | None = None) -> None:
         super().__init__([], environ=dict(environ))
         self._loop = loop
         self._workspace_dispatch = dispatch
+        self._mount_prefixes = mount_prefixes
         self._missing: set[str] = set()
+        self._no_append: set[str] = set()
+
+    def _mount_of(self, path: PurePosixPath) -> str | None:
+        """The mount prefix serving `path`, or None when none does.
+
+        Args:
+            path (PurePosixPath): the virtual path to place.
+        """
+        if self._mount_prefixes is None:
+            return None
+        virtual = str(path)
+        best: str | None = None
+        for prefix in self._mount_prefixes():
+            norm = prefix if prefix.endswith("/") else prefix + "/"
+            if virtual == norm.rstrip("/") or virtual.startswith(norm):
+                if best is None or len(norm) > len(best):
+                    best = norm
+        return best
 
     def _sync(self, coro):
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
@@ -129,13 +153,18 @@ class _MirageOS(OSAccess):
         self._missing.discard(str(path))
 
     def _append_remote(self, path: PurePosixPath, data: bytes) -> None:
-        """Send only the appended bytes, never the whole file.
+        """Send only the appended bytes when the mount can take them.
 
-        Monty hands an append hook the new text alone, so the mount's
-        own append op carries it. Flushing instead would re-send every
-        byte written so far, which turns a write loop quadratic: 200
-        appends of one short line shipped 164 KB to build a 1.7 KB
+        Monty hands an append hook the new text alone, so a mount with
+        its own append op carries just that. Flushing instead re-sends
+        every byte written so far, which turns a write loop quadratic:
+        200 appends of one short line shipped 164 KB to build a 1.7 KB
         file before this.
+
+        `append` is optional per backend (S3 registers `write` without
+        it), so a mount that declines falls back to the whole-file
+        flush and is remembered, keeping one failed dispatch per file
+        rather than one per append.
 
         Args:
             path (PurePosixPath): the file being appended to.
@@ -143,11 +172,19 @@ class _MirageOS(OSAccess):
         """
         if self._workspace_dispatch is None:
             return
-        self._sync(
-            self._workspace_dispatch("append",
-                                     PathSpec.from_str_path(str(path)),
-                                     data=data))
-        self._missing.discard(str(path))
+        mount = self._mount_of(path) or str(path)
+        if mount not in self._no_append:
+            try:
+                self._sync(
+                    self._workspace_dispatch("append",
+                                             PathSpec.from_str_path(str(path)),
+                                             data=data))
+            except OperationNotSupportedError:
+                self._no_append.add(mount)
+            else:
+                self._missing.discard(str(path))
+                return
+        self._flush(path)
 
     def _insert_tree_dir(self, path: PurePosixPath) -> dict[str, Any] | None:
         subtree = self._tree
@@ -254,15 +291,35 @@ class _MirageOS(OSAccess):
 
     def path_mkdir(self, path: PurePosixPath, parents: bool,
                    exist_ok: bool) -> None:
+        """Create a directory on the mount, keeping pathlib's flags.
+
+        `parents` rides through to the backend op, which takes it;
+        `exist_ok` is answered here, since the op has no such argument
+        and backends differ on whether creating an existing directory
+        raises at all.
+
+        Args:
+            path (PurePosixPath): the directory to create.
+            parents (bool): create missing ancestors too.
+            exist_ok (bool): stay quiet when it already exists.
+        """
         self._ensure_dir(path.parent)
-        if self._workspace_dispatch is not None:
-            self._sync(
-                self._workspace_dispatch("mkdir",
-                                         PathSpec.from_str_path(str(path))))
-            self._insert_tree_dir(path)
-            self._missing.discard(str(path))
+        if self._workspace_dispatch is None:
+            super().path_mkdir(path, parents, exist_ok)
             return
-        super().path_mkdir(path, parents, exist_ok)
+        exists = (self._get_entry(path) is not None
+                  or self._list_remote(str(path)) is not None)
+        if exists:
+            if exist_ok:
+                self._insert_tree_dir(path)
+                return
+            raise FileExistsError(f"[Errno 17] File exists: {str(path)!r}")
+        self._sync(
+            self._workspace_dispatch("mkdir",
+                                     PathSpec.from_str_path(str(path)),
+                                     parents=parents))
+        self._insert_tree_dir(path)
+        self._missing.discard(str(path))
 
     def path_rmdir(self, path: PurePosixPath) -> None:
         self._ensure_dir(path)
@@ -274,9 +331,31 @@ class _MirageOS(OSAccess):
         super().path_rmdir(path)
 
     def path_rename(self, path: PurePosixPath, target: PurePosixPath) -> None:
+        """Rename within one mount, refusing to cross mounts.
+
+        The dispatcher picks the mount from the source alone and hands
+        the destination to that same backend, which reads it against
+        its own keyspace: a cross-mount rename would drop the source
+        and write the target into the wrong store. POSIX already has
+        the answer for a rename across filesystems, and `shutil.move`
+        knows to fall back to copy-and-delete on it.
+
+        Args:
+            path (PurePosixPath): the source path.
+            target (PurePosixPath): the destination path.
+
+        Raises:
+            OSError: EXDEV when source and target live on different
+                mounts.
+        """
         self._ensure_file(path)
         self._ensure_dir(path)
         if self._workspace_dispatch is not None:
+            src_mount = self._mount_of(path)
+            dst_mount = self._mount_of(target)
+            if src_mount != dst_mount:
+                raise OSError(errno.EXDEV, "Invalid cross-device link",
+                              str(path), None, str(target))
             self._sync(
                 self._workspace_dispatch("rename",
                                          PathSpec.from_str_path(str(path)),
@@ -327,13 +406,16 @@ class MontyRuntime(Runtime, EvaluatorMixin):
                 "pip install mirage-ai[monty], or select the 'local' runtime")
         super().__init__(captures, config, script)
         self._workspace_dispatch: Callable[..., Any] | None = None
+        self._mount_prefixes: Callable[[], list[str]] | None = None
         self._eval_sessions: dict[str, Any] = {}
         self._pool: Any = None
+        self._pool_task: asyncio.Task[Any] | None = None
 
     def attach(self, dispatch: Callable[..., Any],
                mount_prefixes: Callable[[], list[str]]) -> None:
         if self._workspace_dispatch is None:
             self._workspace_dispatch = dispatch
+            self._mount_prefixes = mount_prefixes
 
     async def _ensure_pool(self) -> Any:
         """The runtime's worker pool, spawned on first use.
@@ -343,12 +425,25 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         rather than global. The pool spawns `min_processes` workers
         eagerly and reuses one across sequential checkouts, so an idle
         workspace costs a single worker.
+
+        Creation is cached as a task, not guarded by an `is None`
+        check: two commands reaching a cold runtime together would both
+        see no pool and both await `__aenter__`, and only the last
+        assignment stays reachable, so `close()` could not stop the
+        other pool's workers. Mirrors the TypeScript runtime's
+        `poolPromise`.
         """
-        if self._pool is None:
-            pool = pydantic_monty.AsyncMonty()
-            await pool.__aenter__()
-            self._pool = pool
+        if self._pool is not None:
+            return self._pool
+        if self._pool_task is None:
+            self._pool_task = asyncio.ensure_future(self._open_pool())
+        self._pool = await self._pool_task
         return self._pool
+
+    async def _open_pool(self) -> Any:
+        pool = pydantic_monty.AsyncMonty()
+        await pool.__aenter__()
+        return pool
 
     async def run(self, args: RunArgs) -> RunResult:
         # Execution lives in a monty worker subprocess (0.0.19 moved it
@@ -358,7 +453,8 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         # MontyCrashedError and the pool replaces it.
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
-        bridge = _MirageOS(loop, self._workspace_dispatch, args.env)
+        bridge = _MirageOS(loop, self._workspace_dispatch, args.env,
+                           self._mount_prefixes)
         pool = await self._ensure_pool()
         # argv[0] is the program's own name when the caller has one (a
         # CLI install's head word), else the interpreter's placeholder.
@@ -431,7 +527,8 @@ class MontyRuntime(Runtime, EvaluatorMixin):
         """
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
-        bridge = _MirageOS(loop, self._workspace_dispatch, {})
+        bridge = _MirageOS(loop, self._workspace_dispatch, {},
+                           self._mount_prefixes)
         pool = await self._ensure_pool()
         repl = self._eval_sessions.get(session) if session is not None \
             else None
@@ -457,6 +554,11 @@ class MontyRuntime(Runtime, EvaluatorMixin):
             _kill_worker(worker_pid)
             if session is not None:
                 self._eval_sessions.pop(session, None)
+            # The checkout was entered by hand, so dropping the session
+            # is not enough: without this the pool keeps a lease that
+            # close() can no longer reach, and repeated cancellations
+            # exhaust its capacity.
+            await _release(repl)
             raise
         except pydantic_monty.MontySyntaxError as exc:
             trace = exc.display(format="traceback")
@@ -486,11 +588,30 @@ class MontyRuntime(Runtime, EvaluatorMixin):
 
     async def close(self) -> None:
         for repl in self._eval_sessions.values():
-            await repl.__aexit__(None, None, None)
+            await _release(repl)
         self._eval_sessions.clear()
+        # A pool still being opened must be awaited before teardown, or
+        # its workers outlive the runtime that asked for them.
+        if self._pool is None and self._pool_task is not None:
+            self._pool = await self._pool_task
+        self._pool_task = None
         if self._pool is not None:
             await self._pool.__aexit__(None, None, None)
             self._pool = None
+
+
+async def _release(repl: Any) -> None:
+    """Hand a checked-out session back, even a poisoned one.
+
+    Args:
+        repl (Any): the checked-out monty session.
+    """
+    try:
+        await repl.__aexit__(None, None, None)
+    except Exception as exc:
+        # The worker is already gone in the cancel path; the lease
+        # still has to be returned, so note it and move on.
+        logger.debug("monty session release failed: %s", exc)
 
 
 def _kill_worker(pid: int | None) -> None:
