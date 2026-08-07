@@ -223,3 +223,21 @@ export const ShellBuiltin = Object.freeze({
 } as const)
 
 export type ShellBuiltin = (typeof ShellBuiltin)[keyof typeof ShellBuiltin]
+
+/**
+ * The structural shape of a tree-sitter syntax node, so consumers can
+ * walk a parsed line without depending on a concrete tree-sitter
+ * binding (web-tree-sitter here, tree_sitter in Python). Mirrors the
+ * Python side reading nodes through shell.types.
+ */
+export interface TSNodeLike {
+  type: string
+  text: string
+  children: TSNodeLike[]
+  namedChildren: TSNodeLike[]
+  parent?: TSNodeLike | null
+  isNamed?: boolean
+  isMissing?: boolean
+  startIndex?: number
+  endIndex?: number
+}

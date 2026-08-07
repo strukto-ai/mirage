@@ -19,8 +19,9 @@ import pytest
 from mirage import MountMode, RAMResource, Workspace
 from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import RunResult
 from mirage.types import Limit
 
 
@@ -113,11 +114,12 @@ async def test_stdin_bytes_reach_exec_line():
         await ws.close()
 
 
-@pytest.mark.asyncio
-async def test_run_raises_sandboxes_take_lines():
+def test_sandboxes_take_lines_not_stages():
+    # A sandbox is a line executor, never the engine inside one
+    # command: it carries the line door and no interpreter door.
     box = RecordingSandbox()
-    with pytest.raises(NotImplementedError, match="whole lines"):
-        await box.run(RunArgs(code="x", args=[], env={}, stdin=None, flags={}))
+    assert isinstance(box, LineExecutorMixin)
+    assert not hasattr(box, "run")
 
 
 def test_config_dict_form_coerces():

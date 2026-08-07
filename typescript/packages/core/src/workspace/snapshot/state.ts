@@ -22,7 +22,7 @@ import { z } from 'zod'
 
 import type { CLIInstall } from '../cli/types.ts'
 import { CLISpec } from '../../commands/cli/types.ts'
-import { ScriptSource } from '../executor/policy/types.ts'
+import { ScriptSource } from '../../runtime/policy/types.ts'
 
 /**
  * Per-name overrides for restoring installed CLIs: a plain mapping is a

@@ -24,8 +24,9 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { linkTargetStat, pathExists, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
-import { VfsRuntime, type Runtime } from '../runtime.ts'
-import type { PolicyDecision } from '../policy/index.ts'
+import type { Runtime } from '../../../runtime/base.ts'
+import { VFSRuntime } from '../../../runtime/table.ts'
+import type { PolicyDecision } from '../../../runtime/policy/index.ts'
 import type { Session } from '../../session/session.ts'
 import { LS_FAILURE } from '../../../commands/builtin/generic/ls.ts'
 import type { DispatchFn } from '../cross_mount.ts'
@@ -63,7 +64,7 @@ function admissionDenial(cmdName: string): IOResult {
  * Resolve a command against the line's routing decision. With no
  * decision, the static bindings apply. With one, the command's runtime
  * is looked up in the decision: its binding, or the decision's
- * fallback when no entry captures it. A resolved VfsRuntime means the
+ * fallback when no entry captures it. A resolved VFSRuntime means the
  * executor serves the command itself (the vfs runtime has no
  * interpreter door); null means no runtime accepted it: exit 126,
  * "no runtime accepted this line", like a shell refusing to exec.
@@ -75,7 +76,7 @@ function lineRuntimeFor(
   routingDecision: PolicyDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
-    const restricted = vfs instanceof VfsRuntime && vfs.restricted
+    const restricted = vfs instanceof VFSRuntime && vfs.restricted
     const runtime = runtimeBindings?.[cmdName]
     if (runtime !== undefined && runtime === vfs) return [undefined, null]
     if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
@@ -85,7 +86,7 @@ function lineRuntimeFor(
     ? routingDecision.bindings[cmdName]
     : routingDecision.fallback
   if (runtime === null || runtime === undefined) return [undefined, admissionDenial(cmdName)]
-  if (runtime instanceof VfsRuntime) return [undefined, null]
+  if (runtime instanceof VFSRuntime) return [undefined, null]
   return [runtime, null]
 }
 

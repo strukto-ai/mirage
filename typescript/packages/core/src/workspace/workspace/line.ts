@@ -19,8 +19,9 @@ import {
 } from '../../commands/builtin/utils/limit.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
-import type { Runtime } from '../executor/runtime.ts'
-import type { RunResult } from '../executor/runtime_types.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { LineExecutor } from '../../runtime/mixin.ts'
+import type { RunResult } from '../../runtime/types.ts'
 import { type Policies, postExecuteGate, resolveLimit } from '../../policy/index.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Session } from '../session/session.ts'
@@ -37,7 +38,7 @@ import { commandName } from './utils.ts'
  * anywhere in the runtime's view of the workspace.
  */
 export async function runWholeLine(
-  runtime: Runtime & { runLine: NonNullable<Runtime['runLine']> },
+  runtime: Runtime & LineExecutor,
   command: string,
   stdin: ByteSource | null,
   session: Session,

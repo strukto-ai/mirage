@@ -13,20 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Runtime, VfsRuntime } from './executor/runtime.ts'
-import { EVALUATOR, type Evaluator } from './executor/runtime_mixin.ts'
-import type { EvalResult } from './executor/runtime_types.ts'
-import { POLICY_EVAL_TIMEOUT, evaluatorOf, runtimeForLanguage } from './executor/policy/index.ts'
-import type { RunArgs, RunResult } from './executor/runtime_types.ts'
-import { MontyRuntime } from './executor/python/runtimes/monty.ts'
-import { QuickJsRuntime } from './executor/js/quickjs.ts'
+import { Runtime } from '../runtime/base.ts'
+import { LanguageRuntime } from '../runtime/language.ts'
+import { VFSRuntime } from '../runtime/table.ts'
+import {
+  EVALUATOR,
+  isLineExecutor,
+  LINE_EXECUTOR,
+  type Evaluator,
+  type LineExecutor,
+} from '../runtime/mixin.ts'
+import type { EvalResult } from '../runtime/types.ts'
+import { POLICY_EVAL_TIMEOUT, evaluatorOf, runtimeForLanguage } from '../runtime/policy/index.ts'
+import type { RunArgs, RunResult } from '../runtime/types.ts'
+import { MontyRuntime } from '../runtime/python/monty.ts'
+import { QuickJsRuntime } from '../runtime/js/quickjs.ts'
 import {
   DenyResult,
   parseVerdict,
   PolicyDeny,
   RouteResult,
   ScriptSource,
-} from './executor/policy/index.ts'
+} from '../runtime/policy/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -35,9 +43,9 @@ import { Workspace } from './workspace.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-class HangingEvaluator extends Runtime implements Evaluator {
+class HangingEvaluator extends LanguageRuntime implements Evaluator {
   readonly [EVALUATOR] = true as const
-  override readonly language = 'python'
+  readonly language = 'python'
   readonly name = 'hang-eval'
 
   constructor() {
@@ -53,9 +61,9 @@ class HangingEvaluator extends Runtime implements Evaluator {
   }
 }
 
-class NamedEvaluator extends Runtime implements Evaluator {
+class NamedEvaluator extends LanguageRuntime implements Evaluator {
   readonly [EVALUATOR] = true as const
-  override readonly language: 'python' | 'js'
+  readonly language: 'python' | 'js'
 
   constructor(
     readonly name: string,
@@ -80,7 +88,8 @@ class NamedEvaluator extends Runtime implements Evaluator {
   }
 }
 
-class NamedFakeRuntime extends Runtime {
+class NamedFakeRuntime extends LanguageRuntime {
+  readonly language = 'python'
   constructor(readonly name: string) {
     super({ captures: ['python3', 'python'] })
   }
@@ -216,7 +225,7 @@ describe('routing ladder', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new VfsRuntime({ script: (ctx) => !ctx.line.includes('/secret') })],
+        runtimes: [new VFSRuntime({ script: (ctx) => !ctx.line.includes('/secret') })],
       },
     )
     try {
@@ -323,10 +332,16 @@ describe('routing ladder', () => {
     const quickjs = new QuickJsRuntime()
     expect(runtimeForLanguage([monty, quickjs], 'python')).toBe(monty)
     expect(runtimeForLanguage([monty, quickjs], 'js')).toBe(quickjs)
-    // Captures do not count (the fake captures python3 but declares no
-    // language), and unlike evaluatorOf there is no any-language
+    // Captures do not count (the marker captures python3 but is no
+    // LanguageRuntime), and unlike evaluatorOf there is no any-language
     // fallback: a python program cannot run on a js engine.
-    expect(runtimeForLanguage([new NamedFakeRuntime('alpha')], 'python')).toBeNull()
+    class CapturingMarker extends Runtime {
+      readonly name = 'marker'
+      constructor() {
+        super({ captures: ['python3', 'python'] })
+      }
+    }
+    expect(runtimeForLanguage([new CapturingMarker()], 'python')).toBeNull()
     expect(runtimeForLanguage([quickjs], 'python')).toBeNull()
     expect(runtimeForLanguage([], 'js')).toBeNull()
   })
@@ -561,7 +576,7 @@ describe('vfs runtime overrides', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new NamedFakeRuntime('alpha'), new VfsRuntime({ captures: ['echo'] })],
+        runtimes: [new NamedFakeRuntime('alpha'), new VFSRuntime({ captures: ['echo'] })],
       },
     )
     try {
@@ -586,7 +601,7 @@ describe('vfs runtime overrides', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [alpha, new VfsRuntime({ captures: ['echo'] })],
+        runtimes: [alpha, new VFSRuntime({ captures: ['echo'] })],
       },
     )
     try {
@@ -625,7 +640,7 @@ describe('script context', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new NamedFakeRuntime('alpha'), new VfsRuntime({ captures: [] })],
+        runtimes: [new NamedFakeRuntime('alpha'), new VFSRuntime({ captures: [] })],
       },
     )
     try {
@@ -639,21 +654,17 @@ describe('script context', () => {
   })
 })
 
-class LineBox extends Runtime {
+class LineBox extends Runtime implements LineExecutor {
+  readonly [LINE_EXECUTOR] = true as const
   readonly name = 'sandbox'
   declare captures: readonly string[]
-  override readonly runsLines = true
   lines: [string, Uint8Array | null, string][] = []
 
   constructor() {
     super({ captures: ['nvidia-smi'] })
   }
 
-  run(_args: RunArgs): Promise<RunResult> {
-    return Promise.reject(new Error('runLine runtimes never get single stages'))
-  }
-
-  override runLine(
+  runLine(
     line: string,
     stdin: Uint8Array | null,
     _env: Record<string, string>,
@@ -737,15 +748,18 @@ describe('whole-line runtimes', () => {
     }
   })
 
-  it("the vfs runtime's runLine is the workspace executor", async () => {
+  it('the vfs entry is a pure routing marker', async () => {
+    // A vfs-resolved line runs on the workspace executor inline; the
+    // entry is a marker with no line door to call.
     const parser = await getTestParser()
-    const vfs = new VfsRuntime()
+    const vfs = new VFSRuntime()
     const ws = new Workspace(
       { '/': new RAMResource() },
       { mode: MountMode.EXEC, shellParser: parser, runtimes: ['pyodide', vfs] },
     )
     try {
-      const result = await vfs.runLine('echo through-vfs', null, {}, '/')
+      expect(isLineExecutor(vfs)).toBe(false)
+      const result = await ws.execute('echo through-vfs')
       expect(DEC.decode(result.stdout)).toBe('through-vfs\n')
       expect(result.exitCode).toBe(0)
     } finally {

@@ -12,22 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
-from mirage.io import IOResult
 from mirage.observe import OpRecord
 from mirage.types import PathSpec
-
-
-class DispatchFn(Protocol):
-    """The workspace op dispatch: run ``op`` against the mount owning
-    ``path`` and return its result with the accounting IOResult."""
-
-    def __call__(self, op: str, path: PathSpec,
-                 **kwargs: Any) -> Awaitable[tuple[Any, IOResult]]:
-        ...
 
 
 @dataclass

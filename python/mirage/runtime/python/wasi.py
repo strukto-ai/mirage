@@ -18,9 +18,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import Runtime
 from mirage.runtime.config import HomeConfig, RuntimeConfig
-from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.types import (DispatchFn, PrefixSource, RunArgs, RunResult,
+                                  ScriptSource)
 from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 wasmtime: Any
@@ -42,7 +43,7 @@ _BUILD_HINT = (
     "variable at the directory")
 
 
-class WasiRuntime(Runtime):
+class WasiRuntime(PythonRuntime):
     """Run Python code on a WASI CPython under wasmtime, in-process.
 
     Full CPython (classes, complete stdlib, real `sys`) inside a wasm
@@ -68,7 +69,6 @@ class WasiRuntime(Runtime):
 
     name = "wasi"
     captures = ("python3", "python")
-    language = "python"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig
@@ -95,12 +95,12 @@ class WasiRuntime(Runtime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
-        self._dispatch: Callable[..., Any] | None = None
-        self._mount_prefixes: Callable[[], list[str]] | None = None
+        self._dispatch: DispatchFn | None = None
+        self._mount_prefixes: PrefixSource | None = None
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
-    def attach(self, dispatch: Callable[..., Any],
-               mount_prefixes: Callable[[], list[str]]) -> None:
+    def attach(self, dispatch: DispatchFn,
+               mount_prefixes: PrefixSource) -> None:
         if self._dispatch is None:
             self._dispatch = dispatch
             self._mount_prefixes = mount_prefixes

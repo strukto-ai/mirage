@@ -35,9 +35,11 @@ import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
-import { runtimeForLanguage } from '../policy/decide.ts'
-import type { ScriptSource } from '../policy/types.ts'
-import { runOutput, type Runtime } from '../runtime.ts'
+import { runtimeForLanguage } from '../../../runtime/policy/decide.ts'
+import type { ScriptSource } from '../../../runtime/policy/types.ts'
+import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import type { Runtime } from '../../../runtime/base.ts'
+import { LanguageRuntime } from '../../../runtime/language.ts'
 import { optionError, parseFlags } from './flags.ts'
 
 // A textual rest operand is the spec's pass-through form: the parser
@@ -82,7 +84,7 @@ function selectRuntime(
   prog: string,
   leaf: CLISpec,
   entries: readonly Runtime[],
-): [Runtime | null, string | null] {
+): [LanguageRuntime | null, string | null] {
   const script = leaf.script
   if (script === null) {
     throw new Error(`selecting a runtime for '${prog}' without a script`)
@@ -93,7 +95,7 @@ function selectRuntime(
     if (pinned === null) {
       return [null, `${prog}: unknown runtime: '${leaf.runtime}' (workspace runtimes: ${known})`]
     }
-    if (pinned.language !== script.language) {
+    if (!(pinned instanceof LanguageRuntime) || pinned.language !== script.language) {
       return [null, `${prog}: runtime '${pinned.name}' does not run ${script.language} scripts`]
     }
     return [pinned, null]
@@ -122,7 +124,7 @@ function selectRuntime(
 async function scriptOutput(
   inv: CLIInvocation,
   script: ScriptSource,
-  runtime: Runtime,
+  runtime: LanguageRuntime,
   prog: string,
 ): Promise<[Uint8Array | null, IOResult]> {
   const env: Record<string, string> = { ...inv.env }

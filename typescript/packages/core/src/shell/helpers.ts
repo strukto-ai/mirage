@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { TSNodeLike } from '../workspace/expand/variable.ts'
+import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, Redirect, RedirectKind } from './types.ts'
 
 export function getText(node: TSNodeLike): string {

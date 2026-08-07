@@ -14,7 +14,7 @@
 
 from abc import ABC, abstractmethod
 
-from mirage.runtime.types import EvalResult, EvalValue
+from mirage.runtime.types import EvalResult, EvalValue, RunResult
 
 
 class EvaluatorMixin(ABC):
@@ -56,4 +56,33 @@ class EvaluatorMixin(ABC):
         Raises:
             EvalError: the program failed to parse, raised, or its
                 value could not be carried back.
+        """
+
+
+class LineExecutorMixin(ABC):
+    """The whole-line capability: a raw command line in, a result out.
+
+    A true mixin: no state, no constructor, one method. A Runtime that
+    also inherits this owns any line routed to it wholesale: pipes,
+    redirects, and every command in the line run inside the runtime's
+    world (its own cat, its own grep), the workspace shell never
+    splits the line. A line lands on it when the runtime captures one
+    of the line's commands or "*". Interpreter runtimes never inherit
+    it: they are the engine inside one command (python3, node), never
+    the line. The vfs runtime does not either: a line resolved to vfs
+    runs on the workspace executor inline, so there is no delegate to
+    call. Capability is detected by type (isinstance), never by
+    probing for a method or a flag.
+    """
+
+    @abstractmethod
+    async def run_line(self, line: str, stdin: bytes | None,
+                       env: dict[str, str], cwd: str) -> RunResult:
+        """Execute one raw command line wholesale.
+
+        Args:
+            line (str): the raw typed line.
+            stdin (bytes | None): bytes piped into the line.
+            env (dict[str, str]): the session environment.
+            cwd (str): the session working directory.
         """

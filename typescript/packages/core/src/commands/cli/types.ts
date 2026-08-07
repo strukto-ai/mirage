@@ -15,7 +15,7 @@
 import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec, ResourceName } from '../../types.ts'
 import type { MountRoot, StatPath } from '../../ops/types.ts'
-import type { ScriptSource } from '../../workspace/executor/policy/types.ts'
+import type { ScriptSource } from '../../runtime/policy/types.ts'
 import type { CommandDispatch, CommandFnResult } from '../config.ts'
 import { compileSpec } from '../spec/compile.ts'
 import type { ZodObject, ZodRawShape } from 'zod'

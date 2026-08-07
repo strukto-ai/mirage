@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { TSNodeLike } from '../workspace/expand/variable.ts'
+import type { TSNodeLike } from './types.ts'
 import {
   getCommandAssignments,
   getCommandName,

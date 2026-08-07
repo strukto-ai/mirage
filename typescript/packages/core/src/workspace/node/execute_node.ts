@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../executor/runtime.ts'
-import type { PolicyDecision } from '../executor/policy/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { PolicyDecision } from '../../runtime/policy/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -54,7 +54,8 @@ import {
 } from '../../shell/array.ts'
 import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
+import { arrayIndex } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { wordText } from '../../types.ts'
 import {
   type CforEval,

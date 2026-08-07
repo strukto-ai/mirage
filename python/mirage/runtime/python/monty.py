@@ -23,11 +23,12 @@ from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Any, Callable
 
-from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.types import (EvalResult, EvalValue, RunArgs, RunResult,
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue,
+                                  PrefixSource, RunArgs, RunResult,
                                   ScriptSource)
 from mirage.types import PathSpec
 from mirage.utils.errors import OperationNotSupportedError
@@ -387,7 +388,7 @@ class _MirageOS(OSAccess):
             self._missing.add(str(path))
 
 
-class MontyRuntime(Runtime, EvaluatorMixin):
+class MontyRuntime(PythonRuntime, EvaluatorMixin):
     """Run Python code on the Monty sandboxed interpreter.
 
     Code executes in Monty's Rust interpreter, inside a pooled worker
@@ -405,7 +406,6 @@ class MontyRuntime(Runtime, EvaluatorMixin):
 
     name = "monty"
     captures = ("python3", "python")
-    language = "python"
 
     def __init__(
             self,
@@ -417,14 +417,14 @@ class MontyRuntime(Runtime, EvaluatorMixin):
                 "the monty runtime requires the 'monty' extra. Install with: "
                 "pip install mirage-ai[monty], or select the 'local' runtime")
         super().__init__(captures, config, script)
-        self._workspace_dispatch: Callable[..., Any] | None = None
-        self._mount_prefixes: Callable[[], list[str]] | None = None
+        self._workspace_dispatch: DispatchFn | None = None
+        self._mount_prefixes: PrefixSource | None = None
         self._eval_sessions: dict[str, Any] = {}
         self._pool: Any = None
         self._pool_task: asyncio.Task[Any] | None = None
 
-    def attach(self, dispatch: Callable[..., Any],
-               mount_prefixes: Callable[[], list[str]]) -> None:
+    def attach(self, dispatch: DispatchFn,
+               mount_prefixes: PrefixSource) -> None:
         if self._workspace_dispatch is None:
             self._workspace_dispatch = dispatch
             self._mount_prefixes = mount_prefixes

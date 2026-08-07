@@ -19,9 +19,9 @@ import { Operand, Option } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { Limit } from '../../../types.ts'
 import type { CLIInstall } from '../../cli/types.ts'
-import { ScriptSource } from '../policy/types.ts'
-import { Runtime } from '../runtime.ts'
-import type { RunArgs, RunResult, RuntimeLanguage } from '../runtime_types.ts'
+import { ScriptSource } from '../../../runtime/policy/types.ts'
+import { LanguageRuntime } from '../../../runtime/language.ts'
+import type { RunArgs, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
 import { Session } from '../../session/session.ts'
 import { handleCli } from './cli.ts'
 
@@ -192,9 +192,9 @@ describe('handleCli', () => {
   })
 })
 
-class FakePyRuntime extends Runtime {
+class FakePyRuntime extends LanguageRuntime {
   readonly name: string = 'fakepy'
-  override readonly language: RuntimeLanguage | null = 'python'
+  readonly language: RuntimeLanguage = 'python'
   seen: RunArgs[] = []
   result: RunResult = { stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 }
 
@@ -210,7 +210,7 @@ class OtherPyRuntime extends FakePyRuntime {
 
 class FakeJsRuntime extends FakePyRuntime {
   override readonly name = 'fakejs'
-  override readonly language = 'js'
+  override readonly language: RuntimeLanguage = 'js'
 }
 
 class CrashingRuntime extends FakePyRuntime {

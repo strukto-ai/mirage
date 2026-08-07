@@ -22,6 +22,7 @@ from mirage.policy import MountRootPolicy, OutputCapPolicy, Policies
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
+from mirage.runtime.table import VFSRuntime
 from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
@@ -76,7 +77,7 @@ class MountRegistry:
         # The world's vfs runtime, set by Workspace after construction.
         # Catch-all when its captures are empty; explicit captures make
         # unclaimed commands an admission failure (126).
-        self.vfs_runtime: Runtime | None = None
+        self.vfs_runtime: VFSRuntime | None = None
         # The ordered runtime world, set by Workspace after
         # construction and refreshed on add(). The CLI script arm
         # selects an interpreter from it (a runtime: pin or the

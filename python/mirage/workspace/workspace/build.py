@@ -12,23 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from mirage.observe.store import ObserverStore
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import VfsRuntime, bind_commands
-from mirage.runtime.types import RunResult
+from mirage.runtime.table import VFSRuntime, bind_commands
+from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session import SessionStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
-from mirage.workspace.types import DispatchFn
 from mirage.workspace.workspace.policy import PolicyRouter
 from mirage.workspace.workspace.runtimes import Runtimes
-
-LineExecutor = Callable[[str, bytes | None, dict[str, str], str],
-                        Awaitable[RunResult]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,16 +79,14 @@ def resolve_control_stores(
 def wire_runtime_world(
         registry: MountRegistry, dispatch: DispatchFn,
         mount_prefixes: Callable[[], list[str]],
-        entries: list[Runtime | str] | None,
-        line_executor: LineExecutor) -> tuple[Runtimes, PolicyRouter]:
+        entries: list[Runtime | str] | None) -> tuple[Runtimes, PolicyRouter]:
     """Build the ordered runtime world and its policy router.
 
     Instances and the vfs marker; the first capturer binds each
     command. An explicit list fails loud per entry; the default world
     builds gracefully (a missing extra leaves the command reporting
     its install hint per invocation, never a silent escalation to
-    another runtime). The vfs runtime, when present, gets the
-    workspace executor as its ``run_line``.
+    another runtime).
 
     Args:
         registry (MountRegistry): mount table the bindings install on.
@@ -100,8 +94,6 @@ def wire_runtime_world(
         mount_prefixes (Callable[[], list[str]]): live prefix listing.
         entries (list[Runtime | str] | None): explicit runtime world;
             None builds the default.
-        line_executor (LineExecutor): the workspace executor bound as
-            the vfs runtime's run_line.
     """
     runtimes = Runtimes(registry, dispatch, mount_prefixes)
     runtimes.resolve(entries)
@@ -109,8 +101,6 @@ def wire_runtime_world(
     registry.runtime_bindings = bind_commands(runtimes.entries)
     registry.runtime_entries = runtimes.entries
     registry.vfs_runtime = next(
-        (entry for entry in runtimes.entries if isinstance(entry, VfsRuntime)),
+        (entry for entry in runtimes.entries if isinstance(entry, VFSRuntime)),
         None)
-    if isinstance(registry.vfs_runtime, VfsRuntime):
-        registry.vfs_runtime.bind_line_executor(line_executor)
     return runtimes, router

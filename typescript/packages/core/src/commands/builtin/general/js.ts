@@ -17,6 +17,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { handleJs } from '../../../workspace/executor/js/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveScript } from '../utils/operands.ts'
 
@@ -39,7 +40,7 @@ async function jsCommand(
     ]
   }
 
-  if (opts.runtime === undefined) {
+  if (!(opts.runtime instanceof LanguageRuntime)) {
     return [
       null,
       new IOResult({

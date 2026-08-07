@@ -17,12 +17,13 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.policy.types import PolicyScript
 from mirage.runtime.sandbox.config import SandboxConfig
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import RunResult
 
 
-class RemoteSandbox(Runtime):
+class RemoteSandbox(Runtime, LineExecutorMixin):
     """A runtime that runs whole lines inside a sandbox the user runs.
 
     Mirage never creates, provisions, or deletes sandboxes: you bring
@@ -32,14 +33,15 @@ class RemoteSandbox(Runtime):
     ``mirage workspace create`` in the image entrypoint or by hand)
     with mounts at the same prefixes as the host workspace, so the
     session cwd and every path in a line resolve unchanged. Mirage
-    only connects and execs lines. Subclasses adapt one provider by
-    implementing connect() and exec_line(); routing, captures, and
-    per-line scripts are inherited. Constructed like every runtime
-    (captures, config, script); config is how to reach the sandbox,
-    coerced through the provider's own config class.
+    only connects and execs lines: the whole-line door is
+    LineExecutorMixin's run_line, and there is no interpreter door.
+    Subclasses adapt one provider by implementing connect() and
+    exec_line(); routing, captures, and per-line scripts are
+    inherited. Constructed like every runtime (captures, config,
+    script); config is how to reach the sandbox, coerced through the
+    provider's own config class.
     """
 
-    runs_lines = True
     captures: tuple[str, ...] = ("*", )
     config_cls: ClassVar[type[SandboxConfig]] = SandboxConfig
     config: SandboxConfig
@@ -54,11 +56,6 @@ class RemoteSandbox(Runtime):
         # next line retries.
         self._connected = False
         self._connect_lock = asyncio.Lock()
-
-    async def run(self, args: RunArgs) -> RunResult:
-        raise NotImplementedError(
-            f"runtime {self.name!r} runs whole lines in a remote sandbox, "
-            f"not single interpreter stages")
 
     async def run_line(self, line: str, stdin: bytes | None,
                        env: dict[str, str], cwd: str) -> RunResult:

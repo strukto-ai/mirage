@@ -22,7 +22,7 @@ from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.spec.types import Operand, Option
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.runtime.base import Runtime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 from mirage.types import Limit
 from mirage.workspace.cli.types import CLIInstall
@@ -175,7 +175,7 @@ async def test_stdin_rides_the_invocation_record():
     assert "stdin" not in inv.flags
 
 
-class FakePyRuntime(Runtime):
+class FakePyRuntime(LanguageRuntime):
     name = "fakepy"
     language = "python"
 

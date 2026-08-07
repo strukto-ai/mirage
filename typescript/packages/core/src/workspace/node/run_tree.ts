@@ -18,7 +18,7 @@ import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import type { Session } from '../session/session.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecutionNode } from '../types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
 

@@ -20,7 +20,7 @@ import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 
 export type ExecuteNodeFn = (

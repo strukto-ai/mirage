@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parsedCommands, type PolicyDecision } from '../executor/policy/index.ts'
+import { parsedCommands, type PolicyDecision } from '../../runtime/policy/index.ts'
+import { scriptStringError, type Runtime, type RuntimeEntry } from '../../runtime/base.ts'
+import { LanguageRuntime } from '../../runtime/language.ts'
+import { isLineExecutor, type LineExecutor } from '../../runtime/mixin.ts'
 import {
   bindCommands,
+  buildRuntime,
   DEFAULT_ENTRIES,
-  scriptStringError,
-  VfsRuntime,
+  VFSRuntime,
   wholeLineRuntime,
-  type Runtime,
-  type RuntimeEntry,
-} from '../executor/runtime.ts'
-import { buildRuntime } from '../executor/runtime_table.ts'
-import type { BridgeDispatchFn } from '../executor/python/mirage_bridge.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+} from '../../runtime/table.ts'
+import type { BridgeDispatchFn } from '../../runtime/types.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 export interface RuntimesInit {
@@ -35,12 +35,6 @@ export interface RuntimesInit {
   pythonConfig: Record<string, unknown>
   bridge: () => BridgeDispatchFn
   visibleMounts: () => string[]
-  lineExecutor: (
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-  ) => Promise<{ stdout: Uint8Array; stderr: Uint8Array | null; exitCode: number }>
   registerCloser: (fn: () => Promise<void>) => void
 }
 
@@ -78,19 +72,17 @@ export class Runtimes {
       }
     }
     if (!this.entries.some((entry) => entry.name === 'vfs')) {
-      this.entries.push(new VfsRuntime())
+      this.entries.push(new VFSRuntime())
     }
-    init.registry.vfsRuntime = this.entries.find((entry) => entry instanceof VfsRuntime) ?? null
-    if (init.registry.vfsRuntime instanceof VfsRuntime) {
-      init.registry.vfsRuntime.bindLineExecutor(init.lineExecutor)
-    }
+    init.registry.vfsRuntime =
+      this.entries.find((entry): entry is VFSRuntime => entry instanceof VFSRuntime) ?? null
     // The live array: add() pushes into it, so the registry view never
     // goes stale (Python re-assigns per add instead).
     init.registry.runtimeEntries = this.entries
     for (const entry of this.entries) {
       if (typeof entry.script === 'string')
         throw scriptStringError(`runtime '${entry.name}' script`)
-      entry.attach(this.bridge(), this.visibleMounts)
+      if (entry instanceof LanguageRuntime) entry.attach(this.bridge(), this.visibleMounts)
       this.registerCloser(() => entry.close())
     }
     this.bindings = bindCommands(this.entries)
@@ -109,7 +101,7 @@ export class Runtimes {
     if (typeof entry.script === 'string') throw scriptStringError(`runtime '${entry.name}' script`)
     const candidate = [...this.entries, entry]
     const bindings = bindCommands(candidate)
-    entry.attach(this.bridge(), this.visibleMounts)
+    if (entry instanceof LanguageRuntime) entry.attach(this.bridge(), this.visibleMounts)
     this.registerCloser(() => entry.close())
     this.entries.push(entry)
     this.bindings = bindings
@@ -119,15 +111,16 @@ export class Runtimes {
   /**
    * The runtime taking this whole line, null for the executor.
    *
-   * A runtime with runsLines takes the raw line when the line's
+   * A runtime carrying LineExecutor takes the raw line when the line's
    * resolved bindings place one of its commands (or "*") on it;
    * everything else walks the executor's tree. The common world has no
    * such runtime, so this is a cheap scan.
    */
-  wholeLineFor(rootNode: TSNodeLike, decision: PolicyDecision | null): Runtime | null {
-    const candidates = this.entries.some(
-      (entry) => entry.runsLines && !(entry instanceof VfsRuntime),
-    )
+  wholeLineFor(
+    rootNode: TSNodeLike,
+    decision: PolicyDecision | null,
+  ): (Runtime & LineExecutor) | null {
+    const candidates = this.entries.some((entry) => isLineExecutor(entry))
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =
       decision !== null ? decision.bindings : this.bindings

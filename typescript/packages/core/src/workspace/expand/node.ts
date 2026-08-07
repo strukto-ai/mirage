@@ -22,7 +22,8 @@ import { shlexSplit } from '../../utils/shlex.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { ArithError } from '../../shell/errors.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
+import { expandBraces, lookupVar } from './variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 export type ExecuteFn = (
   command: string,

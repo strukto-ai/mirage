@@ -23,7 +23,8 @@ import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES, SPLIT_TYPES } from './constants.ts'
 import { expandNode, foldedWhitespace, unescapeUnquoted, type ExecuteFn } from './node.ts'
-import { expandArrayAt, isMultiwordAt, type TSNodeLike } from './variable.ts'
+import { expandArrayAt, isMultiwordAt } from './variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 // Brace-expand a concatenation or brace_expression into words. Literal
 // word tokens form the brace template; every other child (expansions,

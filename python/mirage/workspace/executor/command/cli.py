@@ -36,14 +36,15 @@ from mirage.io.types import ByteSource, CommandOutput
 from mirage.ops.types import MountRoot, StatPath
 from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.policy import runtime_for_language
-from mirage.runtime.types import RunArgs, ScriptSource
+from mirage.runtime.types import DispatchFn, RunArgs, ScriptSource
 from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
 from mirage.workspace.session import Session
-from mirage.workspace.types import DispatchFn, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 # A textual rest operand is the spec's pass-through form: the parser
 # reads undeclared dashed tokens as operands instead of refusing them
@@ -80,7 +81,7 @@ def parse_spec_for(leaf: CLISpec) -> tuple[CLISpec, bool]:
 
 def _select_runtime(
         prog: str, leaf: CLISpec,
-        entries: list[Runtime]) -> tuple[Runtime | None, str | None]:
+        entries: list[Runtime]) -> tuple[LanguageRuntime | None, str | None]:
     """Pick the workspace entry that runs a script leaf.
 
     A ``runtime:`` pin names the entry, and the entry must speak the
@@ -106,7 +107,8 @@ def _select_runtime(
         if pinned is None:
             return None, (f"{prog}: unknown runtime: {leaf.runtime!r} "
                           f"(workspace runtimes: {known})")
-        if pinned.language != script.language:
+        if (not isinstance(pinned, LanguageRuntime)
+                or pinned.language != script.language):
             return None, (f"{prog}: runtime {pinned.name!r} does not run "
                           f"{script.language} scripts")
         return pinned, None
@@ -119,7 +121,7 @@ def _select_runtime(
 
 
 async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
-                         runtime: Runtime, prog: str) -> CommandOutput:
+                         runtime: LanguageRuntime, prog: str) -> CommandOutput:
     """Render the invocation onto the selected runtime as one RunArgs.
 
     The script tier's whole contract, the one a native binary could

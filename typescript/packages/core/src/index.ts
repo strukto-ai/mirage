@@ -496,16 +496,20 @@ export {
   isCrossMount,
 } from './workspace/executor/cross_mount.ts'
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
+export { Runtime, type RuntimeEntry } from './runtime/base.ts'
+export { LanguageRuntime } from './runtime/language.ts'
+export { PythonRuntime } from './runtime/python/base.ts'
+export { JsRuntime } from './runtime/js/base.ts'
+export { bindCommands, DEFAULT_ENTRIES, runtimeBindingsFor, VFSRuntime } from './runtime/table.ts'
+export { EvalError } from './runtime/errors.ts'
 export {
-  bindCommands,
-  DEFAULT_ENTRIES,
-  Runtime,
-  runtimeBindingsFor,
-  VfsRuntime,
-  type RuntimeEntry,
-} from './workspace/executor/runtime.ts'
-export { EvalError } from './workspace/executor/runtime_errors.ts'
-export { EVALUATOR, isEvaluator, type Evaluator } from './workspace/executor/runtime_mixin.ts'
+  EVALUATOR,
+  isEvaluator,
+  LINE_EXECUTOR,
+  isLineExecutor,
+  type Evaluator,
+  type LineExecutor,
+} from './runtime/mixin.ts'
 export {
   type EvalResult,
   type EvalStatus,
@@ -513,7 +517,7 @@ export {
   type RunArgs,
   type RunResult,
   type RuntimeOptions,
-} from './workspace/executor/runtime_types.ts'
+} from './runtime/types.ts'
 export {
   parsedCommands,
   decideLine,
@@ -533,7 +537,7 @@ export {
   type PolicyFn,
   type PolicyScript,
   type PolicyVerdict,
-} from './workspace/executor/policy/index.ts'
+} from './runtime/policy/index.ts'
 export {
   MountRootPolicy,
   Policies,
@@ -553,19 +557,10 @@ export {
   type OpsResultContext,
   type Policy,
 } from './policy/index.ts'
-export {
-  buildRuntime,
-  candidates,
-  registerRuntime,
-  RUNTIMES,
-} from './workspace/executor/runtime_table.ts'
-export { RemoteSandbox } from './workspace/executor/sandbox/base.ts'
-export {
-  type NormalizedSandboxConfig,
-  type SandboxConfig,
-} from './workspace/executor/sandbox/config.ts'
-export { stdinPath, stdinRedirect } from './workspace/executor/sandbox/constants.ts'
-export type { JsRuntime } from './workspace/executor/js/interface.ts'
+export { buildRuntime, candidates, registerRuntime, RUNTIMES } from './runtime/table.ts'
+export { RemoteSandbox } from './runtime/sandbox/base.ts'
+export { type NormalizedSandboxConfig, type SandboxConfig } from './runtime/sandbox/config.ts'
+export { stdinPath, stdinRedirect } from './runtime/sandbox/constants.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
 export { handleRedirect } from './workspace/executor/redirect.ts'

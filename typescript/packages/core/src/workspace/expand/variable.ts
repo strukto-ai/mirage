@@ -24,7 +24,7 @@ import {
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
-import { NodeType as NT } from '../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -32,18 +32,6 @@ import { fnmatch } from '../../utils/fnmatch.ts'
 // $$ reports the host process id where one exists (Node); browsers have
 // no process, so a fixed positive placeholder keeps the expansion usable.
 const REALM_PID: number = (globalThis as { process?: { pid?: number } }).process?.pid ?? 1
-
-export interface TSNodeLike {
-  type: string
-  text: string
-  children: TSNodeLike[]
-  namedChildren: TSNodeLike[]
-  parent?: TSNodeLike | null
-  isNamed?: boolean
-  isMissing?: boolean
-  startIndex?: number
-  endIndex?: number
-}
 
 export type ExpandChild = (node: TSNodeLike) => Promise<string>
 
