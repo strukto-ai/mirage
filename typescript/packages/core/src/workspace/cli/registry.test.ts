@@ -132,6 +132,36 @@ describe('CLIRegistry zod config schemas', () => {
     ).toThrow(/unknown config keys: typo/)
   })
 
+  // The same snake_case YAML config block must serve the Python and TS
+  // sides alike (the resource registries already promise this); the
+  // pydantic arm is snake_case-native, so the zod arm normalizes.
+  it('accepts python-style snake_case keys for camelCase fields', () => {
+    const reg = new CLIRegistry()
+    const model = z.object({ imapHost: z.string(), imapPort: z.number().default(993) })
+    const install = reg.install('prog', tree(model), {
+      imap_host: 'mail.example.com',
+      imap_port: 143,
+    })
+    expect(install.config).toEqual({ imapHost: 'mail.example.com', imapPort: 143 })
+  })
+
+  it('reports an unknown key in the spelling the caller used', () => {
+    const reg = new CLIRegistry()
+    const model = z.object({ imapHost: z.string() })
+    expect(() => reg.install('prog', tree(model), { imap_host: 'x', imap_hostt: 'y' })).toThrow(
+      /unknown config keys: imap_hostt/,
+    )
+  })
+
+  it('keeps undeclared keys verbatim under a loose schema', () => {
+    const reg = new CLIRegistry()
+    const install = reg.install('prog', tree(z.looseObject({ imapHost: z.string() })), {
+      imap_host: 'x',
+      extra_key: 'y',
+    })
+    expect(install.config).toEqual({ imapHost: 'x', extra_key: 'y' })
+  })
+
   it('honors a loose schema that allows extra keys', () => {
     const reg = new CLIRegistry()
     const install = reg.install('prog', tree(z.looseObject({ token: z.string() })), {

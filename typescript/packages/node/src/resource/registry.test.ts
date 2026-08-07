@@ -20,6 +20,8 @@ import {
   OneDriveResource,
   ResourceName,
   resourceStateRequiresOverride,
+  tokenUrl,
+  type TokenManager,
 } from '@struktoai/mirage-core'
 import { normalizeS3Config } from './s3/config.ts'
 import { buildResource, knownResources, register } from './registry.ts'
@@ -41,6 +43,23 @@ describe('node resource registry', () => {
     expect(names).toContain('sharepoint')
     expect(names).toContain('mem0')
     expect(names).toEqual([...names].sort())
+  })
+
+  // The four Drive-family resources used to redeclare core's GoogleConfig
+  // without apiBase and hand-pick TokenManager fields, so a mount pointed
+  // at a fake server still refreshed its token at Google's real endpoint.
+  it('threads api_base into every google resource token manager', async () => {
+    const base = 'http://127.0.0.1:9999'
+    for (const name of ['gdrive', 'gdocs', 'gsheets', 'gslides', 'gmail']) {
+      const resource = await buildResource(name, {
+        client_id: 'id',
+        client_secret: 'secret',
+        refresh_token: 'refresh',
+        api_base: base,
+      })
+      const { accessor } = resource as unknown as { accessor: { tokenManager: TokenManager } }
+      expect(tokenUrl(accessor.tokenManager.config), name).toBe(`${base}/token`)
+    }
   })
 
   it('builds Microsoft Graph and Mem0 resources from snake_case config', async () => {

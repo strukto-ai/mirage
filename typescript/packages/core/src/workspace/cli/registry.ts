@@ -14,6 +14,7 @@
 
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
+import { snakeToCamel } from '../../utils/normalize.ts'
 import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../route/constants.ts'
 import { z } from 'zod'
 
@@ -92,17 +93,29 @@ export class CLIRegistry {
     }
     const model = spec.configModel
     if (model instanceof z.ZodObject) {
+      // The same snake_case YAML config block serves Python and TS alike
+      // (the resource registries already promise this), and the pydantic
+      // arm is snake_case-native, so a key that camelizes onto a declared
+      // field is delivered there. Keys that resolve to no field keep the
+      // caller's spelling: an unknown key is then reported as typed, and
+      // a loose schema's passthrough data stays verbatim like pydantic
+      // extra="allow".
+      const norm: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(config ?? {})) {
+        const camel = snakeToCamel(key)
+        norm[camel in model.shape ? camel : key] = value
+      }
       // Unknown keys fail loud (a typo'd YAML key must not be silently
       // ignored), mirroring the Python pydantic arm; a schema that
       // declares its own extra-key policy (strict/passthrough/catchall)
       // enforces it through parse instead, like pydantic extra="allow".
       if (model.def.catchall === undefined) {
-        const unknown = Object.keys(config ?? {}).filter((k) => !(k in model.shape))
+        const unknown = Object.keys(norm).filter((k) => !(k in model.shape))
         if (unknown.length > 0) {
           throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
         }
       }
-      return model.parse(config ?? {})
+      return model.parse(norm)
     }
     const result = model(config ?? {})
     // The snapshot stores the normalized config and replays it through

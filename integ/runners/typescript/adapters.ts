@@ -118,44 +118,6 @@ const DATABRICKS_ENDPOINT = process.env.DATABRICKS_ENDPOINT
 const NEXTCLOUD_URL = process.env.NEXTCLOUD_URL
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME ?? 'admin'
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD ?? 'admin123'
-const GOOGLE_API_HOSTS = new Set([
-  'oauth2.googleapis.com',
-  'www.googleapis.com',
-  'docs.googleapis.com',
-  'slides.googleapis.com',
-  'sheets.googleapis.com',
-  'gmail.googleapis.com',
-])
-
-type FetchInput = Parameters<typeof globalThis.fetch>[0]
-type FetchInit = Parameters<typeof globalThis.fetch>[1]
-
-let realFetch: typeof globalThis.fetch | null = null
-let fakeGoogleBase = ''
-
-function redirectGoogleUrl(input: FetchInput): FetchInput {
-  if (typeof input !== 'string' && !(input instanceof URL)) return input
-  const raw = input instanceof URL ? input.href : input
-  if (!raw.startsWith('http://') && !raw.startsWith('https://')) return input
-  const url = new URL(raw)
-  if (GOOGLE_API_HOSTS.has(url.hostname)) {
-    return `${fakeGoogleBase}${url.pathname}${url.search}`
-  }
-  return input
-}
-
-function fakeGoogleFetch(input: FetchInput, init?: FetchInit): Promise<Response> {
-  if (realFetch === null) throw new Error('fake Google fetch is not installed')
-  return realFetch(redirectGoogleUrl(input), init)
-}
-
-function useFakeGoogleEndpoints(base: string): void {
-  fakeGoogleBase = base
-  if (realFetch !== null) return
-  realFetch = globalThis.fetch
-  globalThis.fetch = fakeGoogleFetch
-}
-
 function runId(): string {
   return `${String(process.pid)}-${String(Date.now())}`
 }
@@ -459,14 +421,16 @@ async function openEmail(target: Target): Promise<Open> {
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('himalaya') === true) {
+    // The same snake_case block the Python runner installs; the CLI
+    // registry normalizes it, so one YAML config serves both hosts.
     ws.registerCli('himalaya', HIMALAYA, {
-      imapHost: host,
-      imapPort: EMAIL_IMAP_PORT,
-      smtpHost: host,
-      smtpPort: EMAIL_SMTP_PORT,
+      imap_host: host,
+      imap_port: EMAIL_IMAP_PORT,
+      smtp_host: host,
+      smtp_port: EMAIL_SMTP_PORT,
       username: EMAIL_USERNAME,
       password: EMAIL_PASSWORD,
-      useSsl: false,
+      use_ssl: false,
     })
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
@@ -1206,8 +1170,11 @@ async function seedGwsMail(base: string, entries: MailEntry[]): Promise<void> {
 
 function gwsNativeResource(
   resource: string,
+  base: string,
 ): GDocsResource | GSheetsResource | GSlidesResource | GmailResource {
-  const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ' }
+  // apiBase points the backend at the fake server through the same
+  // config field a real embedder uses; nothing is monkey-patched.
+  const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
   if (resource === 'gdocs') return new GDocsResource(config)
   if (resource === 'gsheets') return new GSheetsResource(config)
   if (resource === 'gmail') return new GmailResource(config)
@@ -1218,7 +1185,6 @@ async function openGws(target: Target): Promise<Open> {
   let base = process.env.GWS_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('gdrive target requires GWS_URL')
-  useFakeGoogleEndpoints(base)
   // Native mounts (gdocs/gsheets/gslides) render the modified date into
   // filenames, so those targets pin the server clock.
   await gwsJson(`${base}/reset`, {
@@ -1238,7 +1204,7 @@ async function openGws(target: Target): Promise<Open> {
       continue
     }
     if (m.resource !== 'gdrive') {
-      mounts[m.path] = gwsNativeResource(m.resource)
+      mounts[m.path] = gwsNativeResource(m.resource, base)
       continue
     }
     // A mount may live inside a Shared Drive: the drive is created once
@@ -1260,6 +1226,7 @@ async function openGws(target: Target): Promise<Open> {
       clientId: 'integ',
       clientSecret: 'integ',
       refreshToken: 'integ',
+      apiBase: base,
       folderId: parent,
     })
     folderIds[m.path] = parent
@@ -1276,12 +1243,15 @@ async function openGws(target: Target): Promise<Open> {
   if (target.clis?.includes('gws') === true) {
     // A target may scope the gws install to one mount's folder, the
     // configuration where the CLI and the mount are the same folder.
+    // The block is the same snake_case mapping the Python runner
+    // installs, pinning that one config serves both hosts.
     const scope = target.cli_scope
     ws.registerCli('gws', GWS, {
-      clientId: 'integ',
-      clientSecret: 'integ',
-      refreshToken: 'integ',
-      ...(scope !== undefined ? { folderId: folderIds[scope] } : {}),
+      client_id: 'integ',
+      client_secret: 'integ',
+      refresh_token: 'integ',
+      api_base: base,
+      ...(scope !== undefined ? { folder_id: folderIds[scope] } : {}),
     })
   }
   const cleanup = async (): Promise<void> => {

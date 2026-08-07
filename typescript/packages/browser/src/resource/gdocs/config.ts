@@ -12,37 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-
-export interface GDocsConfig {
-  clientId: string
-  clientSecret?: string
-  refreshToken: string
-  refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-}
-
-export interface GDocsConfigRedacted {
-  clientId: string
-  clientSecret?: '<REDACTED>'
-  refreshToken: '<REDACTED>'
-}
-
-const GDocsConfigSchema = z.object({
-  clientId: z.string(),
-  clientSecret: secretStr().optional(),
-  refreshToken: secretStr(),
-})
-
-export function redactGDocsConfig(config: GDocsConfig): GDocsConfigRedacted {
-  return redactConfigWithSchema(GDocsConfigSchema, config) as unknown as GDocsConfigRedacted
-}
-
-export function normalizeGDocsConfig(input: Record<string, unknown>): GDocsConfig {
-  return normalizeFields(input, {
-    rename: {
-      client_id: 'clientId',
-      client_secret: 'clientSecret',
-      refresh_token: 'refreshToken',
-    },
-  }) as unknown as GDocsConfig
-}
+export {
+  normalizeGoogleConfig as normalizeGDocsConfig,
+  redactGoogleConfig as redactGDocsConfig,
+  type GoogleConfig as GDocsConfig,
+  type GoogleConfigRedacted as GDocsConfigRedacted,
+} from '@struktoai/mirage-core'

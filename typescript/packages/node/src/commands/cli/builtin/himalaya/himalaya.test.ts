@@ -431,6 +431,26 @@ describe('himalaya dispatch', () => {
     await ws.close()
   })
 
+  // The email resource normalizes snake_case; the CLI install used to
+  // validate the raw keys against the camelCase schema and reject the
+  // very same config block ("unknown config keys: imap_host, ...").
+  it('installs from the same snake_case config block the Python side uses', async () => {
+    const ws = new Workspace({})
+    ws.registerCli('himalaya', HIMALAYA, {
+      imap_host: 'h',
+      imap_port: 993,
+      smtp_host: 'h',
+      smtp_port: 587,
+      username: 'me@example.com',
+      password: 'p',
+      use_ssl: true,
+    })
+    const io = await ws.execute('himalaya message compose --to a@b.com --subject Hi --body yo')
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(io.stdout)).toContain('To: a@b.com')
+    await ws.close()
+  })
+
   it('reports an upstream verb mirage lacks with git wording', async () => {
     const ws = new Workspace({})
     ws.registerCli('himalaya', HIMALAYA, {
