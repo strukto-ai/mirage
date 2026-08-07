@@ -181,8 +181,8 @@ MONTY_ROWS = (
         setup=("echo -n x > /data/gone.txt", ),
         checks=(("ls /data", "!gone.txt"), )),
     Row("rmdir",
-        "Path.rmdir",
-        "python3 -c \"from pathlib import Path; Path('/data/hollow').rmdir()\"",
+        "Path.rmdir", "python3 -c \"from pathlib import Path; "
+        "Path('/data/hollow').rmdir()\"",
         setup=("mkdir /data/hollow", ),
         checks=(("ls /data", "!hollow"), )),
     Row("rename",
