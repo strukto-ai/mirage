@@ -337,8 +337,12 @@ export class PyodideRuntime extends Runtime implements Evaluator {
     if (this.bridge === null) return
     for (const prefix of this.bridge.prefixes()) {
       if (this.preloadedPrefixes.has(prefix)) continue
-      this.preloadedPrefixes.add(prefix)
+      // Record only after success: preloadInto's one throw path is the
+      // top-level LIST (per-entry failures warn and continue), so a
+      // transient failure surfaces loudly and retries on the next run
+      // instead of poisoning the prefix for the runtime's lifetime.
       await preloadInto(pyodide.FS, this.bridge, prefix)
+      this.preloadedPrefixes.add(prefix)
     }
   }
 

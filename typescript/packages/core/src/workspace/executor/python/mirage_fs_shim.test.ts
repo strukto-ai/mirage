@@ -28,6 +28,14 @@ interface Call {
   bytes?: Uint8Array
 }
 
+// The runtime's post-run drain: close() only marks paths dirty, the
+// flush happens host-side where awaiting the bridge needs no JSPI.
+async function drain(py: PyodideInterface, bridge: MirageBridge): Promise<void> {
+  for (const path of bridge.takeDirty()) {
+    await bridge.flush(path, py.FS.readFile(path) as Uint8Array)
+  }
+}
+
 describe('mirage_fs_shim', () => {
   let py: PyodideInterface
   let bridge: MirageBridge
@@ -41,14 +49,6 @@ describe('mirage_fs_shim', () => {
   function preload(path: string, bytes: Uint8Array): void {
     preloaded.set(path, bytes)
     py.FS.writeFile(path, bytes)
-  }
-
-  // The runtime's post-run drain: close() only marks paths dirty, the
-  // flush happens host-side where awaiting the bridge needs no JSPI.
-  async function drain(): Promise<void> {
-    for (const path of bridge.takeDirty()) {
-      await bridge.flush(path, py.FS.readFile(path) as Uint8Array)
-    }
   }
 
   function seedLazyFile(path: string, bytes: Uint8Array): void {
@@ -99,7 +99,7 @@ describe('mirage_fs_shim', () => {
 with open('/ram/hello.txt', 'wb') as f:
     f.write(b'world')
 `)
-    await drain()
+    await drain(py, bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -114,7 +114,7 @@ with open('/ram/hello.txt', 'wb') as f:
 with open('/tmp/x.txt', 'wb') as f:
     f.write(b'unbridged')
 `)
-    await drain()
+    await drain(py, bridge)
     expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
   })
 
@@ -124,7 +124,7 @@ with open('/tmp/x.txt', 'wb') as f:
 with open('/ram/x.txt', 'w') as f:
     f.write('hello')
 `)
-    await drain()
+    await drain(py, bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -140,7 +140,7 @@ with open('/ram/x.txt', 'w') as f:
 with open('/ram/log.txt', 'ab') as f:
     f.write(b'b')
 `)
-    await drain()
+    await drain(py, bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -156,7 +156,7 @@ with open('/ram/log.txt', 'ab') as f:
 with open('/ram/x.txt', 'wb') as f:
     f.write(b'nope')
 `)
-    await drain()
+    await drain(py, bridge)
     expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
   })
 
@@ -195,7 +195,7 @@ f.close()
       opened = false
     }
     void opened
-    await drain()
+    await drain(py, bridge)
     expect(calls.filter((c) => c.op === 'WRITE' && c.path === '/ram/../etc/x')).toHaveLength(0)
     expect(calls.filter((c) => c.op === 'WRITE' && c.path === '/etc/x')).toHaveLength(0)
   })
@@ -207,7 +207,7 @@ for i in range(5):
     with open('/ram/loop.txt', 'ab') as f:
         f.write(b'x')
 `)
-    await drain()
+    await drain(py, bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -224,7 +224,7 @@ with open('/ram/data.bin', 'r+b') as f:
     f.seek(2)
     f.write(b'\\x99\\x99')
 `)
-    await drain()
+    await drain(py, bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -240,7 +240,7 @@ with open('/ram/data.bin', 'r+b') as f:
 with open('/ram/x', 'wb') as f:
     f.write(b'y')
 `)
-    await drain()
+    await drain(py, bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
