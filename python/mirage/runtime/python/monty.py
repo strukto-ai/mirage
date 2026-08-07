@@ -405,7 +405,6 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     """
 
     name = "monty"
-    captures = ("python3", "python")
 
     def __init__(
             self,

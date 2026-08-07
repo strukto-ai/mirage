@@ -162,13 +162,12 @@ const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
 export class QuickJsRuntime extends JsRuntime implements Evaluator {
   readonly name = QUICKJS_RUNTIME
   readonly [EVALUATOR] = true as const
-  static readonly commands: readonly string[] = ['node', 'js'] as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: () => string[] = () => []
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, QuickJsRuntime.commands, QUICKJS_CONFIG_KEYS)
+    super(options, QUICKJS_CONFIG_KEYS)
   }
 
   override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {

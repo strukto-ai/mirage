@@ -22,9 +22,11 @@ class PythonRuntime(LanguageRuntime):
     """The python tier: every runtime that interprets Python source.
 
     Groups the engines behind the python3/python commands (monty,
-    wasi, local here; pyodide in TypeScript), so ``language`` is
-    declared once and python-tier behavior has one home. A new Python
-    engine subclasses this, not LanguageRuntime.
+    wasi, local here; pyodide in TypeScript), so ``language`` and the
+    default ``captures`` are declared once and python-tier behavior
+    has one home. A new Python engine subclasses this, not
+    LanguageRuntime.
     """
 
     language: ClassVar[Language] = "python"
+    captures = ("python3", "python")

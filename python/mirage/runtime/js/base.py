@@ -22,8 +22,10 @@ class JsRuntime(LanguageRuntime):
     """The js tier: every runtime that interprets JavaScript source.
 
     Groups the engines behind the node/js commands (quickjs today), so
-    ``language`` is declared once and js-tier behavior has one home. A
-    new JavaScript engine subclasses this, not LanguageRuntime.
+    ``language`` and the default ``captures`` are declared once and
+    js-tier behavior has one home. A new JavaScript engine subclasses
+    this, not LanguageRuntime.
     """
 
     language: ClassVar[Language] = "js"
+    captures = ("node", "js")

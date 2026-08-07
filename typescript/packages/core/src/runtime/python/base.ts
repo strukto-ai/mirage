@@ -13,16 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LanguageRuntime } from '../language.ts'
-import type { RuntimeLanguage } from '../types.ts'
+import type { RuntimeLanguage, RuntimeOptions } from '../types.ts'
 
 /**
  * The python tier: every runtime that interprets Python source.
  *
  * Groups the engines behind the python3/python commands (pyodide,
  * monty here; wasi, local in Python and @struktoai/mirage-node), so
- * `language` is declared once and python-tier behavior has one home.
- * A new Python engine subclasses this, not LanguageRuntime.
+ * `language` and the default captures are declared once and
+ * python-tier behavior has one home. A new Python engine subclasses
+ * this, not LanguageRuntime.
  */
 export abstract class PythonRuntime extends LanguageRuntime {
   readonly language: RuntimeLanguage = 'python'
+  /** The tier's head words: the class-default captures of every python engine. */
+  static readonly commands: readonly string[] = ['python3', 'python'] as const
+
+  constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
+    super(options, PythonRuntime.commands, configKeys)
+  }
 }

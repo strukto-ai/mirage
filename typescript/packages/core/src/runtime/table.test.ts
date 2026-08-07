@@ -41,6 +41,15 @@ describe('runtime table', () => {
     expect(candidates('grep')).toEqual([])
   })
 
+  it('captures default is declared once per tier', () => {
+    // The head words are a language fact like `language` itself: the
+    // tier declares them, engines inherit, an instance still overrides.
+    expect([...new MontyRuntime().captures]).toEqual(['python3', 'python'])
+    expect([...new PyodideRuntime().captures]).toEqual(['python3', 'python'])
+    expect([...new QuickJsRuntime().captures]).toEqual(['node', 'js'])
+    expect([...new MontyRuntime({ captures: ['only'] }).captures]).toEqual(['only'])
+  })
+
   it('default entries end with the vfs runtime', () => {
     expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('vfs')
   })

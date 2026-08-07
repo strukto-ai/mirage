@@ -52,6 +52,17 @@ def test_language_is_declared_once_per_tier():
     assert QuickJsRuntime.language == "js"
 
 
+def test_captures_default_is_declared_once_per_tier():
+    # The head words are a language fact like `language` itself: the
+    # tier declares them, engines inherit, and a class (EchoRuntime
+    # above) or an instance can still override.
+    for cls in (MontyRuntime, WasiRuntime, LocalRuntime):
+        assert cls.captures == ("python3", "python")
+    assert QuickJsRuntime.captures == ("node", "js")
+    assert EchoRuntime.captures == ("echo-run", )
+    assert EchoRuntime(captures=("only", )).captures == ("only", )
+
+
 def test_tiers_are_language_runtimes():
     assert issubclass(PythonRuntime, LanguageRuntime)
     assert issubclass(JsRuntime, LanguageRuntime)

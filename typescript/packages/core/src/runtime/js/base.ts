@@ -13,15 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LanguageRuntime } from '../language.ts'
-import type { RuntimeLanguage } from '../types.ts'
+import type { RuntimeLanguage, RuntimeOptions } from '../types.ts'
 
 /**
  * The js tier: every runtime that interprets JavaScript source.
  *
  * Groups the engines behind the node/js commands (quickjs today), so
- * `language` is declared once and js-tier behavior has one home. A
- * new JavaScript engine subclasses this, not LanguageRuntime.
+ * `language` and the default captures are declared once and js-tier
+ * behavior has one home. A new JavaScript engine subclasses this, not
+ * LanguageRuntime.
  */
 export abstract class JsRuntime extends LanguageRuntime {
   readonly language: RuntimeLanguage = 'js'
+  /** The tier's head words: the class-default captures of every js engine. */
+  static readonly commands: readonly string[] = ['node', 'js'] as const
+
+  constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
+    super(options, JsRuntime.commands, configKeys)
+  }
 }

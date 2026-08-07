@@ -40,7 +40,6 @@ class LocalRuntime(PythonRuntime):
     """
 
     name = "local"
-    captures = ("python3", "python")
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig

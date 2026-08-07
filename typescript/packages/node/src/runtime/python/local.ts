@@ -37,12 +37,11 @@ const LOCAL_CONFIG_KEYS: readonly string[] = ['home']
  */
 export class LocalRuntime extends PythonRuntime {
   readonly name = 'local'
-  static readonly commands: readonly string[] = ['python3', 'python'] as const
   private readonly python: string
   private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, LocalRuntime.commands, LOCAL_CONFIG_KEYS)
+    super(options, LOCAL_CONFIG_KEYS)
     const home = (this.config as { home?: string }).home
     const chosen = home !== undefined && home !== '' ? home : process.env[LOCAL_HOME_ENV]
     this.python = chosen !== undefined && chosen !== '' ? chosen : 'python3'

@@ -130,7 +130,6 @@ function toEvalValue(value: unknown): EvalValue {
 export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = MONTY_RUNTIME
   readonly [EVALUATOR] = true as const
-  static readonly commands: readonly string[] = ['python3', 'python'] as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: () => string[] = () => []
   private module: MontyModuleLike | null = null
@@ -139,7 +138,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   private readonly evalSessions = new Map<string, MontySessionLike>()
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, MontyRuntime.commands, [])
+    super(options)
   }
 
   override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {

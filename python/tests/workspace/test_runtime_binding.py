@@ -112,7 +112,6 @@ def test_config_vfs_entry_takes_no_options():
 
 class AlphaRuntime(PythonRuntime):
     name = "alpha"
-    captures = ("python3", "python")
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=b"ran-alpha\n", stderr=None, exit_code=0)
@@ -120,7 +119,6 @@ class AlphaRuntime(PythonRuntime):
 
 class BetaRuntime(PythonRuntime):
     name = "beta"
-    captures = ("python3", "python")
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=b"ran-beta\n", stderr=None, exit_code=0)

@@ -128,7 +128,6 @@ const EVAL_INTERRUPT_SECONDS = 10
 export class PyodideRuntime extends PythonRuntime implements Evaluator {
   readonly name = PYODIDE_RUNTIME
   readonly [EVALUATOR] = true as const
-  static readonly commands: readonly string[] = ['python3', 'python'] as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
   private bootstrapPromise: Promise<void> | null = null
@@ -148,7 +147,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private interrupterTried = false
 
   constructor(options: RuntimeOptions<PyodideConfig> = {}) {
-    super(options, PyodideRuntime.commands, PYODIDE_CONFIG_KEYS)
+    super(options, PYODIDE_CONFIG_KEYS)
     const config = this.config as PyodideConfig
     this.autoLoadFromImports = config.autoLoadFromImports ?? true
     this.bootstrapCode = config.bootstrapCode ?? null
