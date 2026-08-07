@@ -336,9 +336,12 @@ class _MirageOS(OSAccess):
         The dispatcher picks the mount from the source alone and hands
         the destination to that same backend, which reads it against
         its own keyspace: a cross-mount rename would drop the source
-        and write the target into the wrong store. POSIX already has
-        the answer for a rename across filesystems, and `shutil.move`
-        knows to fall back to copy-and-delete on it.
+        and write the target into the wrong store. EXDEV is what POSIX
+        answers for a rename across filesystems, so the failure is the
+        familiar one and the copy-and-delete workaround is the known
+        one. Monty ships no `shutil`, so its own code has to write that
+        fallback by hand; the runtimes with a real stdlib get it from
+        `shutil.move`, which retries on exactly this errno.
 
         Args:
             path (PurePosixPath): the source path.
