@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Runtime } from './base.ts'
-import type { BridgeDispatchFn, PrefixSource, RunArgs, RunResult, RuntimeLanguage } from './types.ts'
+import type {
+  BridgeDispatchFn,
+  PrefixSource,
+  RunArgs,
+  RunResult,
+  RuntimeLanguage,
+} from './types.ts'
 
 /**
  * A runtime that interprets one language's code inside a command.
