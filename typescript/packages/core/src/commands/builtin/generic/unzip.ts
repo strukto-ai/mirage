@@ -33,6 +33,17 @@ interface ZipEntry {
 // Info-ZIP's wording and spacing, verbatim (two spaces after the colon).
 const CAUTION_PREFIX = 'caution: filename not matched:  '
 
+// Info-ZIP matches filespecs against the encoded name, so `?` stands for
+// one byte, not one code point: `?.txt` misses `é.txt` and `??.txt` hits
+// it. Both sides are flattened to one UTF-16 unit per byte so the regex
+// counts bytes.
+function byteString(s: string): string {
+  const bytes = ENC.encode(s)
+  let out = ''
+  for (const b of bytes) out += String.fromCharCode(b)
+  return out
+}
+
 function memberRegex(pattern: string): RegExp {
   let out = '^'
   let i = 0
@@ -80,11 +91,12 @@ interface MemberSelection {
 // reports "filename not matched" even when its file was printed.
 function selectEntries(entries: ZipEntry[], members: readonly string[]): MemberSelection {
   if (members.length === 0) return { selected: entries, unmatched: [] }
-  const regexes = members.map(memberRegex)
+  const regexes = members.map((m) => memberRegex(byteString(m)))
   const hit = members.map(() => false)
   const selected: ZipEntry[] = []
   for (const e of entries) {
-    const idx = regexes.findIndex((r) => r.test(e.name))
+    const name = byteString(e.name)
+    const idx = regexes.findIndex((r) => r.test(name))
     if (idx === -1) continue
     hit[idx] = true
     selected.push(e)

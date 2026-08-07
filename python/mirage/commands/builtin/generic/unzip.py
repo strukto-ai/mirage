@@ -21,7 +21,7 @@ def _resolve_dest(d: str | PathSpec | None, mount_prefix: str) -> str:
     return dest_raw
 
 
-def _spec_index(name: str, members: tuple[str, ...]) -> int | None:
+def _spec_index(name: bytes, members: tuple[bytes, ...]) -> int | None:
     for i, member in enumerate(members):
         if fnmatch.fnmatchcase(name, member):
             return i
@@ -33,13 +33,17 @@ def _select(
         members: tuple[str, ...]) -> tuple[list[zipfile.ZipInfo], list[str]]:
     if not members:
         return infos, []
+    # Info-ZIP matches filespecs against the encoded name, so `?` stands
+    # for one byte, not one code point: `?.txt` misses `é.txt` and
+    # `??.txt` hits it.
+    encoded = tuple(member.encode() for member in members)
     # Info-ZIP walks the archive in order and charges each entry to the
     # first filespec that matches it, so a spec shadowed by an earlier
     # one reports "filename not matched" even when its file was printed.
     hit = [False] * len(members)
     selected: list[zipfile.ZipInfo] = []
     for info in infos:
-        idx = _spec_index(info.filename, members)
+        idx = _spec_index(info.filename.encode(), encoded)
         if idx is None:
             continue
         hit[idx] = True
@@ -89,7 +93,7 @@ async def unzip(
                     if info.is_dir():
                         continue
                     try:
-                        zf.read(info.filename)
+                        zf.read(info)
                     except zipfile.BadZipFile:
                         bad = info.filename
                         break
@@ -110,7 +114,9 @@ async def unzip(
             chunks: list[bytes] = []
             for info in selected:
                 if not info.is_dir():
-                    chunks.append(zf.read(info.filename))
+                    # Read the selected ZipInfo, not its name: a name
+                    # lookup resolves every duplicate to the last one.
+                    chunks.append(zf.read(info))
             if unmatched:
                 return b"".join(chunks), IOResult(
                     exit_code=11, stderr=_cautions(unmatched).encode())
@@ -124,7 +130,7 @@ async def unzip(
         for info in selected:
             if info.is_dir():
                 continue
-            content = zf.read(info.filename)
+            content = zf.read(info)
             entry_name = info.filename.lstrip("/")
             out_path = dest.rstrip("/") + "/" + entry_name
             parent = out_path.rsplit("/", 1)[0] or "/"

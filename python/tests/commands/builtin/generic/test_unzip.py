@@ -26,24 +26,40 @@ APP = b"APPXML-CONTENT\n"
 MEDIA = b"MEDIA-BYTES\n"
 
 
-def _zip_bytes(names_dirs: tuple[str, ...] = ()) -> bytes:
+def _zip_entries(entries: tuple[tuple[str, bytes], ...]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for d in names_dirs:
-            zf.writestr(d, b"")
-        zf.writestr("docProps/app.xml", APP)
-        zf.writestr("xl/sheet1.xml", SHEET)
-        zf.writestr("xl/media/img.bin", MEDIA)
-        zf.writestr("xl/workbook.xml", WORKBOOK)
+        for name, content in entries:
+            zf.writestr(name, content)
     return buf.getvalue()
 
 
-def _reader(data: bytes):
+def _zip_bytes(names_dirs: tuple[str, ...] = ()) -> bytes:
+    return _zip_entries(
+        tuple((d, b"") for d in names_dirs) + (
+            ("docProps/app.xml", APP),
+            ("xl/sheet1.xml", SHEET),
+            ("xl/media/img.bin", MEDIA),
+            ("xl/workbook.xml", WORKBOOK),
+        ))
 
-    async def read_bytes(_p: PathSpec, **_kw) -> bytes:
-        return data
 
-    return read_bytes
+class _Reader:
+
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+    async def __call__(self, _p: PathSpec, **_kw: object) -> bytes:
+        return self.data
+
+
+class _Recorder:
+
+    def __init__(self) -> None:
+        self.written: dict[str, bytes] = {}
+
+    async def __call__(self, p: PathSpec, content: bytes) -> None:
+        self.written[p.virtual] = content
 
 
 async def _no_write(_p: PathSpec, _content: bytes) -> None:
@@ -54,15 +70,6 @@ async def _no_mkdir(_p: PathSpec, parents: bool = False) -> None:
     raise AssertionError("mkdir_fn must not be called")
 
 
-def _recorder():
-    written: dict[str, bytes] = {}
-
-    async def write_bytes(p: PathSpec, content: bytes) -> None:
-        written[p.virtual] = content
-
-    return written, write_bytes
-
-
 async def _mkdir_ok(_p: PathSpec, parents: bool = False) -> None:
     return None
 
@@ -71,17 +78,17 @@ def _archive() -> list[PathSpec]:
     return [PathSpec.from_str_path("/a.zip")]
 
 
-async def _run(members: tuple[str, ...], **kw):
-    written, write_bytes = _recorder()
+async def _run(members: tuple[str, ...], data: bytes | None = None, **kw):
+    recorder = _Recorder()
     out, res = await unzip(
         _archive(),
-        read_bytes=_reader(_zip_bytes()),
-        write_bytes=write_bytes,
+        read_bytes=_Reader(_zip_bytes() if data is None else data),
+        write_bytes=recorder,
         mkdir_fn=_mkdir_ok,
         members=members,
         **kw,
     )
-    return out, res, written
+    return out, res, recorder.written
 
 
 def _stderr_text(res) -> str:
@@ -157,13 +164,34 @@ async def test_p_duplicate_spec_cautions_second():
 async def test_p_dir_entry_spec_matches_with_no_output():
     out, res = await unzip(
         _archive(),
-        read_bytes=_reader(_zip_bytes(names_dirs=("xl/", ))),
+        read_bytes=_Reader(_zip_bytes(names_dirs=("xl/", ))),
         write_bytes=_no_write,
         mkdir_fn=_no_mkdir,
         members=("xl/", ),
         p=True,
     )
     assert out in (None, b"")
+    assert res.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:Duplicate name:UserWarning")
+async def test_p_duplicate_names_serve_each_entrys_own_data():
+    data = _zip_entries((("dup.txt", b"FIRST\n"), ("dup.txt", b"SECOND\n")))
+    out, res, _ = await _run(("dup.txt", ), data=data, p=True)
+    assert out == b"FIRST\nSECOND\n"
+    assert res.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_p_question_mark_matches_one_byte_not_one_code_point():
+    data = _zip_entries((("é.txt", b"ACCENT\n"), ("ab.txt", b"AB\n")))
+    out, res, _ = await _run(("?.txt", ), data=data, p=True)
+    assert out in (None, b"")
+    assert res.exit_code == 11
+    assert _stderr_text(res) == "caution: filename not matched:  ?.txt\n"
+    out, res, _ = await _run(("??.txt", ), data=data, p=True)
+    assert out == b"ACCENT\nAB\n"
     assert res.exit_code == 0
 
 

@@ -242,6 +242,30 @@ describe('unzip members', () => {
     expect(r.exitCode).toBe(0)
   })
 
+  it('-p treats ? as one byte, the way Info-ZIP does', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/é.txt', ENC.encode('ACCENT\n'))
+    resource.store.files.set('/ab.txt', ENC.encode('AB\n'))
+    await runCmd(
+      RAM_ZIP,
+      resource,
+      [
+        PathSpec.fromStrPath('/bytes.zip'),
+        PathSpec.fromStrPath('/é.txt'),
+        PathSpec.fromStrPath('/ab.txt'),
+      ],
+      {},
+    )
+    const arch = [PathSpec.fromStrPath('/bytes.zip')]
+    const one = await runCmd(RAM_UNZIP, resource, arch, { p: true }, ['?.txt'])
+    expect(one.out.byteLength).toBe(0)
+    expect(one.exitCode).toBe(11)
+    expect(DEC.decode(one.stderr)).toBe(`${CAUTION}?.txt\n`)
+    const two = await runCmd(RAM_UNZIP, resource, arch, { p: true }, ['??.txt'])
+    expect(DEC.decode(two.out)).toBe('ACCENT\nAB\n')
+    expect(two.exitCode).toBe(0)
+  })
+
   it('-l filters rows and exits 11 only when nothing matched', async () => {
     const resource = await makeBook()
     const hit = await runCmd(RAM_UNZIP, resource, book(), { args_l: true }, ['xl/workbook.xml'])
