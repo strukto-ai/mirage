@@ -356,12 +356,26 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const bridge = this.bridge
     if (bridge === null) return []
     const failures: string[] = []
-    for (const mutation of bridge.takeMutations()) {
+    const pending = bridge.takeMutations()
+    for (let i = 0; i < pending.length; i++) {
+      const mutation = pending[i]
+      if (mutation === undefined) continue
       try {
         await applyMutation(bridge, mutation)
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)
+        // Stop: the journal is a sequence, not a set. Replaying past a
+        // failure applies later entries against a prerequisite that was
+        // never established, which can put the mount in a state the guest
+        // never produced (a rename landing on a temp file the failed write
+        // left stale). Report what was dropped rather than truncating
+        // silently.
+        const dropped = pending.length - i - 1
+        if (dropped > 0) {
+          failures.push(`python3: skipped ${String(dropped)} later mutation(s) after that failure`)
+        }
+        break
       }
     }
     return failures

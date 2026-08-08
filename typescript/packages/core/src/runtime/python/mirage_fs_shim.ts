@@ -242,13 +242,18 @@ def _backfill(path):
     _populate_entries(parent_entries)
     return True
 
+# Absolute, because every mount test below compares against absolute
+# prefixes: guest code that chdirs into a mount and then names a relative
+# path ('child' after os.chdir('/data')) would otherwise miss every
+# prefix and mutate only MEMFS. abspath resolves against the guest cwd
+# and leaves an already-absolute path at what normpath would give.
 def _normalize_path(path):
     if isinstance(path, int):
         return None
     sp = path if isinstance(path, str) else os.fspath(path)
     if isinstance(sp, bytes):
         sp = sp.decode()
-    return sp
+    return os.path.abspath(sp)
 
 def _patched_listdir(path='.'):
     sp = _normalize_path(path)
@@ -308,7 +313,7 @@ def _patched_mkdir(path, mode=0o777, *, dir_fd=None):
     sp = _normalize_path(path)
     if sp is None or dir_fd is not None:
         return _mkdir(path, mode, dir_fd=dir_fd)
-    norm = os.path.normpath(sp)
+    norm = sp
     if not _under_prefix(norm):
         return _mkdir(path, mode, dir_fd=dir_fd)
     _makedirs_raw(os.path.dirname(norm))
@@ -319,7 +324,7 @@ def _patched_rmdir(path, *, dir_fd=None):
     sp = _normalize_path(path)
     if sp is None or dir_fd is not None:
         return _rmdir(path, dir_fd=dir_fd)
-    norm = os.path.normpath(sp)
+    norm = sp
     if not _under_prefix(norm):
         return _rmdir(path, dir_fd=dir_fd)
     try:
@@ -332,7 +337,7 @@ def _patched_unlink(path, *, dir_fd=None):
     sp = _normalize_path(path)
     if sp is None or dir_fd is not None:
         return _unlink(path, dir_fd=dir_fd)
-    norm = os.path.normpath(sp)
+    norm = sp
     if not _under_prefix(norm):
         return _unlink(path, dir_fd=dir_fd)
     try:
@@ -346,8 +351,8 @@ def _patched_rename(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
     dsp = _normalize_path(dst)
     if ssp is None or dsp is None or src_dir_fd is not None or dst_dir_fd is not None:
         return _rename(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
-    s = os.path.normpath(ssp)
-    d = os.path.normpath(dsp)
+    s = ssp
+    d = dsp
     if not _under_prefix(s) and not _under_prefix(d):
         return _rename(src, dst)
     # The dispatcher picks the mount from the source and addresses the
@@ -369,7 +374,7 @@ def _patched_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
     sp = file if isinstance(file, str) else os.fspath(file)
     if isinstance(sp, bytes):
         sp = sp.decode()
-    sp = os.path.normpath(sp)
+    sp = os.path.abspath(sp)
     under = _under_prefix(sp)
     writable = _is_writable_mode(mode)
     # A non-truncating writable open ('a', 'r+') keeps what the file

@@ -163,4 +163,64 @@ describe('PyodideRuntime mount visibility', () => {
     expect(result.exitCode).toBe(0)
     await rt.close()
   }, 60_000)
+
+  it('a failed mutation stops the replay instead of applying later entries', async () => {
+    const attempted: string[] = []
+    const dispatch: BridgeDispatchFn = (op, path) => {
+      attempted.push(`${op} ${path}`)
+      if (op === 'WRITE') return Promise.reject(new Error('backend hiccup'))
+      if (op === 'READ') return Promise.resolve(new Uint8Array())
+      if (op === 'LIST') return Promise.resolve([])
+      return Promise.resolve(undefined)
+    }
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
+    const result = await rt.run({
+      code: [
+        'import os',
+        "open('/ram/tmp.txt', 'wb').write(b'new')",
+        "os.rename('/ram/tmp.txt', '/ram/final.txt')",
+      ].join('\n'),
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    // The rename must not run: its prerequisite write never landed, so
+    // replaying it could move a stale backend copy onto the destination.
+    expect(attempted.filter((c) => c.startsWith('RENAME'))).toHaveLength(0)
+    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
+    expect(stderr).toContain('failed to write /ram/tmp.txt')
+    expect(stderr).toContain('skipped 1 later mutation(s)')
+    expect(result.exitCode).toBe(1)
+    await rt.close()
+  }, 60_000)
+
+  it('an unreadable base fails the append rather than replacing the file', async () => {
+    const writes: Uint8Array[] = []
+    const dispatch: BridgeDispatchFn = (op, path, bytes) => {
+      if (op === 'READ' && path === '/ram/log.txt') {
+        return Promise.reject(new Error('backend unavailable'))
+      }
+      if (op === 'READ') return Promise.resolve(new Uint8Array())
+      if (op === 'LIST') return Promise.resolve([])
+      if (op === 'WRITE' && bytes !== undefined) writes.push(new Uint8Array(bytes))
+      return Promise.resolve(undefined)
+    }
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
+    const result = await rt.run({
+      code: `open('/ram/log.txt', 'a').write('tail')`,
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    // An error that is not a confirmed absence must not be read as an
+    // empty base, or the tail alone would overwrite the file.
+    expect(writes).toHaveLength(0)
+    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toContain(
+      'failed to append /ram/log.txt',
+    )
+    expect(result.exitCode).toBe(1)
+    await rt.close()
+  }, 60_000)
 })

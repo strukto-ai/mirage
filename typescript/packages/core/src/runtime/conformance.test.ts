@@ -179,6 +179,14 @@ const PYODIDE_ROWS: Row[] = [
     checks: [['ls /data', 'm3']],
   },
   {
+    // A relative operand only names a mount through the guest cwd, so
+    // the shim resolves against it before deciding what to record.
+    capability: 'mkdir',
+    spelling: 'os.mkdir relative to cwd',
+    line: `python3 -c "import os; os.chdir('/data'); os.mkdir('m4')"`,
+    checks: [['ls /data', 'm4']],
+  },
+  {
     capability: 'unlink',
     spelling: 'os.remove',
     line: `python3 -c "import os; os.remove('/data/f1.txt')"`,

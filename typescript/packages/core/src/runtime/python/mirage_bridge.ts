@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isMissingPath } from '../../utils/errors.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 
 export interface MirageEntry {
@@ -204,8 +205,14 @@ export function createMirageBridge(
  *
  * Read-modify-write, because no transport op appends yet: the whole file
  * goes back over the wire per call, which is why the append-amplification
- * conformance row stays marked. Correctness does not depend on that:
- * the tail is only ever added to what the mount already holds.
+ * conformance row stays marked. It also leaves the append non-atomic
+ * against a concurrent writer, the same lost-update hazard whole-file
+ * flushing already carries; a transport append op closes both at once.
+ *
+ * Only a confirmed absence starts from an empty base, since an append
+ * may create the file. Every other read failure propagates: writing the
+ * tail on its own over a file that exists but is momentarily unreadable
+ * would replace content this run never saw.
  *
  * Args:
  *   bridge: the mount bridge to read and write through.
@@ -217,13 +224,7 @@ async function appendOnMount(bridge: MirageBridge, path: string, tail: Uint8Arra
   try {
     base = await bridge.fetch(path)
   } catch (err) {
-    // Absent is the normal case: an append may create the file. Any
-    // other cause (denied, backend down) fails the write below as well,
-    // so it still reaches the caller instead of quietly replacing the
-    // file's content with the tail alone.
-    console.warn(
-      `mirage append: ${path} has no base to extend: ${err instanceof Error ? err.message : String(err)}`,
-    )
+    if (!isMissingPath(err)) throw err
   }
   await bridge.flush(path, concatBytes(base, tail))
 }
