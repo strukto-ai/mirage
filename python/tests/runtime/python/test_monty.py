@@ -359,14 +359,14 @@ async def test_monty_runs_off_loop_and_cancellation_halts():
 
 
 def test_monty_missing_extra_raises(monkeypatch):
-    import mirage.runtime.python.monty as monty_module
+    import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
         MontyRuntime()
 
 
 def test_python3_reports_missing_extra(monkeypatch):
-    import mirage.runtime.python.monty as monty_module
+    import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
     io = asyncio.run(ws.execute("python3 -c 'print(1)'"))
@@ -375,7 +375,7 @@ def test_python3_reports_missing_extra(monkeypatch):
 
 
 def test_workspace_explicit_monty_fails_loud(monkeypatch):
-    import mirage.runtime.python.monty as monty_module
+    import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
         Workspace({"/data": RAMResource()},
@@ -611,7 +611,7 @@ async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
     itself: one leaked lease would not exhaust a CPU-sized pool, so a
     later eval succeeding proves nothing.
     """
-    import mirage.runtime.python.monty as monty_mod
+    import mirage.runtime.python.monty.runtime as monty_mod
     released: list[object] = []
     original = monty_mod._release
 

@@ -12,20 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.wasm.build import BuildDir
-from mirage.runtime.wasm.config import WasmFsConfig
-from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
-from mirage.runtime.wasm.runtime import WasmRuntime, epoch_engine
-from mirage.runtime.wasm.types import GuestStat
-from mirage.runtime.wasm.vfs import WasmVFS
+from mirage.runtime.python.monty.osaccess import MirageOSAccess
+from mirage.runtime.python.monty.runtime import MontyRuntime
+from mirage.runtime.python.monty.vfs import MontyVFS
 
 __all__ = [
-    "BuildDir",
-    "GuestStat",
-    "WasiFs",
-    "WasmFsConfig",
-    "WasmVFS",
-    "WasmRuntime",
-    "epoch_engine",
-    "install_wasi_fs",
+    "MirageOSAccess",
+    "MontyRuntime",
+    "MontyVFS",
 ]

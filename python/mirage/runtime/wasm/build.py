@@ -18,8 +18,6 @@ from pathlib import Path
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG
 from mirage.runtime.wasm.types import GuestStat
 
-READONLY_HINT = "interpreter build directory is read-only"
-
 
 class BuildDir:
     """The interpreter's own files, served read-only.

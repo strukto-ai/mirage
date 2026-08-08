@@ -18,8 +18,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
+from mirage.runtime.wasm.vfs import WasmVFS
 
 wasmtime: Any
 try:

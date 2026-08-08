@@ -19,8 +19,9 @@ from typing import Any
 
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_UNKNOWN
-from mirage.runtime.wasm.build import READONLY_HINT, BuildDir
+from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
+from mirage.runtime.wasm.constants import READONLY_HINT
 from mirage.runtime.wasm.types import GuestStat
 from mirage.types import FileType
 
