@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.list import DEFAULT_PAGE_SIZE
 from mirage.commands.cli.builtin.himalaya.query import (page_slice,
@@ -24,6 +22,7 @@ from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.config import EmailConfig
+from mirage.core.email.render import messages_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 
@@ -47,6 +46,5 @@ async def search_envelopes(
     finally:
         await accessor.close()
     page_of = page_slice(sort_headers(headers, query.sorters), page, page_size)
-    out = json.dumps(page_of, ensure_ascii=False,
-                     separators=(",", ":")).encode()
+    out = messages_json_bytes(page_of)
     return yield_bytes(out), IOResult()

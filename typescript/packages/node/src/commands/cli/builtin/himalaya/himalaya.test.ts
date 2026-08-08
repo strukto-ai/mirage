@@ -22,6 +22,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
+import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { Workspace } from '../../../../workspace.ts'
 import {
   build,
@@ -36,6 +37,7 @@ import { forward } from './forward.ts'
 import { HIMALAYA } from './index.ts'
 import { listEnvelopes } from './list.ts'
 import { pageSlice, parseQuery, QueryError, sortHeaders, uidBudget } from './query.ts'
+import { read } from './read.ts'
 import { reply } from './reply.ts'
 import { searchEnvelopes } from './search.ts'
 import { send } from './send.ts'
@@ -70,6 +72,7 @@ const ORIGINAL = {
   attachments: [],
   uid: '7',
   flags: [],
+  internalDate: '2026-02-02T10:00:00.000Z',
 }
 
 const HEADERS: Record<string, unknown> = {
@@ -542,6 +545,25 @@ describe('himalaya verbs', () => {
     closeSpy.mockRestore()
   })
 
+  // `message read` and `cat` of the .email.json are the same document, so
+  // they share one renderer and INTERNALDATE reaches neither.
+  it('read serves exactly what the mount renders', async () => {
+    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+    const [out] = (await read({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: ['7'],
+      flags: {},
+      stdin: null,
+      env: {},
+    })) as [Uint8Array, IOResult]
+    const bytes = await materialize(out)
+    expect(bytes).toEqual(messageJsonBytes(ORIGINAL))
+    expect(decode(bytes)).not.toContain('internalDate')
+    closeSpy.mockRestore()
+  })
+
   it('reply without an id is a usage error', async () => {
     await expect(
       reply({ config: CONFIG, argv: [], paths: [], texts: [], flags: {}, stdin: null, env: {} }),
@@ -596,8 +618,11 @@ describe('himalaya verbs', () => {
       stdin: null,
       env: {},
     })) as [Uint8Array, IOResult]
-    const rows = JSON.parse(decode(await materialize(out))) as { uid: string }[]
+    const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
+    // INTERNALDATE only picks the date directory; it is not an envelope
+    // field, and every envelope renders through the mount's renderer.
+    expect(rows.every((r) => !('internalDate' in r))).toBe(true)
     expect(closeSpy).toHaveBeenCalledTimes(1)
     closeSpy.mockRestore()
   })

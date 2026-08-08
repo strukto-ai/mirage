@@ -24,7 +24,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.email._client import fetch_headers
-from mirage.core.email.readdir import _date_from_header, _sanitize
+from mirage.core.email.readdir import _date_bucket, _sanitize
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import search_messages
@@ -150,7 +150,7 @@ async def _find_server_side(
     headers = await fetch_headers(accessor, folder, uids)
     results: list[str] = []
     for h in headers:
-        date_str = _date_from_header(h.get("date", ""))
+        date_str = _date_bucket(h)
         subject = _sanitize(h.get("subject", "No Subject"))
         uid = h.get("uid", "")
         filename = f"{subject}__{uid}.email.json"

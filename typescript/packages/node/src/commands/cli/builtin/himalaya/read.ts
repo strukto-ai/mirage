@@ -22,9 +22,8 @@ import {
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage, fetchRawMessage } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
+import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { firstText } from './util.ts'
-
-const ENC = new TextEncoder()
 
 export async function read(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
@@ -37,7 +36,9 @@ export async function read(inv: CLIInvocation): Promise<CommandFnResult> {
       return [raw, new IOResult()]
     }
     const processed = await fetchMessage(accessor, mailbox, uid)
-    const out: ByteSource = ENC.encode(JSON.stringify(processed))
+    // The same renderer the mount serves, so `message read` and `cat`
+    // of the .email.json cannot drift apart.
+    const out: ByteSource = messageJsonBytes(processed)
     return [out, new IOResult()]
   } finally {
     await accessor.close()

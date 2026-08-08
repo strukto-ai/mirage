@@ -13,12 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.email._client import fetch_headers, list_message_uids
+from mirage.core.email._client import (INTERNAL_DATE_KEY, fetch_headers,
+                                       list_message_uids)
 from mirage.core.email.folders import list_folders
 from mirage.core.email.render import message_json_bytes
 from mirage.types import PathSpec
@@ -28,6 +30,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 TITLE_MAX = 80
 UNSAFE = re.compile(r"[^\w\s\-.]")
 MULTI_UNDERSCORE = re.compile(r"_+")
+EPOCH_DATE = "1970-01-01"
 
 
 def _sanitize(text: str) -> str:
@@ -44,12 +47,46 @@ def _msg_filename(subject: str, uid: str) -> str:
     return f"{_sanitize(subject)}__{uid}.email.json"
 
 
-def _date_from_header(date_str: str) -> str:
+def _parse_date(value: str) -> str | None:
+    if not value.strip():
+        return None
     try:
-        dt = parsedate_to_datetime(date_str)
-        return dt.strftime("%Y-%m-%d")
-    except Exception:
-        return "1970-01-01"
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    # Normalized to UTC so one message buckets the same everywhere: the
+    # gmail backend and both TS backends already read their timestamps in
+    # UTC, and honoring the sender's offset instead put a message written
+    # at 23:30 -0500 in the day before the one gmail files it under.
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%d")
+
+
+def _date_bucket(message: dict[str, Any]) -> str:
+    """Pick the YYYY-MM-DD directory a message files under.
+
+    The ``Date:`` header wins, because it is the timestamp the sender
+    wrote and the one himalaya's date conditions search on (SENTON /
+    SENTSINCE / SENTBEFORE). It is also optional, and a message without
+    it used to fall straight to the epoch, collapsing the mount's only
+    organizing axis into a single 1970 directory. IMAP's own
+    INTERNALDATE (RFC 3501, server-assigned and always present) fills
+    that hole.
+
+    Args:
+        message (dict): a fetched message carrying ``date`` and
+            ``internal_date``.
+
+    Returns:
+        str: the bucket name, ``1970-01-01`` when neither timestamp
+            parses.
+    """
+    header = _parse_date(str(message.get("date", "")))
+    if header is not None:
+        return header
+    internal = _parse_date(str(message.get(INTERNAL_DATE_KEY, "")))
+    return internal if internal is not None else EPOCH_DATE
 
 
 async def readdir(
@@ -98,7 +135,7 @@ async def readdir(
         headers_list = await fetch_headers(accessor, folder_name, uids)
         date_groups: dict[str, list[dict[str, Any]]] = {}
         for hdr in headers_list:
-            date_str = _date_from_header(hdr.get("date", ""))
+            date_str = _date_bucket(hdr)
             date_groups.setdefault(date_str, []).append(hdr)
         date_entries: list[tuple[str, IndexEntry]] = []
         for date_str in sorted(date_groups.keys(), reverse=True):

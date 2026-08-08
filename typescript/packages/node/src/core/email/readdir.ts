@@ -21,7 +21,7 @@ import {
   mountPrefixOf,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchHeaders, listMessageUids } from './_client.ts'
+import { fetchHeaders, listMessageUids, type FetchedMessage } from './_client.ts'
 import { listFolders } from './folders.ts'
 import { messageJsonBytes } from './render.ts'
 import type { ParsedAttachment } from './_parse.ts'
@@ -29,8 +29,9 @@ import type { ParsedAttachment } from './_parse.ts'
 const TITLE_MAX = 80
 const UNSAFE = /[^\w\s\-.]/g
 const MULTI_UNDERSCORE = /_+/g
+const EPOCH_DATE = '1970-01-01'
 
-function sanitize(text: string): string {
+export function sanitize(text: string): string {
   if (text.trim() === '') return 'No_Subject'
   let cleaned = text.replace(UNSAFE, '_').replace(/ /g, '_')
   cleaned = cleaned.replace(MULTI_UNDERSCORE, '_').replace(/^_+|_+$/g, '')
@@ -42,14 +43,28 @@ function msgFilename(subject: string, uid: string): string {
   return `${sanitize(subject)}__${uid}.email.json`
 }
 
-function dateFromHeader(dateStr: string): string {
-  if (dateStr === '') return '1970-01-01'
-  const d = new Date(dateStr)
-  if (Number.isNaN(d.getTime())) return '1970-01-01'
+function parseDate(value: string): string | null {
+  if (value.trim() === '') return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
   const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
   const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
   const dd = d.getUTCDate().toString().padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
+}
+
+/**
+ * Picks the YYYY-MM-DD directory a message files under.
+ *
+ * The `Date:` header wins, because it is the timestamp the sender wrote
+ * and the one himalaya's date conditions search on (SENTON / SENTSINCE /
+ * SENTBEFORE). It is also optional, and a message without it used to
+ * fall straight to the epoch, collapsing the mount's only organizing
+ * axis into a single 1970 directory. IMAP's own INTERNALDATE (RFC 3501,
+ * server-assigned and always present) fills that hole.
+ */
+export function dateBucket(message: FetchedMessage): string {
+  return parseDate(message.date) ?? parseDate(message.internalDate) ?? EPOCH_DATE
 }
 
 export async function readdir(
@@ -98,7 +113,7 @@ export async function readdir(
     const headersList = await fetchHeaders(accessor, folderName, uids)
     const dateGroups = new Map<string, typeof headersList>()
     for (const hdr of headersList) {
-      const dateStr = dateFromHeader(hdr.date)
+      const dateStr = dateBucket(hdr)
       let bucket = dateGroups.get(dateStr)
       if (bucket === undefined) {
         bucket = []

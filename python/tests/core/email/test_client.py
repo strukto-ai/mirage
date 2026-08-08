@@ -17,8 +17,20 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.accessor.email import EmailAccessor
-from mirage.core.email._client import list_folders, list_message_uids
+from mirage.core.email._client import (fetch_headers, fetch_message,
+                                       list_folders, list_message_uids)
 from mirage.core.email.config import EmailConfig
+
+MESSAGE = (b"From: alice@example.com\r\n"
+           b"To: bob@example.com\r\n"
+           b"Subject: Hello\r\n"
+           b"MIME-Version: 1.0\r\n"
+           b"Content-Type: text/plain; charset=utf-8\r\n"
+           b"\r\n"
+           b"a message with no Date header at all\r\n")
+
+FETCH_LINE = (b'1 FETCH (FLAGS () INTERNALDATE "07-Aug-2026 20:54:05 +0000" '
+              b"UID 101 BODY[] {%d}" % len(MESSAGE))
 
 
 @pytest.fixture
@@ -134,3 +146,84 @@ async def test_a_refused_search_is_not_an_empty_result(accessor):
 
     with pytest.raises(ValueError, match="IMAP rejected the search"):
         await list_message_uids(accessor, "INBOX", "SENTON not-a-date")
+
+
+def _fetch_imap() -> AsyncMock:
+    mock_imap = AsyncMock()
+    mock_select_response = MagicMock()
+    mock_select_response.result = "OK"
+    mock_imap.select.return_value = mock_select_response
+
+    mock_fetch_response = MagicMock()
+    mock_fetch_response.lines = [
+        FETCH_LINE,
+        bytearray(MESSAGE),
+        b")",
+        b"FETCH completed.",
+    ]
+    mock_imap.uid.return_value = mock_fetch_response
+    return mock_imap
+
+
+@pytest.mark.asyncio
+async def test_fetch_headers_reads_internaldate(accessor):
+    accessor._imap = _fetch_imap()
+    accessor._imap.protocol = True
+
+    headers = await fetch_headers(accessor, "INBOX", ["101"])
+
+    assert len(headers) == 1
+    assert headers[0]["date"] == ""
+    assert headers[0]["internal_date"] == "07-Aug-2026 20:54:05 +0000"
+    assert headers[0]["uid"] == "101"
+
+
+@pytest.mark.asyncio
+async def test_fetch_message_reads_internaldate(accessor):
+    accessor._imap = _fetch_imap()
+    accessor._imap.protocol = True
+
+    msg = await fetch_message(accessor, "INBOX", "101")
+
+    assert msg["internal_date"] == "07-Aug-2026 20:54:05 +0000"
+
+
+@pytest.mark.asyncio
+async def test_a_message_quoting_internaldate_is_not_read_as_one(accessor):
+    quoted = b'the header reads INTERNALDATE "01-Jan-1990 00:00:00 +0000"\r\n'
+    body = MESSAGE + quoted
+    mock_imap = AsyncMock()
+    mock_select_response = MagicMock()
+    mock_select_response.result = "OK"
+    mock_imap.select.return_value = mock_select_response
+    mock_fetch_response = MagicMock()
+    # No INTERNALDATE on the descriptor line, and the message text quotes
+    # one: the literal payload must not answer for the mailbox.
+    mock_fetch_response.lines = [
+        b"1 FETCH (FLAGS () UID 101 BODY[] {%d}" % len(body),
+        bytearray(body),
+        b")",
+    ]
+    mock_imap.uid.return_value = mock_fetch_response
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
+
+    msg = await fetch_message(accessor, "INBOX", "101")
+
+    assert msg["internal_date"] == ""
+
+
+@pytest.mark.asyncio
+async def test_fetch_asks_for_metadata_before_the_body(accessor):
+    # A server may answer the items in the order they were requested, and
+    # anything after BODY[] lands on the line behind the literal, where
+    # neither response parser looks.
+    accessor._imap = _fetch_imap()
+    accessor._imap.protocol = True
+
+    await fetch_message(accessor, "INBOX", "101")
+
+    items = accessor._imap.uid.call_args[0][-1]
+    assert items.index("INTERNALDATE") < items.index("BODY.PEEK[]")
+    assert items.index("FLAGS") < items.index("BODY.PEEK[]")
+    assert items.index("UID") < items.index("BODY.PEEK[]")
