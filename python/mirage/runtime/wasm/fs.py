@@ -13,17 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno as host_errno
-import os
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
+from mirage.runtime.wasm.abi import FT_DIR, FT_UNKNOWN
+from mirage.runtime.wasm.build import READONLY_HINT, BuildDir
+from mirage.runtime.wasm.config import WasmFsConfig
+from mirage.runtime.wasm.types import GuestStat
 from mirage.types import FileType
-
-_READONLY_HINT = "interpreter build directory is read-only"
 
 
 def _mtime_ns(modified: str | None) -> int:
@@ -42,68 +41,95 @@ def _mtime_ns(modified: str | None) -> int:
     return int(ts.timestamp() * 1_000_000_000)
 
 
-@dataclass(frozen=True, slots=True)
-class GuestStat:
-    is_dir: bool
-    size: int
-    mtime_ns: int
-
-
 class WasmVFS:
-    """Route guest-absolute paths to the interpreter build or workspace.
+    """The filesystem a wasm guest sees, over two sources.
 
-    The wasm tier's one addition to `RuntimeVFS`: paths under a mount
-    prefix go to the core, and everything else is served read-only from
-    the host build directory, so the interpreter's own files stay local
-    and fast. A path in neither answers ENOENT. Without a core, only the
-    build directory is visible; without a build directory (quickjs),
-    everything routes to the core.
+    Routing is the wasm tier's own problem: a guest here is a whole
+    interpreter, so its own build directory has to stay visible beside
+    the workspace mounts. A mount prefix always wins, anything else
+    falls to the build, and a path neither side holds is ENOENT.
+
+    Its second job is shape. `RuntimeVFS` answers in mirage's terms
+    (`FileStat`, virtual paths); preview1 asks in its own (`GuestStat`,
+    `FT_DIR`/`FT_REG` pairs, errno). Translating between them is why
+    quickjs still builds one of these even with no build directory to
+    route to.
+
+    Args:
+        config (WasmFsConfig | dict | None): the knobs, chiefly which
+            build directory to serve. None means no build directory.
+        core (RuntimeVFS | None): the shared mount op vocabulary. None
+            means no workspace is attached and only the build is
+            visible.
     """
 
     def __init__(
         self,
-        host_root: Path | None = None,
-        vfs: RuntimeVFS | None = None,
+        config: WasmFsConfig | dict[str, Any] | None = None,
+        core: RuntimeVFS | None = None,
     ) -> None:
-        self._host_root = Path(host_root) if host_root is not None else None
-        self._vfs = vfs
+        self.config = WasmFsConfig.coerce(config)
+        root = self.config.host_root
+        self._build = BuildDir(Path(root)) if root is not None else None
+        self._core = core
 
     def _prefixes(self) -> list[str]:
-        if self._vfs is None:
+        if self._core is None:
             return []
-        return self._vfs.prefixes()
+        return self._core.prefixes()
 
-    def _host_target(self, path: str) -> Path | None:
-        """Resolve a guest path to the host build, or None for the bridge.
+    def _claimed_by_mount(self, path: str) -> bool:
+        for prefix in self._prefixes():
+            if path == prefix or path.startswith(prefix + "/"):
+                return True
+        return False
+
+    def _serving_build(self, path: str) -> BuildDir | None:
+        """The build directory when it answers for `path`, else None.
+
+        A mount prefix always wins. Below that: with no build there is
+        nothing local to serve; with a build but no core the build owns
+        every path, including a missing one, so the guest gets the
+        build's own ENOENT; with both, the build answers only for what
+        it holds and the core takes the rest.
 
         Args:
             path (str): guest-absolute path.
 
         Raises:
-            FileNotFoundError: no host build and no bridge to serve it.
+            FileNotFoundError: neither source can answer at all.
         """
-        for prefix in self._prefixes():
-            if path == prefix or path.startswith(prefix + "/"):
-                return None
-        if self._host_root is None:
-            if self._vfs is None:
+        if self._claimed_by_mount(path):
+            return None
+        if self._build is None:
+            if self._core is None:
                 raise FileNotFoundError(path)
             return None
-        rel = path.lstrip("/")
-        host = self._host_root / rel if rel else self._host_root
-        if self._vfs is None:
-            return host
-        return host if path == "/" or host.exists() else None
+        if self._core is None:
+            return self._build
+        return self._build if self._build.has(path) else None
 
-    def _core(self) -> RuntimeVFS:
-        if self._vfs is None:
+    def _deny_build(self, path: str) -> None:
+        """Refuse a mutation that lands on the interpreter's own files.
+
+        Args:
+            path (str): guest-absolute path.
+
+        Raises:
+            PermissionError: the build directory serves this path.
+        """
+        if self._serving_build(path) is not None:
+            raise PermissionError(READONLY_HINT)
+
+    def _require_core(self) -> RuntimeVFS:
+        if self._core is None:
             raise FileNotFoundError("no workspace mounts are reachable")
-        return self._vfs
+        return self._core
 
-    def _bridge_call(self, op: str, path: str, **kwargs: Any) -> Any:
-        if self._vfs is None:
+    def _core_call(self, op: str, path: str, **kwargs: Any) -> Any:
+        if self._core is None:
             raise FileNotFoundError(path)
-        return self._vfs.call(op, path, **kwargs)
+        return self._core.call(op, path, **kwargs)
 
     def stat(self, path: str) -> GuestStat:
         """Stat a guest path.
@@ -114,13 +140,10 @@ class WasmVFS:
         Raises:
             FileNotFoundError: the path exists on neither side.
         """
-        host = self._host_target(path)
-        if host is not None:
-            st = os.stat(host)
-            return GuestStat(is_dir=host.is_dir(),
-                             size=st.st_size,
-                             mtime_ns=st.st_mtime_ns)
-        fs = self._bridge_call("stat", path)
+        build = self._serving_build(path)
+        if build is not None:
+            return build.stat(path)
+        fs = self._core_call("stat", path)
         return GuestStat(is_dir=fs.type == FileType.DIRECTORY,
                          size=fs.size or 0,
                          mtime_ns=_mtime_ns(fs.modified))
@@ -132,43 +155,37 @@ class WasmVFS:
             return None
 
     def read(self, path: str) -> bytes:
-        host = self._host_target(path)
-        if host is not None:
-            return host.read_bytes()
-        data = self._bridge_call("read", path)
+        build = self._serving_build(path)
+        if build is not None:
+            return build.read(path)
+        data = self._core_call("read", path)
         if isinstance(data, str):
             return data.encode()
         return bytes(data)
 
     def write(self, path: str, data: bytes) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("write", path, data=data)
+        self._deny_build(path)
+        self._core_call("write", path, data=data)
 
     def create(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("create", path)
+        self._deny_build(path)
+        self._core_call("create", path)
 
     def truncate(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("truncate", path, length=0)
+        self._deny_build(path)
+        self._core_call("truncate", path, length=0)
 
     def unlink(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("unlink", path)
+        self._deny_build(path)
+        self._core_call("unlink", path)
 
     def mkdir(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("mkdir", path)
+        self._deny_build(path)
+        self._core_call("mkdir", path)
 
     def rmdir(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("rmdir", path)
+        self._deny_build(path)
+        self._core_call("rmdir", path)
 
     def rename(self, src: str, dst: str) -> None:
         """Rename within the workspace.
@@ -176,14 +193,18 @@ class WasmVFS:
         Args:
             src (str): guest-absolute source path.
             dst (str): guest-absolute destination path.
+
+        Raises:
+            OSError: one end is on the build and the other is not.
+            PermissionError: both ends are on the build.
         """
-        src_host = self._host_target(src) is not None
-        dst_host = self._host_target(dst) is not None
-        if src_host or dst_host:
-            if src_host != dst_host:
+        src_build = self._serving_build(src) is not None
+        dst_build = self._serving_build(dst) is not None
+        if src_build or dst_build:
+            if src_build != dst_build:
                 raise OSError(host_errno.EXDEV, "cross-device rename", src)
-            raise PermissionError(_READONLY_HINT)
-        self._core().rename(src, dst)
+            raise PermissionError(READONLY_HINT)
+        self._require_core().rename(src, dst)
 
     def flush(self, path: str, base_len: int, low_write: int,
               buf: bytes | bytearray) -> None:
@@ -195,14 +216,13 @@ class WasmVFS:
             low_write (int): lowest offset this handle wrote at.
             buf (bytes | bytearray): the handle's whole buffer.
         """
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._core().flush(path, base_len, low_write, buf)
+        self._deny_build(path)
+        self._require_core().flush(path, base_len, low_write, buf)
 
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.
 
-        Bridge entries whose kind the backend does not report come back
+        Core entries whose kind the backend does not report come back
         FT_UNKNOWN; guests stat lazily when they care.
 
         Args:
@@ -210,19 +230,13 @@ class WasmVFS:
         """
         if path == "/":
             return self._readdir_root()
-        host = self._host_target(path)
-        if host is not None:
-            return self._readdir_host(host)
-        return self._readdir_bridge(path)
+        build = self._serving_build(path)
+        if build is not None:
+            return build.readdir(path)
+        return self._readdir_core(path)
 
-    def _readdir_host(self, host: Path) -> list[tuple[str, int]]:
-        entries = []
-        for entry in os.scandir(host):
-            entries.append((entry.name, FT_DIR if entry.is_dir() else FT_REG))
-        return sorted(entries)
-
-    def _readdir_bridge(self, path: str) -> list[tuple[str, int]]:
-        names = self._bridge_call("readdir", path)
+    def _readdir_core(self, path: str) -> list[tuple[str, int]]:
+        names = self._core_call("readdir", path)
         entries: dict[str, int] = {}
         for raw in names:
             base = raw.rstrip("/").rsplit("/", 1)[-1]
@@ -234,11 +248,11 @@ class WasmVFS:
 
     def _readdir_root(self) -> list[tuple[str, int]]:
         entries: dict[str, int] = {}
-        if self._host_root is not None:
-            for name, kind in self._readdir_host(self._host_root):
+        if self._build is not None:
+            for name, kind in self._build.readdir("/"):
                 entries[name] = kind
-        if self._vfs is not None:
-            for name, kind in self._readdir_bridge("/"):
+        if self._core is not None:
+            for name, kind in self._readdir_core("/"):
                 entries.setdefault(name, kind)
             for prefix in self._prefixes():
                 top = prefix.lstrip("/").split("/", 1)[0]

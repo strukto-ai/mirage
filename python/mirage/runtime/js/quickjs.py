@@ -146,7 +146,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
         core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
                            self._mount_prefixes)
                 if self._dispatch is not None else None)
-        fs = WasmVFS(vfs=core)
+        fs = WasmVFS(core=core)
         stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,

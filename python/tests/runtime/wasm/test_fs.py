@@ -18,7 +18,9 @@ import pytest
 
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
-from mirage.runtime.wasm.fs import GuestStat, WasmVFS
+from mirage.runtime.wasm.config import WasmFsConfig
+from mirage.runtime.wasm.fs import WasmVFS
+from mirage.runtime.wasm.types import GuestStat
 from mirage.types import FileStat, FileType
 
 
@@ -89,7 +91,7 @@ def test_mount_prefix_routes_to_bridge_even_when_host_file_exists(tmp_path):
     (tmp_path / "data" / "f.txt").write_text("host-side")
     bridge = FakeVFS(files={"/data/f.txt": b"bridge-side"},
                      prefixes=["/data/"])
-    fs = WasmVFS(host_root=tmp_path, vfs=bridge)
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     assert fs.read("/data/f.txt") == b"bridge-side"
 
 
@@ -97,14 +99,14 @@ def test_host_serves_paths_outside_mounts(tmp_path):
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "os.py").write_text("stdlib")
     bridge = FakeVFS(prefixes=["/data/"])
-    fs = WasmVFS(host_root=tmp_path, vfs=bridge)
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     assert fs.read("/lib/os.py") == b"stdlib"
     assert bridge.calls == []
 
 
 def test_missing_host_path_falls_through_to_bridge(tmp_path):
     bridge = FakeVFS(files={"/new.txt": b"ram-root"})
-    fs = WasmVFS(host_root=tmp_path, vfs=bridge)
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     assert fs.read("/new.txt") == b"ram-root"
     fs.write("/created.txt", b"x")
     assert bridge.files["/created.txt"] == b"x"
@@ -112,7 +114,7 @@ def test_missing_host_path_falls_through_to_bridge(tmp_path):
 
 def test_host_paths_are_read_only(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
-    fs = WasmVFS(host_root=tmp_path, vfs=FakeVFS())
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), FakeVFS())
     with pytest.raises(PermissionError, match="read-only"):
         fs.write("/python.wasm", b"clobber")
     with pytest.raises(PermissionError, match="read-only"):
@@ -130,7 +132,7 @@ def test_stat_maps_filestat_fields():
     bridge = FakeVFS(files={"/data/f.txt": b"hello"},
                      dirs={"/data/sub"},
                      prefixes=["/data/"])
-    fs = WasmVFS(vfs=bridge)
+    fs = WasmVFS(core=bridge)
     st = fs.stat("/data/f.txt")
     assert st == GuestStat(is_dir=False, size=5,
                            mtime_ns=st.mtime_ns) and st.mtime_ns > 0
@@ -142,7 +144,7 @@ def test_readdir_bridge_marks_kind_from_trailing_slash():
     bridge = FakeVFS(files={"/data/f.txt": b""},
                      dirs={"/data/sub"},
                      prefixes=["/data/"])
-    fs = WasmVFS(vfs=bridge)
+    fs = WasmVFS(core=bridge)
     assert fs.readdir("/data") == [("f.txt", FT_UNKNOWN), ("sub", FT_DIR)]
 
 
@@ -150,7 +152,7 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     (tmp_path / "lib").mkdir()
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     bridge = FakeVFS(files={"/root.txt": b""}, prefixes=["/data/", "/logs/"])
-    fs = WasmVFS(host_root=tmp_path, vfs=bridge)
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     assert fs.readdir("/") == [
         ("data", FT_DIR),
         ("lib", FT_DIR),
@@ -163,7 +165,7 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
 def test_rename_within_bridge_and_across_routes(tmp_path):
     (tmp_path / "host.txt").write_text("x")
     bridge = FakeVFS(files={"/data/a.txt": b"move-me"}, prefixes=["/data/"])
-    fs = WasmVFS(host_root=tmp_path, vfs=bridge)
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     fs.rename("/data/a.txt", "/data/b.txt")
     assert bridge.files == {"/data/b.txt": b"move-me"}
     with pytest.raises(OSError) as exc:

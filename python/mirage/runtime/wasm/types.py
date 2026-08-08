@@ -12,20 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.wasm.build import BuildDir
-from mirage.runtime.wasm.config import WasmFsConfig
-from mirage.runtime.wasm.fs import WasmVFS
-from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
-from mirage.runtime.wasm.runtime import WasmRuntime, epoch_engine
-from mirage.runtime.wasm.types import GuestStat
+from dataclasses import dataclass
 
-__all__ = [
-    "BuildDir",
-    "GuestStat",
-    "WasiFs",
-    "WasmFsConfig",
-    "WasmVFS",
-    "WasmRuntime",
-    "epoch_engine",
-    "install_wasi_fs",
-]
+
+@dataclass(frozen=True, slots=True)
+class GuestStat:
+    """One stat answer in the terms preview1 asks for.
+
+    Args:
+        is_dir (bool): whether the path is a directory.
+        size (int): size in bytes.
+        mtime_ns (int): modification time in epoch nanoseconds, 0 when
+            the source reports none.
+    """
+
+    is_dir: bool
+    size: int
+    mtime_ns: int

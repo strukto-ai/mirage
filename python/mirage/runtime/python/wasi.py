@@ -23,7 +23,7 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import (DispatchFn, PrefixSource, RunArgs, RunResult,
                                   ScriptSource)
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm import WasmRuntime, WasmVFS
+from mirage.runtime.wasm import WasmFsConfig, WasmRuntime, WasmVFS
 
 wasmtime: Any
 try:
@@ -112,7 +112,7 @@ class WasiRuntime(PythonRuntime):
         core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
                            self._mount_prefixes)
                 if self._dispatch is not None else None)
-        fs = WasmVFS(host_root=self._root, vfs=core)
+        fs = WasmVFS(WasmFsConfig(host_root=str(self._root)), core)
         # sys.argv becomes ['-c', *args.args], matching the local runtime.
         stdout, stderr, exit_code = await self._runtime.run(
             argv=["python", "-c", args.code, *args.args],
