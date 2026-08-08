@@ -12,53 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandTimeoutError } from '../../commands/builtin/utils/limit.ts'
-import { PythonRuntime } from './base.ts'
-import { EvalError } from '../errors.ts'
-import { EVALUATOR, type Evaluator } from '../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../types.ts'
-import type { BridgeDispatchFn } from '../types.ts'
-import { MONTY_RUNTIME } from './interface.ts'
-
-export class MontyUnavailableError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = 'MontyUnavailableError'
-  }
-}
-
-// Structural views of @pydantic/monty so its types never leak into our
-// public .d.ts (the package is an optional peer dependency).
-interface MontySessionLike {
-  readonly workerPid?: number
-  feedRun(code: string, options?: Record<string, unknown>): Promise<unknown>
-  close(): Promise<void>
-}
-
-interface MontyPoolLike {
-  checkout(options?: Record<string, unknown>): Promise<MontySessionLike>
-  close(): Promise<void>
-}
-
-interface MontyModuleLike {
-  Monty: { create(options?: Record<string, unknown>): Promise<MontyPoolLike> }
-  NOT_HANDLED: symbol
-  MontySyntaxError: new (...args: never[]) => Error
-  MontyRuntimeError: new (...args: never[]) => Error
-}
-
-interface MontyDisplayableError extends Error {
-  display?: (format?: string) => string
-}
-
-interface MirageEntryLike {
-  path: string
-  isDir: boolean
-}
-
-// One-shot eval is bounded like quickjs's: nothing above the runtime
-// can stop a hung guest, so the runtime owns its own interrupt.
-const EVAL_INTERRUPT_SECONDS = 10
+import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
+import { PythonRuntime } from '../base.ts'
+import { EvalError } from '../../errors.ts'
+import { EVALUATOR, type Evaluator } from '../../mixin.ts'
+import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
+import type { BridgeDispatchFn, PrefixSource } from '../../types.ts'
+import { RuntimeVFS } from '../../vfs.ts'
+import { MONTY_RUNTIME } from '../interface.ts'
+import {
+  loadMontyModule,
+  type MontyModuleLike,
+  type MontyPoolLike,
+  type MontySessionLike,
+} from './binding.ts'
+import { DEFAULT_PROG, EVAL_INTERRUPT_SECONDS, INCOMPLETE_MARKERS } from './constants.ts'
+import { displayError } from './errors.ts'
+import { MirageOSAccess } from './osaccess.ts'
+import { MontyVFS } from './vfs.ts'
 
 const INTERRUPTED = Symbol('interrupted')
 
@@ -88,12 +59,6 @@ function killWorker(pid: number | undefined): void {
   } catch {
     // the worker may already have exited; nothing left to reclaim
   }
-}
-
-function displayError(err: unknown): string {
-  const e = err as MontyDisplayableError
-  if (typeof e.display === 'function') return e.display('traceback')
-  return e instanceof Error ? e.message : String(err)
 }
 
 /**
@@ -131,7 +96,8 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = MONTY_RUNTIME
   readonly [EVALUATOR] = true as const
   private workspaceBridge: BridgeDispatchFn | null = null
-  private listMounts: () => string[] = () => []
+  private listMounts: PrefixSource = () => []
+  private vfs: MontyVFS | null = null
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
@@ -141,10 +107,11 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     super(options)
   }
 
-  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, listMounts: PrefixSource): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
       this.listMounts = listMounts
+      this.vfs = new MontyVFS(new RuntimeVFS(dispatch, listMounts))
     }
   }
 
@@ -246,7 +213,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: this.buildOsCallback(module, {}),
+      os: new MirageOSAccess(module.NOT_HANDLED, {}, this.vfs).handle,
     }
     const enc = new TextEncoder()
     // One-shot evals get the quickjs-style 10s bound (the policy layer
@@ -280,8 +247,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
         const trace = displayError(caught)
         // Console continuation, not a broken program: the source
         // merely stopped early (an open block or unclosed suite).
-        const incomplete =
-          trace.includes('unexpected EOF') || trace.includes('Expected an indented block')
+        const incomplete = INCOMPLETE_MARKERS.some((marker) => trace.includes(marker))
         if (opts.session !== undefined) {
           if (incomplete) {
             return {
@@ -347,15 +313,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async loadModule(): Promise<MontyModuleLike> {
-    if (this.module !== null) return this.module
-    try {
-      this.module = (await import('@pydantic/monty')) as unknown as MontyModuleLike
-    } catch (err) {
-      throw new MontyUnavailableError(
-        "monty runtime requires the '@pydantic/monty' package — install it or select the pyodide runtime",
-        { cause: err },
-      )
-    }
+    this.module ??= await loadMontyModule()
     return this.module
   }
 
@@ -370,12 +328,12 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     const options: Record<string, unknown> = {
       // argv[0] is the program's own name when the caller has one (a
       // CLI install's head word), else the interpreter's placeholder.
-      inputs: { argv: [args.prog ?? 'main.py', ...args.args], stdin: args.stdin },
+      inputs: { argv: [args.prog ?? DEFAULT_PROG, ...args.args], stdin: args.stdin },
       printCallback: (stream: 'stdout' | 'stderr', text: string) => {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: this.buildOsCallback(module, args.env),
+      os: new MirageOSAccess(module.NOT_HANDLED, args.env, this.vfs).handle,
     }
     try {
       await session.feedRun(code, options)
@@ -396,244 +354,4 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
       exitCode: 0,
     }
   }
-
-  private buildOsCallback(
-    module: MontyModuleLike,
-    env: Record<string, string>,
-  ): (name: string, args: unknown[]) => unknown {
-    const bridge = this.workspaceBridge
-    const notHandled = module.NOT_HANDLED
-    return (name: string, args: unknown[]): unknown => {
-      if (name === 'os.getenv') {
-        // hasOwn, not `in`: the guest picks the key, so a name like
-        // `toString` must miss instead of leaking a host function.
-        const key = String(args[0])
-        if (Object.hasOwn(env, key)) return env[key]
-        return args.length > 1 ? args[1] : null
-      }
-      if (name === 'os.environ') {
-        // The engine asks for the whole mapping as one call; a plain
-        // object arrives in the guest as a dict, so `.get`, `[...]`,
-        // `in`, iteration and len all work, and a missing key raises
-        // KeyError. Declining instead raised "'os.environ' is not
-        // supported in this environment", which made a program written
-        // against the python host fail here (integ/runtime caught it).
-        // A copy, like python's OSAccess(environ=dict(environ)): a
-        // guest that mutates it cannot reach the session's own env.
-        return { ...env }
-      }
-      // Everything below serves a path through the workspace bridge;
-      // the env doors above need no mount.
-      if (bridge === null) return notHandled
-      const path = pathArg(args[0])
-      if (path === null) return notHandled
-      if (!this.underWorkspaceMount(path)) return notHandled
-      switch (name) {
-        case 'Path.read_bytes':
-          return readBytes(bridge, path)
-        case 'Path.read_text':
-          return readBytes(bridge, path).then((b) => new TextDecoder().decode(b))
-        case 'Path.write_bytes':
-        case 'Path.write_text':
-          return writeBack(bridge, path, args[1])
-        case 'Path.mkdir':
-          return mutate(bridge, 'MKDIR', path)
-        case 'Path.rmdir':
-          return mutate(bridge, 'RMDIR', path)
-        case 'Path.unlink':
-          return mutate(bridge, 'UNLINK', path)
-        case 'Path.rename': {
-          const dst = pathArg(args[1])
-          // A destination outside the workspace has no mount to rename
-          // into; decline rather than half-apply the move.
-          if (dst === null || !this.underWorkspaceMount(dst)) return notHandled
-          // The dispatcher picks the mount from the source alone and
-          // reads the destination against that same backend, so a
-          // cross-mount rename would drop the source and write the
-          // target into the wrong store. POSIX answers this with
-          // EXDEV, which is also what tells a caller to copy instead.
-          if (this.mountOf(path) !== this.mountOf(dst)) {
-            return Promise.reject(guestError('EXDEV', path, dst))
-          }
-          return mutate(bridge, 'RENAME', path, dst)
-        }
-        case 'Path.iterdir':
-          return listEntries(bridge, path).then((entries) => entries.map((e) => e.path))
-        case 'Path.is_dir':
-          return listEntries(bridge, path).then(
-            () => true,
-            () => false,
-          )
-        case 'Path.is_file':
-          return entryFor(bridge, path).then(
-            (e) => e !== null && !e.isDir,
-            () => false,
-          )
-        case 'Path.exists':
-          return entryFor(bridge, path).then(
-            (e) => e !== null,
-            () =>
-              listEntries(bridge, path).then(
-                () => true,
-                () => false,
-              ),
-          )
-        default:
-          return notHandled
-      }
-    }
-  }
-
-  /**
-   * True when `path` may be serviced by the workspace bridge. An empty
-   * live view means no scoping: every path routes to the bridge.
-   */
-  private underWorkspaceMount(path: string): boolean {
-    const prefixes = this.listMounts()
-    if (prefixes.length === 0) return true
-    return prefixes.some((p) => {
-      const norm = p.endsWith('/') ? p : p + '/'
-      return path.startsWith(norm) || path === norm.slice(0, -1)
-    })
-  }
-
-  /**
-   * The mount prefix serving `path`, longest match first, or null when
-   * none does. Two paths belong to the same mount only when this
-   * agrees for both, which is what a rename needs to know.
-   */
-  private mountOf(path: string): string | null {
-    let best: string | null = null
-    for (const p of this.listMounts()) {
-      const norm = p.endsWith('/') ? p : p + '/'
-      if (path.startsWith(norm) || path === norm.slice(0, -1)) {
-        if (best === null || norm.length > best.length) best = norm
-      }
-    }
-    return best
-  }
-}
-
-function pathArg(value: unknown): string | null {
-  if (typeof value === 'string') return value
-  if (value !== null && typeof value === 'object' && 'path' in value) {
-    const p = (value as { path: unknown }).path
-    return typeof p === 'string' ? p : null
-  }
-  return null
-}
-
-// fs error codes -> the python exception the guest should catch, with
-// CPython's errno message shape.
-const CODE_TO_GUEST_EXC = {
-  ENOENT: { name: 'FileNotFoundError', errno: 2, phrase: 'No such file or directory' },
-  EISDIR: { name: 'IsADirectoryError', errno: 21, phrase: 'Is a directory' },
-  ENOTDIR: { name: 'NotADirectoryError', errno: 20, phrase: 'Not a directory' },
-  EACCES: { name: 'PermissionError', errno: 13, phrase: 'Permission denied' },
-  EEXIST: { name: 'FileExistsError', errno: 17, phrase: 'File exists' },
-  EXDEV: { name: 'OSError', errno: 18, phrase: 'Invalid cross-device link' },
-} as const
-
-type GuestCode = keyof typeof CODE_TO_GUEST_EXC
-
-function isGuestCode(code: string | undefined): code is GuestCode {
-  return code !== undefined && code in CODE_TO_GUEST_EXC
-}
-
-/**
- * Build the guest-side exception for one fs code, in CPython's message
- * shape. `target` renders rename's two-path form.
- *
- * Args:
- *   code: the fs error code, e.g. ENOENT.
- *   path: the path the operation names.
- *   target: rename's destination, when there is one.
- */
-function guestError(code: GuestCode, path: string, target?: string): Error {
-  const mapped = CODE_TO_GUEST_EXC[code]
-  const where = target === undefined ? `'${path}'` : `'${path}' -> '${target}'`
-  const guest = new Error(`[Errno ${String(mapped.errno)}] ${mapped.phrase}: ${where}`)
-  guest.name = mapped.name
-  return guest
-}
-
-/**
- * Re-throw a bridge failure under its python exception name: the monty
- * binding raises `err.name` as the matching guest exception type
- * (PYTHON_EXC_NAMES), so agent code can `except FileNotFoundError`
- * exactly as it does on the python host.
- */
-function asGuestError(err: unknown, path: string): unknown {
-  const code = (err as { code?: string }).code
-  if (!isGuestCode(code)) return err
-  return guestError(code, path)
-}
-
-/**
- * Run one mutating bridge op, translating a coded failure the way the
- * read and write helpers do. Without this the raw workspace error
- * reaches monty with `name` still `Error`, so guest code cannot catch
- * the `FileNotFoundError` or `FileExistsError` the operation implies.
- *
- * Args:
- *   bridge: the workspace dispatch callable.
- *   op: the mutation to run.
- *   path: the path the operation names.
- *   dst: rename's destination.
- */
-async function mutate(
-  bridge: BridgeDispatchFn,
-  op: 'MKDIR' | 'RMDIR' | 'UNLINK' | 'RENAME',
-  path: string,
-  dst?: string,
-): Promise<null> {
-  try {
-    await bridge(op, path, undefined, dst)
-  } catch (caught) {
-    throw asGuestError(caught, path)
-  }
-  return null
-}
-
-async function readBytes(bridge: BridgeDispatchFn, path: string): Promise<Uint8Array> {
-  let data: unknown
-  try {
-    data = await bridge('READ', path)
-  } catch (caught) {
-    throw asGuestError(caught, path)
-  }
-  if (data instanceof Uint8Array) return data
-  throw new Error(`monty bridge: READ ${path} expected bytes`)
-}
-
-async function writeBack(bridge: BridgeDispatchFn, path: string, data: unknown): Promise<number> {
-  const bytes =
-    data instanceof Uint8Array
-      ? data
-      : new TextEncoder().encode(typeof data === 'string' ? data : '')
-  try {
-    await bridge('WRITE', path, bytes)
-  } catch (caught) {
-    throw asGuestError(caught, path)
-  }
-  return typeof data === 'string' ? data.length : bytes.length
-}
-
-async function listEntries(bridge: BridgeDispatchFn, path: string): Promise<MirageEntryLike[]> {
-  const prefix = path.endsWith('/') ? path : path + '/'
-  let out: unknown
-  try {
-    out = await bridge('LIST', prefix)
-  } catch (caught) {
-    throw asGuestError(caught, path)
-  }
-  if (!Array.isArray(out)) throw new Error(`monty bridge: LIST ${prefix} expected array`)
-  return out as MirageEntryLike[]
-}
-
-async function entryFor(bridge: BridgeDispatchFn, path: string): Promise<MirageEntryLike | null> {
-  const slash = path.lastIndexOf('/')
-  const parent = slash <= 0 ? '/' : path.slice(0, slash)
-  const entries = await listEntries(bridge, parent)
-  return entries.find((e) => e.path === path || e.path === path + '/') ?? null
 }

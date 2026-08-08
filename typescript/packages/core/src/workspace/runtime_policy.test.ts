@@ -26,7 +26,7 @@ import {
 import type { EvalResult } from '../runtime/types.ts'
 import { POLICY_EVAL_TIMEOUT, evaluatorOf, runtimeForLanguage } from '../runtime/policy/index.ts'
 import type { RunArgs, RunResult } from '../runtime/types.ts'
-import { MontyRuntime } from '../runtime/python/monty.ts'
+import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { QuickJsRuntime } from '../runtime/js/quickjs.ts'
 import {
   DenyResult,

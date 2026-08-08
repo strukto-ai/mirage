@@ -12,14 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const S_IFDIR = 0o040000
-const S_IFREG = 0o100000
-
-export const DIR_MODE = S_IFDIR | 0o777
-export const FILE_MODE = S_IFREG | 0o666
-
-export const BLKSIZE = 4096
-
-// llseek's whence, which Emscripten passes through as the raw number.
-export const SEEK_CUR = 1
-export const SEEK_END = 2
+export { MontyUnavailableError } from './binding.ts'
+export { MirageOSAccess } from './osaccess.ts'
+export { MontyRuntime } from './runtime.ts'
+export { MontyVFS } from './vfs.ts'

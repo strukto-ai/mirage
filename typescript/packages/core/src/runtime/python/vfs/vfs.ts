@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MirageBridge } from '../mirage_bridge.ts'
-import { BLKSIZE, NO_WRITE, SEEK_CUR, SEEK_END } from './constants.ts'
+import { NO_WRITE, planFlush } from '../../vfs.ts'
+import { BLKSIZE, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
-import { planFlush } from './flush.ts'
+import type { MutationJournal } from './journal.ts'
 import type { MirageFsSeed } from './seed.ts'
 import { NodeTree } from './tree.ts'
 import type {
@@ -40,8 +40,8 @@ import type {
  * inside the interpreter.
  *
  * Callbacks are synchronous because Emscripten's are, so they never reach
- * the bridge inline: reads are served from the tree `seed` filled before
- * the run, and writes are recorded on the bridge journal for the runtime
+ * the mounts inline: reads are served from the tree `seed` filled before
+ * the run, and writes are recorded on the mutation journal for the runtime
  * to replay after it. That is the same contract the guest had before, and
  * the reason it needs no JSPI.
  *
@@ -53,20 +53,20 @@ export class MirageFs {
   readonly type: FSType
   private readonly host: FSHost
   private readonly errno: ErrnoCodes
-  private readonly bridge: MirageBridge
+  private readonly journal: MutationJournal
   private readonly tree: NodeTree
 
   /**
    * Args:
    *   host: the Emscripten FS namespace (`pyodide.FS`).
    *   errno: Emscripten's errno table (`pyodide.ERRNO_CODES`).
-   *   bridge: the mount bridge whose journal records guest mutations.
+   *   journal: the write-ahead log guest mutations are recorded on.
    *   prefix: the mount prefix this filesystem serves.
    */
-  constructor(host: FSHost, errno: ErrnoCodes, bridge: MirageBridge, prefix: string) {
+  constructor(host: FSHost, errno: ErrnoCodes, journal: MutationJournal, prefix: string) {
     this.host = host
     this.errno = errno
-    this.bridge = bridge
+    this.journal = journal
     const nodeOps: NodeOps = {
       getattr: this.getattr.bind(this),
       setattr: this.setattr.bind(this),
@@ -93,7 +93,7 @@ export class MirageFs {
    * Populate the tree. Must run after `FS.mount`; see `NodeTree.seed`.
    *
    * Args:
-   *   seed: tree collected from the bridge before the run.
+   *   seed: tree collected from the mounts before the run.
    */
   seed(seed: MirageFsSeed): void {
     this.tree.seed(seed)
@@ -132,13 +132,13 @@ export class MirageFs {
     // A resize rewrites history, so it can only ship whole. Recording here
     // rather than at close is what makes a bare `os.truncate(path, n)`,
     // which opens no handle at all, reach the mount.
-    this.bridge.markWrite(this.tree.pathOf(node), next)
+    this.journal.markWrite(this.tree.pathOf(node), next)
   }
 
   private lookup(parent: FSNode, name: string): FSNode {
     const found = this.tree.childOf(parent, name)
     // A miss is a genuine ENOENT: the seed is everything the host could
-    // reach before the run, and a callback cannot await the bridge to go
+    // reach before the run, and a callback cannot await the mounts to go
     // looking for more.
     if (found === undefined) throw errnoError(this.host, this.errno, 'ENOENT')
     return found
@@ -148,30 +148,30 @@ export class MirageFs {
     const node = this.tree.makeNode(parent, name, mode)
     node.rdev = rdev
     const path = this.tree.pathOf(node)
-    if (this.host.isDir(mode)) this.bridge.markMkdir(path)
+    if (this.host.isDir(mode)) this.journal.markMkdir(path)
     // An empty write is what carries a file that is created and never
     // written (`Path.touch()`, `open(p,'w').close()`) through to the
     // mount. A later close for the same path coalesces over it.
-    else this.bridge.markWrite(path, new Uint8Array(0))
+    else this.journal.markWrite(path, new Uint8Array(0))
     return node
   }
 
   private rename(node: FSNode, newDir: FSNode, newName: string): void {
     const from = this.tree.pathOf(node)
     this.tree.move(node, newDir, newName)
-    this.bridge.markRename(from, this.tree.pathOf(node))
+    this.journal.markRename(from, this.tree.pathOf(node))
   }
 
   private unlink(parent: FSNode, name: string): void {
     const path = this.tree.pathOf(parent) + '/' + name
     this.tree.detach(parent, name)
-    this.bridge.markUnlink(path)
+    this.journal.markUnlink(path)
   }
 
   private rmdir(parent: FSNode, name: string): void {
     const path = this.tree.pathOf(parent) + '/' + name
     this.tree.detach(parent, name)
-    this.bridge.markRmdir(path)
+    this.journal.markRmdir(path)
   }
 
   private readdir(node: FSNode): string[] {
@@ -202,8 +202,8 @@ export class MirageFs {
     const [kind, bytes] = planFlush(stream.baseLen ?? 0, low, buf)
     stream.lowWrite = NO_WRITE
     const path = this.tree.pathOf(node)
-    if (kind === 'append') this.bridge.markAppend(path, bytes)
-    else this.bridge.markWrite(path, bytes)
+    if (kind === 'append') this.journal.markAppend(path, bytes)
+    else this.journal.markWrite(path, bytes)
   }
 
   private streamRead(

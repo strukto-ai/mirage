@@ -137,24 +137,20 @@ const png = await ws.fs.readFile('/ram/icon.png')
 
 ### How it works
 
-- **Eager preload**: `addMount(prefix, ...)` walks the resource and populates Pyodide's MEMFS at `prefix`. Subsequent reads from Python are sync and fast.
-- **Flush on close**: when Python `close()`s a file under a mounted prefix, the bytes are flushed back through the workspace bridge.
-- **Python `open()` and friends**: `open()`, `pathlib.Path.write_text()`, `numpy.save`, `PIL.Image.save`, `pandas.to_csv`. Anything that ultimately calls Python-level `open()` works.
-- **C extensions calling `fopen` directly**: see only the preloaded MEMFS snapshot (sqlite3, h5py). Most data-science libs use Python `open` and just work; native FFI database drivers don't.
+- **Its own filesystem**: Mirage registers an Emscripten filesystem at each mount prefix, below the interpreter's syscall boundary. Every spelling of an operation arrives as the same callback, so nothing inside Python is patched.
+- **Collected before the run**: each prefix is walked into the filesystem's node table before the script starts, so reads are sync and cost no round trip.
+- **Replayed after it**: writes are recorded in guest order and applied to the mounts once the script returns. A handle that only extended a file replays as an `append`.
+- **Every spelling**: `open()`, `os.open`, `pathlib`, `shutil`, `numpy.save`, `PIL.Image.save`, `pandas.to_csv`, and C extensions calling `fopen` (sqlite3, h5py) all reach the mount.
 
 ### Runtime requirements
 
-The shim uses [JSPI](https://github.com/WebAssembly/js-promise-integration) (JavaScript Promise Integration) so sync Python calls can drive async JS bridge ops.
+None. No V8 flag, no [JSPI](https://github.com/WebAssembly/js-promise-integration), no stack switching: a filesystem callback never suspends, because the reads it serves were collected before the run and the writes it takes are replayed after.
 
-- **Browser**: Chrome 137+ (May 2025); Firefox behind `javascript.options.wasm_js_promise_integration`.
-- **Node**: 24+ with `--experimental-wasm-jspi` (the vitest config in this repo sets it).
-- **No JSPI**: reads of preloaded files still work, but `close()` on a write under a mounted prefix throws `RuntimeError: Cannot stack switch`.
+### What doesn't work
 
-### What doesn't work with the shim
-
-- C extensions calling `fopen` directly (sqlite3, h5py): they only see the preloaded MEMFS state. Don't read or modify mount-backed databases through these.
-- Stale listings: changes made to the underlying resource from outside this workspace aren't picked up until the next `addMount` cycle.
-- Concurrent writers: last-flush wins; no conflict detection.
+- Live external edits: a change made to the resource from outside mid-run is not seen until the next run re-collects the prefix.
+- Concurrent writers: last write wins; no conflict detection.
+- Symlinks: links are namespace state in Mirage, so `os.symlink` is refused with `EPERM` rather than accepted and lost at the end of the run.
 
 ## What you cannot do
 
@@ -204,7 +200,7 @@ PYEOF`)
 | `sys.modules` fresh per call | shared within workspace |
 | True CPU parallelism within one workspace | serialized; use separate workspaces |
 | `select()` / `poll()` / `fcntl()` on stdin | no real fds in WASM |
-| `open('/<mount>/...')` inside Python | via FS shim, eager preload + flush on close |
+| `open('/<mount>/...')` inside Python | via Mirage's own filesystem, collected before the run + replayed after |
 | `pip install` at runtime | pre-bundle instead |
 | Native CPython fallback | always Pyodide |
-| Browser support | Chrome 137+, Node 24+ with JSPI |
+| Browser support | any engine (no JSPI, no V8 flag) |

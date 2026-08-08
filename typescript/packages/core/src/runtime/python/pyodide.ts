@@ -26,13 +26,10 @@ import type {
 } from '../types.ts'
 import { createPyodideInterrupter, type PyodideInterrupter } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import {
-  applyMutation,
-  createMirageBridge,
-  preloadInto,
-  type MirageBridge,
-} from './mirage_bridge.ts'
 import type { BridgeDispatchFn } from '../types.ts'
+import { RuntimeVFS } from '../vfs.ts'
+import { applyMutation, createJournal, type MutationJournal } from './vfs/journal.ts'
+import { preloadInto } from './vfs/preload.ts'
 import { MirageFs } from './vfs/vfs.ts'
 import { MirageFsSeed } from './vfs/seed.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
@@ -150,7 +147,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly denyPackages: ReadonlySet<string>
   private listMounts: () => string[] = () => []
   private readonly home: string | null
-  private bridge: MirageBridge | null = null
+  private vfs: RuntimeVFS | null = null
+  private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
   // The guest executes on this event loop, so only the watchdog-backed
   // interrupt buffer can stop a busy loop (see interrupt.ts); null
@@ -278,7 +276,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
     this.pyodide = null
     this.initPromise = null
-    this.bridge = null
+    this.vfs = null
     this.mounted.clear()
     this.interrupter?.close()
     this.interrupter = null
@@ -324,8 +322,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private wireBridgeIfNeeded(): void {
-    if (this.workspaceBridge === null || this.bridge !== null) return
-    this.bridge = createMirageBridge(this.workspaceBridge, this.listMounts)
+    if (this.workspaceBridge === null || this.vfs !== null) return
+    this.vfs = new RuntimeVFS(this.workspaceBridge, this.listMounts)
   }
 
   /**
@@ -349,9 +347,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * stops being visible instead of lingering for the interpreter's life.
    */
   private async syncMounts(pyodide: PyodideInterface): Promise<void> {
-    const bridge = this.bridge
-    if (bridge === null) return
-    const wanted = new Set(bridge.prefixes())
+    const vfs = this.vfs
+    if (vfs === null) return
+    const wanted = new Set(vfs.prefixes())
     for (const prefix of [...this.mounted]) {
       if (wanted.has(prefix)) continue
       pyodide.FS.unmount(mountpointOf(prefix))
@@ -362,10 +360,10 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       // leaves the previous snapshot serving rather than an empty mount,
       // and the prefix retries on the next run.
       const seed = new MirageFsSeed()
-      await preloadInto(seed, bridge, prefix)
+      await preloadInto(seed, vfs, prefix)
       const mountpoint = mountpointOf(prefix)
       if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
-      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, bridge, mountpoint)
+      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, this.journal, mountpoint)
       pyodide.FS.mkdirTree(mountpoint)
       pyodide.FS.mount(fs.type, {}, mountpoint)
       // After the mount, never inside it: Emscripten assigns the root's
@@ -384,15 +382,15 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * way it ran. Returns one message per failure for the caller's stderr.
    */
   private async drainMutations(): Promise<string[]> {
-    const bridge = this.bridge
-    if (bridge === null) return []
+    const vfs = this.vfs
+    if (vfs === null) return []
     const failures: string[] = []
-    const pending = bridge.takeMutations()
+    const pending = this.journal.takeMutations()
     for (let i = 0; i < pending.length; i++) {
       const mutation = pending[i]
       if (mutation === undefined) continue
       try {
-        await applyMutation(bridge, mutation)
+        await applyMutation(vfs, mutation)
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)

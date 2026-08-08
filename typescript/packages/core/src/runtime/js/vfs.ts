@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MirageBridge } from '../python/mirage_bridge.ts'
+import { NO_WRITE, type RuntimeVFS, type VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
 const ENC = new TextEncoder()
@@ -56,14 +56,20 @@ interface GuestFile {
   pos: number
   dirty: boolean
   writable: boolean
+  // What close needs to plan the flush: the length this handle opened
+  // over, and the lowest offset it wrote at. An append-mode handle only
+  // ever writes at or past baseLen, so its close ships the tail alone.
+  baseLen: number
+  lowWrite: number
 }
 
 // The `std.open`/`os.readdir` surface that qjs-wasi exposes natively,
-// synthesized here over the workspace bridge so quickjs-emscripten
-// matches it. Whole-file buffering mirrors the Python `WasiFs`: open
-// fetches the bytes (or starts empty), the byte-level calls touch the
-// in-memory buffer, and close flushes a dirty buffer back through
-// dispatch. Only open, close, and readdir cross the async bridge, so
+// synthesized here over the runtime's mount vocabulary so
+// quickjs-emscripten matches it. Whole-file buffering mirrors the Python
+// `WasiFs`: open fetches the bytes (or starts empty), the byte-level
+// calls touch the in-memory buffer, and close hands the buffer to
+// `RuntimeVFS.flush`, which ships a tail when the handle only extended
+// the file. Only open, close, and readdir cross the async boundary, so
 // they are asyncified host functions (the guest suspends until the
 // dispatch resolves); the byte-level calls are synchronous.
 //
@@ -102,6 +108,7 @@ function isWritable(mode: string): boolean {
 }
 
 function writeAt(file: GuestFile, bytes: Uint8Array): void {
+  file.lowWrite = Math.min(file.lowWrite, file.pos)
   const end = file.pos + bytes.length
   if (end > file.buf.length) {
     const grown = new Uint8Array(end)
@@ -115,26 +122,20 @@ function writeAt(file: GuestFile, bytes: Uint8Array): void {
 
 /**
  * Install the `std.open`/`os.readdir` host functions on an asyncified
- * quickjs context, backed by the workspace bridge. A null bridge (no
+ * quickjs context, backed by the runtime vfs. A null vfs (no
  * workspace mounts wired) still installs the surface, but every open
  * and readdir fails cleanly — `std.open` returns null and `os.readdir`
  * reports ENOENT — so guest code sees an empty filesystem rather than a
  * missing global.
  *
  * @param ctx - the asyncified quickjs context
- * @param bridge - the workspace bridge, or null when no mounts are wired
+ * @param vfs - the runtime's mount vocabulary, or null when no mounts are wired
  */
-export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge | null): void {
+export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null): void {
   const table = new Map<number, GuestFile>()
   let nextFd = 1
 
-  const mountOf = (path: string): string | null => {
-    if (bridge === null) return null
-    for (const p of bridge.prefixes()) {
-      if (path === p.slice(0, -1) || path.startsWith(p)) return p
-    }
-    return null
-  }
+  const mountOf = (path: string): string | null => (vfs === null ? null : vfs.mountOf(path))
 
   const underMount = (path: string): boolean => mountOf(path) !== null
 
@@ -156,7 +157,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = ctx.getString(pathH)
     const mode = ctx.getString(modeH)
-    if (bridge === null || !underMount(path)) return ctx.newNumber(-1)
+    if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
     const truncate = mode.includes('w')
     const append = mode.includes('a')
     const writable = isWritable(mode)
@@ -164,19 +165,19 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
     let existed = false
     if (!truncate) {
       try {
-        buf = await bridge.fetch(path)
+        buf = await vfs.read(path)
         existed = true
       } catch {
         if (!writable) return ctx.newNumber(-1)
       }
     }
-    // Truncate or create writes through the bridge at open, mirroring
+    // Truncate or create writes through the mount at open, mirroring
     // the Python runtime: this enforces write modes (a read-only mount
     // or a read-narrowed session throws here, so the guest gets null)
     // and establishes the file before the buffered writes.
     if (truncate || (writable && !existed)) {
       try {
-        await bridge.flush(path, buf)
+        await vfs.write(path, buf)
       } catch {
         return ctx.newNumber(-1)
       }
@@ -188,6 +189,8 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
       pos: append ? buf.length : 0,
       dirty: false,
       writable,
+      baseLen: buf.length,
+      lowWrite: NO_WRITE,
     })
     return ctx.newNumber(fd)
   })
@@ -196,8 +199,8 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
     const file = table.get(ctx.getNumber(fdH))
     if (file === undefined) return ctx.undefined
     table.delete(ctx.getNumber(fdH))
-    if (file.dirty && file.writable && bridge !== null) {
-      await bridge.flush(file.path, file.buf)
+    if (file.dirty && file.writable && vfs !== null) {
+      await vfs.flush(file.path, file.baseLen, file.lowWrite, file.buf)
     }
     return ctx.undefined
   })
@@ -206,12 +209,12 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
     const path = ctx.getString(pathH)
     const names: string[] = []
     let errno = 0
-    if (bridge === null || !underMount(path)) {
+    if (vfs === null || !underMount(path)) {
       errno = ENOENT
     } else {
       try {
         const prefix = path.endsWith('/') ? path : path + '/'
-        for (const entry of await bridge.list(prefix)) {
+        for (const entry of await vfs.readdir(prefix)) {
           const rel = entry.path.replace(/\/$/, '').slice(prefix.length)
           if (rel.length > 0 && !rel.includes('/')) names.push(rel)
         }
@@ -288,13 +291,13 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
   // files and empty directories; os.stat answers [obj, errno].
   defineAsync('__mirage_remove', async (pathH) => {
     const path = ctx.getString(pathH)
-    if (bridge === null || !underMount(path)) return ctx.newNumber(-ENOENT)
+    if (vfs === null || !underMount(path)) return ctx.newNumber(-ENOENT)
     try {
-      const st = await bridge.stat(path)
+      const st = await vfs.stat(path)
       if (st.isDir) {
-        await bridge.rmdir(path)
+        await vfs.rmdir(path)
       } else {
-        await bridge.unlink(path)
+        await vfs.unlink(path)
       }
       return ctx.newNumber(0)
     } catch (err) {
@@ -304,9 +307,9 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
 
   defineAsync('__mirage_mkdir', async (pathH) => {
     const path = ctx.getString(pathH)
-    if (bridge === null || !underMount(path)) return ctx.newNumber(-ENOENT)
+    if (vfs === null || !underMount(path)) return ctx.newNumber(-ENOENT)
     try {
-      await bridge.mkdir(path)
+      await vfs.mkdir(path)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-wasiErrno(err))
@@ -316,14 +319,14 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
   defineAsync('__mirage_rename', async (srcH, dstH) => {
     const src = ctx.getString(srcH)
     const dst = ctx.getString(dstH)
-    if (bridge === null || !underMount(src) || !underMount(dst)) return ctx.newNumber(-ENOENT)
+    if (vfs === null || !underMount(src) || !underMount(dst)) return ctx.newNumber(-ENOENT)
     // The dispatcher addresses the rename's endpoints against the
     // source's mount, so a cross-mount pair would land inside the
     // wrong tree; the real engine answers -44 (pinned live: each
     // mount is its own preopen and the destination never resolves).
     if (mountOf(src) !== mountOf(dst)) return ctx.newNumber(-ENOENT)
     try {
-      await bridge.rename(src, dst)
+      await vfs.rename(src, dst)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-wasiErrno(err))
@@ -332,13 +335,13 @@ export function installMirageFs(ctx: QuickJSAsyncContext, bridge: MirageBridge |
 
   defineAsync('__mirage_stat', async (pathH) => {
     const path = ctx.getString(pathH)
-    let st = null as Awaited<ReturnType<MirageBridge['stat']>> | null
+    let st: VFSStat | null = null
     let errno = 0
-    if (bridge === null || !underMount(path)) {
+    if (vfs === null || !underMount(path)) {
       errno = ENOENT
     } else {
       try {
-        st = await bridge.stat(path)
+        st = await vfs.stat(path)
       } catch (err) {
         errno = wasiErrno(err)
       }

@@ -22,7 +22,7 @@ import {
   runtimeBindingsFor,
   VFSRuntime,
 } from './table.ts'
-import { MontyRuntime } from './python/monty.ts'
+import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
 

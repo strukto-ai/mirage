@@ -13,14 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../commands/builtin/utils/limit.ts'
+import { HOME_CONFIG_KEYS } from '../config.ts'
 import { EvalError } from '../errors.ts'
 import { JsRuntime } from './base.ts'
 import { EVALUATOR, type Evaluator } from '../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../types.ts'
-import { createMirageBridge, type MirageBridge } from '../python/mirage_bridge.ts'
+import { RuntimeVFS } from '../vfs.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 import { QUICKJS_RUNTIME } from './interface.ts'
-import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './mirage_fs.ts'
+import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './vfs.ts'
 import { QuickJsUnavailableError } from './types.ts'
 import type {
   QuickJSAsyncContext,
@@ -151,10 +152,9 @@ globalThis.std = {
 };
 `
 
-// quickjs-emscripten bundles its own wasm, so the `home` config key
-// (for parity with the Python quickjs runtime, which locates
+// quickjs-emscripten bundles its own wasm, so the HomeConfig `home`
+// key (for parity with the Python quickjs runtime, which locates
 // qjs-wasi.wasm) has nothing to locate here and is ignored.
-const QUICKJS_CONFIG_KEYS: readonly string[] = ['home']
 
 // The asyncify variant is used so `std.open`/`os.readdir` can suspend
 // the guest while a workspace-mount read or write awaits the dispatch,
@@ -167,7 +167,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
   private listMounts: () => string[] = () => []
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, QUICKJS_CONFIG_KEYS)
+    super(options, HOME_CONFIG_KEYS)
   }
 
   override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
@@ -193,11 +193,9 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const bridge: MirageBridge | null =
-        this.workspaceBridge !== null
-          ? createMirageBridge(this.workspaceBridge, this.listMounts)
-          : null
-      installMirageFs(ctx, bridge)
+      const vfs =
+        this.workspaceBridge !== null ? new RuntimeVFS(this.workspaceBridge, this.listMounts) : null
+      installMirageFs(ctx, vfs)
 
       const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
@@ -279,11 +277,9 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       // Same filesystem surface as run(): an attached workspace serves
       // std.open/os.readdir, so a JS policy script can read mounted
       // content (the python evaluator gets this via run()'s GuestFs).
-      const bridge: MirageBridge | null =
-        this.workspaceBridge !== null
-          ? createMirageBridge(this.workspaceBridge, this.listMounts)
-          : null
-      installMirageFs(ctx, bridge)
+      const vfs =
+        this.workspaceBridge !== null ? new RuntimeVFS(this.workspaceBridge, this.listMounts) : null
+      installMirageFs(ctx, vfs)
       const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()

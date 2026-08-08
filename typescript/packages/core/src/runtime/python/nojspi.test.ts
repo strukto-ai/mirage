@@ -150,6 +150,13 @@ describe('PyodideRuntime without JSPI', () => {
         files.set(path, new Uint8Array(bytes))
         writes.push({ path, text: new TextDecoder().decode(bytes) })
       }
+      if (op === 'APPEND' && bytes !== undefined) {
+        const base = files.get(path) ?? new Uint8Array()
+        const next = new Uint8Array(base.length + bytes.length)
+        next.set(base)
+        next.set(bytes, base.length)
+        files.set(path, next)
+      }
       return undefined
     }
     const rt = new PyodideRuntime()

@@ -14,12 +14,9 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
-import {
-  applyMutation,
-  createMirageBridge,
-  preloadInto,
-  type MirageBridge,
-} from '../mirage_bridge.ts'
+import { RuntimeVFS } from '../../vfs.ts'
+import { applyMutation, createJournal, type MutationJournal } from './journal.ts'
+import { preloadInto } from './preload.ts'
 import { MirageFs } from './vfs.ts'
 import { MirageFsSeed } from './seed.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
@@ -35,7 +32,8 @@ interface Call {
 
 describe('MirageFs', () => {
   let py: PyodideInterface
-  let bridge: MirageBridge
+  let vfs: RuntimeVFS
+  let journal: MutationJournal
   const calls: Call[] = []
   const mounts: string[] = []
   const store = new Map<string, Uint8Array>()
@@ -50,9 +48,9 @@ describe('MirageFs', () => {
   async function mountPrefix(prefix: string): Promise<void> {
     mounts.push(prefix)
     const seed = new MirageFsSeed()
-    await preloadInto(seed, bridge, prefix)
+    await preloadInto(seed, vfs, prefix)
     const mountpoint = prefix.slice(0, -1)
-    const fs = new MirageFs(py.FS, py.ERRNO_CODES, bridge, mountpoint)
+    const fs = new MirageFs(py.FS, py.ERRNO_CODES, journal, mountpoint)
     py.FS.mkdirTree(mountpoint)
     py.FS.mount(fs.type, {}, mountpoint)
     fs.seed(seed)
@@ -61,7 +59,7 @@ describe('MirageFs', () => {
   // The runtime's post-run drain, applied host-side where awaiting the
   // bridge needs no JSPI.
   async function drain(): Promise<void> {
-    for (const mutation of bridge.takeMutations()) await applyMutation(bridge, mutation)
+    for (const mutation of journal.takeMutations()) await applyMutation(vfs, mutation)
   }
 
   beforeAll(async () => {
@@ -75,6 +73,13 @@ describe('MirageFs', () => {
         return Promise.resolve(found)
       }
       if (op === 'WRITE' && bytes !== undefined) store.set(path, new Uint8Array(bytes))
+      if (op === 'APPEND' && bytes !== undefined) {
+        const base = store.get(path) ?? new Uint8Array()
+        const next = new Uint8Array(base.length + bytes.length)
+        next.set(base)
+        next.set(bytes, base.length)
+        store.set(path, next)
+      }
       if (op === 'UNLINK') store.delete(path)
       if (op === 'RENAME' && dst !== undefined) {
         const moved = store.get(path)
@@ -91,7 +96,8 @@ describe('MirageFs', () => {
       }
       return Promise.resolve(undefined)
     }
-    bridge = createMirageBridge(dispatch, () => mounts)
+    vfs = new RuntimeVFS(dispatch, () => mounts)
+    journal = createJournal()
   }, 60_000)
 
   beforeEach(() => {
@@ -99,7 +105,7 @@ describe('MirageFs', () => {
     mounts.length = 0
     store.clear()
     unreadable.clear()
-    bridge.takeMutations()
+    journal.takeMutations()
     counter += 1
   })
 
@@ -123,7 +129,7 @@ describe('MirageFs', () => {
 with open('${p}log.txt', 'a') as f:
     f.write('+more')
 `)
-    const mutations = bridge.takeMutations()
+    const mutations = journal.takeMutations()
     expect(mutations).toHaveLength(1)
     const only = mutations[0]
     if (only?.kind !== 'append') throw new Error(`expected an append, got ${String(only?.kind)}`)
@@ -179,7 +185,7 @@ Path('${p}empty.txt').touch()
 import shutil
 shutil.rmtree('${p}tree')
 `)
-    const kinds = bridge.takeMutations().map((m) => `${m.kind} ${m.path.slice(p.length)}`)
+    const kinds = journal.takeMutations().map((m) => `${m.kind} ${m.path.slice(p.length)}`)
     expect(kinds).toEqual([
       'unlink tree/a.txt',
       'unlink tree/b/c.txt',
@@ -221,7 +227,7 @@ except OSError as e:
     _res = 'EXDEV' if e.errno == errno.EXDEV else f'wrong errno {e.errno}'
 `)
     expect(py.globals.get('_res')).toBe('EXDEV')
-    expect(bridge.takeMutations()).toEqual([])
+    expect(journal.takeMutations()).toEqual([])
   })
 
   it('resolves a relative path against the guest cwd', async () => {
@@ -285,7 +291,7 @@ except OSError as e:
     // EIO, not ENOENT: absence and unreadable must stay distinguishable,
     // since only absence makes an empty base safe to build a write on.
     expect(py.globals.get('_errno')).toBe(py.ERRNO_CODES.EIO)
-    expect(bridge.takeMutations()).toEqual([])
+    expect(journal.takeMutations()).toEqual([])
   })
 
   // Filenames are the mount's to choose, so the child table is keyed by a

@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterAll, describe, expect, it } from 'vitest'
-import type { BridgeDispatchFn } from '../types.ts'
-import { MontyRuntime } from './monty.ts'
-import { PyodideRuntime } from './pyodide.ts'
-import { buildRuntime } from '../table.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
-import { MountMode } from '../../types.ts'
-import { Workspace } from '../../workspace/workspace.ts'
+import type { BridgeDispatchFn } from '../../types.ts'
+import { MontyRuntime } from './index.ts'
+import { PyodideRuntime } from '../pyodide.ts'
+import { buildRuntime } from '../../table.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { RAMResource } from '../../../resource/ram/ram.ts'
+import { MountMode } from '../../../types.ts'
+import { Workspace } from '../../../workspace/workspace.ts'
 
 function makeBridge(seed: Record<string, Uint8Array>): {
   dispatch: BridgeDispatchFn
@@ -275,6 +275,18 @@ describe('MontyRuntime', () => {
     expect(files.has('/s3/a.txt')).toBe(false)
   }, 30_000)
 
+  it('unlink after rename reaches the mount', async () => {
+    const { dispatch, mutations, files } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
+    const rt = make(dispatch)
+    const result = await run(
+      rt,
+      "from pathlib import Path\nPath('/s3/a.txt').rename('/s3/b.txt')\nPath('/s3/b.txt').unlink()",
+    )
+    expect(result.exitCode).toBe(0)
+    expect(mutations).toEqual(['RENAME /s3/a.txt /s3/b.txt', 'UNLINK /s3/b.txt'])
+    expect(files.has('/s3/b.txt')).toBe(false)
+  }, 30_000)
+
   it('rename carries both paths to the bridge', async () => {
     const { dispatch, mutations, files } = makeBridge({ '/s3/a.txt': new Uint8Array([1]) })
     const rt = make(dispatch)
@@ -483,8 +495,8 @@ describe('Workspace with the monty runtime', () => {
 
 describe('monty unavailable', () => {
   it('handlePython maps MontyUnavailableError to exit 127', async () => {
-    const { handlePython } = await import('../../workspace/executor/python/handle.ts')
-    const { MontyUnavailableError } = await import('./monty.ts')
+    const { handlePython } = await import('../../../workspace/executor/python/handle.ts')
+    const { MontyUnavailableError } = await import('./index.ts')
     const runtime = {
       name: 'monty',
       captures: ['python3', 'python'],

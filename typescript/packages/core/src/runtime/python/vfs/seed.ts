@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FSLike } from '../mirage_bridge.ts'
+import type { FSLike } from './preload.ts'
 
 /**
  * A mount's tree, collected in memory so it can be served synchronously.

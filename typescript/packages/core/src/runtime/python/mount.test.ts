@@ -32,6 +32,15 @@ function makeBridge(): {
       files.set(path, normalizedBytes ?? new Uint8Array())
       return Promise.resolve(undefined)
     }
+    if (op === 'APPEND') {
+      const base = files.get(path) ?? new Uint8Array()
+      const tail = normalizedBytes ?? new Uint8Array()
+      const next = new Uint8Array(base.length + tail.length)
+      next.set(base)
+      next.set(tail, base.length)
+      files.set(path, next)
+      return Promise.resolve(undefined)
+    }
     if (op === 'READ') return Promise.resolve(files.get(path) ?? new Uint8Array())
     const prefix = path
     const entries: { path: string; size: number; isDir: boolean }[] = []

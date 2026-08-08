@@ -18,7 +18,7 @@ import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { MontyRuntime } from './python/monty.ts'
+import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
 import type { BridgeDispatchFn, RunArgs } from './types.ts'
@@ -50,7 +50,6 @@ const MONTY_OPEN_UNSUPPORTED =
 
 // The workspace bridge has no APPEND op, so every append close
 // re-flushes the whole file: n appends ship O(n^2) bytes.
-const APPEND_AMPLIFIED = 'the bridge has no append op: each close re-flushes the whole file'
 
 interface Row {
   capability: string
@@ -478,6 +477,15 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
       files.set(path, bytes === undefined ? new Uint8Array() : new Uint8Array(bytes))
       return Promise.resolve(undefined)
     }
+    if (op === 'APPEND') {
+      const base = files.get(path) ?? new Uint8Array()
+      const tail = bytes ?? new Uint8Array()
+      const next = new Uint8Array(base.length + tail.length)
+      next.set(base)
+      next.set(tail, base.length)
+      files.set(path, next)
+      return Promise.resolve(undefined)
+    }
     if (op === 'STAT') {
       const hit = files.get(path)
       if (hit !== undefined) return Promise.resolve({ size: hit.length, isDir: false, mtimeMs: 0 })
@@ -515,10 +523,14 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
     }
     return Promise.resolve(undefined)
   }
+  // Both spellings count: the question is how many bytes crossed the
+  // transport, and a runtime that ships tails is exactly the one being
+  // measured. Counting WRITE alone would score a working append as 0.
+  const isMutation = (op: string): boolean => op === 'WRITE' || op === 'APPEND'
   const mutationBytes = () =>
-    ops.filter(([op]) => op === 'WRITE').reduce((total, [, , size]) => total + size, 0)
+    ops.filter(([op]) => isMutation(op)).reduce((total, [, , size]) => total + size, 0)
   const mutationOps = () =>
-    ops.filter(([op]) => op === 'WRITE').map(([op, path]) => `${op} ${path}`)
+    ops.filter(([op]) => isMutation(op)).map(([op, path]) => `${op} ${path}`)
   return { dispatch, files, mutationBytes, mutationOps }
 }
 
@@ -550,35 +562,27 @@ describe('append ships only the deltas', () => {
     120_000,
   )
 
-  it.fails(
-    `pyodide [${APPEND_AMPLIFIED}]`,
-    async () => {
-      const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-      const rt = new PyodideRuntime()
-      rt.attach(counting.dispatch, () => ['/data/'])
-      const result = await rt.run(runArgs(APPEND_LOOP_PY))
-      await rt.close()
-      expect(result.exitCode).toBe(0)
-      const dec = new TextDecoder()
-      expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
-      expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-    },
-    120_000,
-  )
+  it('pyodide', async () => {
+    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
+    const rt = new PyodideRuntime()
+    rt.attach(counting.dispatch, () => ['/data/'])
+    const result = await rt.run(runArgs(APPEND_LOOP_PY))
+    await rt.close()
+    expect(result.exitCode).toBe(0)
+    const dec = new TextDecoder()
+    expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
+    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
+  }, 120_000)
 
-  it.fails(
-    `quickjs [${APPEND_AMPLIFIED}]`,
-    async () => {
-      const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-      const rt = new QuickJsRuntime()
-      rt.attach(counting.dispatch, () => ['/data/'])
-      const result = await rt.run(runArgs(APPEND_LOOP_JS))
-      await rt.close()
-      expect(result.exitCode).toBe(0)
-      const dec = new TextDecoder()
-      expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
-      expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-    },
-    120_000,
-  )
+  it('quickjs', async () => {
+    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
+    const rt = new QuickJsRuntime()
+    rt.attach(counting.dispatch, () => ['/data/'])
+    const result = await rt.run(runArgs(APPEND_LOOP_JS))
+    await rt.close()
+    expect(result.exitCode).toBe(0)
+    const dec = new TextDecoder()
+    expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
+    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
+  }, 120_000)
 })

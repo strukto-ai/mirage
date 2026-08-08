@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const S_IFDIR = 0o040000
-const S_IFREG = 0o100000
+export const MISSING_PACKAGE_HINT =
+  "monty runtime requires the '@pydantic/monty' package — install it or select the pyodide runtime"
 
-export const DIR_MODE = S_IFDIR | 0o777
-export const FILE_MODE = S_IFREG | 0o666
+// argv[0] when the caller named no program of its own.
+export const DEFAULT_PROG = 'main.py'
 
-export const BLKSIZE = 4096
+// One-shot eval is bounded like quickjs's: nothing above the runtime
+// can stop a hung guest, so the runtime owns its own interrupt.
+export const EVAL_INTERRUPT_SECONDS = 10
 
-// llseek's whence, which Emscripten passes through as the raw number.
-export const SEEK_CUR = 1
-export const SEEK_END = 2
+// A console tells "keep typing" from "this is broken" by matching
+// monty's own traceback wording, so a version that rephrases either
+// line turns every continuation into an error at the prompt.
+export const INCOMPLETE_MARKERS = ['unexpected EOF', 'Expected an indented block'] as const

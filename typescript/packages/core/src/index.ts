@@ -510,7 +510,20 @@ export { LanguageRuntime } from './runtime/language.ts'
 export { PythonRuntime } from './runtime/python/base.ts'
 export { JsRuntime } from './runtime/js/base.ts'
 export { bindCommands, DEFAULT_ENTRIES, runtimeBindingsFor, VFSRuntime } from './runtime/table.ts'
-export { EvalError } from './runtime/errors.ts'
+export {
+  coerceRuntimeConfig,
+  HOME_CONFIG_KEYS,
+  type HomeConfig,
+  type RuntimeConfig,
+} from './runtime/config.ts'
+export { CrossMountError, EvalError } from './runtime/errors.ts'
+export {
+  planFlush,
+  RuntimeVFS,
+  type FlushKind,
+  type VFSEntry,
+  type VFSStat,
+} from './runtime/vfs.ts'
 export {
   EVALUATOR,
   isEvaluator,

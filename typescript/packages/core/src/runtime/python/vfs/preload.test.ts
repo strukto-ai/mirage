@@ -13,78 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { createMirageBridge, preloadInto } from './mirage_bridge.ts'
-import type { BridgeDispatchFn } from '../types.ts'
-
-describe('createMirageBridge', () => {
-  it('forwards fetch to dispatch READ and returns bytes', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(new Uint8Array([1, 2, 3])))
-    const b = createMirageBridge(dispatch)
-    const out = await b.fetch('/ram/x.txt')
-    expect(dispatch).toHaveBeenCalledWith('READ', '/ram/x.txt')
-    expect(Array.from(out)).toEqual([1, 2, 3])
-  })
-
-  it('forwards flush to dispatch WRITE with bytes and resolves void', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    const b = createMirageBridge(dispatch)
-    await b.flush('/ram/x.txt', new Uint8Array([9, 9]))
-    const call = dispatch.mock.calls[0]
-    if (call === undefined) throw new Error('unreachable')
-    const [op, path, bytes] = call
-    if (bytes === undefined) throw new Error('unreachable')
-    expect(op).toBe('WRITE')
-    expect(path).toBe('/ram/x.txt')
-    expect(Array.from(bytes)).toEqual([9, 9])
-  })
-
-  it('forwards list to dispatch LIST and returns entries', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve([
-        { path: '/ram/a.txt', size: 4, isDir: false },
-        { path: '/ram/sub', size: 0, isDir: true },
-      ]),
-    )
-    const b = createMirageBridge(dispatch)
-    const entries = await b.list('/ram/')
-    expect(entries).toHaveLength(2)
-    expect(entries[0]).toEqual({ path: '/ram/a.txt', size: 4, isDir: false })
-  })
-
-  it('rethrows dispatch errors', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.reject(new Error('boom')))
-    const b = createMirageBridge(dispatch)
-    await expect(b.fetch('/x')).rejects.toThrow(/boom/)
-  })
-
-  it('throws TypeError when READ returns non-Uint8Array', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve('not bytes' as unknown as Uint8Array),
-    )
-    await expect(createMirageBridge(dispatch).fetch('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when LIST returns non-array', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve({ not: 'array' } as unknown as never[]),
-    )
-    await expect(createMirageBridge(dispatch).list('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when LIST entry has bad shape', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve([{ path: '/x' }] as unknown as never[]),
-    )
-    await expect(createMirageBridge(dispatch).list('/x')).rejects.toThrow(TypeError)
-  })
-
-  it('throws TypeError when WRITE dispatch returns non-undefined', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve('unexpected' as unknown))
-    await expect(createMirageBridge(dispatch).flush('/x', new Uint8Array([1]))).rejects.toThrow(
-      TypeError,
-    )
-  })
-})
+import { preloadInto } from './preload.ts'
+import { RuntimeVFS } from '../../vfs.ts'
+import type { BridgeDispatchFn } from '../../types.ts'
 
 interface FakeFS {
   mkdirTree(path: string): void
@@ -123,7 +54,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, createMirageBridge(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
     expect(fs._dirs.has('/ram')).toBe(true)
     expect(new TextDecoder().decode(fs._files.get('/ram/a.txt'))).toBe('hello')
     const bbin = fs._files.get('/ram/b.bin')
@@ -141,14 +72,14 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, createMirageBridge(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
     expect(fs._dirs.has('/ram/sub')).toBe(true)
     const ctxt = fs._files.get('/ram/sub/c.txt')
     if (ctxt === undefined) throw new Error('unreachable')
     expect(Array.from(ctxt)).toEqual([7])
   })
 
-  it('is idempotent: re-running overwrites with the bridge content', async () => {
+  it('is idempotent: re-running overwrites with the mount content', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
       if (op === 'LIST' && path === '/ram/')
         return Promise.resolve([{ path: '/ram/x', size: 1, isDir: false }])
@@ -156,10 +87,10 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    const bridge = createMirageBridge(dispatch)
-    await preloadInto(fs, bridge, '/ram/')
+    const vfs = new RuntimeVFS(dispatch)
+    await preloadInto(fs, vfs, '/ram/')
     fs.writeFile('/ram/x', new Uint8Array([99]))
-    await preloadInto(fs, bridge, '/ram/')
+    await preloadInto(fs, vfs, '/ram/')
     const x = fs._files.get('/ram/x')
     if (x === undefined) throw new Error('unreachable')
     expect(Array.from(x)).toEqual([42])
@@ -170,7 +101,7 @@ describe('preloadInto', () => {
       Promise.resolve(op === 'LIST' ? [] : new Uint8Array()),
     )
     const fs = makeFakeFS()
-    await preloadInto(fs, createMirageBridge(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
     expect(fs._dirs.has('/ram')).toBe(true)
     expect(fs._files.size).toBe(0)
   })
@@ -181,7 +112,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, createMirageBridge(dispatch), '/ram')
+    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram')
     expect(fs._dirs.has('/ram')).toBe(true)
     expect(dispatch).toHaveBeenCalledWith('LIST', '/ram/')
   })
@@ -200,7 +131,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, createMirageBridge(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
     const ok = fs._files.get('/ram/ok.txt')
     if (ok === undefined) throw new Error('unreachable')
     expect(Array.from(ok)).toEqual([1, 2])
@@ -223,7 +154,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    await preloadInto(fs, createMirageBridge(dispatch), '/ram/')
+    await preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')
     const ok = fs._files.get('/ram/ok.txt')
     if (ok === undefined) throw new Error('unreachable')
     expect(Array.from(ok)).toEqual([7])
@@ -235,7 +166,7 @@ describe('preloadInto', () => {
   it('lets the top-level LIST error propagate', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.reject(new Error('top-level boom')))
     const fs = makeFakeFS()
-    await expect(preloadInto(fs, createMirageBridge(dispatch), '/ram/')).rejects.toThrow(
+    await expect(preloadInto(fs, new RuntimeVFS(dispatch), '/ram/')).rejects.toThrow(
       /top-level boom/,
     )
   })
