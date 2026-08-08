@@ -33,8 +33,8 @@ import {
   type MirageBridge,
 } from './mirage_bridge.ts'
 import type { BridgeDispatchFn } from '../types.ts'
-import { MirageFs } from './fs/fs.ts'
-import { MirageFsSeed } from './fs/seed.ts'
+import { MirageFs } from './vfs/vfs.ts'
+import { MirageFsSeed } from './vfs/seed.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
 import { PYODIDE_RUNTIME } from './interface.ts'
 

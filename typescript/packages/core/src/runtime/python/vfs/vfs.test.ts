@@ -20,7 +20,7 @@ import {
   preloadInto,
   type MirageBridge,
 } from '../mirage_bridge.ts'
-import { MirageFs } from './fs.ts'
+import { MirageFs } from './vfs.ts'
 import { MirageFsSeed } from './seed.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ErrnoCodes, FSHost, FSType } from './fs/types.ts'
+import type { ErrnoCodes, FSHost, FSType } from './vfs/types.ts'
 import { PyodideUnavailableError } from './types.ts'
 
 const noopIo = (): void => undefined
