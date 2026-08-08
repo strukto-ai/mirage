@@ -278,7 +278,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       })
       // Same filesystem surface as run(): an attached workspace serves
       // std.open/os.readdir, so a JS policy script can read mounted
-      // content (the python evaluator gets this via run()'s GuestFs).
+      // content (the python evaluator gets this via run()'s WasmVFS).
       const bridge: MirageBridge | null =
         this.workspaceBridge !== null
           ? createMirageBridge(this.workspaceBridge, this.listMounts)

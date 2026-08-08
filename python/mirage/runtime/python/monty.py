@@ -24,14 +24,13 @@ from pathlib import PurePosixPath
 from typing import Any, Callable
 
 from mirage.runtime.config import RuntimeConfig
-from mirage.runtime.errors import EvalError
+from mirage.runtime.errors import CrossMountError, EvalError
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue,
                                   PrefixSource, RunArgs, RunResult,
                                   ScriptSource)
-from mirage.types import PathSpec
-from mirage.utils.errors import OperationNotSupportedError
+from mirage.runtime.vfs import RuntimeVFS
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +59,119 @@ else:
     path_from_arg = _path_from_arg
 
 
+class MontyVFS:
+    """Monty's mount view: the shared core plus a negative cache.
+
+    Monty asks whether a path exists on nearly every guest expression,
+    so a path the mount already answered "not there" for must not cost
+    a second dispatch. Reads and listings return None for a miss rather
+    than raising, which is the shape the encoder above wants, and every
+    mutation keeps the cache honest.
+
+    Args:
+        core (RuntimeVFS | None): the shared op vocabulary, or None
+            when the runtime was built without a workspace.
+    """
+
+    def __init__(self, core: RuntimeVFS | None) -> None:
+        self._core = core
+        self._missing: set[str] = set()
+
+    @property
+    def wired(self) -> bool:
+        """True when a workspace dispatch is reachable."""
+        return self._core is not None
+
+    def mount_of(self, path: PurePosixPath) -> str | None:
+        if self._core is None:
+            return None
+        return self._core.mount_of(str(path))
+
+    def read(self, virtual: str) -> bytes | None:
+        """The file's bytes, or None when the mount does not have it."""
+        if self._core is None or virtual in self._missing:
+            return None
+        try:
+            return self._core.read(virtual)
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError,
+                ValueError):
+            self._missing.add(virtual)
+            return None
+
+    def readdir(self, virtual: str) -> list[str] | None:
+        """The directory's entries, or None when it is not a directory."""
+        if self._core is None:
+            return None
+        try:
+            return self._core.readdir(virtual)
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError,
+                ValueError):
+            return None
+
+    def write(self, virtual: str, data: bytes) -> None:
+        if self._core is None:
+            return
+        self._core.write(virtual, data)
+        self._missing.discard(virtual)
+
+    def append(self, virtual: str, data: bytes, whole: bytes) -> None:
+        """Ship only `data`, falling back to writing `whole`.
+
+        Args:
+            virtual (str): the file being appended to.
+            data (bytes): only the newly appended bytes.
+            whole (bytes): full content, for a mount with no append op.
+        """
+        if self._core is None:
+            return
+        self._core.append(virtual, data, whole)
+        self._missing.discard(virtual)
+
+    def mkdir(self, virtual: str, parents: bool) -> None:
+        if self._core is None:
+            return
+        self._core.call("mkdir", virtual, parents=parents)
+        self._missing.discard(virtual)
+
+    def rmdir(self, virtual: str) -> None:
+        if self._core is None:
+            return
+        self._core.rmdir(virtual)
+        self._missing.add(virtual)
+
+    def unlink(self, virtual: str) -> None:
+        if self._core is None:
+            return
+        self._core.unlink(virtual)
+        self._missing.add(virtual)
+
+    def rename(self, src: str, dst: str) -> None:
+        """Rename within one mount.
+
+        Args:
+            src (str): the source path.
+            dst (str): the destination path.
+
+        Raises:
+            CrossMountError: the two ends live on different mounts.
+        """
+        if self._core is None:
+            return
+        self._core.rename(src, dst)
+        self._missing.add(src)
+        self._missing.discard(dst)
+
+
 class _MirageOS(OSAccess):
     """Monty OS bridge that lazily backfills files from the workspace.
 
     Reads materialize the file into the in-memory tree on first touch;
     writes go through the tree first (Monty's own open/append semantics)
-    and are then flushed back through the dispatch. Runs on Monty's
-    worker thread, so async dispatch calls hop to the workspace loop via
-    `run_coroutine_threadsafe`.
+    and are then flushed back through `MontyVFS`. Runs on Monty's worker
+    thread, so every op hops to the workspace loop inside the core.
 
-    The binding only accepts sync callbacks (pydantic/monty#560), so
-    `_sync` parks the tokio worker for the whole I/O wait. That caps
+    The binding only accepts sync callbacks (pydantic/monty#560), so the
+    core's hop parks the tokio worker for the whole I/O wait. That caps
     concurrent I/O-waiting runs at Monty's worker pool size, which is
     the core count by default; TOKIO_WORKER_THREADS raises it, and
     parked workers cost stack pages, not CPU (measured: 100 concurrent
@@ -84,74 +185,31 @@ class _MirageOS(OSAccess):
             environ: dict[str, str],
             mount_prefixes: Callable[[], list[str]] | None = None) -> None:
         super().__init__([], environ=dict(environ))
-        self._loop = loop
-        self._workspace_dispatch = dispatch
-        self._mount_prefixes = mount_prefixes
-        self._missing: set[str] = set()
-        self._no_append: set[str] = set()
+        core = (RuntimeVFS(dispatch, loop, mount_prefixes)
+                if dispatch is not None else None)
+        self._vfs = MontyVFS(core)
 
     def _mount_of(self, path: PurePosixPath) -> str | None:
-        """The mount prefix serving `path`, or None when none does.
-
-        Args:
-            path (PurePosixPath): the virtual path to place.
-        """
-        if self._mount_prefixes is None:
-            return None
-        virtual = str(path)
-        best: str | None = None
-        for prefix in self._mount_prefixes():
-            norm = prefix if prefix.endswith("/") else prefix + "/"
-            if virtual == norm.rstrip("/") or virtual.startswith(norm):
-                if best is None or len(norm) > len(best):
-                    best = norm
-        return best
-
-    def _sync(self, coro):
-        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+        return self._vfs.mount_of(path)
 
     def _fetch(self, virtual: str) -> bytes | None:
-        if self._workspace_dispatch is None or virtual in self._missing:
-            return None
-        try:
-            data, _ = self._sync(
-                self._workspace_dispatch("read",
-                                         PathSpec.from_str_path(virtual)))
-        except (FileNotFoundError, IsADirectoryError, NotADirectoryError,
-                ValueError):
-            self._missing.add(virtual)
-            return None
-        if isinstance(data, str):
-            return data.encode()
-        if isinstance(data, (bytes, bytearray)):
-            return bytes(data)
-        return None
+        return self._vfs.read(virtual)
 
     def _list_remote(self, virtual: str) -> list[str] | None:
-        if self._workspace_dispatch is None:
-            return None
-        try:
-            names, _ = self._sync(
-                self._workspace_dispatch("readdir",
-                                         PathSpec.from_str_path(virtual)))
-        except (FileNotFoundError, IsADirectoryError, NotADirectoryError,
-                ValueError):
-            return None
-        return list(names)
+        return self._vfs.readdir(virtual)
 
-    def _flush(self, path: PurePosixPath) -> None:
-        if self._workspace_dispatch is None:
-            return
+    def _tree_bytes(self, path: PurePosixPath) -> bytes | None:
         entry = self._get_entry(path)
         if entry is None or isinstance(entry, dict):
-            return
+            return None
         content = entry.read_content()
-        data = content.encode() if isinstance(content, str) else bytes(content)
-        self._sync(
-            self._workspace_dispatch("write",
-                                     PathSpec.from_str_path(str(path)),
-                                     data=data))
-        self._missing.discard(str(path))
+        return content.encode() if isinstance(content, str) else bytes(content)
+
+    def _flush(self, path: PurePosixPath) -> None:
+        data = self._tree_bytes(path)
+        if data is None:
+            return
+        self._vfs.write(str(path), data)
 
     def _append_remote(self, path: PurePosixPath, data: bytes) -> None:
         """Send only the appended bytes when the mount can take them.
@@ -162,30 +220,14 @@ class _MirageOS(OSAccess):
         200 appends of one short line shipped 164 KB to build a 1.7 KB
         file before this.
 
-        `append` is optional per backend (S3 registers `write` without
-        it), so a mount that declines falls back to the whole-file
-        flush and is remembered, keeping one failed dispatch per file
-        rather than one per append.
-
         Args:
             path (PurePosixPath): the file being appended to.
             data (bytes): only the newly appended bytes.
         """
-        if self._workspace_dispatch is None:
+        whole = self._tree_bytes(path)
+        if whole is None:
             return
-        mount = self._mount_of(path) or str(path)
-        if mount not in self._no_append:
-            try:
-                self._sync(
-                    self._workspace_dispatch("append",
-                                             PathSpec.from_str_path(str(path)),
-                                             data=data))
-            except OperationNotSupportedError:
-                self._no_append.add(mount)
-            else:
-                self._missing.discard(str(path))
-                return
-        self._flush(path)
+        self._vfs.append(str(path), data, whole)
 
     def _insert_tree_dir(self, path: PurePosixPath) -> dict[str, Any] | None:
         subtree = self._tree
@@ -312,7 +354,7 @@ class _MirageOS(OSAccess):
             exist_ok (bool): stay quiet when it already exists.
         """
         self._ensure_dir(path.parent)
-        if self._workspace_dispatch is None:
+        if not self._vfs.wired:
             super().path_mkdir(path, parents, exist_ok)
             return
         self._ensure_file(path)
@@ -324,20 +366,12 @@ class _MirageOS(OSAccess):
                 self._insert_tree_dir(path)
                 return
             raise FileExistsError(f"[Errno 17] File exists: {str(path)!r}")
-        self._sync(
-            self._workspace_dispatch("mkdir",
-                                     PathSpec.from_str_path(str(path)),
-                                     parents=parents))
+        self._vfs.mkdir(str(path), parents)
         self._insert_tree_dir(path)
-        self._missing.discard(str(path))
 
     def path_rmdir(self, path: PurePosixPath) -> None:
         self._ensure_dir(path)
-        if self._workspace_dispatch is not None:
-            self._sync(
-                self._workspace_dispatch("rmdir",
-                                         PathSpec.from_str_path(str(path))))
-            self._missing.add(str(path))
+        self._vfs.rmdir(str(path))
         super().path_rmdir(path)
 
     def path_rename(self, path: PurePosixPath, target: PurePosixPath) -> None:
@@ -363,29 +397,20 @@ class _MirageOS(OSAccess):
         """
         self._ensure_file(path)
         self._ensure_dir(path)
-        if self._workspace_dispatch is not None:
-            src_mount = self._mount_of(path)
-            dst_mount = self._mount_of(target)
-            if src_mount != dst_mount:
-                raise OSError(errno.EXDEV, "Invalid cross-device link",
-                              str(path), None, str(target))
-            self._sync(
-                self._workspace_dispatch("rename",
-                                         PathSpec.from_str_path(str(path)),
-                                         dst=PathSpec.from_str_path(
-                                             str(target))))
-            self._missing.add(str(path))
-            self._missing.discard(str(target))
+        try:
+            self._vfs.rename(str(path), str(target))
+        except CrossMountError as exc:
+            # pathlib's answer for a rename across filesystems, so the
+            # failure is the familiar one and the copy-and-delete
+            # workaround is the known one.
+            raise OSError(errno.EXDEV, "Invalid cross-device link", str(path),
+                          None, str(target)) from exc
         super().path_rename(path, target)
 
     def path_unlink(self, path: PurePosixPath) -> None:
         self._ensure_file(path)
         super().path_unlink(path)
-        if self._workspace_dispatch is not None:
-            self._sync(
-                self._workspace_dispatch("unlink",
-                                         PathSpec.from_str_path(str(path))))
-            self._missing.add(str(path))
+        self._vfs.unlink(str(path))
 
 
 class MontyRuntime(PythonRuntime, EvaluatorMixin):

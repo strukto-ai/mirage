@@ -12,16 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.wasm.bridge import SyncDispatch
-from mirage.runtime.wasm.fs import GuestFs, GuestStat
+from mirage.runtime.wasm.fs import GuestStat, WasmVFS
 from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
 from mirage.runtime.wasm.runtime import WasmRuntime, epoch_engine
 
 __all__ = [
-    "GuestFs",
     "GuestStat",
-    "SyncDispatch",
     "WasiFs",
+    "WasmVFS",
     "WasmRuntime",
     "epoch_engine",
     "install_wasi_fs",

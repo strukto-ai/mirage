@@ -322,7 +322,7 @@ export class Workspace {
   // takes the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
   // by the current session all come from the Dispatcher. Reads are raw
-  // bytes (no filetype rendering), matching the Python GuestFs.
+  // bytes (no filetype rendering), matching the Python WasmVFS.
   private buildWorkspaceBridge(): BridgeDispatchFn {
     return async (op, path, bytes, dst) => {
       switch (op) {

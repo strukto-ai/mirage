@@ -22,7 +22,8 @@ from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import (DispatchFn, PrefixSource, RunArgs, RunResult,
                                   ScriptSource)
-from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.wasm import WasmRuntime, WasmVFS
 
 wasmtime: Any
 try:
@@ -108,11 +109,10 @@ class WasiRuntime(PythonRuntime):
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
-        bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
-                  if self._dispatch is not None else None)
-        fs = GuestFs(host_root=self._root,
-                     bridge=bridge,
-                     mount_prefixes=self._mount_prefixes)
+        core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
+                           self._mount_prefixes)
+                if self._dispatch is not None else None)
+        fs = WasmVFS(host_root=self._root, vfs=core)
         # sys.argv becomes ['-c', *args.args], matching the local runtime.
         stdout, stderr, exit_code = await self._runtime.run(
             argv=["python", "-c", args.code, *args.args],

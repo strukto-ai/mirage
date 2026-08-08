@@ -17,11 +17,11 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
-from mirage.runtime.wasm.bridge import SyncDispatch
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType
 
 _READONLY_HINT = "interpreter build directory is read-only"
 
@@ -49,37 +49,29 @@ class GuestStat:
     mtime_ns: int
 
 
-class GuestFs:
+class WasmVFS:
     """Route guest-absolute paths to the interpreter build or workspace.
 
-    Paths under a workspace mount prefix bridge to the dispatch (cache
-    read-through, write modes, session narrowing — the same path shell
-    commands take). Everything else is served read-only from the host
-    build directory, so the interpreter's own files stay local and
-    fast. A path in neither answers ENOENT. Without a bridge, only the
+    The wasm tier's one addition to `RuntimeVFS`: paths under a mount
+    prefix go to the core, and everything else is served read-only from
+    the host build directory, so the interpreter's own files stay local
+    and fast. A path in neither answers ENOENT. Without a core, only the
     build directory is visible; without a build directory (quickjs),
-    everything bridges.
+    everything routes to the core.
     """
 
     def __init__(
         self,
         host_root: Path | None = None,
-        bridge: SyncDispatch | None = None,
-        mount_prefixes: Callable[[], list[str]] | None = None,
+        vfs: RuntimeVFS | None = None,
     ) -> None:
         self._host_root = Path(host_root) if host_root is not None else None
-        self._bridge = bridge
-        self._mount_prefixes = mount_prefixes
+        self._vfs = vfs
 
     def _prefixes(self) -> list[str]:
-        if self._bridge is None or self._mount_prefixes is None:
+        if self._vfs is None:
             return []
-        out = []
-        for prefix in self._mount_prefixes():
-            normed = "/" + prefix.strip("/")
-            if normed != "/":
-                out.append(normed)
-        return sorted(out, key=len, reverse=True)
+        return self._vfs.prefixes()
 
     def _host_target(self, path: str) -> Path | None:
         """Resolve a guest path to the host build, or None for the bridge.
@@ -94,19 +86,24 @@ class GuestFs:
             if path == prefix or path.startswith(prefix + "/"):
                 return None
         if self._host_root is None:
-            if self._bridge is None:
+            if self._vfs is None:
                 raise FileNotFoundError(path)
             return None
         rel = path.lstrip("/")
         host = self._host_root / rel if rel else self._host_root
-        if self._bridge is None:
+        if self._vfs is None:
             return host
         return host if path == "/" or host.exists() else None
 
+    def _core(self) -> RuntimeVFS:
+        if self._vfs is None:
+            raise FileNotFoundError("no workspace mounts are reachable")
+        return self._vfs
+
     def _bridge_call(self, op: str, path: str, **kwargs: Any) -> Any:
-        if self._bridge is None:
+        if self._vfs is None:
             raise FileNotFoundError(path)
-        return self._bridge.call(op, path, **kwargs)
+        return self._vfs.call(op, path, **kwargs)
 
     def stat(self, path: str) -> GuestStat:
         """Stat a guest path.
@@ -186,7 +183,21 @@ class GuestFs:
             if src_host != dst_host:
                 raise OSError(host_errno.EXDEV, "cross-device rename", src)
             raise PermissionError(_READONLY_HINT)
-        self._bridge_call("rename", src, dst=PathSpec.from_str_path(dst))
+        self._core().rename(src, dst)
+
+    def flush(self, path: str, base_len: int, low_write: int,
+              buf: bytes | bytearray) -> None:
+        """Send a closing handle's buffer, as a delta when it can be one.
+
+        Args:
+            path (str): guest-absolute path.
+            base_len (int): length the file had when the handle opened.
+            low_write (int): lowest offset this handle wrote at.
+            buf (bytes | bytearray): the handle's whole buffer.
+        """
+        if self._host_target(path) is not None:
+            raise PermissionError(_READONLY_HINT)
+        self._core().flush(path, base_len, low_write, buf)
 
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.
@@ -226,7 +237,7 @@ class GuestFs:
         if self._host_root is not None:
             for name, kind in self._readdir_host(self._host_root):
                 entries[name] = kind
-        if self._bridge is not None:
+        if self._vfs is not None:
             for name, kind in self._readdir_bridge("/"):
                 entries.setdefault(name, kind)
             for prefix in self._prefixes():
