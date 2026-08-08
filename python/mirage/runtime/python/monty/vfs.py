@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pathlib import PurePosixPath
-
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -39,11 +37,6 @@ class MontyVFS:
     def wired(self) -> bool:
         """True when a workspace dispatch is reachable."""
         return self._core is not None
-
-    def mount_of(self, path: PurePosixPath) -> str | None:
-        if self._core is None:
-            return None
-        return self._core.mount_of(str(path))
 
     def read(self, virtual: str) -> bytes | None:
         """The file's bytes, or None when the mount does not have it."""

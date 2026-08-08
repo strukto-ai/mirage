@@ -64,9 +64,6 @@ class MirageOSAccess(OSAccess):
                 if dispatch is not None else None)
         self._vfs = MontyVFS(core)
 
-    def _mount_of(self, path: PurePosixPath) -> str | None:
-        return self._vfs.mount_of(path)
-
     def _fetch(self, virtual: str) -> bytes | None:
         return self._vfs.read(virtual)
 
@@ -278,6 +275,29 @@ class MirageOSAccess(OSAccess):
             raise OSError(errno.EXDEV, EXDEV_MESSAGE, str(path), None,
                           str(target)) from exc
         super().path_rename(path, target)
+        self._restamp(target)
+
+    def _restamp(self, target: PurePosixPath) -> None:
+        """Re-point a renamed file at the name it now has.
+
+        monty 0.0.19's `path_rename` moves a file between directory
+        dicts without updating the file's own `path`/`name`, which it
+        does do for the directory branch (`_update_paths_recursive`).
+        `path_unlink` then deletes by `file.name`, so renaming a.txt to
+        b.txt and removing b.txt raises `KeyError: 'a.txt'`, which is
+        not an OSError and so cannot be caught by guest code. On a
+        mount the rename has already landed by then, leaving the
+        backend ahead of the tree. Reported upstream; drop this once a
+        release carries the fix.
+
+        Args:
+            target (PurePosixPath): the path the file now has.
+        """
+        entry = self._get_entry(target)
+        if entry is None or isinstance(entry, dict):
+            return
+        entry.path = target
+        entry.name = target.name
 
     def path_unlink(self, path: PurePosixPath) -> None:
         self._ensure_file(path)
