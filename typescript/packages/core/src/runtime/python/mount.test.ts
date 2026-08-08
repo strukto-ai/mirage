@@ -195,14 +195,19 @@ describe('PyodideRuntime mount visibility', () => {
     await rt.close()
   }, 60_000)
 
-  it('an unreadable base fails the append rather than replacing the file', async () => {
+  it('an unreadable base refuses the open rather than replacing the file', async () => {
     const writes: Uint8Array[] = []
+    // The mount lists the file, so it exists, but will not hand over its
+    // content. Leaving it out of the guest's tree would read as absence,
+    // and the append would then ship its tail as the whole file.
     const dispatch: BridgeDispatchFn = (op, path, bytes) => {
       if (op === 'READ' && path === '/ram/log.txt') {
         return Promise.reject(new Error('backend unavailable'))
       }
       if (op === 'READ') return Promise.resolve(new Uint8Array())
-      if (op === 'LIST') return Promise.resolve([])
+      if (op === 'LIST') {
+        return Promise.resolve([{ path: '/ram/log.txt', size: 4, isDir: false }])
+      }
       if (op === 'WRITE' && bytes !== undefined) writes.push(new Uint8Array(bytes))
       return Promise.resolve(undefined)
     }
@@ -214,12 +219,11 @@ describe('PyodideRuntime mount visibility', () => {
       env: {},
       stdin: new Uint8Array(),
     })
-    // An error that is not a confirmed absence must not be read as an
-    // empty base, or the tail alone would overwrite the file.
     expect(writes).toHaveLength(0)
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toContain(
-      'failed to append /ram/log.txt',
-    )
+    // The refusal reaches the guest at the call site now, rather than
+    // surfacing after the run as a failed replay.
+    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
+    expect(stderr).toContain('OSError')
     expect(result.exitCode).toBe(1)
     await rt.close()
   }, 60_000)

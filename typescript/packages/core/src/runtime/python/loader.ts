@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ErrnoCodes, FSHost, FSType } from './fs/types.ts'
 import { PyodideUnavailableError } from './types.ts'
 
 const noopIo = (): void => undefined
@@ -27,11 +28,13 @@ function envHome(): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
 
-interface PyodideFS {
+interface PyodideFS extends FSHost {
   mkdirTree: (path: string, mode?: number) => void
   writeFile: (path: string, data: Uint8Array | string) => void
   readFile: (path: string, opts?: { encoding?: 'binary' | 'utf8' }) => Uint8Array | string
   unlink?: (path: string) => void
+  mount: (type: FSType, opts: Record<string, unknown>, mountpoint: string) => unknown
+  unmount: (mountpoint: string) => void
 }
 
 export interface PyodideInterface {
@@ -48,6 +51,7 @@ export interface PyodideInterface {
   unregisterJsModule?: (name: string) => void
   setInterruptBuffer?: (buffer: Int32Array | Uint8Array) => void
   FS: PyodideFS
+  ERRNO_CODES: ErrnoCodes
 }
 
 function isNode(): boolean {

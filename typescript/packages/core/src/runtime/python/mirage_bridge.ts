@@ -24,6 +24,12 @@ export interface MirageEntry {
 export interface FSLike {
   mkdirTree(path: string): void
   writeFile(path: string, bytes: Uint8Array): void
+  /**
+   * Note a listed file whose content could not be fetched. A target that
+   * does not implement this simply omits the file, which is only safe
+   * when nothing will write to it.
+   */
+  markUnreadable?(path: string): void
 }
 
 interface MirageStat {
@@ -270,8 +276,12 @@ async function preloadEntry(fs: FSLike, bridge: MirageBridge, entry: MirageEntry
     const bytes = await bridge.fetch(entry.path)
     fs.writeFile(entry.path, bytes)
   } catch (err) {
+    // The mount listed it, so it exists; we just cannot serve it. Say so
+    // rather than leaving a hole the guest would read as absence and an
+    // append would fill by replacing the file.
+    fs.markUnreadable?.(entry.path)
     console.warn(
-      `mirage preload: skipping ${entry.path}: ${err instanceof Error ? err.message : String(err)}`,
+      `mirage preload: cannot read ${entry.path}: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
 }
