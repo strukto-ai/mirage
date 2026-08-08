@@ -16,7 +16,7 @@ import pytest
 
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.wasm.config import WasmFsConfig
-from mirage.runtime.wasm.fs import WasmVFS
+from mirage.runtime.wasm.vfs import WasmVFS
 
 
 def test_defaults_to_no_build_directory():

@@ -28,7 +28,7 @@ from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
                                      pack_prestat, pack_u32, pack_u64,
                                      unpack_iovs)
 # yapf: enable
-from mirage.runtime.wasm.fs import WasmVFS
+from mirage.runtime.wasm.vfs import WasmVFS
 
 wasmtime: Any
 Func: Any

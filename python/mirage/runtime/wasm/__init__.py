@@ -14,7 +14,7 @@
 
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
-from mirage.runtime.wasm.fs import WasmVFS
+from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
 from mirage.runtime.wasm.runtime import WasmRuntime, epoch_engine
 from mirage.runtime.wasm.types import GuestStat

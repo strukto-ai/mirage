@@ -19,7 +19,7 @@ import pytest
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
 from mirage.runtime.wasm.config import WasmFsConfig
-from mirage.runtime.wasm.fs import WasmVFS
+from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.runtime.wasm.types import GuestStat
 from mirage.types import FileStat, FileType
 
