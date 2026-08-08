@@ -43,14 +43,53 @@ function msgFilename(subject: string, uid: string): string {
   return `${sanitize(subject)}__${uid}.email.json`
 }
 
+// RFC 5322's obsolete zone names, the set `parsedate_to_datetime` knows.
+const NAMED_ZONES: Record<string, number> = {
+  UT: 0,
+  UTC: 0,
+  GMT: 0,
+  Z: 0,
+  EST: -300,
+  EDT: -240,
+  CST: -360,
+  CDT: -300,
+  MST: -420,
+  MDT: -360,
+  PST: -480,
+  PDT: -420,
+}
+
+/** Minutes east of UTC the timestamp states, null when it states none. */
+function statedOffset(value: string): number | null {
+  const numeric = /([+-])(\d{2}):?(\d{2})\s*$/.exec(value)
+  if (numeric !== null) {
+    const sign = numeric[1] === '-' ? -1 : 1
+    return sign * (Number(numeric[2]) * 60 + Number(numeric[3]))
+  }
+  const named = /([A-Z]{1,3})\s*$/.exec(value.toUpperCase())
+  return NAMED_ZONES[named?.[1] ?? ''] ?? null
+}
+
+function ymd(year: number, month: number, day: number): string {
+  return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+}
+
 function parseDate(value: string): string | null {
   if (value.trim() === '') return null
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return null
-  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = d.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+  // The calendar date as written, with no zone conversion. RFC 3501
+  // defines SENTON/SENTBEFORE/SENTSINCE (and ON/BEFORE/SINCE) as
+  // comparing the date "disregarding time and timezone", so a message
+  // written 05 Jan 23:30 -0500 answers a search for the 5th and has to
+  // sit in the 5th's directory. `Date` only keeps the instant, so the
+  // stated offset is added back before reading the fields.
+  const offset = statedOffset(value)
+  // No zone stated: `new Date` read the wall clock as host-local, so the
+  // local fields hand it back exactly as written.
+  if (offset === null) return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+  const shifted = new Date(d.getTime() + offset * 60_000)
+  return ymd(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate())
 }
 
 /**

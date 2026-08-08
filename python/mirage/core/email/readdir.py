@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -54,12 +53,12 @@ def _parse_date(value: str) -> str | None:
         dt = parsedate_to_datetime(value)
     except (TypeError, ValueError):
         return None
-    # Normalized to UTC so one message buckets the same everywhere: the
-    # gmail backend and both TS backends already read their timestamps in
-    # UTC, and honoring the sender's offset instead put a message written
-    # at 23:30 -0500 in the day before the one gmail files it under.
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc)
+    # The calendar date as written, with no zone conversion. RFC 3501
+    # defines SENTON/SENTBEFORE/SENTSINCE (and ON/BEFORE/SINCE) as
+    # comparing the date "disregarding time and timezone", so a message
+    # written 05 Jan 23:30 -0500 answers a search for the 5th and has to
+    # sit in the 5th's directory. Converting to UTC would file it under
+    # the 6th and the search would select mail the directory lacks.
     return dt.strftime("%Y-%m-%d")
 
 

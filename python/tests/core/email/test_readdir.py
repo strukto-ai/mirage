@@ -141,12 +141,18 @@ def test_date_bucket_reaches_the_epoch_only_with_neither():
     assert _date_bucket({}) == "1970-01-01"
 
 
-def test_date_bucket_reads_offsets_in_utc():
-    # The TS backend and both gmail backends bucket in UTC; honoring the
-    # sender's offset instead filed a late-evening message a day early.
+def test_date_bucket_keeps_the_calendar_date_as_written():
+    # RFC 3501 compares SENTON/SENTBEFORE/SENTSINCE (and ON/BEFORE/SINCE)
+    # "disregarding time and timezone", so a message written late on the
+    # 5th in -0500 answers a search for the 5th and belongs in the 5th's
+    # directory. Converting to UTC would file it under the 6th.
     assert _date_bucket({"date":
-                         "Mon, 05 Jan 2026 23:30:00 -0500"}) == "2026-01-06"
+                         "Mon, 05 Jan 2026 23:30:00 -0500"}) == "2026-01-05"
+    # The same in the other direction: early on the 5th in +0900 is still
+    # the 5th, not the 4th.
+    assert _date_bucket({"date":
+                         "Mon, 05 Jan 2026 01:30:00 +0900"}) == "2026-01-05"
     assert _date_bucket({
         "date": "",
-        "internal_date": " 7-Aug-2026 20:54:05 -0500",
-    }) == "2026-08-08"
+        "internal_date": " 7-Aug-2026 02:00:00 +1000",
+    }) == "2026-08-07"

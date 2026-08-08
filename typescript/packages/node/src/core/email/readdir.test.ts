@@ -120,7 +120,23 @@ describe('dateBucket', () => {
     expect(dateBucket(message({ date: '', internalDate: '' }))).toBe('1970-01-01')
   })
 
-  it('reads offsets in UTC', () => {
-    expect(dateBucket(message({ date: 'Mon, 05 Jan 2026 23:30:00 -0500' }))).toBe('2026-01-06')
+  // RFC 3501 compares SENTON/SENTBEFORE/SENTSINCE (and ON/BEFORE/SINCE)
+  // "disregarding time and timezone", so a message written late on the 5th
+  // in -0500 answers a search for the 5th and belongs in the 5th's
+  // directory. Converting to UTC would file it under the 6th.
+  it('keeps the calendar date as written', () => {
+    expect(dateBucket(message({ date: 'Mon, 05 Jan 2026 23:30:00 -0500' }))).toBe('2026-01-05')
+    expect(dateBucket(message({ date: 'Mon, 05 Jan 2026 01:30:00 +0900' }))).toBe('2026-01-05')
+  })
+
+  it('reads the obsolete zone names RFC 5322 still allows', () => {
+    expect(dateBucket(message({ date: 'Mon, 05 Jan 2026 23:30:00 EST' }))).toBe('2026-01-05')
+    expect(dateBucket(message({ date: 'Mon, 05 Jan 2026 23:30:00 GMT' }))).toBe('2026-01-05')
+  })
+
+  // A header with no zone at all: the wall clock is the answer, and it
+  // must not shift with the host's timezone.
+  it('keeps a zone-less header at its written wall clock', () => {
+    expect(dateBucket(message({ date: 'Mon, 05 Jan 2026 23:30:00' }))).toBe('2026-01-05')
   })
 })
