@@ -19,3 +19,12 @@ export const DIR_MODE = S_IFDIR | 0o777
 export const FILE_MODE = S_IFREG | 0o666
 
 export const BLKSIZE = 4096
+
+// The lowest offset a handle has written at, before it writes anything.
+// A sentinel rather than a null because every write takes the minimum of
+// it and the new offset, and "nothing yet" has to lose that comparison.
+export const NO_WRITE = Number.MAX_SAFE_INTEGER
+
+// llseek's whence, which Emscripten passes through as the raw number.
+export const SEEK_CUR = 1
+export const SEEK_END = 2

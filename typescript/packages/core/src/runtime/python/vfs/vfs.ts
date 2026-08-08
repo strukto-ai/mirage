@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MirageBridge } from '../mirage_bridge.ts'
-import { BLKSIZE } from './constants.ts'
+import { BLKSIZE, NO_WRITE, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
 import { planFlush } from './flush.ts'
 import type { MirageFsSeed } from './seed.ts'
@@ -191,16 +191,16 @@ export class MirageFs {
     // because a write through one could only guess at what it replaces.
     if (stream.node.unreadable === true) throw errnoError(this.host, this.errno, 'EIO')
     stream.baseLen = stream.node.usedBytes ?? 0
-    stream.lowWrite = Number.MAX_SAFE_INTEGER
+    stream.lowWrite = NO_WRITE
   }
 
   private streamClose(stream: FSStream): void {
-    const low = stream.lowWrite ?? Number.MAX_SAFE_INTEGER
-    if (low === Number.MAX_SAFE_INTEGER) return
+    const low = stream.lowWrite ?? NO_WRITE
+    if (low === NO_WRITE) return
     const node = stream.node
     const buf = (node.contents ?? new Uint8Array(0)).subarray(0, node.usedBytes ?? 0)
     const [kind, bytes] = planFlush(stream.baseLen ?? 0, low, buf)
-    stream.lowWrite = Number.MAX_SAFE_INTEGER
+    stream.lowWrite = NO_WRITE
     const path = this.tree.pathOf(node)
     if (kind === 'append') this.bridge.markAppend(path, bytes)
     else this.bridge.markWrite(path, bytes)
@@ -241,14 +241,14 @@ export class MirageFs {
     contents.set(buffer.subarray(offset, offset + length), position)
     node.usedBytes = Math.max(node.usedBytes ?? 0, need)
     node.mtime = node.ctime = Date.now()
-    stream.lowWrite = Math.min(stream.lowWrite ?? Number.MAX_SAFE_INTEGER, position)
+    stream.lowWrite = Math.min(stream.lowWrite ?? NO_WRITE, position)
     return length
   }
 
   private llseek(stream: FSStream, offset: number, whence: number): number {
     let position = offset
-    if (whence === 1) position += stream.position
-    else if (whence === 2 && this.host.isFile(stream.node.mode)) {
+    if (whence === SEEK_CUR) position += stream.position
+    else if (whence === SEEK_END && this.host.isFile(stream.node.mode)) {
       position += stream.node.usedBytes ?? 0
     }
     if (position < 0) throw errnoError(this.host, this.errno, 'EINVAL')
