@@ -23,9 +23,11 @@ from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
                                 array_indices, array_slice, array_values)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.glob_walk import escape_glob
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -52,6 +54,11 @@ _PATTERN_OPS = _REPLACE_OPS | _STRIP_OPS | _CASE_OPS
 _MULTIWORD_AT_OPS = frozenset({":"}) | _STRIP_OPS | _REPLACE_OPS | _CASE_OPS
 
 _LITERAL_ARG_TYPES = frozenset({NT.WORD, NT.NUMBER, "regex"})
+
+# Quote-carrying operand nodes: in pattern position their value matches
+# literally, exactly as a quoted case pattern does.
+_QUOTED_ARG_TYPES = frozenset(
+    {NT.STRING, NT.RAW_STRING, NT.ANSI_C_STRING, NT.TRANSLATED_STRING})
 
 # Operators that handle unset themselves, so `set -u` must not fire
 # on the lookup that feeds them.
@@ -202,46 +209,142 @@ def _parse_braces(node: tree_sitter.Node) -> _BraceParse:
                        groups=tuple(tuple(g) for g in groups))
 
 
-def _expand_dollar_refs(text: str, session: Session,
-                        call_stack: CallStack | None) -> str:
-    """Expand ``$name``/``${name}`` references embedded in a pattern.
+def _escaped_find(text: str, start: int, quote: str) -> int:
+    """Index of the next unescaped ``quote``, -1 when it never closes.
 
-    Pattern operands (``${f%$ext}``) arrive as opaque ``regex`` nodes
-    whose ``$``-references have no child nodes; resolve them textually
-    while keeping every other character (glob syntax) literal.
+    Args:
+        text (str): the token being scanned.
+        start (int): first index inside the quotes.
+        quote (str): the closing character.
+    """
+    i = start
+    n = len(text)
+    while i < n:
+        if text[i] == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if text[i] == quote:
+            return i
+        i += 1
+    return -1
+
+
+def _ref_end(text: str, start: int) -> tuple[str, int] | None:
+    """A ``$name``/``${name}`` reference starting after the ``$``.
+
+    Args:
+        text (str): the token being scanned.
+        start (int): index of the character after ``$``.
+
+    Returns:
+        The name and the index past the reference, or None when the
+        ``$`` starts no reference and stays literal.
+    """
+    n = len(text)
+    j = start
+    braced = j < n and text[j] == "{"
+    if braced:
+        j += 1
+    k = j
+    while k < n and (text[k].isalnum() or text[k] == "_"):
+        k += 1
+    name = text[j:k]
+    if not name:
+        return None
+    if braced:
+        if k >= n or text[k] != "}":
+            return None
+        k += 1
+    return name, k
+
+
+def _dquoted_pattern(inner: str, session: Session,
+                     call_stack: CallStack | None) -> str:
+    """A double-quoted pattern segment: everything in it is literal.
+
+    Args:
+        inner (str): the text between the double quotes.
+        session (Session): shell session for name resolution.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(inner)
+    while i < n:
+        ch = inner[i]
+        if ch == "\\" and i + 1 < n and inner[i + 1] in '$`"\\':
+            out.append(escape_glob(inner[i + 1]))
+            i += 2
+            continue
+        if ch == "$" and i + 1 < n:
+            ref = _ref_end(inner, i + 1)
+            if ref is not None:
+                name, nxt = ref
+                out.append(escape_glob(_lookup_var(name, session, call_stack)))
+                i = nxt
+                continue
+        out.append(escape_glob(ch))
+        i += 1
+    return "".join(out)
+
+
+def _pattern_text(text: str, session: Session,
+                  call_stack: CallStack | None) -> str:
+    """Render an opaque pattern token with bash quoting semantics.
+
+    Pattern operands (``${f%$ext}``, ``${v#x"a*"}``) arrive as opaque
+    ``regex`` nodes tree-sitter does not parse further, but bash still
+    honors quoting inside them: quoted segments (single, double, or
+    ANSI-C) match literally, a backslash binds the next character, an
+    unquoted ``$``-reference splices a live pattern while a
+    double-quoted one splices literal text, and every other character -
+    glob syntax included - stays live. Literal text is spelled in
+    one-character classes because fnmatch has no escape character.
 
     Args:
         text (str): the raw pattern text.
         session (Session): shell session for name resolution.
         call_stack (CallStack | None): function-call scope, if any.
     """
-    if "$" not in text:
+    if not any(c in text for c in "$\\'\""):
         return text
     out: list[str] = []
     i = 0
     n = len(text)
     while i < n:
         ch = text[i]
-        if ch != "$" or i + 1 >= n:
-            out.append(ch)
-            i += 1
+        if ch == "\\" and i + 1 < n:
+            out.append(escape_glob(text[i + 1]))
+            i += 2
             continue
-        j = i + 1
-        braced = text[j] == "{"
-        if braced:
-            j += 1
-        start = j
-        while j < n and (text[j].isalnum() or text[j] == "_"):
-            j += 1
-        name = text[start:j]
-        if not name or (braced and (j >= n or text[j] != "}")):
-            out.append(ch)
-            i += 1
-            continue
-        if braced:
-            j += 1
-        out.append(_lookup_var(name, session, call_stack))
-        i = j
+        if ch == "\'":
+            end = text.find("\'", i + 1)
+            if end != -1:
+                out.append(escape_glob(text[i + 1:end]))
+                i = end + 1
+                continue
+        if ch == '"':
+            end = _escaped_find(text, i + 1, '"')
+            if end != -1:
+                out.append(
+                    _dquoted_pattern(text[i + 1:end], session, call_stack))
+                i = end + 1
+                continue
+        if ch == "$" and i + 1 < n:
+            if text[i + 1] == "\'":
+                end = _escaped_find(text, i + 2, "\'")
+                if end != -1:
+                    out.append(escape_glob(decode_ansi_c(text[i + 2:end])))
+                    i = end + 1
+                    continue
+            ref = _ref_end(text, i + 1)
+            if ref is not None:
+                name, nxt = ref
+                out.append(_lookup_var(name, session, call_stack))
+                i = nxt
+                continue
+        out.append(ch)
+        i += 1
     return "".join(out)
 
 
@@ -251,8 +354,13 @@ async def _expand_operand(node: tree_sitter.Node, expand_child: ExpandChild,
     if node.type == NT.CONCATENATION:
         return await _expand_group(tuple(node.children), expand_child,
                                    pattern_mode, session, call_stack)
+    if pattern_mode and node.type in _QUOTED_ARG_TYPES:
+        # Quoted pattern text matches literally, the same rule case
+        # patterns follow: the value, inner expansions included, is
+        # escaped so its glob characters match themselves.
+        return escape_glob(await expand_child(node))
     if pattern_mode and node.type in _LITERAL_ARG_TYPES:
-        return _expand_dollar_refs(get_text(node), session, call_stack)
+        return _pattern_text(get_text(node), session, call_stack)
     return await expand_child(node)
 
 

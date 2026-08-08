@@ -1,0 +1,541 @@
+{
+ "ascii_short": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogaGVsbG8NCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpwbGFpbiBib2R5DQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "plain body",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "hello",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "attachment_long_ascii_name": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iM2U4N2FhMWNhZDZlZTVkMjY2MmJlNzlmNWU0MGRjYTMiDQoNCi0tM2U4N2FhMWNhZDZlZTVkMjY2MmJlNzlmNWU0MGRjYTMNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQoNCm9rDQoNCi0tM2U4N2FhMWNhZDZlZTVkMjY2MmJlNzlmNWU0MGRjYTMNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogYmFzZTY0DQpDb250ZW50LURpc3Bvc2l0aW9uOiBhdHRhY2htZW50Ow0KIGZpbGVuYW1lKjAqPXVzLWFzY2lpJydhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE7DQogZmlsZW5hbWUqMSo9YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLnR4dA0KTUlNRS1WZXJzaW9uOiAxLjANCg0KZUE9PQ0KDQotLTNlODdhYTFjYWQ2ZWU1ZDI2NjJiZTc5ZjVlNDBkY2EzLS0NCg==",
+  "compose": {
+   "attachments": [
+    {
+     "contentType": "text/plain",
+     "dataB64": "eA==",
+     "filename": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.txt"
+    }
+   ],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "attachment_long_nonascii_name": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iNDE2OGI5YTA5Y2M1N2UzMWE4MzQzOTY0MGUxNmZhNDAiDQoNCi0tNDE2OGI5YTA5Y2M1N2UzMWE4MzQzOTY0MGUxNmZhNDANCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQoNCm9rDQoNCi0tNDE2OGI5YTA5Y2M1N2UzMWE4MzQzOTY0MGUxNmZhNDANCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogYmFzZTY0DQpDb250ZW50LURpc3Bvc2l0aW9uOiBhdHRhY2htZW50Ow0KIGZpbGVuYW1lKjAqPXV0Zi04JydkJUMzJUE5dGFpbHMlMjBkJUMzJUE5dGFpbHMlMjBkJUMzJUE5dGFpbHMlMjBkJUMzJUE5dGFpbHM7DQogZmlsZW5hbWUqMSo9JTIwZCVDMyVBOXRhaWxzJTIwZCVDMyVBOXRhaWxzJTIwZCVDMyVBOXRhaWxzJTIwZCVDMyVBOXRhaWxzJTIwZDsNCiBmaWxlbmFtZSoyKj0lQzMlQTl0YWlscyUyMGQlQzMlQTl0YWlscyUyMGQlQzMlQTl0YWlscyUyMGQlQzMlQTl0YWlscyUyMC50eHQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCmVBPT0NCg0KLS00MTY4YjlhMDljYzU3ZTMxYTgzNDM5NjQwZTE2ZmE0MC0tDQo=",
+  "compose": {
+   "attachments": [
+    {
+     "contentType": "text/plain",
+     "dataB64": "eA==",
+     "filename": "d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails d\u00e9tails .txt"
+    }
+   ],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "attachment_nonascii_filename_with_line_break": {
+  "bytesB64": "RnJvbTogc2VuZGVyQGV4YW1wbGUuY29tDQpUbzogdG9AZXhhbXBsZS5jb20NClN1YmplY3Q6IHNuZWFreSBmaWxlbmFtZQ0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iYTUxMDI5MzZlNTA4YmQ5NDc2ZTcwYTYzNmMzODFjODYiDQoNCi0tYTUxMDI5MzZlNTA4YmQ5NDc2ZTcwYTYzNmMzODFjODYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQoNCnNlZSBhdHRhY2htZW50DQoNCi0tYTUxMDI5MzZlNTA4YmQ5NDc2ZTcwYTYzNmMzODFjODYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogYmFzZTY0DQpDb250ZW50LURpc3Bvc2l0aW9uOiBhdHRhY2htZW50OyBmaWxlbmFtZSo9dXRmLTgnJ25hJUMzJUFGdmUlMEFuYW1lLnR4dA0KTUlNRS1WZXJzaW9uOiAxLjANCg0KY0dGNWJHOWhaQW89DQoNCi0tYTUxMDI5MzZlNTA4YmQ5NDc2ZTcwYTYzNmMzODFjODYtLQ0K",
+  "compose": {
+   "attachments": [
+    {
+     "contentType": "text/plain",
+     "dataB64": "cGF5bG9hZAo=",
+     "filename": "na\u00efve\nname.txt"
+    }
+   ],
+   "bcc": [],
+   "body": "see attachment\n",
+   "cc": [],
+   "sender": "sender@example.com",
+   "signature": null,
+   "subject": "sneaky filename",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "attachment_nonascii_name": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZTliOGM5MWEzNDhhODE0ZDdhMTlmMGVhNGZmMDIxNGIiDQoNCi0tZTliOGM5MWEzNDhhODE0ZDdhMTlmMGVhNGZmMDIxNGINCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQoNCm9rDQoNCi0tZTliOGM5MWEzNDhhODE0ZDdhMTlmMGVhNGZmMDIxNGINCkNvbnRlbnQtVHlwZTogYXBwbGljYXRpb24vcGRmDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBiYXNlNjQNCkNvbnRlbnQtRGlzcG9zaXRpb246IGF0dGFjaG1lbnQ7IGZpbGVuYW1lKj11dGYtOCcnciVDMyVBOXN1bSVDMyVBOS5wZGYNCk1JTUUtVmVyc2lvbjogMS4wDQoNCkpWQkVSZz09DQoNCi0tZTliOGM5MWEzNDhhODE0ZDdhMTlmMGVhNGZmMDIxNGItLQ0K",
+  "compose": {
+   "attachments": [
+    {
+     "contentType": "application/pdf",
+     "dataB64": "JVBERg==",
+     "filename": "r\u00e9sum\u00e9.pdf"
+    }
+   ],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_8bit": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDhiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm5hw692ZSByw6lzdW3DqSBib2R5DQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "na\u00efve r\u00e9sum\u00e9 body",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_crlf_input": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCmZpcnN0DQpzZWNvbmQNCnRoaXJkDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "first\r\nsecond\r\nthird",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_long_ascii_qp": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IHF1b3RlZC1wcmludGFibGUNCk1JTUUtVmVyc2lvbjogMS4wDQoNCnh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4PQ0KeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgNCg==",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_long_dense_b64": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IGJhc2U2NA0KTUlNRS1WZXJzaW9uOiAxLjANCg0KNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVw0KNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOQ0KNUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZw0KNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTQ0KNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVw0KNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOTVMaVc1NVdNNUwyZzVhVzk1TGlXNTVXTTVMMmc1YVc5NUxpVzU1V001TDJnNWFXOQ0KNUxpVzU1V001TDJnNWFXOTVMaVc1NVdNQ2c9PQ0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c\u4f60\u597d\u4e16\u754c",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_long_mostly_ascii_qp": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IHF1b3RlZC1wcmludGFibGUNCk1JTUUtVmVyc2lvbjogMS4wDQoNCndvcmQgd29yZCB3b3JkIHdvcmQgd29yZCB3b3JkIHdvcmQgd29yZCB3b3JkIHdvcmQgd29yZCB3b3JkIHdvcmQgd29yZCB3b3JkIHdvPQ0KcmQgd29yZCB3b3JkIGNhZj1DMz1BOQ0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "word word word word word word word word word word word word word word word word word word caf\u00e9",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_many_lines_qp": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IHF1b3RlZC1wcmludGFibGUNCk1JTUUtVmVyc2lvbjogMS4wDQoNCmxpbmUgMA0KbGluZSAxDQpsaW5lIDINCmxpbmUgMw0KbGluZSA0DQpsaW5lIDUNCmxpbmUgNg0KbGluZSA3DQpsaW5lIDgNCmxpbmUgOQ0KbGluZSAxMA0KbGluZSAxMQ0KdHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQ9DQp0dHR0dHR0dHR0dHR0DQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\ntttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_multiline_8bit": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDhiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCnByZW1pw6hyZSBsaWduZQ0Kc2Vjb25kZSBsaWduZQ0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "premi\u00e8re ligne\nseconde ligne\n",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "body_trailing_space_qp": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IHF1b3RlZC1wcmludGFibGUNCk1JTUUtVmVyc2lvbjogMS4wDQoNCnl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5eXl5PQ0KeXl5eXl5eXl5eXl5eT0yMA0KZW5kDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy \nend",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "cc_nonascii": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KQ2M6ID0/dXRmLTg/cT9abz1DMz1BQj89IDx6b2VAZXhhbXBsZS5jb20+DQpTdWJqZWN0OiBzDQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW47IGNoYXJzZXQ9InV0Zi04Ig0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogN2JpdA0KTUlNRS1WZXJzaW9uOiAxLjANCg0Kb2sNCg==",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [
+    "Zo\u00eb <zoe@example.com>"
+   ],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "from_display_nonascii": {
+  "bytesB64": "RnJvbTogPT91dGYtOD9xP1Jlbj1DMz1BOWU/PSA8cmVuZWVAZXhhbXBsZS5jb20+DQpUbzogdG9AZXhhbXBsZS5jb20NClN1YmplY3Q6IHMNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpvaw0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "Ren\u00e9e <renee@example.com>",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "multipart_8bit_body": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iMDM5ZDNkMThkMDllM2I3YTFiNjYzYjY4NWM5NTBjM2QiDQoNCi0tMDM5ZDNkMThkMDllM2I3YTFiNjYzYjY4NWM5NTBjM2QNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA4Yml0DQoNCmNvcnBzIG5hw69mDQoNCi0tMDM5ZDNkMThkMDllM2I3YTFiNjYzYjY4NWM5NTBjM2QNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogYmFzZTY0DQpDb250ZW50LURpc3Bvc2l0aW9uOiBhdHRhY2htZW50OyBmaWxlbmFtZT0iYS50eHQiDQpNSU1FLVZlcnNpb246IDEuMA0KDQpaR0YwWVFvPQ0KDQotLTAzOWQzZDE4ZDA5ZTNiN2ExYjY2M2I2ODVjOTUwYzNkLS0NCg==",
+  "compose": {
+   "attachments": [
+    {
+     "contentType": "text/plain",
+     "dataB64": "ZGF0YQo=",
+     "filename": "a.txt"
+    }
+   ],
+   "bcc": [],
+   "body": "corps na\u00eff",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "multipart_qp_body": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogbXVsdGlwYXJ0L21peGVkOyBib3VuZGFyeT0iZTlkNGU2Nzc0OGU5NjMwNjhkNzE1NTQ1YTBkYTQyZjciDQoNCi0tZTlkNGU2Nzc0OGU5NjMwNjhkNzE1NTQ1YTBkYTQyZjcNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCnp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6enp6PQ0Kenp6enp6enp6enp6eg0KDQotLWU5ZDRlNjc3NDhlOTYzMDY4ZDcxNTU0NWEwZGE0MmY3DQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW4NCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IGJhc2U2NA0KQ29udGVudC1EaXNwb3NpdGlvbjogYXR0YWNobWVudDsgZmlsZW5hbWU9ImEudHh0Ig0KTUlNRS1WZXJzaW9uOiAxLjANCg0KWkdGMFlRbz0NCg0KLS1lOWQ0ZTY3NzQ4ZTk2MzA2OGQ3MTU1NDVhMGRhNDJmNy0tDQo=",
+  "compose": {
+   "attachments": [
+    {
+     "contentType": "text/plain",
+     "dataB64": "ZGF0YQo=",
+     "filename": "a.txt"
+    }
+   ],
+   "bcc": [],
+   "body": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "reply_threading": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NCkluLVJlcGx5LVRvOiA8b3JpZy0xMjNAZXhhbXBsZS5jb20+DQpSZWZlcmVuY2VzOiA8dGhyZWFkLTFAZXhhbXBsZS5jb20+IDxvcmlnLTEyM0BleGFtcGxlLmNvbT4NClRvOiBPcmlnaW4gU2VuZGVyIDxvcmlnaW5AZXhhbXBsZS5jb20+DQpTdWJqZWN0OiBSZTogb3JpZ2luYWwgc3ViamVjdA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm15IHJlcGx5DQoNCk9uIE1vbmRheSwgT3JpZ2luIFNlbmRlciB3cm90ZToNCj4gb3JpZ2luYWwgYm9keSBsaW5lDQo+IHNlY29uZCBsaW5lDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "my reply",
+   "cc": [],
+   "mode": "reply",
+   "postingStyle": "top",
+   "quoteHeadline": "On Monday, Origin Sender wrote:",
+   "sender": "me@example.com",
+   "signature": null,
+   "source": {
+    "body_text": "original body line\nsecond line",
+    "from": {
+     "email": "origin@example.com",
+     "name": "Origin Sender"
+    },
+    "message_id": "<orig-123@example.com>",
+    "references": [
+     "<thread-1@example.com>"
+    ],
+    "reply_to": [],
+    "subject": "original subject"
+   },
+   "subject": null,
+   "to": []
+  }
+ },
+ "subject_adjacent": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogPT91dGYtOD9iP2JtSERyM1psSUhMRHFYTjFiY09wPz0NCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpvaw0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "na\u00efve r\u00e9sum\u00e9",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_cjk": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogPT91dGYtOD9iPzVMMmc1YVc5NUxpVzU1V00/PQ0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm9rDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "\u4f60\u597d\u4e16\u754c",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_empty": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDoNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpvaw0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_latin": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogPT91dGYtOD9xP2g9QzM9QTlsbG8/PQ0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm9rDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "h\u00e9llo",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_long_ascii": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDoNCiBhIHJlcG9ydCBvbiB0aGUgcXVhcnRlcmx5IG51bWJlcnMgYW5kIHRoZSBwbGFuIGZvciB0aGUgbmV4dCBxdWFydGVyIG9mIHdvcmsNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpvaw0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "a report on the quarterly numbers and the plan for the next quarter of work",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_long_nonascii": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogPT91dGYtOD9iP2NzT3BjM1Z0dzZrZ1pNT3BkR0ZwYkd6RHFTQmtaWE1nWVdOMGFYWnBkTU9wY3lCa1pTQnNKOE9wPz0NCiA9P3V0Zi04P3E/cXVpcGVfcGVuZGFudF9sZV9wcmVtaWVyX3RyaW1lc3RyZV9kZV9sPTI3YW5uPUMzPUE5ZT89DQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW47IGNoYXJzZXQ9InV0Zi04Ig0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogN2JpdA0KTUlNRS1WZXJzaW9uOiAxLjANCg0Kb2sNCg==",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "r\u00e9sum\u00e9 d\u00e9taill\u00e9 des activit\u00e9s de l'\u00e9quipe pendant le premier trimestre de l'ann\u00e9e",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_long_word": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogPT91dGYtOD9xP3h4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eD89DQogPT91dGYtOD9xP3h4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eD89DQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW47IGNoYXJzZXQ9InV0Zi04Ig0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogN2JpdA0KTUlNRS1WZXJzaW9uOiAxLjANCg0Kb2sNCg==",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_mixed": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogaGVsbG8gPT91dGYtOD9xP3c9QzM9QjZybGQ/PSBhZ2Fpbg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm9rDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "hello w\u00f6rld again",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "subject_wsp_runs": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiB0b0BleGFtcGxlLmNvbQ0KU3ViamVjdDogPT91dGYtOD9xPz1DMz1BND89ICAgYgljDQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW47IGNoYXJzZXQ9InV0Zi04Ig0KQ29udGVudC1UcmFuc2Zlci1FbmNvZGluZzogN2JpdA0KTUlNRS1WZXJzaW9uOiAxLjANCg0Kb2sNCg==",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "\u00e4   b\tc",
+   "to": [
+    "to@example.com"
+   ]
+  }
+ },
+ "to_display_dots": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiBKb2huIFEuIFB1YmxpYyA8akBleGFtcGxlLmNvbT4NClN1YmplY3Q6IHMNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpvaw0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "John Q. Public <j@example.com>"
+   ]
+  }
+ },
+ "to_display_mixed": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiBKb2huID0/dXRmLTg/cT9NPUMzPUJDbGxlcj89IDxqQGV4YW1wbGUuY29tPg0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm9rDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "John M\u00fcller <j@example.com>"
+   ]
+  }
+ },
+ "to_display_nonascii": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiA9P3V0Zi04P3E/Qj1DMz1CNmJfTT1DMz1CQ2xsZXI/PSA8Ym9iQGV4YW1wbGUuY29tPg0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm9rDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "B\u00f6b M\u00fcller <bob@example.com>"
+   ]
+  }
+ },
+ "to_display_specials": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiBKLiA9P3V0Zi04P3E/Qj1DMz1CNmI/PSA8akBleGFtcGxlLmNvbT4NClN1YmplY3Q6IHMNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA3Yml0DQpNSU1FLVZlcnNpb246IDEuMA0KDQpvaw0K",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "J. B\u00f6b <j@example.com>"
+   ]
+  }
+ },
+ "to_long_list": {
+  "bytesB64": "RnJvbTogbWVAZXhhbXBsZS5jb20NClRvOiBwZXJzb24wQGV4YW1wbGUuY29tLCBwZXJzb24xQGV4YW1wbGUuY29tLCBwZXJzb24yQGV4YW1wbGUuY29tLA0KIHBlcnNvbjNAZXhhbXBsZS5jb20sIHBlcnNvbjRAZXhhbXBsZS5jb20sIHBlcnNvbjVAZXhhbXBsZS5jb20sDQogcGVyc29uNkBleGFtcGxlLmNvbSwgcGVyc29uN0BleGFtcGxlLmNvbQ0KU3ViamVjdDogcw0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCINCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQNCk1JTUUtVmVyc2lvbjogMS4wDQoNCm9rDQo=",
+  "compose": {
+   "attachments": [],
+   "bcc": [],
+   "body": "ok",
+   "cc": [],
+   "sender": "me@example.com",
+   "signature": null,
+   "subject": "s",
+   "to": [
+    "person0@example.com",
+    "person1@example.com",
+    "person2@example.com",
+    "person3@example.com",
+    "person4@example.com",
+    "person5@example.com",
+    "person6@example.com",
+    "person7@example.com"
+   ]
+  }
+ }
+}

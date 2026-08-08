@@ -14,12 +14,11 @@
 
 import json
 
-from mirage.commands.cli.builtin.himalaya.builder import drain
 from mirage.commands.cli.builtin.himalaya.smtp import send_raw
 from mirage.commands.cli.types import CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 
 
 async def send(
@@ -28,8 +27,7 @@ async def send(
     # space and literal \n become real line breaks, the way upstream's
     # MessageArg resolves an inline message.
     inline = " ".join(inv.texts).replace("\\r", "").replace("\\n", "\n")
-    raw = inline.encode() if inline else await drain(inv.stdin
-                                                     ) if inv.stdin else b""
+    raw = inline.encode() if inline else await materialize(inv.stdin)
     if not raw.strip():
         raise ValueError("no message provided: pass it as an argument "
                          "or pipe it via standard input")

@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "truncate_parse_mode_whitespace",
+      "seq": 910048,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2tparse && printf '0123456789' > /data/t2tparse/f && truncate -s '< 4' /data/t2tparse/f && wc -c < /data/t2tparse/f && truncate -s ' +2' /data/t2tparse/f && wc -c < /data/t2tparse/f && truncate -s '% 512' /data/t2tparse/f && wc -c < /data/t2tparse/f && truncate -s '/ 100' /data/t2tparse/f && wc -c < /data/t2tparse/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n6\n512\n500\n",
+        "stderr": ""
+      },
+      "flags": ["s"]
+    },
+    {
+      "id": "truncate_parse_multiple_relative_modifiers",
+      "seq": 910049,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2tmm && printf 'abcdef' > /data/t2tmm/f && truncate -s '<+4' /data/t2tmm/f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "truncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\n"
+      },
+      "flags": ["s"]
+    },
+    {
+      "id": "truncate_parse_junk_quotes_remainder",
+      "seq": 910050,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2tjunk && printf 'abcdef' > /data/t2tjunk/f && truncate -s '<abc' /data/t2tjunk/f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "truncate: Invalid number: 'abc'\n"
+      },
+      "flags": ["s"]
+    }
+  ]
+}

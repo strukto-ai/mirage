@@ -19,8 +19,11 @@ import { stat as difyStat } from '../../../core/dify/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
 // Dify is read-only, so no write op is wired and the generic byte-mutation
-// commands are intentionally absent. stat is the index-only stat, so ls/find
-// never issue a per-entry document-detail call.
+// commands are intentionally absent. stat is the full document-detail stat;
+// the commands that would multiply that per-entry API call stay cheap
+// through lighter routes instead (ls receives a light-stat adapter from the
+// package factory, the find wrapper threads statLight unless -mtime needs
+// detail timestamps), mirroring the Python wiring.
 export const DIFY_IO: CommandIO<DifyAccessor> = {
   readdir: difyReaddir,
   readBytes: difyRead,

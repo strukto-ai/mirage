@@ -24,6 +24,7 @@ from typing import Any
 import mirage.commands.builtin
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
+from mirage.resource.registry import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,35 @@ def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
         json.dumps(payload, indent=2, sort_keys=True, default=_default) + "\n")
 
 
+def _emit_resources(registry: dict[str, list[RegisteredCommand]]) -> None:
+    """Dump the two resource-name sets the parity gate compares.
+
+    ``registry`` is what ``build_resource`` can construct by name — the
+    hand-maintained table workspace YAML and snapshots go through.
+    ``command_resources`` is what the spec tree already knew: every
+    resource registering at least one builtin command. A name in the
+    second but not the first registers commands yet cannot be mounted by
+    name, which is how SharePoint stayed unconstructible in python while
+    appearing in every command's ``_meta``.
+
+    Args:
+        registry (dict[str, list[RegisteredCommand]]): registrations keyed
+            by command name, as collected for the spec dump.
+    """
+    command_resources: set[str] = set()
+    for rcs in registry.values():
+        for rc in rcs:
+            if rc.resource is not None:
+                command_resources.add(str(rc.resource))
+    payload = {
+        "registry": sorted(REGISTRY),
+        "command_resources": sorted(command_resources),
+    }
+    path = OUT.parent / "resources.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(f"emitted {len(payload['registry'])} registry names to {path}")
+
+
 def main() -> None:
     failed = _walk_pkg(mirage.commands.builtin)
     if failed:
@@ -142,6 +172,7 @@ def main() -> None:
     for name, spec in sorted(SPECS.items()):
         _emit_one(name, spec, registry.get(name, []))
     print(f"emitted {len(SPECS)} specs to {OUT}")
+    _emit_resources(registry)
 
 
 if __name__ == "__main__":

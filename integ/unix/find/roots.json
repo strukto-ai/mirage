@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "find_roots_provision",
+      "seq": 785,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/roots1/sub && printf 'r1\\n' > /data/roots1/r1.txt && printf 'r2\\n' > /data/roots1/sub/r2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_roots_operand_order",
+      "seq": 786,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data/roots1 /data/a.txt -name '*.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/roots1/r1.txt\n/data/roots1/sub/r2.txt\n/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_roots_duplicate_walks_twice",
+      "seq": 787,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/a.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_roots_missing_middle_keeps_output",
+      "seq": 788,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data/a.txt /data/nope /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/a.txt\n/data/b.txt\n",
+        "stderr": "find: '/data/nope': No such file or directory\n"
+      }
+    }
+  ]
+}

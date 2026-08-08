@@ -23,7 +23,7 @@ import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
 import { type ValueType } from '../../commands/spec/types.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
-import type { TSNodeLike } from './variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 /**
  * One command's expanded argument vector.

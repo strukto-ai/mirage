@@ -354,3 +354,213 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
     )
   })
 })
+
+describe('ANSI-C quoting $\'...\' and locale quoting $"..."', () => {
+  // Expectations pinned against bash 5.2 (docker, C.UTF-8); direct port
+  // of the matching block in tests/shell/test_quoting_coverage.py.
+  it.each([
+    ["echo $'a\\nb'", 'a\nb\n'],
+    ["echo x$'\\ty'z", 'x\tyz\n'],
+    ["echo $'\\x41\\101\\u42\\U00000043'", 'AABC\n'],
+    ["echo $'a\\qb'", 'a\\qb\n'],
+    ["echo $'\\x'", '\\x\n'],
+    ["echo $'it\\'s'", "it's\n"],
+    ["echo $'' y", ' y\n'],
+    // NUL truncates the segment alone, not the rest of the word
+    ["printf '[%s]' x$'a\\0b'y", '[xay]'],
+    // braces inside the quotes are literal, outside still expand
+    ["echo $'{a,b}'", '{a,b}\n'],
+    ["echo $'a'{1,2}", 'a1 a2\n'],
+    // no expansion of any kind happens inside
+    ["V=w; echo $'$V $(echo x)'", '$V $(echo x)\n'],
+    // assignments and quoted re-reads round-trip
+    ['V=$\'x\\ty\'; echo "$V"', 'x\ty\n'],
+    // inside double quotes the form is inert text
+    ['echo "$\'a\\nb\'"', "$'a\\nb'\n"],
+    // $"..." is plain double-quote semantics (identity translation)
+    ['echo $"hello world"', 'hello world\n'],
+    ['echo a$"b c"d', 'ab cd\n'],
+    ['echo "a"$"c"', 'ac\n'],
+    ['V=$"tv"; echo "$V"', 'tv\n'],
+    // a bare trailing dollar is still literal text
+    ['echo a$', 'a$\n'],
+  ])('expands %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+
+  it('keeps the quoted form one word across spaces', async () => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, 'for i in $\'x y\'; do echo "<$i>"; done')
+    expect(r.out).toBe('<x y>\n')
+    await ws.close()
+  })
+
+  it('names a redirect target through the decoded text', async () => {
+    const ws = await makeQuotingWs()
+    await run(ws, "echo hi > $'f 1.txt'")
+    const r = await run(ws, "cat '/data/f 1.txt'")
+    expect(r.out).toBe('hi\n')
+    await ws.close()
+  })
+
+  it('carries the decoded text through a herestring', async () => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, "grep -c $'\\t' <<< $'a\\tb'")
+    expect(r.out).toBe('1\n')
+    await ws.close()
+  })
+
+  it('treats the quoted form as literal in a test command', async () => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, "x=a; [[ $x == $'a' ]] && echo eq")
+    expect(r.out).toBe('eq\n')
+    await ws.close()
+  })
+
+  it('emits high bytes as raw output bytes', async () => {
+    const ws = await makeQuotingWs()
+    const io = await ws.execute("echo $'\\xe4\\xb8\\xad'")
+    expect(stdoutStr(io)).toBe('中\n')
+    await ws.close()
+  })
+})
+
+describe('quoted case patterns (pinned against bash 5.2 in docker)', () => {
+  it.each([
+    ["case a in 'a') echo hit;; *) echo miss;; esac", 'hit\n'],
+    ['case a in "a") echo hit;; *) echo miss;; esac', 'hit\n'],
+    ["case a in $'a') echo hit;; *) echo miss;; esac", 'hit\n'],
+    ['case a in $"a") echo hit;; *) echo miss;; esac', 'hit\n'],
+    // A quoted glob is literal; an unquoted one stays live.
+    ["case '*' in '*') echo hit;; *) echo other;; esac", 'hit\n'],
+    ["case x in '*') echo lit;; *) echo glob;; esac", 'glob\n'],
+    // Expansion results are live patterns unless double-quoted.
+    ['x=\'*\'; case y in "$x") echo lit;; *) echo miss;; esac', 'miss\n'],
+    ["x='*'; case '*' in \"$x\") echo hit;; *) echo miss;; esac", 'hit\n'],
+    ["x='*'; case y in $x) echo glob;; *) echo miss;; esac", 'glob\n'],
+    // Patterns are never word-split.
+    ["p='a b'; case 'a b' in $p) echo hit;; *) echo miss;; esac", 'hit\n'],
+    // Concatenations mix literal and live segments.
+    ["case ab in 'a'*) echo hit;; *) echo miss;; esac", 'hit\n'],
+    ["case Xb in 'a'*) echo hit;; *) echo miss;; esac", 'miss\n'],
+    ['case ab in a"b") echo hit;; *) echo miss;; esac', 'hit\n'],
+    // Backslash escapes the next character in an unquoted pattern.
+    ["case 'a*b' in a\\*b) echo hit;; *) echo miss;; esac", 'hit\n'],
+    ['case aXb in a\\*b) echo hit;; *) echo miss;; esac', 'miss\n'],
+    ['case x in \\?) echo hit;; *) echo miss;; esac', 'miss\n'],
+    // Escaped-quote coverage: literal class text and quoted alternation.
+    ["case '[^a]' in '[^a]') echo hit;; *) echo miss;; esac", 'hit\n'],
+    ['case b in [^a]) echo hit;; *) echo miss;; esac', 'hit\n'],
+    ["case b in a|'b') echo hit;; *) echo miss;; esac", 'hit\n'],
+    ["case '' in '') echo hit;; *) echo miss;; esac", 'hit\n'],
+  ])('matches %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+
+  it('matches decoded ANSI-C bytes in a pattern', async () => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, "case \"$(printf 'a\\tb')\" in $'a\\tb') echo hit;; esac")
+    expect(r.out).toBe('hit\n')
+    await ws.close()
+  })
+})
+
+describe('quoted declaration operands (pinned against bash 5.2)', () => {
+  it.each([
+    ["export 'FOO=bar'; echo [$FOO]", '[bar]\n'],
+    ['x=v; export "FOO=$x"; echo [$FOO]', '[v]\n'],
+    ["export 'A=1' B=2; echo [$A][$B]", '[1][2]\n'],
+    ["export $'T=a\\tb'; printf '[%s]\\n' \"$T\"", '[a\tb]\n'],
+    ["export 'NOEQ'; echo ok$?", 'ok0\n'],
+    ["declare 'x=y z'; echo [$x]", '[y z]\n'],
+    // Quoting keeps a compound-looking value scalar, exactly like bash.
+    ["declare 'x=(1 2)'; echo [$x] [${x[1]-unset}]", '[(1 2)] [unset]\n'],
+    ["f() { local 'l=v'; echo in:[$l]; }; f; echo out:[$l]", 'in:[v]\nout:[]\n'],
+    ["readonly 'R=v'; echo [$R]", '[v]\n'],
+  ])('assigns %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})
+
+describe('quoted parameter-expansion and [[ ]] patterns (pinned against bash 5.2 in docker)', () => {
+  it.each([
+    // Quoted parameter-expansion patterns match literally.
+    ['v="a*b"; echo "${v#"a*"}"', 'b\n'],
+    ['v=aXb; echo "${v#"a*"}"', 'aXb\n'],
+    ['v=aXb; echo "${v#\'a*\'}"', 'aXb\n'],
+    ['v="a*b"; echo "${v/"*"/y}"', 'ayb\n'],
+    ['v="a*b"; echo "${v%"*b"}"', 'a\n'],
+    ['v=aXbXc; echo "${v//"X"/-}"', 'a-b-c\n'],
+    // Unquoted globs stay live; a backslash binds the next char.
+    ['v=aXb; echo ${v#a*}', 'Xb\n'],
+    ['v="a*b"; echo ${v#a\\*}', 'b\n'],
+    ['v=aXb; echo ${v#a\\*}', 'aXb\n'],
+    // Expansion values are live unquoted, literal double-quoted.
+    ['p=\'a*\'; v=\'a*b\'; echo "${v#"$p"}"', 'b\n'],
+    ["p='a*'; v='a*b'; echo ${v#$p}", '*b\n'],
+    ["v=$'a\\tb'; echo \"${v#$'a\\t'}\"", 'b\n'],
+    // Mixed operands stay one opaque token; quoting inside them
+    // still binds (single, double, ANSI-C, quoted refs).
+    ['v=ab; echo "[${v#a\'b\'}]"', '[]\n'],
+    ['v="xa*b"; echo "[${v#x"a*"}]"', '[b]\n'],
+    ['v=xaXb; echo "[${v#x"a*"}]"', '[xaXb]\n'],
+    ['v=xy; echo "[${v#$\'x\'y}]"', '[]\n'],
+    ['p=\'a*\'; v=\'xa*b\'; echo "[${v#x"$p"}]"', '[b]\n'],
+    ['p=\'a*\'; v=xaXb; echo "[${v#x$p}]"', '[Xb]\n'],
+    // [[ == ]] renders its right side through the same expander.
+    ['x=abc; [[ $x == "a*"* ]] && echo hit || echo miss', 'miss\n'],
+    ['x=\'a*c\'; [[ $x == "a*"* ]] && echo hit || echo miss', 'hit\n'],
+    ['x=aXb; [[ $x == "a"*"b" ]] && echo hit || echo miss', 'hit\n'],
+    ['x=ab; [[ $x == "a*" ]] && echo hit || echo miss', 'miss\n'],
+    ['x=ab; [[ $x == a* ]] && echo hit || echo miss', 'hit\n'],
+    ['x=ab; [[ $x != "a*" ]] && echo hit || echo miss', 'hit\n'],
+    ["x=$'a\\tb'; [[ $x == $'a\\tb' ]] && echo hit || echo miss", 'hit\n'],
+    ['[[ abc < abd ]] && echo hit || echo miss', 'hit\n'],
+  ])('matches %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})
+
+describe('multi-line double-quoted strings (pinned against bash 5.2 in docker)', () => {
+  it.each([
+    ['echo "a\nb"', 'a\nb\n'],
+    ['echo "a\n\nb"', 'a\n\nb\n'],
+    ['echo "\na"', '\na\n'],
+    ['echo "a\n"', 'a\n\n'],
+    ['x=1; echo "p$x\n\nq"', 'p1\n\nq\n'],
+    ['case "a\nb" in "a\nb") echo hit;; *) echo miss;; esac', 'hit\n'],
+  ])('keeps the newlines of %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})
+
+describe('a bare $ is a literal word', () => {
+  it.each([
+    ['echo $', '$\n'],
+    ['echo a$ b', 'a$ b\n'],
+    ['echo $ x', '$ x\n'],
+    // Adjacency decides: $"..." is a translated string, $ "..." is two words.
+    ['echo $"x"', 'x\n'],
+    ['echo $ "x"', '$ x\n'],
+  ])('prints %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})

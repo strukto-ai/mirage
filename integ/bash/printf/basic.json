@@ -1670,7 +1670,7 @@
       "command": "printf '\\xc3\\xa9' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "c3 a9\n",
+        "stdout": " c3 a9\n",
         "stderr": ""
       }
     },
@@ -1701,7 +1701,7 @@
       "command": "printf '\\xff' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -1732,7 +1732,7 @@
       "command": "printf '\\377' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -1763,7 +1763,7 @@
       "command": "printf '\\u00e9' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "c3 a9\n",
+        "stdout": " c3 a9\n",
         "stderr": ""
       }
     },
@@ -1794,7 +1794,7 @@
       "command": "printf '%b' '\\xff' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -1825,7 +1825,7 @@
       "command": "mkdir -p /data/pf && printf '\\xff' > /data/pf/b && od -An -tx1 /data/pf/b",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -1856,7 +1856,7 @@
       "command": "printf -v x '\\xff'; printf '%s' \"$x\" | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -1980,7 +1980,7 @@
       "command": "echo -e '\\xff' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff 0a\n",
+        "stdout": " ff 0a\n",
         "stderr": ""
       }
     },
@@ -2011,7 +2011,7 @@
       "command": "printf '\\400' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "00\n",
+        "stdout": " 00\n",
         "stderr": ""
       }
     },
@@ -2042,7 +2042,7 @@
       "command": "printf '\\777' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -2073,7 +2073,7 @@
       "command": "echo -en '\\0777' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "ff\n",
+        "stdout": " ff\n",
         "stderr": ""
       }
     },
@@ -2104,7 +2104,7 @@
       "command": "printf '\\U00010080' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "f0 90 82 80\n",
+        "stdout": " f0 90 82 80\n",
         "stderr": ""
       }
     },
@@ -2135,7 +2135,7 @@
       "command": "echo -n '𐂀' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "f0 90 82 80\n",
+        "stdout": " f0 90 82 80\n",
         "stderr": ""
       }
     },
@@ -2166,7 +2166,7 @@
       "command": "printf '\\U00010080\\xff' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "f0 90 82 80 ff\n",
+        "stdout": " f0 90 82 80 ff\n",
         "stderr": ""
       }
     }

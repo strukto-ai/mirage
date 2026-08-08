@@ -198,14 +198,13 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    // Databricks readdir returns slash-less paths, so classification always
-    // falls back to stat (which the walker resolves via the index cache).
+    // Databricks readdir returns slash-less paths, so the walker classifies
+    // through stat (which resolves via the index cache).
     return walkFind(
       p,
       {
         readdir: (spec, idx) => databricksVolumeReaddir(this.accessor, spec, idx),
         stat: (spec, idx) => databricksVolumeStat(this.accessor, spec, idx),
-        isDirName: () => null,
       },
       options,
       this.index,

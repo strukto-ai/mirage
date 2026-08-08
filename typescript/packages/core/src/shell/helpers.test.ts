@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { TSNodeLike } from '../workspace/expand/variable.ts'
+import type { TSNodeLike } from './types.ts'
 import {
   getCommandAssignments,
   getCommandName,
@@ -94,20 +94,44 @@ describe('getText / getCommandName', () => {
 describe('getParts', () => {
   it('includes normal named children', () => {
     const n = node('command', 'ls /ram', {
-      namedChildren: [node(NT.COMMAND_NAME, 'ls'), node(NT.WORD, '/ram')],
+      children: [node(NT.COMMAND_NAME, 'ls'), node(NT.WORD, '/ram')],
     })
     expect(getParts(n).map((c) => c.text)).toEqual(['ls', '/ram'])
   })
 
   it('skips FILE_REDIRECT and HERESTRING_REDIRECT children', () => {
     const n = node('command', '', {
-      namedChildren: [
+      children: [
         node(NT.COMMAND_NAME, 'echo'),
         node(NT.WORD, 'hi'),
         node(NT.FILE_REDIRECT, '>file'),
       ],
     })
     expect(getParts(n)).toHaveLength(2)
+  })
+
+  it('keeps a bare $ argument but not the $"..." marker', () => {
+    const dollar = node('$', '$', { isNamed: false })
+    dollar.startIndex = 5
+    dollar.endIndex = 6
+    const gapped = node(NT.STRING, '"x"')
+    gapped.startIndex = 7
+    gapped.endIndex = 10
+    const bare = node('command', 'echo $ "x"', {
+      children: [node(NT.COMMAND_NAME, 'echo'), dollar, gapped],
+    })
+    expect(getParts(bare).map((c) => c.text)).toEqual(['echo', '$', '"x"'])
+
+    const marker = node('$', '$', { isNamed: false })
+    marker.startIndex = 5
+    marker.endIndex = 6
+    const adjacent = node(NT.STRING, '"x"')
+    adjacent.startIndex = 6
+    adjacent.endIndex = 9
+    const translated = node('command', 'echo $"x"', {
+      children: [node(NT.COMMAND_NAME, 'echo'), marker, adjacent],
+    })
+    expect(getParts(translated).map((c) => c.text)).toEqual(['echo', '"x"'])
   })
 })
 
@@ -170,6 +194,8 @@ describe('getRedirects quoted targets', () => {
     [NT.RAW_STRING, "'/out.txt'"],
     [NT.STRING, '"/out.txt"'],
     [NT.WORD, '/out.txt'],
+    [NT.ANSI_C_STRING, "$'/out 1.txt'"],
+    [NT.TRANSLATED_STRING, '$"/out.txt"'],
   ])('carries the target node for %s', (targetType, targetText) => {
     const [, redirects] = getRedirects(redirectStatement(targetType, targetText))
     expect(redirects[0]?.targetNode).not.toBeNull()

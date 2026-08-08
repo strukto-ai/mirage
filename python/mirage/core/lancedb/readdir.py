@@ -24,17 +24,6 @@ from mirage.core.lancedb.scope import (LanceDBGroupScope, ScopeLevel,
 from mirage.types import PathSpec
 
 
-def is_dir_name(child: str, config) -> bool:
-    # Row files are recognized by extension, so classification never needs
-    # the stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    if name.endswith(".md"):
-        return False
-    if config.blob_column and name.endswith("." + config.blob_ext):
-        return False
-    return True
-
-
 def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
     names: list[str] = []
     for row in rows:

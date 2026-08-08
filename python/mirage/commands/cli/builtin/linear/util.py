@@ -19,7 +19,7 @@ from mirage.core.linear._client import (list_team_labels, list_team_projects,
 from mirage.core.linear.config import LinearConfig
 from mirage.io.types import ByteSource
 
-ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-\d+$")
+ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
 
 
 def first_text(texts: tuple[str, ...], label: str) -> str:

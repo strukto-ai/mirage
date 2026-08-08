@@ -62,28 +62,26 @@ interface FlagSet {
   beforeContext: number
 }
 
-function parseFlags(flags: Record<string, string | boolean | number | string[]>): FlagSet {
-  const toInt = (v: string | boolean | number | string[] | undefined): number | null =>
-    typeof v === 'string' ? Number.parseInt(v, 10) : null
-  const aCtx = toInt(flags.A)
-  const bCtx = toInt(flags.B)
-  const cCtx = toInt(flags.C)
+function parseFlags(fl: FlagView): FlagSet {
+  const aCtx = fl.asInt('A')
+  const bCtx = fl.asInt('B')
+  const cCtx = fl.asInt('C')
   return {
-    ignoreCase: flags.i === true,
-    invert: flags.v === true,
-    lineNumbers: flags.n === true,
-    countOnly: flags.c === true,
-    filesOnly: flags.args_l === true || flags.l === true,
-    wholeWord: flags.w === true,
-    fixedString: flags.F === true,
+    ignoreCase: fl.asBool('i'),
+    invert: fl.asBool('v'),
+    lineNumbers: fl.asBool('n'),
+    countOnly: fl.asBool('c'),
+    filesOnly: fl.asBool('args_l'),
+    wholeWord: fl.asBool('w'),
+    fixedString: fl.asBool('F'),
     // grep reads a basic expression unless -E says otherwise; -G asks for the
     // default explicitly.
-    basicRegexp: flags.E !== true,
-    onlyMatching: flags.o === true,
-    maxCount: toInt(flags.m),
-    quiet: flags.q === true,
-    withFilename: flags.H === true,
-    noFilename: flags.h === true,
+    basicRegexp: !fl.asBool('E'),
+    onlyMatching: fl.asBool('o'),
+    maxCount: fl.asInt('m') ?? null,
+    quiet: fl.asBool('q'),
+    withFilename: fl.asBool('H'),
+    noFilename: fl.asBool('h'),
     afterContext: aCtx ?? cCtx ?? 0,
     beforeContext: bCtx ?? cCtx ?? 0,
   }
@@ -150,7 +148,7 @@ export async function grepGeneric(
       }),
     ]
   }
-  const f = parseFlags(opts.flags)
+  const f = parseFlags(fl)
   if (resolution.neverMatch) f.fixedString = false
   const recursive = fl.asBool('r') || fl.asBool('R')
 

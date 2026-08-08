@@ -43,10 +43,26 @@ def get_command_name(node: tree_sitter.Node) -> str:
 def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     """Get command parts as child nodes.
 
-    Preserves expansion nodes for later processing.
+    Preserves expansion nodes for later processing. A bare ``$`` word
+    is an anonymous token rather than a named child, but bash passes it
+    through as a literal argument (``echo $`` prints ``$``), so it is
+    the one anonymous child that stays - unless a string starts at its
+    very next byte, where it is the translation marker of ``$"..."``
+    and the string node carries the whole word.
     """
     _SKIP = frozenset({NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT})
-    return [c for c in node.named_children if c.type not in _SKIP]
+    children = node.children
+    parts: list[tree_sitter.Node] = []
+    for position, c in enumerate(children):
+        if c.is_named and c.type not in _SKIP:
+            parts.append(c)
+        elif c.type == "$":
+            nxt = children[position +
+                           1] if position + 1 < len(children) else None
+            if (nxt is None or nxt.type != NT.STRING
+                    or nxt.start_byte != c.end_byte):
+                parts.append(c)
+    return parts
 
 
 def has_command_substitution(node: tree_sitter.Node) -> bool:
@@ -188,6 +204,8 @@ _TARGET_TYPES = frozenset({
     NT.COMMAND_SUBSTITUTION,
     NT.STRING,
     NT.RAW_STRING,
+    NT.ANSI_C_STRING,
+    NT.TRANSLATED_STRING,
     NT.PROCESS_SUBSTITUTION,
 })
 
@@ -393,31 +411,38 @@ def get_case_word(node: tree_sitter.Node) -> tree_sitter.Node:
 
 def get_case_items(
     node: tree_sitter.Node,
-) -> list[tuple[list[str], list[tree_sitter.Node], str]]:  # noqa: E125,E501
-    """Get (patterns, body_statements, terminator) triples from case.
+) -> list[tuple[list[tree_sitter.Node], list[tree_sitter.Node],
+                str]]:  # noqa: E125,E501
+    """Get (pattern_nodes, body_statements, terminator) triples from case.
 
-    An arm's body is every statement up to its terminator, so
+    Patterns are every named child before the arm's ``)``, kept as
+    nodes so quoting survives to the matcher: 'a'), "$x") and $'a\\n')
+    all mean literal text where a bare word keeps its globs live. An
+    arm's body is every statement up to its terminator, so
     multi-statement arms (x) cmd1; cmd2;;) keep all commands. The
     terminator is one of ``;;`` (default/last arm), ``;&`` (fall through
     into the next arm's body unconditionally), or ``;;&`` (keep testing
     the remaining patterns).
     """
-    items: list[tuple[list[str], list[tree_sitter.Node], str]] = []
+    items: list[tuple[list[tree_sitter.Node], list[tree_sitter.Node],
+                      str]] = []
     for c in node.named_children:
         if c.type == NT.CASE_ITEM:
-            patterns = []
+            patterns: list[tree_sitter.Node] = []
             body: list[tree_sitter.Node] = []
             terminator = ";;"
+            in_body = False
             for child in c.children:
                 if child.type in (";;", ";&", ";;&"):
                     terminator = child.type
-                elif not body and child.type in (NT.EXTGLOB_PATTERN, NT.WORD,
-                                                 NT.CONCATENATION, NT.STRING):
-                    patterns.append(get_text(child))
-                elif child.is_named and child.type != "|":
+                elif child.type == ")":
+                    in_body = True
+                elif not child.is_named:
+                    continue
+                elif in_body:
                     body.append(child)
-            if not patterns:
-                patterns = [get_text(c.named_children[0])]
+                else:
+                    patterns.append(child)
             items.append((patterns, body, terminator))
     return items
 

@@ -57,13 +57,12 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         ctx (CondContext): evaluation context.
         node (CondBinary): binary condition.
     """
+    # == and != always fnmatch: the builder already rendered the right
+    # side into the glob dialect, quoted segments escaped, so a
+    # wholly-literal pattern matches exactly itself.
     if node.op in ("=", "=="):
-        if node.right_literal:
-            return node.left == node.right
         return fnmatch(node.left, node.right)
     if node.op == "!=":
-        if node.right_literal:
-            return node.left != node.right
         return not fnmatch(node.left, node.right)
     if node.op == "=~":
         pattern = re.escape(node.right) if node.right_literal else node.right

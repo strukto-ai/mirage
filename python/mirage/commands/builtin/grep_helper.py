@@ -641,7 +641,7 @@ async def grep_recursive(
                         results.append(entry)
                 else:
                     results.extend(f"{entry}:{r}" for r in file_results)
-            except Exception as exc:
+            except WALK_ERRORS as exc:
                 if warnings is not None:
                     warnings.append(f"grep: {entry}: {exc}")
                 continue
@@ -667,7 +667,7 @@ async def grep_recursive(
                     results.extend(file_results)
                 else:
                     results.extend(f"{entry}:{r}" for r in file_results)
-            except Exception as exc:
+            except WALK_ERRORS as exc:
                 if warnings is not None:
                     warnings.append(f"grep: {entry}: {exc}")
                 continue

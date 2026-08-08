@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../executor/runtime.ts'
-import type { PolicyDecision } from '../executor/policy/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { PolicyDecision } from '../../runtime/policy/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -43,6 +43,7 @@ import { ERREXIT_EXEMPT_TYPES, NodeType as NT, Redirect, RedirectKind } from '..
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
+import { expandPattern } from '../expand/pattern.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import {
   type ShellArray,
@@ -54,7 +55,8 @@ import {
 } from '../../shell/array.ts'
 import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
+import { arrayIndex } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { wordText } from '../../types.ts'
 import {
   type CforEval,
@@ -514,7 +516,14 @@ export async function executeNode(
   if (kind === NodeKind.CASE) {
     const wordNode = getCaseWord(node)
     const word = await expandNode(wordNode, session, executeFn, callStack)
-    const items = getCaseItems(node)
+    const items: [string[], TSNodeLike[], string][] = []
+    for (const [patternNodes, body, terminator] of getCaseItems(node)) {
+      const patterns: string[] = []
+      for (const patternNode of patternNodes) {
+        patterns.push(await expandPattern(patternNode, session, executeFn, callStack))
+      }
+      items.push([patterns, body, terminator])
+    }
     return handleCase(recurse, word, items, session, stdin, callStack)
   }
 
@@ -560,8 +569,13 @@ export async function executeNode(
         child.type === NT.CONCATENATION ||
         child.type === NT.WORD ||
         // A bare `readonly NAME` / `export NAME` operand parses as a
-        // variable_name, not a word.
-        child.type === NT.VARIABLE_NAME
+        // variable_name, not a word, and a quoted assignment
+        // (`export 'FOO=bar'`) as a plain string operand.
+        child.type === NT.VARIABLE_NAME ||
+        child.type === NT.STRING ||
+        child.type === NT.RAW_STRING ||
+        child.type === NT.ANSI_C_STRING ||
+        child.type === NT.TRANSLATED_STRING
       ) {
         const expanded = await expandNode(child, session, executeFn, callStack)
         if (expanded === '') continue

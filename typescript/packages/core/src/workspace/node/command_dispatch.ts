@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../executor/runtime.ts'
-import type { PolicyDecision } from '../executor/policy/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { PolicyDecision } from '../../runtime/policy/index.ts'
 import { mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -35,7 +35,7 @@ import { classifyBarePath } from '../expand/classify/index.ts'
 import type { Argv } from '../expand/argv.ts'
 import { expandArgv } from '../expand/argv.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
 import { pathFlagScopes } from '../executor/command/routing.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'

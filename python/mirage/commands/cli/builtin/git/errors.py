@@ -185,12 +185,44 @@ class RevisionResetError(GitError):
                          f"the index from HEAD only")
 
 
+class BadPrettyError(GitError):
+    """A --pretty/--format value naming no format at all.
+
+    git's own wording and exit code for a name it has never heard of.
+
+    Args:
+        value (str): the format value as spelled on the command line.
+    """
+
+    def __init__(self, value: str) -> None:
+        super().__init__(f"invalid --pretty format: {value}")
+
+
+class UnsupportedPrettyError(GitError):
+    """A --pretty/--format preset git has but this build does not.
+
+    ``raw``, ``email``, ``mboxrd`` and ``reference`` are real git
+    formats; answering "invalid" for them would gaslight an agent that
+    spelled a valid one, so the refusal says unsupported and names what
+    exists instead.
+
+    Args:
+        value (str): the format value as spelled on the command line.
+    """
+
+    def __init__(self, value: str) -> None:
+        super().__init__(
+            f"unsupported --pretty format: {value} (this build implements "
+            f"oneline, short, medium, full, fuller and format:/tformat: "
+            f"strings)")
+
+
 class UnrecognizedArgumentError(GitError):
     """A dashed operand, which is a git feature this build does not have.
 
     mirage implements a subset of every verb, so an undeclared flag is
-    rarely a typo: it is a real git option (``-p``, ``--stat``,
-    ``--graph``) arriving at a build that lacks it. Left alone it lands
+    rarely a typo: it is a real git option (``-p``, ``--graph``,
+    ``--follow``) arriving at a build that lacks it. Left alone it lands
     on the revision operand and comes back as "ambiguous argument",
     which blames the repository for missing a commit rather than mirage
     for missing a feature, and an agent reading that draws the wrong

@@ -23,8 +23,8 @@ import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
 import { MountMode } from '../types.ts'
-import { ScriptSource } from './executor/policy/types.ts'
-import type { RuntimeLanguage } from './executor/runtime_types.ts'
+import { ScriptSource } from '../runtime/policy/types.ts'
+import type { RuntimeLanguage } from '../runtime/types.ts'
 import { Workspace } from './workspace.ts'
 
 // Mirrors python/tests/e2e/test_cli_dispatch.py.

@@ -16,15 +16,16 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
-import { Runtime } from './executor/runtime.ts'
-import type { RunArgs, RunResult } from './executor/runtime_types.ts'
+import { LanguageRuntime } from '../runtime/language.ts'
+import type { RunArgs, RunResult } from '../runtime/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace.ts'
 
-class SignalProbeRuntime extends Runtime {
+class SignalProbeRuntime extends LanguageRuntime {
+  readonly language = 'python'
   readonly name = 'probe'
   aborted = false
 

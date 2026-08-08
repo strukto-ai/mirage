@@ -26,8 +26,8 @@ import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { makeAbortError } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
-import { PolicyDeny, type PolicyDecision } from '../executor/policy/index.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import { PolicyDeny, type PolicyDecision } from '../../runtime/policy/index.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -236,7 +236,7 @@ async function runParsedLine(
   const lineRuntime = env.runtimes.wholeLineFor(rootNode, deps.routingDecision ?? null)
   if (lineRuntime?.runLine !== undefined) {
     const result = await runWholeLine(
-      lineRuntime as Parameters<typeof runWholeLine>[0],
+      lineRuntime,
       command,
       stdin,
       effectiveSession,

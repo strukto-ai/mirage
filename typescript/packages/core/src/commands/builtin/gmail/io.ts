@@ -14,7 +14,7 @@
 
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { read as gmailRead } from '../../../core/gmail/read.ts'
-import { isDirName, readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
+import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
 import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
@@ -25,6 +25,5 @@ export const GMAIL_IO: CommandIO<GmailAccessor> = {
   readStream: (a, p, i) => streamFromBytes(gmailRead, a, p, i),
   stat: gmailStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

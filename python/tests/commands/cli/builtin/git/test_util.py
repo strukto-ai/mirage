@@ -55,16 +55,16 @@ async def test_an_unsupported_log_flag_says_so_rather_than_blaming_the_repo(
 
 @pytest.mark.asyncio
 async def test_an_unsupported_long_log_flag_is_refused_whole(git_ws):
-    result = await git_ws.execute("git -C /repo log --format=%H")
+    result = await git_ws.execute("git -C /repo log --graph")
     assert result.exit_code == 128
-    assert result.stderr == b"fatal: unrecognized argument: --format=%H\n"
+    assert result.stderr == b"fatal: unrecognized argument: --graph\n"
 
 
 @pytest.mark.asyncio
 async def test_an_unsupported_show_flag_is_refused(git_ws):
-    result = await git_ws.execute("git -C /repo show --stat HEAD")
+    result = await git_ws.execute("git -C /repo show --raw HEAD")
     assert result.exit_code == 128
-    assert result.stderr == b"fatal: unrecognized argument: --stat\n"
+    assert result.stderr == b"fatal: unrecognized argument: --raw\n"
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.errors import EvalError
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.policy.errors import PolicyDeny, PolicyError
 from mirage.runtime.policy.types import (DenyResult, PolicyContext,
@@ -43,8 +44,8 @@ def evaluator_of(entries: list[Runtime],
     language (or no match) the first evaluator serves. None when the
     world has no evaluator, which only matters once a ScriptSource
     actually needs one. The attribute read here is the one ``run``
-    answers for too (Runtime.language), so an engine cannot speak one
-    language at this door and another at that one.
+    answers for too (LanguageRuntime.language), so an engine cannot
+    speak one language at this door and another at that one.
 
     Args:
         entries (list[Runtime]): the workspace's ordered world.
@@ -55,13 +56,14 @@ def evaluator_of(entries: list[Runtime],
         if isinstance(entry, EvaluatorMixin):
             if first is None:
                 first = entry
-            if language is not None and entry.language == language:
+            if (language is not None and isinstance(entry, LanguageRuntime)
+                    and entry.language == language):
                 return entry
     return first
 
 
 def runtime_for_language(entries: list[Runtime],
-                         language: Language) -> Runtime | None:
+                         language: Language) -> LanguageRuntime | None:
     """The world's interpreter for a script CLI, evaluator_of's run twin.
 
     The first entry whose ``run`` speaks the language wins, the same
@@ -73,8 +75,10 @@ def runtime_for_language(entries: list[Runtime],
         entries (list[Runtime]): the workspace's ordered world.
         language (Language): the script's language ("python" or "js").
     """
-    return next((entry for entry in entries if entry.language == language),
-                None)
+    return next(
+        (entry for entry in entries
+         if isinstance(entry, LanguageRuntime) and entry.language == language),
+        None)
 
 
 async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],

@@ -23,7 +23,8 @@ import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES, SPLIT_TYPES } from './constants.ts'
 import { expandNode, foldedWhitespace, unescapeUnquoted, type ExecuteFn } from './node.ts'
-import { expandArrayAt, isMultiwordAt, type TSNodeLike } from './variable.ts'
+import { expandArrayAt, isMultiwordAt } from './variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 // Brace-expand a concatenation or brace_expression into words. Literal
 // word tokens form the brace template; every other child (expansions,
@@ -156,7 +157,11 @@ export async function expandParts(
       // A quoted word stays a word even when it expands to "" (echo ""
       // or "$EMPTY"), except "$@"/"${a[@]}" which yield zero words.
       if (expanded !== '' || !hasAtExpansion(p)) result.push(expanded)
-    } else if (p.type === NT.RAW_STRING) {
+    } else if (
+      p.type === NT.RAW_STRING ||
+      p.type === NT.ANSI_C_STRING ||
+      p.type === NT.TRANSLATED_STRING
+    ) {
       result.push(expanded)
     } else if (expanded !== '') {
       result.push(expanded)

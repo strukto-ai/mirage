@@ -24,7 +24,8 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import LinkView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
-from mirage.runtime.table import VfsRuntime
+from mirage.runtime.table import VFSRuntime
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, ResourceName
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
@@ -35,7 +36,7 @@ from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.session import Session, assert_mount_allowed
-from mirage.workspace.types import DispatchFn, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 
 async def exec_node(cmd_str: str, io: IOResult,
@@ -75,7 +76,7 @@ def line_runtime_for(
     With no decision, the workspace's static bindings apply. With one,
     the command's runtime is looked up in the decision: its binding,
     or the decision's fallback when no entry captures it. A resolved
-    VfsRuntime means the executor serves the command itself (the vfs
+    VFSRuntime means the executor serves the command itself (the vfs
     runtime has no interpreter door); None means no runtime accepted
     it: exit 126, like a shell refusing to exec.
 
@@ -87,7 +88,7 @@ def line_runtime_for(
     """
     if routing is None:
         vfs = registry.vfs_runtime
-        restricted = isinstance(vfs, VfsRuntime) and vfs.restricted
+        restricted = isinstance(vfs, VFSRuntime) and vfs.restricted
         runtime = registry.runtime_bindings.get(cmd_name)
         if runtime is vfs and vfs is not None:
             return None, None
@@ -97,7 +98,7 @@ def line_runtime_for(
     runtime = routing.bindings.get(cmd_name, routing.fallback)
     if runtime is None:
         return None, admission_denial(cmd_name)
-    if isinstance(runtime, VfsRuntime):
+    if isinstance(runtime, VFSRuntime):
         return None, None
     return runtime, None
 

@@ -12,19 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.policy import PolicyDecision, parsed_commands
-from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VfsRuntime,
+from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VFSRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)
+from mirage.runtime.types import DispatchFn, PrefixSource
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.types import DispatchFn
 from mirage.workspace.workspace.guard import reject_config_script
-
-PrefixFn = Callable[[], list[str]]
 
 
 class Runtimes:
@@ -38,14 +38,14 @@ class Runtimes:
     Args:
         registry (MountRegistry): carries the resolved bindings and the
             unavailable-runtime hints the dispatcher reports.
-        dispatch (DispatchFn): the workspace op dispatch each entry is
-            attached to.
-        mount_prefixes (PrefixFn): pull-model provider read per run, so
-            mounts added after construction are picked up.
+        dispatch (DispatchFn): the workspace op dispatch each language
+            entry is attached to.
+        mount_prefixes (PrefixSource): pull-model provider read per
+            run, so mounts added after construction are picked up.
     """
 
     def __init__(self, registry: MountRegistry, dispatch: DispatchFn,
-                 mount_prefixes: PrefixFn) -> None:
+                 mount_prefixes: PrefixSource) -> None:
         self._registry = registry
         self._dispatch = dispatch
         self._mount_prefixes = mount_prefixes
@@ -88,12 +88,13 @@ class Runtimes:
             for entry in runtimes:
                 entries.append(
                     build_runtime(entry) if isinstance(entry, str) else entry)
-        if not any(entry.name == VfsRuntime.name for entry in entries):
-            entries.append(VfsRuntime())
+        if not any(entry.name == VFSRuntime.name for entry in entries):
+            entries.append(VFSRuntime())
         for entry in entries:
             reject_config_script(f"runtime {entry.name!r} script",
                                  entry.script)
-            entry.attach(self._dispatch, self._mount_prefixes)
+            if isinstance(entry, LanguageRuntime):
+                entry.attach(self._dispatch, self._mount_prefixes)
         self._entries = entries
         return entries
 
@@ -117,28 +118,31 @@ class Runtimes:
         reject_config_script(f"runtime {entry.name!r} script", entry.script)
         candidate = [*self._entries, entry]
         bindings = bind_commands(candidate)
-        entry.attach(self._dispatch, self._mount_prefixes)
+        if isinstance(entry, LanguageRuntime):
+            entry.attach(self._dispatch, self._mount_prefixes)
         self._entries = candidate
         self._registry.runtime_bindings = bindings
         self._registry.runtime_entries = candidate
         return entry
 
-    def whole_line(self, ast: Any,
-                   decision: PolicyDecision | None) -> Runtime | None:
+    def whole_line(
+            self, ast: Any,
+            decision: PolicyDecision | None) -> LineExecutorMixin | None:
         """The entry taking this whole line, None for the executor.
 
-        An entry with ``runs_lines`` takes the raw line when the line's
-        resolved bindings place one of its commands (or "*") on it;
-        everything else walks the executor's tree. The common set has
-        no such entry, so this is a cheap scan.
+        An entry inheriting LineExecutorMixin takes the raw line when
+        the line's resolved bindings place one of its commands (or
+        "*") on it; everything else walks the executor's tree. The
+        common set has no such entry, so this is a cheap scan.
 
         Args:
             ast: the parsed tree-sitter root node.
             decision (PolicyDecision | None): the line's decision,
                 None when only static bindings apply.
         """
-        if not any(entry.runs_lines and not isinstance(entry, VfsRuntime)
-                   for entry in self._entries):
+        if not any(
+                isinstance(entry, LineExecutorMixin)
+                for entry in self._entries):
             return None
         bindings: Mapping[str, Runtime
                           | None] = (decision.bindings if decision is not None

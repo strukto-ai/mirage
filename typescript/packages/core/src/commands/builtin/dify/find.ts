@@ -15,6 +15,7 @@
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { DifyAccessor } from '../../../accessor/dify.ts'
 import { find as difyFind } from '../../../core/dify/find.ts'
+import { stat as statCore, statLight } from '../../../core/dify/stat.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { DIFY_IO } from './io.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
@@ -22,6 +23,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { findGeneric } from '../generic/find.ts'
 
 const resolveGlob = resolveGlobOf(DIFY_IO)
@@ -68,8 +70,20 @@ async function findCommand(
   const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
   const searchPath = resolved[0]
   const adjustedOpts: CommandOpts = { ...opts, flags: defaultName(opts.flags, texts) }
-  const result = await findGeneric(resolved, texts, adjustedOpts, (root, options) =>
-    difyFind(accessor, root, options, index),
+  // Dify's full stat is a document-detail fetch, so it is only paid when
+  // -mtime needs detail timestamps; everything else rides the index-only
+  // stat (mirrors the Python wrapper).
+  const fl = new FlagView(opts.flags, specOf('find'))
+  const statFn =
+    fl.asStr('mtime') !== undefined
+      ? (spec: PathSpec) => statCore(accessor, spec, index)
+      : (spec: PathSpec) => statLight(accessor, spec, index)
+  const result = await findGeneric(
+    resolved,
+    texts,
+    adjustedOpts,
+    (root, options) => difyFind(accessor, root, options, index),
+    statFn,
   )
   if (result === null || searchPath === undefined) return result
   const [stdout, io] = result

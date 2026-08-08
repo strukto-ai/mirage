@@ -21,7 +21,11 @@
       "seq": 910039,
       "targets": ["ram", "disk"],
       "command": "mkdir -p /data/t2checksum2 && printf '00000000000000000000000000000000  /data/not-there\n' > /data/t2checksum2/sums && md5sum --check --ignore-missing /data/t2checksum2/sums && echo ignored",
-      "expect": { "exit": 0, "stdout": "ignored\n", "stderr": "" },
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "md5sum: /data/t2checksum2/sums: no file was verified\n"
+      },
       "flags": ["check", "ignore-missing"]
     },
     {
@@ -29,7 +33,11 @@
       "seq": 910040,
       "targets": ["ram", "disk"],
       "command": "mkdir -p /data/t2checksum3 && printf 'bad\n' > /data/t2checksum3/sums && sha1sum --check --warn /data/t2checksum3/sums 2>&1; echo warn=$?; sha1sum --check --strict /data/t2checksum3/sums > /dev/null 2>&1; echo strict=$?",
-      "expect": { "exit": 0, "stdout": "WARNING: 1 line is improperly formatted\nwarn=0\nstrict=1\n", "stderr": "" },
+      "expect": {
+        "exit": 0,
+        "stdout": "sha1sum: /data/t2checksum3/sums: 1: improperly formatted SHA1 checksum line\nsha1sum: /data/t2checksum3/sums: no properly formatted checksum lines found\nwarn=1\nstrict=1\n",
+        "stderr": ""
+      },
       "flags": ["check", "warn", "strict"]
     },
     {

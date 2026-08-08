@@ -351,6 +351,76 @@
       }
     },
     {
+      "id": "git_log_format_empty_entries_keep_separators",
+      "seq": 568040,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=format:",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_tformat_terminates_empty_entries",
+      "seq": 568041,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format=%b",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_x_placeholder_is_a_raw_byte",
+      "seq": 568042,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -1 --format=a%x80b | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_bare_format_is_fatal",
+      "seq": 568043,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: unrecognized argument: --format\n"
+      }
+    },
+    {
+      "id": "git_show_format_header_no_trailing_newline",
+      "seq": 568044,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --pretty=format:%h",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542",
+        "stderr": ""
+      }
+    },
+    {
       "id": "git_add_stages_an_edit",
       "seq": 568100,
       "targets": [
@@ -838,6 +908,230 @@
         "exit": 128,
         "stdout": "",
         "stderr": "fatal: cannot reset to 'HEAD~1': this build resets the index from HEAD only\n"
+      }
+    },
+    {
+      "id": "git_log_all_walks_every_ref",
+      "seq": 568025,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --all --oneline",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n225f39c add docs\n265ec3a add delta\n98b4ffe first commit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_placeholders",
+      "seq": 568026,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format='%h|%an|%s'",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542|Integ Author|add two\n225f39c|Integ Author|add docs\n265ec3a|Integ Author|add delta\n98b4ffe|Integ Author|first commit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_separator_has_no_trailing_newline",
+      "seq": 568027,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty='format:%h' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "31\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_pretty_oneline_prints_full_ids",
+      "seq": 568028,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=oneline -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_pretty_fuller_block",
+      "seq": 568029,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=fuller -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor:     Integ Author <integ@example.com>\nAuthorDate: Thu Jan 8 14:45:00 2026 +0000\nCommit:     Integ Author <integ@example.com>\nCommitDate: Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_decorations",
+      "seq": 568030,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format='%h%d'",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 (HEAD -> main)\n225f39c (topic)\n265ec3a\n98b4ffe\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_invalid_pretty_is_refused_like_git",
+      "seq": 568031,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=bogus",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: invalid --pretty format: bogus\n"
+      }
+    },
+    {
+      "id": "git_log_unsupported_pretty_says_so",
+      "seq": 568032,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=raw",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: unsupported --pretty format: raw (this build implements oneline, short, medium, full, fuller and format:/tformat: strings)\n"
+      }
+    },
+    {
+      "id": "git_show_stat_table",
+      "seq": 568033,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --stat HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n\n numbers.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_name_only",
+      "seq": 568034,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --name-only HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n\nnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_no_patch_suppresses_the_diff",
+      "seq": 568035,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --no-patch HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_s_short_spelling",
+      "seq": 568036,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_stat_loses_to_no_patch",
+      "seq": 568037,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --stat --no-patch HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_s_with_format",
+      "seq": 568038,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --format='%H %s' HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_no_ext_diff_is_accepted",
+      "seq": 568039,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --no-ext-diff -s HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_counts_binary_files_but_no_lines",
+      "seq": 568230,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'A\\0B\\0C' > /repo/blob.bin && git -C /repo add -A && git -C /repo commit -m 'binary blob' | grep -E 'file changed|create mode'",
+      "expect": {
+        "exit": 0,
+        "stdout": " 1 file changed, 0 insertions(+), 0 deletions(-)\n create mode 100644 blob.bin\n",
+        "stderr": ""
       }
     }
   ]

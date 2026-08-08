@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.util import first_text
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message, fetch_raw_message
 from mirage.core.email.config import EmailConfig
+from mirage.core.email.render import message_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 
@@ -37,6 +36,7 @@ async def read(
         processed = await fetch_message(accessor, mailbox, uid)
     finally:
         await accessor.close()
-    out = json.dumps(processed, ensure_ascii=False,
-                     separators=(",", ":")).encode()
+    # The same renderer the mount serves, so `message read` and `cat` of
+    # the .email.json cannot drift apart.
+    out = message_json_bytes(processed)
     return yield_bytes(out), IOResult()

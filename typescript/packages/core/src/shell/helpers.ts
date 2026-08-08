@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { TSNodeLike } from '../workspace/expand/variable.ts'
+import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, Redirect, RedirectKind } from './types.ts'
 
 export function getText(node: TSNodeLike): string {
@@ -29,7 +29,26 @@ export function getCommandName(node: TSNodeLike): string {
 const SKIP_PARTS: ReadonlySet<string> = new Set([NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT])
 
 export function getParts(node: TSNodeLike): TSNodeLike[] {
-  return node.namedChildren.filter((c) => !SKIP_PARTS.has(c.type))
+  // A bare `$` word is an anonymous token rather than a named child, but
+  // bash passes it through as a literal argument (`echo $` prints `$`), so
+  // it is the one anonymous child that stays - unless a string starts at
+  // its very next byte, where it is the translation marker of `$"..."` and
+  // the string node carries the whole word.
+  const children = node.children
+  const parts: TSNodeLike[] = []
+  for (let position = 0; position < children.length; position += 1) {
+    const c = children[position]
+    if (c === undefined) continue
+    if (c.isNamed === true && !SKIP_PARTS.has(c.type)) {
+      parts.push(c)
+    } else if (c.type === '$') {
+      const nxt = children[position + 1]
+      if (nxt?.type !== NT.STRING || nxt.startIndex !== c.endIndex) {
+        parts.push(c)
+      }
+    }
+  }
+  return parts
 }
 
 /**
@@ -150,6 +169,8 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.COMMAND_SUBSTITUTION,
   NT.STRING,
   NT.RAW_STRING,
+  NT.ANSI_C_STRING,
+  NT.TRANSLATED_STRING,
   NT.PROCESS_SUBSTITUTION,
 ])
 
@@ -369,35 +390,34 @@ export function getCaseWord(node: TSNodeLike): TSNodeLike {
 }
 
 /**
- * Get (patterns, bodyStatements) pairs from case. An arm's body is
- * every statement up to its ;; terminator, so multi-statement arms
+ * Get (patternNodes, bodyStatements, terminator) triples from case.
+ *
+ * Patterns are every named child before the arm's `)`, kept as nodes so
+ * quoting survives to the matcher: 'a'), "$x") and $'a\n') all mean literal
+ * text where a bare word keeps its globs live. An arm's body is every
+ * statement up to its terminator, so multi-statement arms
  * (x) cmd1; cmd2;;) keep all commands.
  */
-export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[], string][] {
-  const items: [string[], TSNodeLike[], string][] = []
+export function getCaseItems(node: TSNodeLike): [TSNodeLike[], TSNodeLike[], string][] {
+  const items: [TSNodeLike[], TSNodeLike[], string][] = []
   for (const c of node.namedChildren) {
     if (c.type !== NT.CASE_ITEM) continue
-    const patterns: string[] = []
+    const patterns: TSNodeLike[] = []
     const body: TSNodeLike[] = []
     let terminator = ';;'
+    let inBody = false
     for (const child of c.children) {
       if (child.type === ';;' || child.type === ';&' || child.type === ';;&') {
         terminator = child.type
-      } else if (
-        body.length === 0 &&
-        (child.type === NT.EXTGLOB_PATTERN ||
-          child.type === NT.WORD ||
-          child.type === NT.CONCATENATION ||
-          child.type === NT.STRING)
-      ) {
-        patterns.push(getText(child))
-      } else if (child.isNamed === true && child.type !== '|') {
+      } else if (child.type === ')') {
+        inBody = true
+      } else if (child.isNamed !== true) {
+        continue
+      } else if (inBody) {
         body.push(child)
+      } else {
+        patterns.push(child)
       }
-    }
-    if (patterns.length === 0) {
-      const first = c.namedChildren[0]
-      if (first !== undefined) patterns.push(getText(first))
     }
     items.push([patterns, body, terminator])
   }

@@ -90,6 +90,16 @@ async def test_backup_target_numbered_scans_versions():
 
 
 @pytest.mark.asyncio
+async def test_backup_target_numbered_ignores_unicode_digits():
+    # python's \d also matches Unicode digits, which JS /\d/ rejects; a
+    # sibling named b.txt.~٩~ is not a numbered backup in either language.
+    listing = _listing(["/d/b.txt", "/d/b.txt.~2~", "/d/b.txt.~٩~"])
+    picked = await backup_target(listing, _spec("/d/b.txt"), "numbered", "~")
+    assert picked is not None
+    assert picked.virtual == "/d/b.txt.~3~"
+
+
+@pytest.mark.asyncio
 async def test_backup_target_existing_falls_back_to_simple():
     picked = await backup_target(_listing(["/d/b.txt"]), _spec("/d/b.txt"),
                                  "existing", ".bak")

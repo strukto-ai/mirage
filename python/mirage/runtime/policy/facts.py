@@ -21,7 +21,9 @@ from mirage.runtime.policy.types import ParsedCommand
 from mirage.shell.types import NodeType
 
 _WORD_TYPES = (NodeType.COMMAND_NAME, NodeType.WORD, NodeType.STRING,
-               NodeType.RAW_STRING, NodeType.NUMBER, NodeType.CONCATENATION)
+               NodeType.RAW_STRING, NodeType.ANSI_C_STRING,
+               NodeType.TRANSLATED_STRING, NodeType.NUMBER,
+               NodeType.CONCATENATION)
 
 
 def parsed_commands(

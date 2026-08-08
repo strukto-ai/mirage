@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, type Resource } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  type ChromaConfig,
+  type DifyConfig,
+  type LanceDBConfig,
+  type QdrantConfig,
+  type Resource,
+} from '@struktoai/mirage-core'
 
 /**
  * Construct a resource by registry name. Mirrors Python's
@@ -159,6 +166,22 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeMongoDBConfig } = await import('@struktoai/mirage-core')
     return new MongoDBResource(normalizeMongoDBConfig(config))
   },
+  chroma: async (config) => {
+    const { ChromaResource } = await import('@struktoai/mirage-core')
+    return new ChromaResource(normalizeFields(config) as unknown as ChromaConfig)
+  },
+  dify: async (config) => {
+    const { DifyResource } = await import('@struktoai/mirage-core')
+    return new DifyResource(normalizeFields(config) as unknown as DifyConfig)
+  },
+  qdrant: async (config) => {
+    const { QdrantResource } = await import('@struktoai/mirage-core')
+    return new QdrantResource(normalizeFields(config) as unknown as QdrantConfig)
+  },
+  lancedb: async (config) => {
+    const { LanceDBResource } = await import('./lancedb/lancedb.ts')
+    return new LanceDBResource(normalizeFields(config) as unknown as LanceDBConfig)
+  },
   slack: async (config) => {
     const { SlackResource } = await import('./slack/slack.ts')
     const { normalizeSlackConfig } = await import('@struktoai/mirage-core')
@@ -268,31 +291,37 @@ const REGISTRY: Record<string, ResourceFactory> = {
   },
 }
 
+const CUSTOM: Record<string, ResourceFactory> = {}
+
 /**
- * Look up the registered names. Lazily-mutated by `register()` so users
- * can extend the registry with custom resources.
+ * Look up every constructible name: builtins plus whatever `register()`
+ * has added.
  */
 export function knownResources(): string[] {
-  return Object.keys(REGISTRY).sort()
+  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort()
 }
 
 /**
- * Register a custom resource factory under `name`. Existing entries
- * are overwritten, mirroring Python's mutable REGISTRY dict.
+ * Register a custom resource factory under `name`. Builtin names cannot
+ * be shadowed; re-registering a custom name replaces it. Mirrors
+ * Python's `mirage.resource.registry.register_resource`, which keeps
+ * builtins in REGISTRY and custom entries in a separate _CUSTOM dict so
+ * a plugin cannot replace the builtin `s3` factory.
  */
 export function register(name: string, factory: ResourceFactory): void {
-  REGISTRY[name] = factory
+  if (name in REGISTRY) throw new Error(`cannot register '${name}': shadows a builtin`)
+  CUSTOM[name] = factory
 }
 
 /**
- * Build a resource instance by registry name. Throws if the name is
- * unknown.
+ * Build a resource instance by registry name. Builtins win over custom
+ * registrations. Throws if the name is unknown.
  */
 export async function buildResource(
   name: string,
   config: Record<string, unknown> = {},
 ): Promise<Resource> {
-  const factory = REGISTRY[name]
+  const factory = REGISTRY[name] ?? CUSTOM[name]
   if (factory === undefined) {
     throw new Error(
       `unknown resource ${JSON.stringify(name)}; known: ${knownResources().join(', ')}`,

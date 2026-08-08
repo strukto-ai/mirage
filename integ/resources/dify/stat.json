@@ -12,6 +12,19 @@
         "stdout": "0 /knowledge/guides/auth\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "df_stat_mtime",
+      "seq": 580023,
+      "targets": [
+        "dify"
+      ],
+      "command": "stat -c '%y' /knowledge/guides/auth",
+      "expect": {
+        "exit": 0,
+        "stdout": "2024-05-21T09:00:00Z\n",
+        "stderr": ""
+      }
     }
   ]
 }

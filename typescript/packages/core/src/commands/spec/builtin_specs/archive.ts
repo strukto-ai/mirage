@@ -67,7 +67,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-p' }),
       new Option({ short: '-t' }),
     ],
-    rest: new Operand({ type: 'path' }),
+    // The archive is the only path operand; everything after it is an
+    // Info-ZIP member pattern matched against archive entry names, never
+    // a filesystem path.
+    positional: [new Operand({ type: 'path' })],
+    rest: new Operand({ type: 'str' }),
   }),
   zcat: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
   zip: new CommandSpec({

@@ -26,6 +26,8 @@ import {
   PathSpec,
   RAMResource,
   RedisResource,
+  LINE_EXECUTOR,
+  type LineExecutor,
   Runtime,
   S3Resource,
   ScriptSource,
@@ -125,19 +127,15 @@ interface Suite {
 let s3Seeded = false;
 let mongoSeeded = false;
 
-class EchoBox extends Runtime {
+class EchoBox extends Runtime implements LineExecutor {
+  readonly [LINE_EXECUTOR] = true as const;
   readonly name = "echobox";
-  override readonly runsLines = true;
 
   constructor(options = {}) {
     super(options, ["nvidia-smi"], []);
   }
 
-  run(): Promise<RunResult> {
-    return Promise.reject(new Error("whole-line runtimes take lines"));
-  }
-
-  override runLine(line: string): Promise<RunResult> {
+  runLine(line: string): Promise<RunResult> {
     return Promise.resolve({
       stdout: ENC.encode(`box:${line}\n`),
       stderr: null,

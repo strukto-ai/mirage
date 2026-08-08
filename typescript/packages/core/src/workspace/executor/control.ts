@@ -23,7 +23,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
@@ -415,7 +415,7 @@ export async function handleCase(
   let ran = false
   let fallthrough = false
   for (const [patterns, body, terminator] of items) {
-    if (!(fallthrough || patterns.some((p) => fnmatch(word, p.trim())))) continue
+    if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
     ran = true
     for (const stmt of body) {
       const [rawStdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)

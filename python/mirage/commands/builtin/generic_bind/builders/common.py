@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line
+from mirage.utils.errors import FS_ERRORS, MISS_ERRORS, eisdir, fs_error_line
 from mirage.utils.path import norm, parent
 
 
@@ -61,7 +61,7 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
     if not key:
         try:
             entries = await ops.readdir(accessor, path, index)
-        except Exception:
+        except MISS_ERRORS:
             return False
         return bool(entries)
     parent_key = key.rsplit("/", 1)[0] if "/" in key else ""
@@ -71,7 +71,7 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
                            resource_path=parent_key)
     try:
         entries = await ops.readdir(accessor, parent_path, index)
-    except Exception:
+    except MISS_ERRORS:
         return False
     return any(norm(entry) == target for entry in entries)
 

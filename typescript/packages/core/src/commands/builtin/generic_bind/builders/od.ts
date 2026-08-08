@@ -32,8 +32,8 @@ export const OD_BUILDER: Builder = {
     return odGeneric(
       source,
       typeof addressValue === 'string' ? addressValue : 'o',
-      typeof skipValue === 'string' ? parseCount(skipValue) : 0,
-      typeof limitValue === 'string' ? parseCount(limitValue) : null,
+      typeof skipValue === 'string' ? parseCount(skipValue, '-j') : 0,
+      typeof limitValue === 'string' ? parseCount(limitValue, '-N') : null,
       formats,
     )
   },

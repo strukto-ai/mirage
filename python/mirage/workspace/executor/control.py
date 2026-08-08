@@ -418,8 +418,7 @@ async def handle_case(
     ran = False
     fallthrough = False
     for patterns, body, terminator in items:
-        if not (fallthrough or any(fnmatch(word, p.strip())
-                                   for p in patterns)):
+        if not (fallthrough or any(fnmatch(word, p) for p in patterns)):
             continue
         ran = True
         for stmt in body:

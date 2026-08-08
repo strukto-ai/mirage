@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs import QuickJsRuntime
 
 __all__ = [
+    "JsRuntime",
     "QuickJsRuntime",
 ]

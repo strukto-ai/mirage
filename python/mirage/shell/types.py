@@ -60,6 +60,8 @@ class NodeType(StrEnum):
     STRING = "string"
     STRING_CONTENT = "string_content"
     RAW_STRING = "raw_string"
+    ANSI_C_STRING = "ansi_c_string"
+    TRANSLATED_STRING = "translated_string"
     PROCESS_SUBSTITUTION = "process_substitution"
     EXTGLOB_PATTERN = "extglob_pattern"
     REGEX = "regex"

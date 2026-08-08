@@ -7,6 +7,19 @@
   "language_only_resources": {
     "opfs": "Browser-only OPFS backend. Python has no browser runtime, so there is nothing to mirror."
   },
+  "unconstructible_resources": {
+    "python": {
+      "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_resource entry."
+    },
+    "node": {
+      "history": "See python: the history view mount is workspace-internal."
+    },
+    "browser": {
+      "history": "See python: the history view mount is workspace-internal.",
+      "databricks_volume": "Registers commands in the browser bundle but has no browser registry factory. Both it and jaeger are pure HTTP, so the omission looks accidental rather than a runtime limit — confirm the intended browser scope before wiring them up.",
+      "jaeger": "Registers commands in the browser bundle but has no browser registry factory. See databricks_volume."
+    }
+  },
   "commands": {
     "grep": {
       "by_resource": {

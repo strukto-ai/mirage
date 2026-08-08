@@ -12,8 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias
+
+from mirage.io import IOResult
+from mirage.types import PathSpec
 
 # The value contract of eval: never richer than JSON plus bytes, so any
 # evaluator (in-process or remote over a serialized transport) can carry
@@ -29,6 +33,25 @@ EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
 # and eval). A Literal, not str, so a typo is a type error instead of a
 # selector that silently matches nothing and reports "no runtime".
 Language: TypeAlias = Literal["python", "js"]
+
+
+class DispatchFn(Protocol):
+    """The workspace op dispatch: run ``op`` against the mount owning
+    ``path`` and return its result with the accounting IOResult.
+
+    The contract a sandboxed runtime's file I/O rides: defined here,
+    on the consumer side, because runtimes receive it (attach) while
+    the workspace provides it, and the runtime package imports no
+    workspace module."""
+
+    def __call__(self, op: str, path: PathSpec,
+                 **kwargs: Any) -> Awaitable[tuple[Any, IOResult]]:
+        ...
+
+
+# Live view of the workspace mount prefixes, read per run so mounts
+# added or removed after construction are always picked up.
+PrefixSource: TypeAlias = Callable[[], list[str]]
 
 
 @dataclass(frozen=True, slots=True)

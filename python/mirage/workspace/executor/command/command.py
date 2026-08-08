@@ -28,6 +28,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
@@ -55,7 +56,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
-from mirage.workspace.types import DispatchFn, ExecutionNode
+from mirage.workspace.types import ExecutionNode
 
 # One handler per JOB_BUILTINS member; route already narrowed the name.
 JOB_HANDLERS = {

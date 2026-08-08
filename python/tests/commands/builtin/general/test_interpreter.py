@@ -17,13 +17,14 @@ import pytest
 from mirage.commands.builtin.general.interpreter import (Source,
                                                          resolve_source,
                                                          run_code, run_output)
-from mirage.runtime.base import Runtime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
 
 
-class EchoRuntime(Runtime):
+class EchoRuntime(LanguageRuntime):
     name = "echo"
+    language = "python"
 
     def __init__(self, dispatch=None):
         self.seen: list[RunArgs] = []

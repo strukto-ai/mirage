@@ -25,7 +25,7 @@ from mirage.cache.index import IndexConfig
 from mirage.commands.cli import CLISpec
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.io import IOResult
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
@@ -35,7 +35,6 @@ from mirage.provision import ProvisionResult
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision, PolicyFn
-from mirage.runtime.types import RunResult
 from mirage.shell.job_table import JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           MountBackend, MountMode, PathSpec, StateKey,
@@ -179,8 +178,7 @@ class Workspace:
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
 
         self._runtimes, self._policy_router = wire_runtime_world(
-            self._registry, self.dispatch, self._ops.mount_prefixes, runtimes,
-            self._execute_line_for_vfs)
+            self._registry, self.dispatch, self._ops.mount_prefixes, runtimes)
         reject_config_script("policy", policy)
         self._policy = policy
 
@@ -332,28 +330,6 @@ class Workspace:
             ValueError: unknown name or duplicate entry.
         """
         return self._runtimes.add(runtime)
-
-    async def _execute_line_for_vfs(self, line: str, stdin: bytes | None,
-                                    env: dict[str,
-                                              str], cwd: str) -> RunResult:
-        """The workspace executor as the vfs runtime's run_line.
-
-        No core path reaches this for a typed line (whole_line_runtime
-        never selects vfs); a caller that invokes it for one records a
-        second history entry and re-resolves the policy.
-
-        Args:
-            line (str): the raw command line.
-            stdin (bytes | None): bytes piped into the line.
-            env (dict[str, str]): environment overrides for the line.
-            cwd (str): working directory for the line.
-        """
-        io = await self.execute(line, stdin=stdin, cwd=cwd, env=env)
-        stdout = (await materialize(io.stdout)
-                  if io.stdout is not None else b"")
-        stderr = (await materialize(io.stderr)
-                  if io.stderr is not None else None)
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=io.exit_code)
 
     @property
     def _cwd(self) -> str:

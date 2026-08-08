@@ -22,11 +22,10 @@ import {
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/_client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
+import { messagesJsonBytes } from '../../../../core/email/render.ts'
 import { pageSlice, sortHeaders, uidBudget } from './query.ts'
 
 export const DEFAULT_PAGE_SIZE = 25
-
-const ENC = new TextEncoder()
 
 export async function listEnvelopes(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
@@ -44,6 +43,6 @@ export async function listEnvelopes(inv: CLIInvocation): Promise<CommandFnResult
     await accessor.close()
   }
   const pageOf = pageSlice(sortHeaders(headers, []), page, pageSize)
-  const out: ByteSource = ENC.encode(JSON.stringify(pageOf))
+  const out: ByteSource = messagesJsonBytes(pageOf)
   return [out, new IOResult()]
 }

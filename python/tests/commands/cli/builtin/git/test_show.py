@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+from dulwich import porcelain
 
 from mirage.commands.cli.builtin.git import GIT
-from tests.commands.cli.builtin.git.conftest import (commit_merge, make_branch,
-                                                     mounted)
+from tests.commands.cli.builtin.git.conftest import (AUTHOR, commit_merge,
+                                                     make_branch, mounted)
 
 
 @pytest.mark.asyncio
@@ -114,3 +115,107 @@ async def test_a_merge_shows_no_patch(repo_path):
     assert result.exit_code == 0
     assert b"diff --git" not in result.stdout
     assert result.stdout.rstrip(b"\n").endswith(b"    merge side")
+
+
+@pytest.mark.asyncio
+async def test_stat_replaces_the_patch_with_the_table(git_ws):
+    result = await git_ws.execute("git -C /repo show --stat HEAD")
+    text = result.stdout.decode()
+    assert " a.txt | 2 +-" in text
+    assert " 1 file changed, 1 insertion(+), 1 deletion(-)" in text
+    assert "diff --git" not in text
+
+
+@pytest.mark.asyncio
+async def test_name_only_lists_bare_paths(git_ws):
+    result = await git_ws.execute("git -C /repo show --name-only HEAD")
+    text = result.stdout.decode()
+    assert text.endswith("\n\na.txt\n")
+    assert "diff --git" not in text
+
+
+@pytest.mark.asyncio
+async def test_name_only_wins_over_stat_like_git(git_ws):
+    result = await git_ws.execute("git -C /repo show --stat --name-only HEAD")
+    text = result.stdout.decode()
+    assert text.endswith("\n\na.txt\n")
+    assert "file changed" not in text
+
+
+@pytest.mark.asyncio
+async def test_no_patch_suppresses_every_diff_section(git_ws):
+    plain = await git_ws.execute("git -C /repo show --no-patch HEAD")
+    stat = await git_ws.execute("git -C /repo show --stat --no-patch HEAD")
+    text = plain.stdout.decode()
+    assert "    third" in text
+    assert "diff --git" not in text
+    assert stat.stdout == plain.stdout
+
+
+@pytest.mark.asyncio
+async def test_s_is_the_short_spelling_of_no_patch(git_ws):
+    dashed = await git_ws.execute("git -C /repo show -s HEAD")
+    spelled = await git_ws.execute("git -C /repo show --no-patch HEAD")
+    assert dashed.stdout == spelled.stdout
+
+
+@pytest.mark.asyncio
+async def test_s_with_format_answers_one_field(git_ws):
+    result = await git_ws.execute("git -C /repo show -s --format=%s HEAD")
+    assert result.stdout == b"third\n"
+    assert result.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_format_header_rides_over_the_patch(git_ws):
+    result = await git_ws.execute("git -C /repo show --format=%s HEAD")
+    text = result.stdout.decode()
+    assert text.startswith("third\n\ndiff --git")
+
+
+@pytest.mark.asyncio
+async def test_no_ext_diff_is_accepted_and_changes_nothing(git_ws):
+    flagged = await git_ws.execute("git -C /repo show --no-ext-diff HEAD")
+    plain = await git_ws.execute("git -C /repo show HEAD")
+    assert flagged.exit_code == 0
+    assert flagged.stdout == plain.stdout
+
+
+@pytest.mark.asyncio
+async def test_stat_reports_a_binary_file_in_bytes(git_ws, repo_path):
+    (repo_path / "blob.bin").write_bytes(b"\x00\x01\x02data")
+    porcelain.add(str(repo_path), paths=[str(repo_path / "blob.bin")])
+    porcelain.commit(str(repo_path),
+                     message=b"binary",
+                     author=AUTHOR,
+                     committer=AUTHOR)
+    result = await git_ws.execute("git -C /repo show --stat HEAD")
+    text = result.stdout.decode()
+    assert " blob.bin | Bin 0 -> 7 bytes" in text
+    assert " 1 file changed, 0 insertions(+), 0 deletions(-)" in text
+
+
+@pytest.mark.asyncio
+async def test_show_format_header_prints_without_trailing_newline(git_ws):
+    # format: is a separator, and a single entry has nothing to
+    # separate from - git prints the seven id characters and stops.
+    result = await git_ws.execute("git -C /repo show -s --pretty='format:%h'")
+    assert len(result.stdout) == 7
+    assert not result.stdout.endswith(b"\n")
+
+
+@pytest.mark.asyncio
+async def test_show_tformat_terminates_an_empty_expansion(git_ws):
+    # A subject-only message has no body: %b renders empty and still
+    # claims its terminator, while an empty template stays silent.
+    result = await git_ws.execute("git -C /repo show -s --format='%b'")
+    assert result.stdout == b"\n"
+    silent = await git_ws.execute("git -C /repo show -s --format=")
+    assert not silent.stdout
+
+
+@pytest.mark.asyncio
+async def test_show_bare_format_is_refused_like_git(git_ws):
+    result = await git_ws.execute("git -C /repo show --format")
+    assert result.exit_code == 128
+    assert result.stderr == b"fatal: unrecognized argument: --format\n"

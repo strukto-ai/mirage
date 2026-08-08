@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './_client.ts'
 import { afterIdPages } from './paginate.ts'
-import { isDirName } from './readdir.ts'
 
 class PageTransport implements DiscordTransport {
   readonly afters: string[] = []
@@ -73,16 +72,5 @@ describe('afterIdPages', () => {
     )
     expect(transport.afters).toEqual(['0', '2'])
     expect(ids).toEqual(['1', '2', '3'])
-  })
-})
-
-describe('isDirName', () => {
-  it('classifies attachments as files whatever their extension', () => {
-    const base = '/d/G/channels/c/2026-06-01'
-    expect(isDirName(`${base}/files`)).toBe(true)
-    expect(isDirName(`${base}/files/report.csv`)).toBe(false)
-    expect(isDirName(`${base}/files/archive.tar.gz`)).toBe(false)
-    expect(isDirName(`${base}/chat.jsonl`)).toBe(false)
-    expect(isDirName('/d/G/channels/c')).toBe(true)
   })
 })

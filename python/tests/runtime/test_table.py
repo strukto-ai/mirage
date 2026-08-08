@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
 import pytest
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VfsRuntime,
+from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VFSRuntime,
                                   bind_commands, build_runtime,
                                   runtime_bindings_for, whole_line_runtime)
 from mirage.runtime.types import RunArgs, RunResult
@@ -55,18 +54,18 @@ def test_build_runtime_local_takes_options():
 def test_bind_commands_first_capturer_wins():
     fake = FakeRuntime()
     local = LocalRuntime()
-    bindings = bind_commands([fake, local, VfsRuntime()])
+    bindings = bind_commands([fake, local, VFSRuntime()])
     assert bindings["python3"] is fake
     assert bindings["made-up"] is fake
     assert bindings["python"] is local
 
 
 def test_bind_commands_vfs_runtime_binds_nothing():
-    assert bind_commands([VfsRuntime()]) == {}
+    assert bind_commands([VFSRuntime()]) == {}
 
 
 def test_build_runtime_vfs_is_a_named_runtime():
-    assert isinstance(build_runtime("vfs"), VfsRuntime)
+    assert isinstance(build_runtime("vfs"), VFSRuntime)
 
 
 def test_bind_commands_rejects_duplicate_names():
@@ -81,27 +80,23 @@ def test_every_runtime_declares_captures():
 
 def test_runtime_bindings_for_maps_only_the_named_captures():
     fake = FakeRuntime()
-    bindings = runtime_bindings_for([fake, VfsRuntime()], "fake")
+    bindings = runtime_bindings_for([fake, VFSRuntime()], "fake")
     assert bindings == {"python3": fake, "made-up": fake}
 
 
 def test_runtime_bindings_for_rejects_vfs():
     with pytest.raises(ValueError, match="not a runtime you can select"):
-        runtime_bindings_for([FakeRuntime(), VfsRuntime()], "vfs")
+        runtime_bindings_for([FakeRuntime(), VFSRuntime()], "vfs")
 
 
 def test_runtime_bindings_for_unknown_name_lists_entries():
     with pytest.raises(ValueError, match="'fake', 'vfs'"):
-        runtime_bindings_for([FakeRuntime(), VfsRuntime()], "nope")
+        runtime_bindings_for([FakeRuntime(), VFSRuntime()], "nope")
 
 
-class _LineRuntime(Runtime):
+class _LineRuntime(Runtime, LineExecutorMixin):
     name = "boxy"
     captures = ("nvidia-smi", )
-    runs_lines = True
-
-    async def run(self, args: RunArgs) -> RunResult:
-        raise AssertionError
 
     async def run_line(self, line: str, stdin: bytes | None,
                        env: dict[str, str], cwd: str) -> RunResult:
@@ -122,13 +117,16 @@ def test_whole_line_runtime_specific_beats_star():
 
 
 def test_whole_line_runtime_skips_stage_engines_and_vfs():
-    vfs = VfsRuntime(captures=["grep"])
-    monty_like = _LineRuntime()
-    monty_like.runs_lines = False
+    vfs = VFSRuntime(captures=["grep"])
+    monty_like = FakeRuntime()
     bindings = {"grep": vfs, "python3": monty_like}
     assert whole_line_runtime(bindings, ["grep", "python3"]) is None
 
 
-def test_vfs_run_line_requires_a_workspace():
-    with pytest.raises(RuntimeError, match="not attached"):
-        asyncio.run(VfsRuntime().run_line("echo x", None, {}, "/"))
+def test_vfs_is_a_pure_routing_marker():
+    # A line resolved to vfs runs on the workspace executor inline, so
+    # the marker carries no line door and no interpreter door.
+    vfs = VFSRuntime()
+    assert not isinstance(vfs, LineExecutorMixin)
+    assert not hasattr(vfs, "run_line")
+    assert not hasattr(vfs, "run")

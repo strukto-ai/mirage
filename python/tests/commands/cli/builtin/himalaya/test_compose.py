@@ -20,14 +20,29 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.core.email.config import EmailConfig
-from mirage.io.types import materialize
+from mirage.io.types import IOResult, materialize
+from mirage.types import PathSpec
 
 CONFIG = EmailConfig(imap_host="h",
                      smtp_host="h",
                      username="me@example.com",
                      password="p")
+
+FILES = {"/scratch/note.txt": b"the note body\n"}
+
+
+async def fake_dispatch(op, path, *args, **kwargs):
+    if op != "read":
+        raise AssertionError(f"unexpected op {op}")
+    if path.virtual not in FILES:
+        raise FileNotFoundError(path.virtual)
+    return FILES[path.virtual], IOResult()
+
+
+def ops_with_files() -> CLIVerbOpts:
+    return CLIVerbOpts(dispatch=fake_dispatch)
 
 
 @pytest.fixture
@@ -131,3 +146,60 @@ async def test_compose_without_a_recipient_is_refused(sent):
                 "subject": "Hi",
                 "body": "yo"
             }))
+
+
+@pytest.mark.asyncio
+async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
+    out, io = await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": "a@b.com",
+                          "subject": "files",
+                          "body": "see attached",
+                          "attach":
+                          [PathSpec.from_str_path("/scratch/note.txt")],
+                      },
+                      ops=ops_with_files()))
+    assert io.exit_code == 0
+    message = BytesParser(policy=default_policy).parsebytes(await
+                                                            materialize(out))
+    assert message.get_content_type() == "multipart/mixed"
+    parts = list(message.iter_parts())
+    # The stdout bytes ride the SMTP policy, so the body keeps CRLF.
+    assert parts[0].get_content() == "see attached\r\n"
+    assert parts[1].get_filename() == "note.txt"
+    assert parts[1].get_content_type() == "text/plain"
+    assert parts[1].get_content() == "the note body\n"
+
+
+@pytest.mark.asyncio
+async def test_attach_of_a_missing_file_names_the_path(sent):
+    with pytest.raises(ValueError,
+                       match=r"read attachment /scratch/gone.txt: "
+                       r"No such file or directory"):
+        await compose(
+            CLIInvocation(CONFIG,
+                          flags={
+                              "to":
+                              "a@b.com",
+                              "body":
+                              "yo",
+                              "attach":
+                              [PathSpec.from_str_path("/scratch/gone.txt")],
+                          },
+                          ops=ops_with_files()))
+
+
+@pytest.mark.asyncio
+async def test_attach_outside_a_workspace_is_refused(sent):
+    with pytest.raises(ValueError, match="needs a workspace"):
+        await compose(
+            CLIInvocation(CONFIG,
+                          flags={
+                              "to":
+                              "a@b.com",
+                              "body":
+                              "yo",
+                              "attach":
+                              [PathSpec.from_str_path("/scratch/note.txt")],
+                          }))

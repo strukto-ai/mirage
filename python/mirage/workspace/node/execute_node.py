@@ -46,6 +46,7 @@ from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.expand.node import expand_arith
+from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -466,7 +467,13 @@ async def execute_node(
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, session, execute_fn, cs)
-        case_items = get_case_items(node)
+        case_items = []
+        for pattern_nodes, body, terminator in get_case_items(node):
+            patterns = [
+                await expand_pattern(p, session, execute_fn, cs)
+                for p in pattern_nodes
+            ]
+            case_items.append((patterns, body, terminator))
         return await handle_case(recurse, word, case_items, session, stdin, cs)
 
     # ── function definition ─────────────────────
@@ -506,9 +513,12 @@ async def execute_node(
                 expanded = await expand_node(child, session, execute_fn, cs)
                 assignments.append(expanded)
             elif child.type in (NT.SIMPLE_EXPANSION, NT.EXPANSION,
-                                NT.CONCATENATION, NT.WORD, NT.VARIABLE_NAME):
+                                NT.CONCATENATION, NT.WORD, NT.VARIABLE_NAME,
+                                NT.STRING, NT.RAW_STRING, NT.ANSI_C_STRING,
+                                NT.TRANSLATED_STRING):
                 # A bare `readonly NAME` / `export NAME` operand parses as
-                # a variable_name, not a word.
+                # a variable_name, not a word, and a quoted assignment
+                # (`export 'FOO=bar'`) as a plain string operand.
                 expanded = await expand_node(child, session, execute_fn, cs)
                 if not expanded:
                     continue

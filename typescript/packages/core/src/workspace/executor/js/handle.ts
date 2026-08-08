@@ -19,14 +19,14 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { ExecutionNode } from '../../types.ts'
-import { runOutput } from '../runtime.ts'
-import type { JsRuntime } from './interface.ts'
-import { QuickJsUnavailableError } from './types.ts'
+import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import type { LanguageRuntime } from '../../../runtime/language.ts'
+import { QuickJsUnavailableError } from '../../../runtime/js/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 export interface HandleJsDeps {
-  runtime: JsRuntime
+  runtime: LanguageRuntime
 }
 
 function readAllBytes(data: unknown): Promise<Uint8Array> {

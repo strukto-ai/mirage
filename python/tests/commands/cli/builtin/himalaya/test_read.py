@@ -34,7 +34,11 @@ async def test_read_takes_the_id_positionally_and_closes_the_accessor(
     async def fake_fetch(accessor, folder, uid):
         seen["accessor"] = accessor
         seen["args"] = (folder, uid)
-        return {"subject": "Hi", "uid": uid}
+        return {
+            "subject": "Hi",
+            "uid": uid,
+            "internal_date": "07-Aug-2026 20:54:05 +0000",
+        }
 
     async def fake_close(self):
         closed.append(self)
@@ -44,6 +48,8 @@ async def test_read_takes_the_id_positionally_and_closes_the_accessor(
     out, io = await read(
         CLIInvocation(CONFIG, texts=("7", ), flags={"mailbox": "INBOX"}))
     assert io.exit_code == 0
+    # Rendered through the mount's own renderer, so INTERNALDATE (which
+    # only picks the date directory) never reaches the output.
     assert json.loads(await materialize(out)) == {"subject": "Hi", "uid": "7"}
     assert isinstance(seen["accessor"], EmailAccessor)
     assert seen["accessor"].config is CONFIG

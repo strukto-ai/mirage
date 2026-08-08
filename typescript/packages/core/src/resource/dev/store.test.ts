@@ -45,12 +45,54 @@ describe('DevFiles', () => {
     expect(f.get('/missing')).toBeUndefined()
   })
 
-  it('silently drops set/delete/clear', () => {
+  it('discards writes to an active synthetic device', () => {
     const f = new DevFiles()
     f.set('/null', new TextEncoder().encode('overwrite'))
     expect(f.get('/null')?.byteLength).toBe(0)
+    expect(f.get('/zero')?.byteLength).toBe(1 << 20)
+  })
+
+  it('delete tombstones a synthetic device', () => {
+    const f = new DevFiles()
+    expect(f.delete('/null')).toBe(true)
+    expect(f.has('/null')).toBe(false)
+    expect(f.get('/null')).toBeUndefined()
+    expect([...f.keys()]).toEqual(['/zero'])
+    expect(f.size).toBe(1)
     expect(f.delete('/null')).toBe(false)
+  })
+
+  it('set after delete stores real bytes (rm-then-redirect recreation)', () => {
+    const f = new DevFiles()
+    expect(f.delete('/null')).toBe(true)
+    f.set('/null', new TextEncoder().encode('recreated'))
     expect(f.has('/null')).toBe(true)
+    expect(new TextDecoder().decode(f.get('/null'))).toBe('recreated')
+    expect([...f.keys()]).toEqual(['/zero', '/null'])
+    expect(f.size).toBe(2)
+  })
+
+  it('delete of a recreated real file removes it again', () => {
+    const f = new DevFiles()
+    f.delete('/null')
+    f.set('/null', new TextEncoder().encode('recreated'))
+    expect(f.delete('/null')).toBe(true)
+    expect(f.has('/null')).toBe(false)
+    expect([...f.keys()]).toEqual(['/zero'])
+  })
+
+  it('stores non-device names for real', () => {
+    const f = new DevFiles()
+    f.set('/custom', new TextEncoder().encode('bytes'))
+    expect(f.has('/custom')).toBe(true)
+    expect(new TextDecoder().decode(f.get('/custom'))).toBe('bytes')
+    expect([...f.keys()]).toEqual(['/null', '/zero', '/custom'])
+    expect(f.delete('/custom')).toBe(true)
+    expect(f.has('/custom')).toBe(false)
+  })
+
+  it('clear stays a no-op', () => {
+    const f = new DevFiles()
     f.clear()
     expect(f.has('/null')).toBe(true)
     expect(f.has('/zero')).toBe(true)

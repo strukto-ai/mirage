@@ -13,13 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  mimeTypeFor,
   IOResult,
+  PathSpec,
+  isMissingPath,
   type ByteSource,
+  type CLIVerbOpts,
   type CommandFnResult,
   type FlagView,
 } from '@struktoai/mirage-core'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-import { build, readBody, splitAddresses, type Source } from './builder.ts'
+import { build, readBody, splitAddresses, type Attachment, type Source } from './builder.ts'
 import { sendRaw } from './smtp.ts'
 
 const ENC = new TextEncoder()
@@ -29,6 +33,46 @@ export function firstText(texts: readonly string[], label: string): string {
   const value = texts[0]
   if (value === undefined) throw new Error(`${label} is required`)
   return value
+}
+
+/**
+ * Reads --attach files through the workspace dispatcher.
+ *
+ * An account CLI has no mount of its own; an attachment is an unrelated
+ * workspace file, so it is read through the op dispatcher the executor
+ * hands every CLI, the same door git reads repositories through. The
+ * flag bag carries path values as their resolved virtual-path strings
+ * (the python executor upgrades them to PathSpec instead).
+ */
+async function loadAttachments(
+  ops: CLIVerbOpts | undefined,
+  paths: readonly string[],
+): Promise<Attachment[]> {
+  if (paths.length === 0) return []
+  const dispatch = ops?.dispatch
+  if (dispatch === undefined) {
+    throw new Error('--attach needs a workspace to read files from')
+  }
+  const attachments: Attachment[] = []
+  for (const path of paths) {
+    let data: unknown
+    try {
+      ;[data] = await dispatch('read', PathSpec.fromStrPath(path))
+    } catch (err) {
+      if (isMissingPath(err)) {
+        throw new Error(`read attachment ${path}: No such file or directory`)
+      }
+      throw err
+    }
+    const trimmed = path.replace(/\/+$/, '')
+    const filename = trimmed.slice(trimmed.lastIndexOf('/') + 1) || 'attachment'
+    attachments.push({
+      filename,
+      contentType: mimeTypeFor(filename),
+      data: data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike),
+    })
+  }
+  return attachments
 }
 
 /**
@@ -43,6 +87,7 @@ export async function route(
   fl: FlagView,
   stdin: ByteSource | null,
   source: Source | null,
+  ops: CLIVerbOpts | undefined,
 ): Promise<CommandFnResult> {
   const raw = build(
     {
@@ -53,6 +98,7 @@ export async function route(
       subject: fl.asStr('subject') ?? null,
       body: await readBody(fl, stdin),
       signature: fl.asStr('signature') ?? null,
+      attachments: await loadAttachments(ops, fl.asList('attach')),
     },
     source,
   )

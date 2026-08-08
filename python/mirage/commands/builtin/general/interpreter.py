@@ -19,6 +19,7 @@ from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.runtime.base import Runtime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
 
@@ -168,10 +169,12 @@ async def run_code(
             command has no runtime (a default entry's build error),
             None when nothing captures it at all.
     """
-    if runtime is None:
+    if not isinstance(runtime, LanguageRuntime):
         # GNU wording (bash prints `bash: python3: command not found`;
         # the shell prefix is dropped workspace-wide), unless the
-        # default world recorded why the entry failed to build.
+        # default world recorded why the entry failed to build. A bound
+        # entry without the interpreter door (not a LanguageRuntime) is
+        # refused the same way: there is nothing to run code on.
         hint = unavailable or "command not found"
         return None, IOResult(exit_code=127,
                               stderr=f"{label}: {hint}\n".encode())

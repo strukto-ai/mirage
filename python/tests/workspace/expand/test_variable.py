@@ -15,9 +15,9 @@
 import pytest
 
 from mirage.workspace.expand.variable import (_arith_int, _case_mod,
-                                              _expand_dollar_refs,
                                               _glob_replace, _glob_strip,
-                                              _lookup_var, _slice_array)
+                                              _lookup_var, _pattern_text,
+                                              _slice_array)
 from mirage.workspace.session import Session
 
 
@@ -58,13 +58,23 @@ def test_glob_strip_class_negation():
     assert _glob_strip("abc", "[^x]", False, True) == "bc"
 
 
-def test_expand_dollar_refs():
+def test_pattern_text_splices_refs_live():
     session = Session(session_id="t", env={"ext": ".txt", "pat": "l"})
-    assert _expand_dollar_refs("$ext", session, None) == ".txt"
-    assert _expand_dollar_refs("*${ext}", session, None) == "*.txt"
-    assert _expand_dollar_refs("a$pat*b", session, None) == "al*b"
-    assert _expand_dollar_refs("no refs", session, None) == "no refs"
-    assert _expand_dollar_refs("${unclosed", session, None) == "${unclosed"
+    assert _pattern_text("$ext", session, None) == ".txt"
+    assert _pattern_text("*${ext}", session, None) == "*.txt"
+    assert _pattern_text("a$pat*b", session, None) == "al*b"
+    assert _pattern_text("no refs", session, None) == "no refs"
+    assert _pattern_text("${unclosed", session, None) == "${unclosed"
+
+
+def test_pattern_text_binds_backslash_escapes():
+    # bash 5.2: ${v#a\*} strips a literal a*, so the escaped
+    # character is spelled as a one-character class for the
+    # escape-less fnmatch; a trailing lone backslash stays itself.
+    session = Session(session_id="t", env={})
+    assert _pattern_text("a\\*b", session, None) == "a[*]b"
+    assert _pattern_text("\\\\", session, None) == "\\"
+    assert _pattern_text("a\\", session, None) == "a\\"
 
 
 def test_lookup_var_array_first_element():

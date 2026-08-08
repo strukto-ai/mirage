@@ -16,7 +16,7 @@ import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
 import { walkFind } from '../../../core/generic/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { GITHUB_CI_IO } from './io.ts'
-import { isCrossRunRoot, isDirName, readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
+import { isCrossRunRoot, readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
 import { stat as ciStat } from '../../../core/github_ci/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -47,7 +47,6 @@ async function findCommand(
       {
         readdir: (spec, i) => ciReaddir(accessor, spec, i),
         stat: (spec, i) => ciStat(accessor, spec, i),
-        isDirName: (child) => isDirName(child),
       },
       options,
       idx,

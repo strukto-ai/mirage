@@ -74,6 +74,12 @@ const COMPOSER = [
   new Option({ short: '-s', long: '--subject', type: 'str', description: 'Subject line' }),
   new Option({ long: '--body', type: 'str', description: 'Inline body (or pipe via stdin)' }),
   new Option({
+    long: '--attach',
+    type: 'path',
+    multiple: true,
+    description: 'Attachment file(s), repeatable',
+  }),
+  new Option({
     long: '--signature',
     type: 'str',
     description: "Signature appended after a '-- ' line",

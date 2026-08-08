@@ -18,38 +18,40 @@ import pytest
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.mixin import EvaluatorMixin, LineExecutorMixin
 
 
-class EchoRuntime(Runtime):
-    name = "echo"
+class MarkerRuntime(Runtime):
+    name = "marker"
     captures = ("echo-run", )
 
-    async def run(self, args: RunArgs) -> RunResult:
-        return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
 
-
-def test_attach_defaults_to_noop():
-    rt = EchoRuntime()
-    rt.attach(lambda *a: None, lambda: [])
-    result = asyncio.run(rt.run(RunArgs(code="hi")))
-    assert result.stdout == b"hi"
-    assert result.exit_code == 0
+def test_base_carries_no_capability_doors():
+    # The base holds identity and config only; run, run_line, eval and
+    # attach belong to the tiers and mixins, detected by isinstance.
+    rt = MarkerRuntime()
+    assert not hasattr(rt, "run")
+    assert not hasattr(rt, "run_line")
+    assert not hasattr(rt, "attach")
+    assert not isinstance(rt, LanguageRuntime)
+    assert not isinstance(rt, LineExecutorMixin)
+    assert not isinstance(rt, EvaluatorMixin)
 
 
 def test_close_defaults_to_noop():
-    asyncio.run(EchoRuntime().close())
+    asyncio.run(MarkerRuntime().close())
 
 
 def test_uniform_constructor_defaults():
-    rt = EchoRuntime()
+    rt = MarkerRuntime()
     assert rt.captures == ("echo-run", )
     assert rt.config == RuntimeConfig()
     assert rt.script is None
 
 
 def test_captures_override():
-    rt = EchoRuntime(captures=["only-this"])
+    rt = MarkerRuntime(captures=["only-this"])
     assert rt.captures == ("only-this", )
 
 
@@ -58,10 +60,10 @@ def test_script_stored():
     def wants(ctx):
         return True
 
-    rt = EchoRuntime(script=wants)
+    rt = MarkerRuntime(script=wants)
     assert rt.script is wants
 
 
 def test_unknown_config_key_fails_loud():
     with pytest.raises(TypeError):
-        EchoRuntime(config={"no_such_knob": 1})
+        MarkerRuntime(config={"no_such_knob": 1})

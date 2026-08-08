@@ -38,6 +38,36 @@ command registers under, and the per-resource metadata. Resources are compared
 against the union of the `node` and `browser` variants, since Python has no
 runtime split.
 
+The comparison walks the **union of the keys both sides emit** rather than a
+fixed field list. Python dumps with `asdict(spec)`, so a new `CommandSpec` or
+`_meta` field appears in its tree on its own, while `gen-specs.ts` serializes
+through hand-written literals and would not. With an allowlist that asymmetry
+was invisible: both drift gates still passed, because each tree regenerated
+byte-identically, and parity never looked at the new key. The two TypeScript
+variants are also diffed against each other, since Python is compared against
+`node` and nothing else would otherwise read `spec/typescript/browser`'s
+non-`_meta` content.
+
+## `resources.json`
+
+One per implementation tree, beside `general/`. Registry membership is a
+*different table* from command registration, and only the second was ever
+dumped — so a resource could register commands under every backend's `_meta`
+while `build_resource` / `buildResource` had no factory for it. That is how
+Python shipped without a `sharepoint` factory and the TypeScript registries
+without chroma/dify/lancedb/qdrant while every command spec stayed identical.
+
+Each file records `registry` (what can be constructed by name) and
+`command_resources` (what registers at least one builtin command). The gate
+asserts `command_resources ⊆ registry` per tree, and that Python's registry
+equals the union of the two TypeScript ones. Deliberate omissions — the
+workspace-internal `history` view mount — are declared under
+`unconstructible_resources.<tree>` and stale-checked like every other
+exemption. `python/tests/resource/test_registry.py` and
+`packages/node/src/resource/registry.test.ts` both read these files instead of
+re-copying the name list, so neither can pin an omission the way the old
+hand-written set pinned SharePoint's.
+
 Divergences that are structural rather than bugs live in
 `parity_exceptions.json`:
 

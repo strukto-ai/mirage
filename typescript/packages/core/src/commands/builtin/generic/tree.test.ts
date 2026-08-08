@@ -166,7 +166,11 @@ describe('treeGeneric operand that is not a directory', () => {
   // renders the same marker with exit 2 (a permission error, not absence).
   it('still walks a directory it cannot list', async () => {
     const dirStat = new FileStat({ name: 'locked', type: FileType.DIRECTORY })
-    const failing = (): Promise<string[]> => Promise.reject(new Error('EACCES'))
+    const failing = (): Promise<string[]> => {
+      const err = new Error('/locked') as Error & { code: string }
+      err.code = 'EACCES'
+      return Promise.reject(err)
+    }
     const [out, io] = (await treeGeneric(
       [spec('/locked')],
       optsWith(dirStat),

@@ -19,7 +19,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import (ExecuteResultContext, Policies, post_execute_gate,
                            resolve_limit)
-from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.types import Producer
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.session import Session
@@ -27,7 +27,7 @@ from mirage.workspace.workspace.utils import command_name
 
 
 async def run_whole_line(
-        runtime: Runtime, command: str, stdin: ByteSource | None,
+        runtime: LineExecutorMixin, command: str, stdin: ByteSource | None,
         session: Session, mounts: list[MountEntry], policies: Policies,
         invalidate: Callable[[], Awaitable[None]]) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
@@ -37,7 +37,8 @@ async def run_whole_line(
     the policies' merged Limit caps the output.
 
     Args:
-        runtime (Runtime): the runtime that captured the whole line.
+        runtime (LineExecutorMixin): the runtime that captured the
+            whole line.
         command (str): the raw command line.
         stdin (ByteSource | None): bytes piped into the line.
         session (Session): session supplying cwd and env.

@@ -53,13 +53,7 @@ export class GDriveResource extends BaseResource implements Resource {
   constructor(config: GDriveConfig) {
     super()
     this.config = config
-    const tm = new TokenManager({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      refreshToken: config.refreshToken,
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-      ...(config.folderId !== undefined ? { folderId: config.folderId } : {}),
-    })
+    const tm = new TokenManager(config)
     this.accessor = new GDriveAccessor({ tokenManager: tm })
   }
 

@@ -29,10 +29,16 @@ export async function forward(inv: CLIInvocation): Promise<CommandFnResult> {
   } finally {
     await accessor.close()
   }
-  return route(inv.config as EmailConfig, fl, inv.stdin, {
-    message: original,
-    mode: 'forward',
-    postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
-    quoteHeadline: fl.asStr('quote_headline') ?? '',
-  })
+  return route(
+    inv.config as EmailConfig,
+    fl,
+    inv.stdin,
+    {
+      message: original,
+      mode: 'forward',
+      postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
+      quoteHeadline: fl.asStr('quote_headline') ?? '',
+    },
+    inv.ops,
+  )
 }

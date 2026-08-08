@@ -354,10 +354,3 @@ async def _readdir_dataset_runs(
         names.append(f"{prefix}/datasets/{dataset_name}/runs/{filename}")
     await index.set_dir(virtual_key, entries)
     return names
-
-
-def is_dir_name(child: str) -> bool:
-    # Entries are recognized by extension, so classification never needs
-    # the stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    return not (name.endswith(".json") or name.endswith(".jsonl"))

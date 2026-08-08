@@ -35,6 +35,21 @@ DIRECTORY_OPTION = Option(short="-C",
 
 REVISION = Operand(type="str")
 
+# --pretty and --format set the same variable in git; both take git's
+# optional-value form, so a bare --pretty means medium and a detached
+# next word is a revision, never a format. A bare --format stays
+# parseable too, but only so pretty_value can answer it with git's own
+# fatal (pretty.c reads --format in its =value form alone).
+PRETTY_OPTION = Option(long="--pretty",
+                       type="str",
+                       value_optional=True,
+                       description="Commit display format: oneline, short, "
+                       "medium, full, fuller, or a format:/tformat:/%-string")
+FORMAT_OPTION = Option(long="--format",
+                       type="str",
+                       value_optional=True,
+                       description="Alias of --pretty (requires =value)")
+
 LOG_OPTIONS = (
     Option(short="-n",
            type="int",
@@ -42,6 +57,10 @@ LOG_OPTIONS = (
            description="Limit the number of commits shown"),
     Option(long="--oneline", description="One abbreviated line per commit"),
     Option(long="--reverse", description="Print commits oldest first"),
+    Option(long="--all",
+           description="Start from every ref as well as the revision"),
+    PRETTY_OPTION,
+    FORMAT_OPTION,
     # The pickaxe, and the reason `git log -S <name> --reverse` answers
     # "which commit introduced this": it selects commits that changed
     # how many times the string occurs, not commits that mention it.
@@ -55,6 +74,21 @@ LOG_OPTIONS = (
     Option(long="--until",
            type="str",
            description="Commits older than a date (ISO-8601 or epoch)"),
+)
+
+SHOW_OPTIONS = (
+    Option(long="--stat",
+           description="Show the diffstat table instead of the patch"),
+    Option(short="-s",
+           long="--no-patch",
+           description="Suppress all diff output"),
+    Option(long="--name-only",
+           description="Show changed paths instead of the patch"),
+    Option(long="--no-ext-diff",
+           description="Accepted for compatibility; there are no external "
+           "diff drivers to disable"),
+    PRETTY_OPTION,
+    FORMAT_OPTION,
 )
 
 BRANCH_OPTIONS = (
@@ -139,6 +173,7 @@ GIT = CLISpec(
             name="show",
             description="Show a commit and its diff",
             fn=show,
+            options=SHOW_OPTIONS,
             rest=REVISION,
         ),
         CLISpec(

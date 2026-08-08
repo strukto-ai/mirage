@@ -66,7 +66,7 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_walk_classifies_dirs_via_stat_without_hint():
-    # Linear wires no is_dir_name hint, so the walk stats entries to
+    # The walk classifies entries through stat, so it stats entries to
     # classify them (stat delegates to the parent readdir listing).
     lines = await _run([_spec("/")], maxdepth="2")
     assert "/teams" in lines

@@ -14,6 +14,7 @@
 
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
+import { snakeToCamel } from '../../utils/normalize.ts'
 import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../route/constants.ts'
 import { z } from 'zod'
 
@@ -92,17 +93,42 @@ export class CLIRegistry {
     }
     const model = spec.configModel
     if (model instanceof z.ZodObject) {
+      // The same snake_case YAML config block serves Python and TS alike
+      // (the resource registries already promise this), and the pydantic
+      // arm is snake_case-native, so a key that camelizes onto a declared
+      // field is delivered there. Keys that resolve to no field keep the
+      // caller's spelling: an unknown key is then reported as typed, and
+      // a loose schema's passthrough data stays verbatim like pydantic
+      // extra="allow". hasOwn, not `in`: the shape is a plain object, so
+      // `in` would read 'constructor'/'toString' off Object.prototype as
+      // declared fields, and fromEntries keeps a '__proto__' key an own
+      // property instead of silently reassigning the prototype.
+      const pairs: [string, unknown][] = []
+      const taken = new Set<string>()
+      for (const [key, value] of Object.entries(config ?? {})) {
+        const camel = snakeToCamel(key)
+        const target = Object.hasOwn(model.shape, camel) ? camel : key
+        // Both spellings of one field is ambiguous, and pydantic already
+        // rejects it (the camelCase one is an unknown key there), so the
+        // zod arm must not silently keep whichever came last.
+        if (taken.has(target)) {
+          throw new Error(`CLI '${name}': config key '${key}' duplicates field '${target}'`)
+        }
+        taken.add(target)
+        pairs.push([target, value])
+      }
+      const norm = Object.fromEntries(pairs)
       // Unknown keys fail loud (a typo'd YAML key must not be silently
       // ignored), mirroring the Python pydantic arm; a schema that
       // declares its own extra-key policy (strict/passthrough/catchall)
       // enforces it through parse instead, like pydantic extra="allow".
       if (model.def.catchall === undefined) {
-        const unknown = Object.keys(config ?? {}).filter((k) => !(k in model.shape))
+        const unknown = [...taken].filter((k) => !Object.hasOwn(model.shape, k))
         if (unknown.length > 0) {
           throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
         }
       }
-      return model.parse(config ?? {})
+      return model.parse(norm)
     }
     const result = model(config ?? {})
     // The snapshot stores the normalized config and replays it through

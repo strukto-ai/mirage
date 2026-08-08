@@ -25,6 +25,22 @@ export function hasGlob(segment: string): boolean {
   return GLOB_CHARS.some((ch) => segment.includes(ch))
 }
 
+/**
+ * Encode text so the glob matcher reads every character literally.
+ *
+ * fnmatch has no escape character, so each special is wrapped in its own
+ * one-character class: `*` becomes `[*]`. A `]` needs no treatment: outside
+ * a class it is already literal, and no class can open because every `[`
+ * gets wrapped.
+ */
+export function escapeGlob(text: string): string {
+  let out = ''
+  for (const c of text) {
+    out += GLOB_CHARS.includes(c) ? `[${c}]` : c
+  }
+  return out
+}
+
 // Whether a pattern spec is a typed word (not a directory listing). A
 // classify-shaped word puts the pattern inside `virtual` (`/data/s*/x.txt`
 // with directory `/data/s*/`); a dir-shaped spec (`PathSpec.dir`) sets

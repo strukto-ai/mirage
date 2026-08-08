@@ -16,7 +16,7 @@ import type { BoxAccessor } from '../../../accessor/box.ts'
 import { size as boxDu, entries as boxDuAll } from '../../../core/box/du/index.ts'
 import { find as boxFind } from '../../../core/box/find.ts'
 import { read as boxRead, stream as boxStream } from '../../../core/box/read.ts'
-import { isDirName, readdir as boxReaddir } from '../../../core/box/readdir.ts'
+import { readdir as boxReaddir } from '../../../core/box/readdir.ts'
 import { stat as boxStat } from '../../../core/box/stat.ts'
 import {
   copy as boxCopy,
@@ -38,7 +38,6 @@ export const BOX_IO: CommandIO<BoxAccessor> = {
   readStream: boxStream,
   stat: boxStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
   du: { size: boxDu, entries: boxDuAll },
   write: boxWrite,

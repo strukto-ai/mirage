@@ -12,40 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-
-export interface GDriveConfig {
-  clientId: string
-  clientSecret: string
-  refreshToken: string
-  refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-  folderId?: string
-}
-
-export interface GDriveConfigRedacted {
-  clientId: string
-  clientSecret: '<REDACTED>'
-  refreshToken: '<REDACTED>'
-}
-
-const GDriveConfigSchema = z.object({
-  clientId: z.string(),
-  clientSecret: secretStr(),
-  refreshToken: secretStr(),
-  folderId: z.string().optional(),
-})
-
-export function redactGDriveConfig(config: GDriveConfig): GDriveConfigRedacted {
-  return redactConfigWithSchema(GDriveConfigSchema, config) as unknown as GDriveConfigRedacted
-}
-
-export function normalizeGDriveConfig(input: Record<string, unknown>): GDriveConfig {
-  return normalizeFields(input, {
-    rename: {
-      client_id: 'clientId',
-      client_secret: 'clientSecret',
-      refresh_token: 'refreshToken',
-      folder_id: 'folderId',
-    },
-  }) as unknown as GDriveConfig
-}
+export {
+  normalizeGoogleConfig as normalizeGDriveConfig,
+  redactGoogleConfig as redactGDriveConfig,
+  type GoogleConfig as GDriveConfig,
+  type GoogleConfigRedacted as GDriveConfigRedacted,
+} from '@struktoai/mirage-core'

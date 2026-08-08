@@ -19,9 +19,10 @@ import {
   type PolicyContext,
   type PolicyDecision,
   type PolicyFn,
-} from '../executor/policy/index.ts'
-import { catchAll, runtimeBindingsFor, type Runtime } from '../executor/runtime.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+} from '../../runtime/policy/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { ExecuteOptions } from './types.ts'

@@ -195,7 +195,7 @@ other command; `max_bytes` and `max_lines` cap its output the same
 way. There is no python3-specific limit surface.
 
 Firing the guard also cancels the run, and every runtime honors
-cancellation: monty halts its interpreter, wasi traps the run
+cancellation: monty kills its worker process, wasi traps the run
 through wasmtime's epoch interruption, and local kills the
 subprocess. A timed-out `python3` run is reclaimed at the deadline,
 not left burning in the background.

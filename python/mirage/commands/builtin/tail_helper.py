@@ -14,7 +14,7 @@
 
 import re
 
-_NUMBER_RE = re.compile(r"^[+-]?\d+$")
+_NUMBER_RE = re.compile(r"^[+-]?[0-9]+$")
 
 
 def number_flag_error(cmd: str, n_raw: str | None,

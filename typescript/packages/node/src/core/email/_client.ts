@@ -19,6 +19,14 @@ import { parseRfc822, parseWithPayloads, type ParsedRfc822 } from './_parse.ts'
 export interface FetchedMessage extends ParsedRfc822 {
   uid: string
   flags: string[]
+  /** IMAP's own arrival stamp, ISO-8601, empty when the server omits it. */
+  internalDate: string
+}
+
+function internalDateOf(value: Date | string | undefined): string {
+  if (value === undefined) return ''
+  if (typeof value === 'string') return value
+  return value.toISOString()
 }
 
 export async function listFolders(accessor: EmailAccessor): Promise<string[]> {
@@ -293,7 +301,11 @@ export async function fetchMessage(
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
   try {
-    const msg = await imap.fetchOne(uid, { source: true, flags: true, uid: true }, { uid: true })
+    const msg = await imap.fetchOne(
+      uid,
+      { source: true, flags: true, uid: true, internalDate: true },
+      { uid: true },
+    )
     if (msg === false) {
       throw new Error(`email: uid ${uid} not found in ${folder}`)
     }
@@ -303,6 +315,7 @@ export async function fetchMessage(
       ...parsed,
       uid,
       flags: msg.flags !== undefined ? [...msg.flags] : [],
+      internalDate: internalDateOf(msg.internalDate),
     }
   } finally {
     lock.release()
@@ -322,7 +335,11 @@ export async function fetchHeaders(
     for (const uid of uids) {
       // Full source (not headers-only): listings need the MIME structure
       // to surface attachment dirs, mirroring the python backend.
-      const msg = await imap.fetchOne(uid, { source: true, flags: true, uid: true }, { uid: true })
+      const msg = await imap.fetchOne(
+        uid,
+        { source: true, flags: true, uid: true, internalDate: true },
+        { uid: true },
+      )
       if (msg === false) continue
       const source = msg.source instanceof Buffer ? new Uint8Array(msg.source) : new Uint8Array(0)
       const parsed = await parseRfc822(source)
@@ -330,6 +347,7 @@ export async function fetchHeaders(
         ...parsed,
         uid,
         flags: msg.flags !== undefined ? [...msg.flags] : [],
+        internalDate: internalDateOf(msg.internalDate),
       })
     }
     return results

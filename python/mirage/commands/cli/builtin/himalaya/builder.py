@@ -12,16 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Any, Literal
 
 from mirage.commands.spec.types import FlagView
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 
 SourceMode = Literal["reply", "forward"]
 PostingStyle = Literal["top", "bottom"]
 PREFIXES: dict[SourceMode, str] = {"reply": "Re: ", "forward": "Fwd: "}
+
+
+@dataclass(frozen=True, slots=True)
+class Attachment:
+    """One file attached to an outgoing message.
+
+    Args:
+        filename (str): basename presented in Content-Disposition.
+        content_type (str): full maintype/subtype pair.
+        data (bytes): the file's bytes, read through the workspace.
+    """
+    filename: str
+    content_type: str
+    data: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +52,8 @@ class Compose:
             the source message.
         body (str): the user's own body text.
         signature (str | None): signature appended after a `-- ` line.
+        attachments (tuple[Attachment, ...]): files attached via
+            --attach, already read into memory.
     """
     sender: str
     to: tuple[str, ...] = ()
@@ -45,6 +62,7 @@ class Compose:
     subject: str | None = None
     body: str = ""
     signature: str | None = None
+    attachments: tuple[Attachment, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +79,28 @@ class Source:
     mode: SourceMode
     posting_style: PostingStyle = "top"
     quote_headline: str = ""
+
+
+def mixed_boundary(body: str, attachments: tuple[Attachment, ...]) -> str:
+    """A deterministic multipart boundary for the message's content.
+
+    EmailMessage would generate a random boundary, which breaks
+    byte-for-byte parity with the TypeScript builder and makes the
+    no-send stdout non-reproducible. Hashing the content gives a
+    boundary that cannot occur inside it (the content would have to
+    contain its own hash) while staying stable across runs and
+    languages.
+
+    Args:
+        body (str): the laid-out text body.
+        attachments (tuple[Attachment, ...]): the attached files.
+    """
+    digest = hashlib.sha256(body.encode())
+    for attachment in attachments:
+        digest.update(attachment.filename.encode())
+        digest.update(attachment.content_type.encode())
+        digest.update(attachment.data)
+    return digest.hexdigest()[:32]
 
 
 def split_addresses(values: list[str]) -> tuple[str, ...]:
@@ -197,9 +237,17 @@ def build(compose: Compose, source: Source | None = None) -> EmailMessage:
     message["Subject"] = subject or ""
     style: PostingStyle = source.posting_style if source else "top"
     headline = source.quote_headline if source else ""
-    message.set_content(
-        compose_body(compose.body, quote_text(source_text, headline),
-                     compose.signature or "", style))
+    body = compose_body(compose.body, quote_text(source_text, headline),
+                        compose.signature or "", style)
+    message.set_content(body)
+    for attachment in compose.attachments:
+        maintype, _, subtype = attachment.content_type.partition("/")
+        message.add_attachment(attachment.data,
+                               maintype=maintype,
+                               subtype=subtype,
+                               filename=attachment.filename)
+    if compose.attachments:
+        message.set_boundary(mixed_boundary(body, compose.attachments))
     return message
 
 
@@ -213,18 +261,4 @@ async def read_body(fl: FlagView, stdin: ByteSource | None) -> str:
     inline = fl.as_str("body")
     if inline is not None:
         return inline
-    return (await drain(stdin)).decode(errors="replace") if stdin else ""
-
-
-async def drain(stdin: ByteSource) -> bytes:
-    """Collect a byte source into one buffer.
-
-    Args:
-        stdin (ByteSource): piped input, bytes or an async iterator.
-    """
-    if isinstance(stdin, bytes):
-        return stdin
-    chunks: list[bytes] = []
-    async for chunk in stdin:
-        chunks.append(chunk)
-    return b"".join(chunks)
+    return (await materialize(stdin)).decode(errors="replace") if stdin else ""

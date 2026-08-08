@@ -19,14 +19,14 @@ import sys
 from collections.abc import Sequence
 from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import Runtime
 from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
-class LocalRuntime(Runtime):
+class LocalRuntime(PythonRuntime):
     """Run Python code on a host interpreter as a subprocess.
 
     Each run spawns `<interpreter> -c <code>`; the code sees the host
@@ -40,8 +40,6 @@ class LocalRuntime(Runtime):
     """
 
     name = "local"
-    captures = ("python3", "python")
-    language = "python"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig

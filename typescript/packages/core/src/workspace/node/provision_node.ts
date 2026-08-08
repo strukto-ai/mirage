@@ -41,7 +41,7 @@ import {
 import { Precision, ProvisionResult } from '../../provision/types.ts'
 import { rollupList, rollupPipe } from '../../provision/rollup.ts'
 import { PathSpec } from '../../types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { classifyParts } from '../expand/classify/index.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import { expandAndClassify, expandParts } from '../expand/parts.ts'

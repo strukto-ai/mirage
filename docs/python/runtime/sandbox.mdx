@@ -202,6 +202,28 @@ that guard `cat` or `grep` guard `python3`, including in the sandbox. A run
 that exceeds `timeout_seconds` answers exit 124; `max_bytes` and `max_lines`
 cap its output the same way. There is no sandbox-specific limit surface.
 
+<Warning>
+**In a sandbox a limit bounds the wait, not the run.** Exit 124 means
+mirage stopped waiting; the command keeps going inside the sandbox. Mirage
+holds only a client, and the process lives in the sandbox's own namespace,
+so dropping that client never signals it — a `docker exec` command is still
+burning CPU after its client is killed. Only the provider's own timeout
+reclaims it, and mirage does not set one today:
+
+- **Docker** has no server-side timeout: a runaway runs until you stop it or
+  the container exits.
+- **e2b** applies its SDK default of 60 seconds, which cuts both ways — a
+  runaway stops there, and so does a legitimate build or query that needs
+  longer.
+- **Daytona** defaults to no timeout, so a runaway keeps running, and
+  billing, until you stop it.
+
+Cancelling a line has the same shape: it releases mirage's side and leaves
+the sandbox side running. Treat `command_limits` here as a bound on
+waiting rather than on execution, and set a lifecycle limit (idle-stop,
+auto-delete) on the sandbox itself.
+</Warning>
+
 ## Serving as the policy engine
 
 A sandbox runs whole lines; it does not evaluate expressions, so it cannot

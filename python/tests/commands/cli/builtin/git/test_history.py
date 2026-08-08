@@ -44,7 +44,7 @@ def subjects(repo_path, flags: dict[str, object]) -> list[str]:
     """
     with Repo(str(repo_path)) as repo:
         parsed = parse_flags(FlagView(flags))
-        return [subject(c) for c in select(repo, head_of(repo), parsed)]
+        return [subject(c) for c in select(repo, [head_of(repo)], parsed)]
 
 
 def test_flags_default_to_off():

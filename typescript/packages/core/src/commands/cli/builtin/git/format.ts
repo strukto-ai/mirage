@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { byteChar } from '../../../../shell/bytes.ts'
+import { BadPrettyError, UnsupportedPrettyError } from './errors.ts'
+
 const SHORT_SHA = 7
+export const FULL_SHA = 40
 const INDENT = '    '
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 const MONTHS = [
@@ -33,6 +37,7 @@ const MONTHS = [
 /** A commit as far as rendering is concerned, whoever read it. */
 export interface CommitFacts {
   readonly oid: string
+  readonly tree: string
   readonly message: string
   readonly authorName: string
   readonly authorEmail: string
@@ -40,7 +45,69 @@ export interface CommitFacts {
   readonly authorTime: number
   /** The author's UTC offset in minutes, git's own sign convention. */
   readonly authorTimezoneMinutes: number
+  readonly committerName: string
+  readonly committerEmail: string
+  readonly committerTime: number
+  readonly committerTimezoneMinutes: number
   readonly parents: readonly string[]
+}
+
+// The presets this build renders, and the real git presets it refuses by
+// name rather than calling invalid.
+const PRESET_KINDS = ['oneline', 'short', 'medium', 'full', 'fuller']
+const UNSUPPORTED_PRESETS = ['raw', 'email', 'mboxrd', 'reference']
+const HEX_DIGITS = /[0-9a-fA-F]/
+
+/** Ref labels per commit id, for %d/%D. */
+export type Decorations = ReadonlyMap<string, readonly string[]>
+
+/**
+ * The parsed value of `--pretty`/`--format`.
+ *
+ * `kind` is a preset name, or `format`/`tformat` for a placeholder template:
+ * `format` separates entries with a newline while `tformat` terminates each
+ * with one, and is what a bare `%` string means.
+ */
+export interface LogFormat {
+  readonly kind: string
+  readonly template: string | null
+}
+
+export const MEDIUM: LogFormat = { kind: 'medium', template: null }
+
+/**
+ * Read a --pretty/--format value the way git's pretty.c does.
+ *
+ * @throws UnsupportedPrettyError for a real git preset this build lacks
+ * @throws BadPrettyError for a name git itself would refuse
+ */
+export function parsePretty(value: string): LogFormat {
+  if (value.startsWith('format:')) return { kind: 'format', template: value.slice(7) }
+  if (value.startsWith('tformat:')) return { kind: 'tformat', template: value.slice(8) }
+  // A bare % string is tformat; so is the empty string, which renders
+  // every commit as nothing and therefore prints nothing at all.
+  if (value.includes('%') || value === '') return { kind: 'tformat', template: value }
+  if (PRESET_KINDS.includes(value)) return { kind: value, template: null }
+  if (UNSUPPORTED_PRESETS.includes(value)) throw new UnsupportedPrettyError(value)
+  throw new BadPrettyError(value)
+}
+
+/**
+ * Whether rendering this format has to know the refs.
+ *
+ * Only `%d`/`%D` read them; git turns decorations off for piped preset
+ * output, which is the only output mirage produces.
+ */
+export function needsDecorations(fmt: LogFormat): boolean {
+  if (fmt.template === null) return false
+  let cursor = 0
+  for (;;) {
+    cursor = fmt.template.indexOf('%', cursor)
+    if (cursor === -1 || cursor + 1 === fmt.template.length) return false
+    const marker = fmt.template[cursor + 1]
+    if (marker === 'd' || marker === 'D') return true
+    cursor += 2
+  }
 }
 
 /**
@@ -143,7 +210,7 @@ function messageBlock(commit: CommitFacts): string[] {
  * @param commit the commit to render
  * @param length how many hex digits of a parent id to print
  */
-export function entry(commit: CommitFacts, length: number = SHORT_SHA): string[] {
+function entry(commit: CommitFacts, length: number = SHORT_SHA): string[] {
   const lines = [`commit ${commit.oid}`]
   if (commit.parents.length > 1) {
     lines.push(`Merge: ${commit.parents.map((p) => short(p, length)).join(' ')}`)
@@ -155,4 +222,179 @@ export function entry(commit: CommitFacts, length: number = SHORT_SHA): string[]
     ...messageBlock(commit),
   )
   return lines
+}
+
+/** The `Merge:` line every block preset prints for a merge. */
+function mergeLine(commit: CommitFacts, length: number): string[] {
+  if (commit.parents.length <= 1) return []
+  return [`Merge: ${commit.parents.map((p) => short(p, length)).join(' ')}`]
+}
+
+/**
+ * One commit as a block preset renders it (short/medium/full/fuller).
+ *
+ * Pinned against git 2.50: `short` is the id, author and indented subject;
+ * `full` adds `Commit:` and drops both dates; `fuller` aligns four header
+ * lines to the `AuthorDate:` column.
+ */
+export function presetBlock(commit: CommitFacts, kind: string, length: number): string[] {
+  if (kind === 'medium') return entry(commit, length)
+  const author = `${commit.authorName} <${commit.authorEmail}>`
+  const committer = `${commit.committerName} <${commit.committerEmail}>`
+  const lines = [`commit ${commit.oid}`, ...mergeLine(commit, length)]
+  if (kind === 'short') {
+    lines.push(`Author: ${author}`, '', `${INDENT}${subject(commit)}`)
+    return lines
+  }
+  if (kind === 'full') {
+    lines.push(`Author: ${author}`, `Commit: ${committer}`, '', ...messageBlock(commit))
+    return lines
+  }
+  lines.push(
+    `Author:     ${author}`,
+    `AuthorDate: ${gitDate(commit.authorTime, commit.authorTimezoneMinutes)}`,
+    `Commit:     ${committer}`,
+    `CommitDate: ${gitDate(commit.committerTime, commit.committerTimezoneMinutes)}`,
+    '',
+    ...messageBlock(commit),
+  )
+  return lines
+}
+
+/** git's %s: the first paragraph folded onto one line. */
+function subjectFolded(message: string): string {
+  const head = message.split('\n\n', 1)[0] ?? ''
+  return head
+    .split('\n')
+    .filter((part) => part !== '')
+    .join(' ')
+    .trim()
+}
+
+/** git's %b: everything after the subject paragraph. */
+function body(message: string): string {
+  const separator = message.indexOf('\n\n')
+  return separator === -1 ? '' : message.slice(separator + 2)
+}
+
+/**
+ * Expand a format:/tformat: template for one commit.
+ *
+ * The scan mirrors git's pretty.c behavior pinned in docker: an unknown or
+ * incomplete placeholder stays verbatim (`%q` prints `%q`), `%%` is a literal
+ * percent, and `%xHH` names a raw output byte (`%x80` is the single byte
+ * 0x80, carried by the shell's byte-escape convention until `encodeText`
+ * writes it). Explicit cursor, one pass, like the stat -c engine.
+ */
+export function renderTemplate(
+  template: string,
+  commit: CommitFacts,
+  length: number,
+  decor: Decorations | null,
+): string {
+  const labels = decor?.get(commit.oid) ?? []
+  const out: string[] = []
+  let i = 0
+  while (i < template.length) {
+    const char = template[i] ?? ''
+    if (char !== '%' || i + 1 === template.length) {
+      out.push(char)
+      i += 1
+      continue
+    }
+    const marker = template[i + 1] ?? ''
+    const expanded = simplePlaceholder(marker, commit, length, labels)
+    if (expanded !== null) {
+      out.push(expanded)
+      i += 2
+      continue
+    }
+    if ((marker === 'a' || marker === 'c') && i + 2 < template.length) {
+      const pair = identPlaceholder(marker, template[i + 2] ?? '', commit)
+      if (pair !== null) {
+        out.push(pair)
+        i += 3
+        continue
+      }
+    }
+    if (
+      marker === 'x' &&
+      i + 3 < template.length &&
+      HEX_DIGITS.test(template[i + 2] ?? '') &&
+      HEX_DIGITS.test(template[i + 3] ?? '')
+    ) {
+      out.push(byteChar(parseInt(template.slice(i + 2, i + 4), 16)))
+      i += 4
+      continue
+    }
+    out.push(char + marker)
+    i += 2
+  }
+  return out.join('')
+}
+
+/** One single-letter placeholder's value, null when it is not one. */
+function simplePlaceholder(
+  marker: string,
+  commit: CommitFacts,
+  length: number,
+  labels: readonly string[],
+): string | null {
+  switch (marker) {
+    case 'H':
+      return commit.oid
+    case 'h':
+      return short(commit.oid, length)
+    case 'T':
+      return commit.tree
+    case 't':
+      return short(commit.tree, length)
+    case 'P':
+      return commit.parents.join(' ')
+    case 'p':
+      return commit.parents.map((p) => short(p, length)).join(' ')
+    case 's':
+      return subjectFolded(commit.message)
+    case 'b':
+      return body(commit.message)
+    case 'B':
+      return commit.message
+    case 'D':
+      return labels.join(', ')
+    case 'd':
+      return labels.length > 0 ? ` (${labels.join(', ')})` : ''
+    case 'n':
+      return '\n'
+    case '%':
+      return '%'
+    default:
+      return null
+  }
+}
+
+/**
+ * An author/committer placeholder's value (%an, %cd, ...).
+ *
+ * %aN/%aE are the mailmap variants; no mailmap is ever loaded, so they read
+ * as their plain forms.
+ */
+function identPlaceholder(who: string, field: string, commit: CommitFacts): string | null {
+  const name = who === 'a' ? commit.authorName : commit.committerName
+  const email = who === 'a' ? commit.authorEmail : commit.committerEmail
+  const time = who === 'a' ? commit.authorTime : commit.committerTime
+  const zone = who === 'a' ? commit.authorTimezoneMinutes : commit.committerTimezoneMinutes
+  switch (field) {
+    case 'n':
+    case 'N':
+      return name
+    case 'e':
+    case 'E':
+      return email
+    case 'd':
+      return gitDate(time, zone)
+    case 't':
+      return String(time)
+    default:
+      return null
+  }
 }

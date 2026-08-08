@@ -238,7 +238,6 @@ async def test_walk_find_tolerates_not_found_readdir():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: None,
                               index=None,
                               args=FindArgs())
     assert results == []
@@ -251,7 +250,6 @@ async def test_walk_find_emits_start_path_at_depth_zero():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: False,
                               index=None,
                               args=FindArgs(maxdepth=0))
     assert results == ["/"]
@@ -268,7 +266,6 @@ async def test_walk_find_propagates_non_not_found_readdir_errors():
         await walk_find(_root_spec(),
                         readdir=readdir,
                         stat=stat,
-                        is_dir_name=lambda c: None,
                         index=None,
                         args=FindArgs())
 
@@ -280,7 +277,6 @@ async def test_walk_find_stat_fallback_treats_not_found_as_file():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: None,
                               index=None,
                               args=FindArgs(type=FindType.FILE))
     assert results == ["/mystery"]
@@ -315,7 +311,6 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: c.endswith("dir"),
                               index=None,
                               args=parse_find_args(("-empty", )))
     assert results == ["/empty-dir", "/empty.txt"]
@@ -335,7 +330,6 @@ async def test_walk_find_not_negates_predicate():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: False,
                               index=None,
                               args=parse_find_args(("-not", "-name", "*.txt")))
     assert results == ["/", "/b.md"]
@@ -349,7 +343,6 @@ async def test_walk_find_stat_fallback_propagates_other_errors():
         await walk_find(_root_spec(),
                         readdir=readdir,
                         stat=stat,
-                        is_dir_name=lambda c: None,
                         index=None,
                         args=FindArgs())
 
@@ -361,7 +354,6 @@ async def test_walk_find_size_filter_drops_not_found_entries():
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
-                              is_dir_name=lambda c: False,
                               index=None,
                               args=FindArgs(min_size=1))
     assert results == []
@@ -375,7 +367,6 @@ async def test_walk_find_size_filter_propagates_other_stat_errors():
         await walk_find(_root_spec(),
                         readdir=readdir,
                         stat=stat,
-                        is_dir_name=lambda c: False,
                         index=None,
                         args=FindArgs(min_size=1))
 
@@ -822,3 +813,107 @@ async def test_find_without_stat_path_walks_as_before():
     stdout, io = await find([_file_spec()], (), find_core=core)
     assert io.exit_code == 0
     assert stdout == b"/mnt/a.txt\n"
+
+
+def _stat_map(stats: dict[str, FileStat | None]):
+
+    async def fn(virtual: str) -> FileStat | None:
+        return stats.get(virtual)
+
+    return fn
+
+
+_DIR_STAT = FileStat(name="d", type=FileType.DIRECTORY)
+_FILE_STAT = FileStat(name="f", size=6, type=FileType.TEXT)
+
+# GNU findutils 4.10.0, pinned on debian:stable-slim:
+#   find A B           -> A's rows, then B's rows (operand order, never
+#                         re-sorted across operands)
+#   find A A           -> A's rows twice (no dedupe)
+#   find A <missing> B -> A's and B's rows still print, the missing
+#                         operand gets the diagnostic, and find exits 1
+
+
+@pytest.mark.asyncio
+async def test_find_walks_every_start_point_in_operand_order():
+    calls: list[str] = []
+
+    async def core(path: PathSpec, **_kw) -> list[str]:
+        calls.append(path.virtual)
+        return ["/sub/z.txt"] if path.virtual == "/mnt/sub" else []
+
+    stdout, io = await find(
+        [
+            _file_spec(virtual="/mnt/sub", key="sub"),
+            _file_spec(virtual="/mnt/a.txt", key="a.txt"),
+        ],
+        (),
+        find_core=core,
+        stat_path=_stat_map({
+            "/mnt/sub": _DIR_STAT,
+            "/mnt/a.txt": _FILE_STAT
+        }),
+    )
+    assert io.exit_code == 0
+    # /mnt/a.txt sorts before /mnt/sub; operand order must win anyway.
+    assert stdout == b"/mnt/sub\n/mnt/sub/z.txt\n/mnt/a.txt\n"
+    # The file start point is reported, never walked.
+    assert calls == ["/mnt/sub"]
+
+
+@pytest.mark.asyncio
+async def test_find_duplicate_start_points_walk_twice():
+
+    async def core(_path: PathSpec, **_kw) -> list[str]:
+        return ["/sub/z.txt"]
+
+    root = _file_spec(virtual="/mnt/sub", key="sub")
+    stdout, io = await find([root, root], (),
+                            find_core=core,
+                            stat_path=_stat_map({"/mnt/sub": _DIR_STAT}))
+    assert io.exit_code == 0
+    assert stdout == b"/mnt/sub\n/mnt/sub/z.txt\n" * 2
+
+
+@pytest.mark.asyncio
+async def test_find_missing_middle_operand_keeps_partial_output():
+    """The rows already found survive a missing operand (GNU).
+
+    The native-op path used to return the diagnostic alone, discarding
+    every other operand's rows along with the missing one's.
+    """
+
+    async def core(path: PathSpec, **_kw) -> list[str]:
+        return ["/sub/z.txt"] if path.virtual == "/mnt/sub" else []
+
+    stdout, io = await find(
+        [
+            _file_spec(virtual="/mnt/sub", key="sub"),
+            _file_spec(virtual="/mnt/nope", key="nope"),
+            _file_spec(virtual="/mnt/a.txt", key="a.txt"),
+        ],
+        (),
+        find_core=core,
+        stat_path=_stat_map({
+            "/mnt/sub": _DIR_STAT,
+            "/mnt/a.txt": _FILE_STAT
+        }),
+    )
+    assert io.exit_code == 1
+    assert stdout == b"/mnt/sub\n/mnt/sub/z.txt\n/mnt/a.txt\n"
+    assert io.stderr == b"find: '/mnt/nope': No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_find_no_operands_defaults_to_the_mount_root():
+
+    async def core(path: PathSpec, **_kw) -> list[str]:
+        assert path.virtual == "/"
+        return ["/a.txt"]
+
+    stdout, io = await find([], (),
+                            find_core=core,
+                            stat_path=_stat_path(
+                                FileStat(name="/", type=FileType.DIRECTORY)))
+    assert io.exit_code == 0
+    assert stdout == b"/\n/a.txt\n"

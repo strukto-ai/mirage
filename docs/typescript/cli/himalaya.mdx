@@ -109,6 +109,7 @@ another composer.
 himalaya message compose --to you@example.org --subject Hello --body Hi --send
 himalaya message compose --to you@example.org --subject Hello --body Hi | himalaya message send
 echo "the body" | himalaya message compose --to you@example.org --subject Hello --send
+himalaya message compose --to you@example.org --subject Report --body 'see attached' --attach /data/report.pdf --send
 ```
 
 | Option          | Required | Description                                    |
@@ -119,6 +120,7 @@ echo "the body" | himalaya message compose --to you@example.org --subject Hello 
 | `--bcc`         | no       | Blind carbon-copy recipient(s)                 |
 | `-s, --subject` | no       | Subject line                                   |
 | `--body`        | no       | Inline body (falls back to stdin)              |
+| `--attach`      | no       | Attachment file path, repeatable               |
 | `--signature`   | no       | Signature appended after a `-- ` line          |
 | `--send`        | no       | Send through SMTP instead of writing to stdout |
 
@@ -177,8 +179,10 @@ Deliberate gaps, all of which fail loudly rather than silently:
   read-only and never flips `\Seen`.
 - `envelope list` renders JSON, not a table, so its table flags
   (`--max-width`, `--recipient`, `--has-attachment`) do not exist.
-- Attachments and signature files (`--attach`, `--body-file`,
-  `--signature-file`) are not wired up.
+- Body and signature files (`--body-file`, `--signature-file`) are
+  not wired up; `--attach` is, reading each path through the
+  workspace, with the content type guessed from a fixed extension
+  table rather than a full mime database.
 
 Server behavior can differ too: whether `from alice` matches
 `alice@example.com` as a substring is up to the IMAP server, not mirage.

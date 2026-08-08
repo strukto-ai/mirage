@@ -26,12 +26,6 @@ export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   'gdrive/shared_drive',
 ])
 
-export function isDirName(child: string): boolean | null {
-  // Cold listings mark folders with a trailing slash; warm index-cache
-  // entries are slash-less, so classification falls back to stat.
-  return child.endsWith('/') ? true : null
-}
-
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'

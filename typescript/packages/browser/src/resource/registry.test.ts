@@ -14,9 +14,27 @@
 
 import type { OAuthClientMetadata } from '@modelcontextprotocol/sdk/shared/auth.js'
 import { describe, expect, it } from 'vitest'
+import { tokenUrl, type TokenManager } from '@struktoai/mirage-core'
 import { buildResource, knownResources, register } from './registry.ts'
 
 describe('browser resource registry', () => {
+  // The four Drive-family resources used to redeclare core's GoogleConfig
+  // without apiBase and hand-pick TokenManager fields, so a mount pointed
+  // at a fake server still refreshed its token at Google's real endpoint.
+  it('threads api_base into every google resource token manager', async () => {
+    const base = 'http://127.0.0.1:9999'
+    for (const name of ['gdrive', 'gdocs', 'gsheets', 'gslides', 'gmail']) {
+      const resource = await buildResource(name, {
+        client_id: 'id',
+        client_secret: 'secret',
+        refresh_token: 'refresh',
+        api_base: base,
+      })
+      const { accessor } = resource as unknown as { accessor: { tokenManager: TokenManager } }
+      expect(tokenUrl(accessor.tokenManager.config), name).toBe(`${base}/token`)
+    }
+  })
+
   it('lists known resources sorted', () => {
     const names = knownResources()
     expect(names).toContain('ram')

@@ -160,15 +160,43 @@ export class RevisionResetError extends GitError {
  * A dashed operand, which is a git feature this build does not have.
  *
  * mirage implements a subset of every verb, so an undeclared flag is rarely a
- * typo: it is a real git option (`-p`, `--stat`, `--graph`) arriving at a build
- * that lacks it. Left alone it lands on the revision operand and comes back as
- * "ambiguous argument", which blames the repository for missing a commit rather
- * than mirage for missing a feature, and an agent reading that draws the wrong
- * conclusion. git words the same mistake this way for `log` and `show`.
+ * typo: it is a real git option (`-p`, `--graph`, `--follow`) arriving at a
+ * build that lacks it. Left alone it lands on the revision operand and comes
+ * back as "ambiguous argument", which blames the repository for missing a
+ * commit rather than mirage for missing a feature, and an agent reading that
+ * draws the wrong conclusion. git words the same mistake this way for `log`
+ * and `show`.
  */
 export class UnrecognizedArgumentError extends GitError {
   constructor(argument: string) {
     super(`unrecognized argument: ${argument}`)
+  }
+}
+
+/**
+ * A --pretty/--format value naming no format at all.
+ *
+ * git's own wording and exit code for a name it has never heard of.
+ */
+export class BadPrettyError extends GitError {
+  constructor(value: string) {
+    super(`invalid --pretty format: ${value}`)
+  }
+}
+
+/**
+ * A --pretty/--format preset git has but this build does not.
+ *
+ * `raw`, `email`, `mboxrd` and `reference` are real git formats; answering
+ * "invalid" for them would gaslight an agent that spelled a valid one, so the
+ * refusal says unsupported and names what exists instead.
+ */
+export class UnsupportedPrettyError extends GitError {
+  constructor(value: string) {
+    super(
+      `unsupported --pretty format: ${value} (this build implements ` +
+        `oneline, short, medium, full, fuller and format:/tformat: strings)`,
+    )
   }
 }
 

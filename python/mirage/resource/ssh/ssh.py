@@ -76,6 +76,9 @@ class SSHResource(BaseResource):
     # every file; reads are the same raw bytes.
     SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _SSH_OPS
+    # A remote filesystem: short-lived index, long enough to spare a
+    # re-walk inside one command pipeline. Mirrors the TypeScript resource.
+    index_ttl: float = 60
     PROMPT: str = PROMPT
 
     def __init__(self, config: SSHConfig) -> None:

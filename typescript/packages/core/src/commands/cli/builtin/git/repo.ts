@@ -132,11 +132,16 @@ export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts>
   const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
   return {
     oid,
+    tree: commit.tree,
     message: commit.message,
     authorName: commit.author.name,
     authorEmail: commit.author.email,
     authorTime: commit.author.timestamp,
     authorTimezoneMinutes: -commit.author.timezoneOffset,
+    committerName: commit.committer.name,
+    committerEmail: commit.committer.email,
+    committerTime: commit.committer.timestamp,
+    committerTimezoneMinutes: -commit.committer.timezoneOffset,
     parents: commit.parent,
   }
 }

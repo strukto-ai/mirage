@@ -23,48 +23,186 @@ import type { TreeEntry } from './tree.ts'
 const ROOT_COMMIT = '(root-commit) '
 const CREATE = 'create'
 const DELETE = 'delete'
+// git's diffstat geometry for piped output: 80 columns total, binary
+// sniffing over the first 8000 bytes, and the 3/8 cap that splits the
+// line between the name column and the +/- graph (diff.c show_stats).
+const STAT_WIDTH = 80
+const BINARY_SNIFF = 8000
+const GRAPH_MIN = 6
+const ELLIPSIS = '...'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-/** A blob's lines, empty when there is no blob on that side. */
-async function blobLines(repo: Repo, oid: string | null): Promise<string[]> {
-  if (oid === null) return []
-  try {
-    const { blob } = await git.readBlob({ ...repoArgs(repo), oid })
-    const text = DEC.decode(blob)
-    return text === '' ? [] : text.split(/(?<=\n)/)
-  } catch {
-    return []
-  }
+/** One changed path as the diffstat table renders it. */
+export interface FileStat {
+  readonly path: string
+  /** Lines added, 0 for a binary file. */
+  readonly insertions: number
+  /** Lines removed, 0 for a binary file. */
+  readonly deletions: number
+  /** Whether either side sniffs as binary. */
+  readonly binary: boolean
+  /** Byte length of the old blob, 0 when created. */
+  readonly oldSize: number
+  /** Byte length of the new blob, 0 when deleted. */
+  readonly newSize: number
 }
 
 /**
- * How many lines a commit added and removed, over every path.
+ * A blob's bytes, empty when there is nothing to read.
  *
- * Counted with the same longest-common-subsequence that `diff` uses, so the
- * totals agree with what git prints. They are line counts, not hunk counts: a
- * rewritten line is one insertion and one deletion.
+ * A gitlink names a commit in another repository, so its id is legitimately
+ * absent from this store; it reads as empty rather than failing the whole
+ * table.
  */
-async function countChanges(
+async function blobData(repo: Repo, oid: string | null): Promise<Uint8Array> {
+  if (oid === null) return new Uint8Array(0)
+  try {
+    const { blob } = await git.readBlob({ ...repoArgs(repo), oid })
+    return blob
+  } catch {
+    return new Uint8Array(0)
+  }
+}
+
+function hasNul(data: Uint8Array): boolean {
+  const window = data.subarray(0, BINARY_SNIFF)
+  return window.includes(0)
+}
+
+/** Line insertions and deletions between two text blobs. */
+function countLines(oldData: Uint8Array, newData: Uint8Array): [number, number] {
+  const split = (data: Uint8Array): string[] => {
+    const text = DEC.decode(data)
+    return text === '' ? [] : text.split(/(?<=\n)/)
+  }
+  let insertions = 0
+  let deletions = 0
+  for (const [tag, i1, i2, j1, j2] of getOpcodes(split(oldData), split(newData))) {
+    if (tag === DiffOpTag.EQUAL) continue
+    deletions += i2 - i1
+    insertions += j2 - j1
+  }
+  return [insertions, deletions]
+}
+
+/**
+ * Per-path change counts between two trees, in path order.
+ *
+ * A binary file (NUL in the first 8000 bytes of either side, git's own sniff)
+ * counts zero lines; a mode-only change counts zero too but still occupies a
+ * row, which is how git prints `path | 0`.
+ */
+export async function diffstat(
   repo: Repo,
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
-): Promise<[number, number]> {
-  let insertions = 0
-  let deletions = 0
-  for (const path of new Set([...before.keys(), ...after.keys()])) {
+): Promise<FileStat[]> {
+  const stats: FileStat[] = []
+  for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
     const old = before.get(path) ?? null
     const now = after.get(path) ?? null
-    if (old !== null && now !== null && old.oid === now.oid) continue
-    const oldLines = await blobLines(repo, old?.oid ?? null)
-    const newLines = await blobLines(repo, now?.oid ?? null)
-    for (const [tag, i1, i2, j1, j2] of getOpcodes(oldLines, newLines)) {
-      if (tag === DiffOpTag.EQUAL) continue
-      deletions += i2 - i1
-      insertions += j2 - j1
+    if (old?.oid === now?.oid && old?.mode === now?.mode) continue
+    const oldData = await blobData(repo, old?.oid ?? null)
+    const newData = await blobData(repo, now?.oid ?? null)
+    const binary = hasNul(oldData) || hasNul(newData)
+    let insertions = 0
+    let deletions = 0
+    if (!binary && old?.oid !== now?.oid) {
+      ;[insertions, deletions] = countLines(oldData, newData)
+    }
+    stats.push({
+      path,
+      insertions,
+      deletions,
+      binary,
+      oldSize: oldData.byteLength,
+      newSize: newData.byteLength,
+    })
+  }
+  return stats
+}
+
+/** git's scale_linear: proportional, but never rounding to zero. */
+function scale(value: number, width: number, maxChange: number): number {
+  if (value === 0) return 0
+  return 1 + Math.floor((value * (width - 1)) / maxChange)
+}
+
+/**
+ * A path fitted to the name column, elided from the left.
+ *
+ * git keeps the tail of a long path, advanced to the next component boundary,
+ * behind a three-dot prefix.
+ */
+function statName(path: string, nameWidth: number): string {
+  if (path.length <= nameWidth) return path
+  let tail = path.slice(-(nameWidth - ELLIPSIS.length))
+  const slash = tail.indexOf('/')
+  if (slash !== -1) tail = tail.slice(slash)
+  return `${ELLIPSIS}${tail}`
+}
+
+/**
+ * git's diffstat table: one row per path, then the summary line.
+ *
+ * The geometry is diff.c's show_stats pinned against git 2.50 at the piped
+ * default of 80 columns: the graph is capped at three eighths of the line,
+ * the name column takes what remains, and per-file graphs scale linearly with
+ * a floor of one mark per nonzero side.
+ */
+export function statTable(stats: readonly FileStat[], width: number = STAT_WIDTH): string[] {
+  if (stats.length === 0) return []
+  const maxLen = Math.max(...stats.map((stat) => stat.path.length))
+  const changes = stats.filter((s) => !s.binary).map((s) => s.insertions + s.deletions)
+  const maxChange = changes.length > 0 ? Math.max(...changes) : 0
+  const numberWidth = maxChange > 0 ? String(maxChange).length : 1
+  const binWidths = stats
+    .filter((s) => s.binary)
+    .map((s) => `Bin ${String(s.oldSize)} -> ${String(s.newSize)} bytes`.length - 4)
+  const binWidth = binWidths.length > 0 ? Math.max(...binWidths) : 0
+  const budget = Math.max(width, 16 + 6 + numberWidth)
+  let graphWidth = maxChange > binWidth ? maxChange : binWidth
+  let nameWidth = maxLen
+  if (nameWidth + numberWidth + 6 + graphWidth > budget) {
+    const cap = Math.floor((budget * 3) / 8) - numberWidth - 6
+    if (graphWidth > cap) graphWidth = Math.max(cap, GRAPH_MIN)
+    if (nameWidth > budget - numberWidth - 6 - graphWidth) {
+      nameWidth = budget - numberWidth - 6 - graphWidth
+    } else {
+      graphWidth = budget - numberWidth - 6 - nameWidth
     }
   }
-  return [insertions, deletions]
+  const lines: string[] = []
+  let totalInsertions = 0
+  let totalDeletions = 0
+  for (const stat of stats) {
+    const name = statName(stat.path, nameWidth).padEnd(nameWidth)
+    if (stat.binary) {
+      lines.push(` ${name} | Bin ${String(stat.oldSize)} -> ${String(stat.newSize)} bytes`)
+      continue
+    }
+    totalInsertions += stat.insertions
+    totalDeletions += stat.deletions
+    const change = stat.insertions + stat.deletions
+    let added = stat.insertions
+    let removed = stat.deletions
+    if (change > 0 && graphWidth <= maxChange) {
+      let total = scale(change, graphWidth, maxChange)
+      if (total < 2 && added > 0 && removed > 0) total = 2
+      if (added < removed) {
+        added = scale(added, graphWidth, maxChange)
+        removed = total - added
+      } else {
+        removed = scale(removed, graphWidth, maxChange)
+        added = total - removed
+      }
+    }
+    const graph = change > 0 ? ` ${'+'.repeat(added)}${'-'.repeat(removed)}` : ''
+    lines.push(` ${name} | ${String(change).padStart(numberWidth)}${graph}`)
+  }
+  lines.push(statLine(stats.length, totalInsertions, totalDeletions))
+  return lines
 }
 
 /** `N noun` with the noun pluralised the way git pluralises it. */
@@ -105,6 +243,9 @@ function modeLines(
 /**
  * What `git commit` prints once the commit exists.
  *
+ * The counts come from `diffstat`, so a binary file adds to the file total
+ * but zero lines, exactly as git reports it.
+ *
  * @param repo the opened repository
  * @param oid the commit just written
  * @param message its message
@@ -124,16 +265,15 @@ export async function report(
   width: number,
   root: boolean,
 ): Promise<string> {
-  const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
-    (path) => before.get(path)?.oid !== after.get(path)?.oid,
-  )
+  const stats = await diffstat(repo, before, after)
   const title = message.split('\n')[0] ?? ''
   const where = branch ?? 'detached HEAD'
   const marker = root ? ROOT_COMMIT : ''
   const lines = [`[${where} ${marker}${short(oid, width)}] ${title}`]
-  if (changed.length > 0) {
-    const [insertions, deletions] = await countChanges(repo, before, after)
-    lines.push(statLine(changed.length, insertions, deletions))
+  if (stats.length > 0) {
+    const insertions = stats.reduce((sum, stat) => sum + stat.insertions, 0)
+    const deletions = stats.reduce((sum, stat) => sum + stat.deletions, 0)
+    lines.push(statLine(stats.length, insertions, deletions))
   }
   lines.push(...modeLines(before, after))
   return lines.map((line) => `${line}\n`).join('')

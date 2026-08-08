@@ -39,6 +39,20 @@ def has_glob(segment: str) -> bool:
     return any(ch in segment for ch in GLOB_CHARS)
 
 
+def escape_glob(text: str) -> str:
+    """Encode text so the glob matcher reads every character literally.
+
+    fnmatch has no escape character, so each special is wrapped in its
+    own one-character class: ``*`` becomes ``[*]``. A ``]`` needs no
+    treatment: outside a class it is already literal, and no class can
+    open because every ``[`` gets wrapped.
+
+    Args:
+        text (str): literal text destined for a glob pattern.
+    """
+    return "".join(f"[{c}]" if c in GLOB_CHARS else c for c in text)
+
+
 def is_word_shaped(p: PathSpec) -> bool:
     """Whether a pattern spec is a typed word (not a directory listing).
 

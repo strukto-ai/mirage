@@ -833,6 +833,58 @@
         "stdout": "Operand probe\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "hm_attach_prep",
+      "seq": 562114,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "printf 'the note body\\n' > /scratch/note.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_attach_builds_multipart_mixed",
+      "seq": 562115,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'With file' --body 'see attached' --attach /scratch/note.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: With file\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"8964b7638e5ed9c5f62cd5fd2c0ed207\"\r\n\r\n--8964b7638e5ed9c5f62cd5fd2c0ed207\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsee attached\r\n\r\n--8964b7638e5ed9c5f62cd5fd2c0ed207\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"note.txt\"\r\nMIME-Version: 1.0\r\n\r\ndGhlIG5vdGUgYm9keQo=\r\n\r\n--8964b7638e5ed9c5f62cd5fd2c0ed207--\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_attach_missing_file_names_the_path",
+      "seq": 562116,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --body x --attach /scratch/gone.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya message compose: read attachment /scratch/gone.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "hm_compose_nonascii_serializes_like_python",
+      "seq": 562117,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'Résumé détaillé' --body 'naïve résumé body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: =?utf-8?b?UsOpc3Vtw6kgZMOpdGFpbGzDqQ==?=\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 8bit\r\nMIME-Version: 1.0\r\n\r\nnaïve résumé body\r\n",
+        "stderr": ""
+      }
     }
   ]
 }

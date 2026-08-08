@@ -14,7 +14,8 @@
 
 import { noMount } from '../../utils/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { Runtime } from '../executor/runtime.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { VFSRuntime } from '../../runtime/table.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
@@ -70,7 +71,7 @@ export class MountRegistry {
   // The world's vfs runtime, set by Workspace after construction.
   // Catch-all when its captures are empty; explicit captures make
   // unclaimed commands an admission failure (126).
-  vfsRuntime: Runtime | null = null
+  vfsRuntime: VFSRuntime | null = null
   // The ordered runtime world, set by Runtimes at construction (the
   // live array, so add() keeps it fresh). The CLI script arm selects
   // an interpreter from it (a runtime: pin or the script's language),

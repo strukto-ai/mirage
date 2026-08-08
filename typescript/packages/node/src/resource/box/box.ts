@@ -55,18 +55,11 @@ export class BoxResource extends BaseResource implements Resource {
   constructor(config: BoxConfig) {
     super()
     this.config = config
-    const tm = new BoxTokenManager({
-      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
-      ...(config.clientId !== undefined ? { clientId: config.clientId } : {}),
-      ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
-      ...(config.refreshToken !== undefined ? { refreshToken: config.refreshToken } : {}),
-      ...(config.enterpriseId !== undefined ? { enterpriseId: config.enterpriseId } : {}),
-      ...(config.accessToken !== undefined ? { accessToken: config.accessToken } : {}),
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-      ...(config.onRefreshTokenRotated !== undefined
-        ? { onRefreshTokenRotated: config.onRefreshTokenRotated }
-        : {}),
-    })
+    // The whole config goes to the token manager, never a hand-picked
+    // subset: a field added to BoxConfig would silently stop reaching it
+    // (that is how gdrive lost apiBase and kept refreshing at the real
+    // Google endpoint against a fake server).
+    const tm = new BoxTokenManager(config)
     this.accessor = new BoxAccessor({
       tokenManager: tm,
       ...(config.rootFolderId !== undefined ? { rootFolderId: config.rootFolderId } : {}),

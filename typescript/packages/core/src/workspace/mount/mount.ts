@@ -39,7 +39,7 @@ import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../obs
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
-import type { Runtime } from '../executor/runtime.ts'
+import type { Runtime } from '../../runtime/base.ts'
 import { eaccesReadOnly, enotsup } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'

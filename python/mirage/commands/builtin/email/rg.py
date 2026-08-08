@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email.io import resolve_glob
@@ -30,6 +28,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
+from mirage.core.email.render import message_json_text
 from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import _build_vfs_path, search_messages
 from mirage.core.email.stat import stat as _stat
@@ -83,9 +82,7 @@ async def rg(
                                       paths[0].resource_path) if paths else ""
         for uid in uids:
             msg = await fetch_message(accessor, folder, uid)
-            msg_text = json.dumps(msg,
-                                  ensure_ascii=False,
-                                  separators=(",", ":"))
+            msg_text = message_json_text(msg)
             vfs_path = _build_vfs_path(file_prefix, folder, msg)
             lines = msg_text.splitlines()
             matched = grep_lines(vfs_path,

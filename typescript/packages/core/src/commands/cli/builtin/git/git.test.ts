@@ -136,6 +136,85 @@ describe('git log', () => {
     expect(code).toBe(128)
     expect(err).toBe('fatal: unrecognized argument: --graph\n')
   })
+
+  it('matches --all byte for byte, topic branch included', async () => {
+    const [, out] = await run('log --all --oneline')
+    expect(out).toBe(realGit(['log', '--all', '--oneline']))
+  })
+
+  it('matches --format placeholder output byte for byte', async () => {
+    const template = '%H|%h|%T|%t|%P|%p|%an|%ae|%ad|%at|%cn|%cd|%ct|%s'
+    const [, out] = await run(`log --format='${template}'`)
+    expect(out).toBe(realGit(['log', `--format=${template}`]))
+  })
+
+  it('matches format: separator semantics byte for byte', async () => {
+    const [, out] = await run("log --pretty='format:%h %s'")
+    expect(out).toBe(realGit(['log', '--pretty=format:%h %s']))
+  })
+
+  it('matches %d decorations byte for byte', async () => {
+    const [, out] = await run("log --all --format='%h%d'")
+    expect(out).toBe(realGit(['log', '--all', '--format=%h%d']))
+  })
+
+  it('matches every block preset byte for byte', async () => {
+    for (const preset of ['oneline', 'short', 'medium', 'full', 'fuller']) {
+      const [, out] = await run(`log --pretty=${preset}`)
+      expect(out, preset).toBe(realGit(['log', `--pretty=${preset}`]))
+    }
+  })
+
+  it('treats a bare --pretty as medium', async () => {
+    const [, bare] = await run('log --pretty')
+    const [, medium] = await run('log')
+    expect(bare).toBe(medium)
+  })
+
+  it('prints nothing at all for an empty format', async () => {
+    const [code, out] = await run('log --format=')
+    expect(code).toBe(0)
+    expect(out).toBe('')
+  })
+
+  it('keeps unknown placeholders verbatim like git', async () => {
+    const [, out] = await run("log -n 1 --format='%q %zz'")
+    expect(out).toBe(realGit(['log', '-n', '1', '--format=%q %zz']))
+  })
+
+  it('refuses an invalid pretty name the way git words it', async () => {
+    const [code, , err] = await run('log --pretty=bogus')
+    expect(code).toBe(128)
+    expect(err).toBe('fatal: invalid --pretty format: bogus\n')
+  })
+
+  it('says unsupported for a real preset this build lacks', async () => {
+    const [code, , err] = await run('log --pretty=raw')
+    expect(code).toBe(128)
+    expect(err).toContain('unsupported --pretty format: raw')
+  })
+
+  it('keeps empty format entries as separators byte for byte', async () => {
+    const [, out] = await run('log --pretty=format:')
+    expect(out).toBe(realGit(['log', '--pretty=format:']))
+  })
+
+  it('terminates empty tformat entries byte for byte', async () => {
+    const [, out] = await run("log --format='%d'")
+    expect(out).toBe(realGit(['log', '--format=%d']))
+  })
+
+  it('emits %xHH as a raw byte, not UTF-8 of the code point', async () => {
+    const result = await ws.execute("git -C /repo log -n 1 --format='a%x80b'")
+    const real = execFileSync('git', ['-C', repoPath, 'log', '-n', '1', '--format=a%x80b'])
+    expect(Array.from(result.stdout)).toEqual(Array.from(real))
+  })
+
+  it('refuses a bare --format the way git does', async () => {
+    const [code, , err] = await run('log --format')
+    expect(code).toBe(128)
+    expect(err).toBe('fatal: unrecognized argument: --format\n')
+  })
 })
 
 describe('git show', () => {
@@ -151,6 +230,68 @@ describe('git show', () => {
     const [, out] = await run('show HEAD')
     expect(out).toContain('diff --git a/numbers.txt b/numbers.txt')
     expect(out).toContain('+two')
+  })
+
+  it('matches --stat byte for byte', async () => {
+    const [, out] = await run('show --stat HEAD')
+    expect(out).toBe(realGit(['show', '--stat', 'HEAD']))
+  })
+
+  it('matches --name-only byte for byte', async () => {
+    const [, out] = await run('show --name-only HEAD')
+    expect(out).toBe(realGit(['show', '--name-only', 'HEAD']))
+  })
+
+  it('lets --name-only win over --stat like git', async () => {
+    const [, out] = await run('show --stat --name-only HEAD')
+    expect(out).toBe(realGit(['show', '--stat', '--name-only', 'HEAD']))
+  })
+
+  it('matches -s and --no-patch byte for byte', async () => {
+    const [, dashed] = await run('show -s HEAD')
+    expect(dashed).toBe(realGit(['show', '-s', 'HEAD']))
+    const [, spelled] = await run('show --no-patch HEAD')
+    expect(spelled).toBe(dashed)
+  })
+
+  it('suppresses the stat table under --no-patch like git', async () => {
+    const [, out] = await run('show --stat --no-patch HEAD')
+    expect(out).toBe(realGit(['show', '--stat', '--no-patch', 'HEAD']))
+  })
+
+  it('matches -s --format one-field output byte for byte', async () => {
+    const [, out] = await run('show -s --format=%s HEAD')
+    expect(out).toBe(realGit(['show', '-s', '--format=%s', 'HEAD']))
+  })
+
+  it('accepts --no-ext-diff without changing the output', async () => {
+    const [code, flagged] = await run('show --no-ext-diff -s HEAD')
+    const [, plain] = await run('show -s HEAD')
+    expect(code).toBe(0)
+    expect(flagged).toBe(plain)
+  })
+
+  it('refuses an option this build lacks', async () => {
+    const [code, , err] = await run('show --raw HEAD')
+    expect(code).toBe(128)
+    expect(err).toBe('fatal: unrecognized argument: --raw\n')
+  })
+
+  it('prints a format: header with no trailing newline like git', async () => {
+    const [, out] = await run("show -s --pretty='format:%h'")
+    expect(out).toBe(realGit(['show', '-s', '--pretty=format:%h']))
+    expect(out.endsWith('\n')).toBe(false)
+  })
+
+  it('terminates an empty tformat expansion byte for byte', async () => {
+    const [, out] = await run("show -s --format='%b' HEAD~1")
+    expect(out).toBe(realGit(['show', '-s', '--format=%b', 'HEAD~1']))
+  })
+
+  it('refuses a bare --format the way git does', async () => {
+    const [code, , err] = await run('show --format HEAD')
+    expect(code).toBe(128)
+    expect(err).toBe('fatal: unrecognized argument: --format\n')
   })
 })
 

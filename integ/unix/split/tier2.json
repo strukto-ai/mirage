@@ -27,7 +27,7 @@
         "ram",
         "disk"
       ],
-      "command": "mkdir -p /data/t2split2 && printf 'abcdef' > /data/t2split2/in && split --bytes 3 --hex-suffixes=10 /data/t2split2/in /data/t2split2/h && cat /data/t2split2/h0a && printf '|' && cat /data/t2split2/h0b",
+      "command": "mkdir -p /data/t2split2 && printf 'abcdef' > /data/t2split2/in && split --bytes 3 --hex-suffixes=10 /data/t2split2/in /data/t2split2/h && cat /data/t2split2/h10 && printf '|' && cat /data/t2split2/h11",
       "expect": {
         "exit": 0,
         "stdout": "abc|def",

@@ -335,6 +335,26 @@ describe('git commit', () => {
     expect(out).toContain(' create mode 100644 fresh.txt')
   })
 
+  it('counts a binary file as changed but zero lines, like git', async () => {
+    // Pinned against git 2.37: NUL in the first 8000 bytes makes the blob
+    // binary, and binary blobs contribute files but never line counts.
+    const h = await harness()
+    await h.ws.dispatch('write', '/repo/blob.bin', [new Uint8Array([65, 0, 66, 0, 67])])
+    await h.run('add -A')
+    const [, out] = await h.run("commit -m 'add binary'")
+    expect(out).toContain(' 1 file changed, 0 insertions(+), 0 deletions(-)')
+    expect(out).toContain(' create mode 100644 blob.bin')
+  })
+
+  it('drops the deletions clause in a mixed text and binary commit', async () => {
+    const h = await harness()
+    await write(h, 'text.txt', 'x\ny\nz\n')
+    await h.ws.dispatch('write', '/repo/blob.bin', [new Uint8Array([68, 0, 69])])
+    await h.run('add -A')
+    const [, out] = await h.run("commit -m 'mixed'")
+    expect(out).toContain(' 2 files changed, 3 insertions(+)\n')
+  })
+
   it('refuses without a message', async () => {
     const h = await harness()
     const [code, , err] = await h.run('commit')

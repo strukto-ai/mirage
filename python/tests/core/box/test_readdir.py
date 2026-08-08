@@ -17,13 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.config import IndexEntry
-from mirage.core.box.readdir import is_dir_name, readdir
+from mirage.core.box.readdir import readdir
 from mirage.types import PathSpec
-
-
-def test_is_dir_name_only_trusts_trailing_slash():
-    assert is_dir_name("docs/") is True
-    assert is_dir_name("docs") is None
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,6 @@ from functools import partial
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.jaeger.read import read as _read
-from mirage.core.jaeger.readdir import is_dir_name as _is_dir_name
 from mirage.core.jaeger.readdir import readdir as _readdir
 from mirage.core.jaeger.stat import stat as _stat
 
@@ -27,7 +26,6 @@ IO = CommandIO(
     read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
-    is_dir_name=lambda a, name: _is_dir_name(name),
     local=False,
 )
 resolve_glob = IO.resolve_glob

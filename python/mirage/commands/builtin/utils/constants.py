@@ -28,4 +28,5 @@ TYPE_CHARS = {FileType.DIRECTORY: "d", FileType.SYMLINK: "l"}
 # lrwxrwxrwx.
 DEFAULT_MODES = {FileType.DIRECTORY: 0o755, FileType.SYMLINK: 0o777}
 
-NUMERIC_PREFIX = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
+NUMERIC_PREFIX = re.compile(
+    r"^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?")

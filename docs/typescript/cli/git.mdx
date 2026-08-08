@@ -52,10 +52,27 @@ git -C /repo log --oneline -n 20
 git -C /repo log --reverse
 git -C /repo log -S delta
 git -C /repo log HEAD~2
+git -C /repo log --all --oneline
+git -C /repo log --format='%h %an %s'
+git -C /repo log --pretty=fuller -n 3
 git -C /repo show 265ec3a
+git -C /repo show --stat HEAD
+git -C /repo show --name-only HEAD
+git -C /repo show -s --format=%H HEAD
 git -C /repo diff HEAD~1 HEAD
 git -C /repo branch
 ```
+
+`log` and `show` take `--pretty`/`--format` with git's grammar: the
+`oneline`, `short`, `medium`, `full` and `fuller` presets, plus
+`format:`/`tformat:` placeholder strings (a bare `%` string is
+`tformat:`). Placeholders cover ids (`%H %h %T %t %P %p`), author and
+committer fields (`%an %ae %ad %at %cn %ce %cd %ct`), the message
+(`%s %b %B`), decorations (`%d %D`), and `%n %% %xHH`; an unknown
+placeholder stays verbatim, exactly as git prints it. `log --all` walks
+every ref, tags peeled. `show` takes `--stat` (git's scaled diffstat
+table), `--name-only`, and `-s`/`--no-patch`, which suppresses every
+diff section just as it does in git.
 
 `status` honors `.gitignore` at every level, including negated rules, and
 collapses an untracked directory to one entry the way git does (`-uall`
@@ -100,4 +117,14 @@ serve, and inventing a name would put an unreviewed one into history.
   target, so nothing is silently resolved.
 - **Diff hunk bodies can differ from git's** on the same change. Headers,
   mode lines and blob abbreviations match; the line grouping inside a
-  hunk comes from a different algorithm than git's xdiff.
+  hunk comes from a different algorithm than git's xdiff. `show --stat`
+  line counts come from the same algorithm, so a rewritten hunk can
+  count slightly differently than git counts it.
+- **`--pretty` knows the block presets, not the wire formats.** `raw`,
+  `email`, `mboxrd` and `reference` are refused by name (`unsupported
+  --pretty format`), not silently misrendered. `--date=` relative
+  formats and `--decorate` are absent; decorations render only through
+  `%d`/`%D`, matching git's piped default of no decorations.
+- **`log` dates are strict.** `--since`/`--until` read ISO-8601 or an
+  epoch second; git's relative wording (`2 weeks ago`) is refused
+  rather than misread.

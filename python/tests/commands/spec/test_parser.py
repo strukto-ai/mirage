@@ -491,6 +491,18 @@ def test_int_typed_multiple_checks_every_value():
     assert parsed.invalid_int_options == [("--id", "x")]
 
 
+def test_typed_values_reject_unicode_digits():
+    # python's \d also matches Unicode digits (int('١٢') is 12), which
+    # JS /\d/ and GNU's C-locale parsers reject — both languages must
+    # report the same strings invalid.
+    int_spec = CommandSpec(options=(Option(long="--port", type="int"), ))
+    parsed = parse_command(int_spec, ["--port", "١٢"], "/")
+    assert parsed.invalid_int_options == [("--port", "١٢")]
+    float_spec = CommandSpec(options=(Option(long="--q", type="float"), ))
+    parsed = parse_command(float_spec, ["--q", "٣.٥"], "/")
+    assert parsed.invalid_float_options == [("--q", "٣.٥")]
+
+
 def test_synonym_spellings_resolve_a_shared_prefix_like_glibc():
     parsed = parse_command(SPECS["grep"], ["--colo", "pat", "/a.txt"], "/")
     assert parsed.ambiguous_options == []

@@ -29,6 +29,7 @@ interface CmdResult {
   out: Uint8Array
   writes: Record<string, Uint8Array>
   exitCode: number
+  stderr: Uint8Array
 }
 
 async function runCmd(
@@ -36,24 +37,35 @@ async function runCmd(
   resource: RAMResource,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]>,
+  texts: string[] = [],
 ): Promise<CmdResult> {
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const result = await cmd.fn(resource.accessor, paths, texts, {
     stdin: null,
     flags,
     filetypeFns: null,
     cwd: '/',
     resource,
   })
-  if (result === null) return { out: new Uint8Array(), writes: {}, exitCode: 0 }
-  const [output, io] = result as [unknown, { writes: Record<string, Uint8Array>; exitCode: number }]
+  if (result === null) {
+    return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }
+  }
+  const [output, io] = result as [
+    unknown,
+    { writes: Record<string, Uint8Array>; exitCode: number; stderr: Uint8Array | null },
+  ]
   let outBytes: Uint8Array = new Uint8Array()
   if (output !== null) {
     outBytes =
       output instanceof Uint8Array ? output : await materialize(output as AsyncIterable<Uint8Array>)
   }
-  return { out: outBytes, writes: io.writes, exitCode: io.exitCode }
+  return {
+    out: outBytes,
+    writes: io.writes,
+    exitCode: io.exitCode,
+    stderr: io.stderr ?? new Uint8Array(),
+  }
 }
 
 describe('tar', () => {
@@ -148,5 +160,151 @@ describe('zip / unzip', () => {
       { q: true },
     )
     expect(out.byteLength).toBe(0)
+  })
+})
+
+describe('unzip members', () => {
+  const APP = 'APPXML-CONTENT\n'
+  const SHEET = 'SHEET1-CONTENT\n'
+  const WORKBOOK = 'WORKBOOK-CONTENT\n'
+  const CAUTION = 'caution: filename not matched:  '
+
+  async function makeBook(): Promise<RAMResource> {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/docProps')
+    resource.store.dirs.add('/xl')
+    resource.store.files.set('/docProps/app.xml', ENC.encode(APP))
+    resource.store.files.set('/xl/sheet1.xml', ENC.encode(SHEET))
+    resource.store.files.set('/xl/workbook.xml', ENC.encode(WORKBOOK))
+    await runCmd(
+      RAM_ZIP,
+      resource,
+      [
+        PathSpec.fromStrPath('/book.zip'),
+        PathSpec.fromStrPath('/docProps/app.xml'),
+        PathSpec.fromStrPath('/xl/sheet1.xml'),
+        PathSpec.fromStrPath('/xl/workbook.xml'),
+      ],
+      {},
+    )
+    return resource
+  }
+
+  function book(): PathSpec[] {
+    return [PathSpec.fromStrPath('/book.zip')]
+  }
+
+  it('-p with a member outputs only that member', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { p: true }, ['xl/workbook.xml'])
+    expect(DEC.decode(r.out)).toBe(WORKBOOK)
+    expect(r.exitCode).toBe(0)
+    expect(r.stderr.byteLength).toBe(0)
+  })
+
+  it('-p with a missing member exits 11 with a caution on stderr', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { p: true }, ['NOSUCHFILE.xml'])
+    expect(r.out.byteLength).toBe(0)
+    expect(r.exitCode).toBe(11)
+    expect(DEC.decode(r.stderr)).toBe(`${CAUTION}NOSUCHFILE.xml\n`)
+  })
+
+  it('-p output follows archive order, not argument order', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { p: true }, [
+      'xl/workbook.xml',
+      'docProps/app.xml',
+    ])
+    expect(DEC.decode(r.out)).toBe(APP + WORKBOOK)
+    expect(r.exitCode).toBe(0)
+  })
+
+  it('-p charges each entry to the first matching spec', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { p: true }, ['*.xml', 'xl/workbook.xml'])
+    expect(DEC.decode(r.out)).toBe(APP + SHEET + WORKBOOK)
+    expect(r.exitCode).toBe(11)
+    expect(DEC.decode(r.stderr)).toBe(`${CAUTION}xl/workbook.xml\n`)
+  })
+
+  it('-p wildcard star crosses slashes', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { p: true }, ['doc*'])
+    expect(DEC.decode(r.out)).toBe(APP)
+    expect(r.exitCode).toBe(0)
+  })
+
+  it('-p wildcard selects a subtree', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { p: true }, ['xl/*'])
+    expect(DEC.decode(r.out)).toBe(SHEET + WORKBOOK)
+    expect(r.exitCode).toBe(0)
+  })
+
+  it('-p treats ? as one byte, the way Info-ZIP does', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/é.txt', ENC.encode('ACCENT\n'))
+    resource.store.files.set('/ab.txt', ENC.encode('AB\n'))
+    await runCmd(
+      RAM_ZIP,
+      resource,
+      [
+        PathSpec.fromStrPath('/bytes.zip'),
+        PathSpec.fromStrPath('/é.txt'),
+        PathSpec.fromStrPath('/ab.txt'),
+      ],
+      {},
+    )
+    const arch = [PathSpec.fromStrPath('/bytes.zip')]
+    const one = await runCmd(RAM_UNZIP, resource, arch, { p: true }, ['?.txt'])
+    expect(one.out.byteLength).toBe(0)
+    expect(one.exitCode).toBe(11)
+    expect(DEC.decode(one.stderr)).toBe(`${CAUTION}?.txt\n`)
+    const two = await runCmd(RAM_UNZIP, resource, arch, { p: true }, ['??.txt'])
+    expect(DEC.decode(two.out)).toBe('ACCENT\nAB\n')
+    expect(two.exitCode).toBe(0)
+  })
+
+  it('-l filters rows and exits 11 only when nothing matched', async () => {
+    const resource = await makeBook()
+    const hit = await runCmd(RAM_UNZIP, resource, book(), { args_l: true }, ['xl/workbook.xml'])
+    expect(DEC.decode(hit.out)).toContain('xl/workbook.xml')
+    expect(DEC.decode(hit.out)).not.toContain('docProps/app.xml')
+    expect(hit.exitCode).toBe(0)
+    const miss = await runCmd(RAM_UNZIP, resource, book(), { args_l: true }, ['NOSUCHFILE.xml'])
+    expect(miss.exitCode).toBe(11)
+    expect(miss.stderr.byteLength).toBe(0)
+    const partial = await runCmd(RAM_UNZIP, resource, book(), { args_l: true }, [
+      'xl/workbook.xml',
+      'NOSUCHFILE.xml',
+    ])
+    expect(partial.exitCode).toBe(0)
+    expect(partial.stderr.byteLength).toBe(0)
+  })
+
+  it('-t reports unmatched members on stdout and exits 11', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { t: true }, [
+      'xl/workbook.xml',
+      'NOSUCHFILE.xml',
+    ])
+    const text = DEC.decode(r.out)
+    expect(text).toContain(`${CAUTION}NOSUCHFILE.xml`)
+    expect(text).toContain('At least one error was detected')
+    expect(r.exitCode).toBe(11)
+    expect(r.stderr.byteLength).toBe(0)
+  })
+
+  it('extraction writes only the selected members', async () => {
+    const resource = await makeBook()
+    const r = await runCmd(RAM_UNZIP, resource, book(), { d: '/ext' }, [
+      'xl/workbook.xml',
+      'NOSUCHFILE.xml',
+    ])
+    expect(resource.store.files.has('/ext/xl/workbook.xml')).toBe(true)
+    expect(resource.store.files.has('/ext/docProps/app.xml')).toBe(false)
+    expect(r.exitCode).toBe(11)
+    expect(DEC.decode(r.stderr)).toBe(`${CAUTION}NOSUCHFILE.xml\n`)
   })
 })

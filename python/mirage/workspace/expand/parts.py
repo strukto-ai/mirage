@@ -179,7 +179,7 @@ async def expand_parts(
             # "" or "$EMPTY"), except "$@"/"${a[@]}" which yield zero words.
             if expanded or not _has_at_expansion(p):
                 result.append(expanded)
-        elif p.type == NT.RAW_STRING:
+        elif p.type in (NT.RAW_STRING, NT.ANSI_C_STRING, NT.TRANSLATED_STRING):
             result.append(expanded)
         else:
             if expanded:

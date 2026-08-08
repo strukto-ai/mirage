@@ -47,19 +47,20 @@ import {
   PathSpec,
 } from '../types.ts'
 import type { Policies } from '../policy/index.ts'
-import type { PolicyFn } from './executor/policy/index.ts'
-import type { TSNodeLike } from './expand/variable.ts'
+import type { PolicyFn } from '../runtime/policy/index.ts'
+import type { TSNodeLike } from '../shell/types.ts'
 import type { ExecuteFn } from './expand/node.ts'
 import type { ProvisionResult } from '../provision/types.ts'
 import { WorkspaceFS } from './fs.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
-import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
-import { MontyUnavailableError } from './executor/python/runtimes/monty.ts'
-import { scriptStringError, type Runtime, type RuntimeEntry } from './executor/runtime.ts'
-import { isEvaluator } from './executor/runtime_mixin.ts'
-import type { EvalResult, RunResult } from './executor/runtime_types.ts'
-import { PyodideUnavailableError } from './executor/python/types.ts'
+import type { MirageEntry } from '../runtime/python/mirage_bridge.ts'
+import type { BridgeDispatchFn } from '../runtime/types.ts'
+import { MontyUnavailableError } from '../runtime/python/monty.ts'
+import { scriptStringError, type Runtime, type RuntimeEntry } from '../runtime/base.ts'
+import { isEvaluator } from '../runtime/mixin.ts'
+import type { EvalResult } from '../runtime/types.ts'
+import { PyodideUnavailableError } from '../runtime/python/types.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
@@ -160,8 +161,6 @@ export class Workspace {
       pythonConfig: options.python ?? {},
       bridge: () => this.buildWorkspaceBridge(),
       visibleMounts: () => this.sandboxVisibleMounts(),
-      lineExecutor: (line, lineStdin, env, cwd) =>
-        this.executeLineForVfs(line, lineStdin, env, cwd),
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
@@ -308,27 +307,6 @@ export class Workspace {
   /** Snapshot of the installed CLIs keyed by head word. */
   clis(): Map<string, CLIInstall> {
     return this.registry.clis.items()
-  }
-
-  /**
-   * The workspace executor as the vfs runtime's runLine.
-   *
-   * No core path reaches this for a typed line (wholeLineRuntime never
-   * selects vfs); a caller that invokes it for one records a second
-   * history entry and re-resolves the policy.
-   */
-  private async executeLineForVfs(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-  ): Promise<RunResult> {
-    const result = await this.execute(line, { stdin, cwd, env })
-    return {
-      stdout: result.stdout,
-      stderr: result.stderr.length > 0 ? result.stderr : null,
-      exitCode: result.exitCode,
-    }
   }
 
   /**

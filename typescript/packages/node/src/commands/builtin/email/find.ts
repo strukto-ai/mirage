@@ -12,148 +12,61 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '@struktoai/mirage-core'
 import {
-  FileType,
-  IOResult,
-  PathSpec,
   ResourceName,
   command,
-  formatRecords,
-  mountKey,
-  mountPrefixOf,
+  findGeneric,
   resolveGlobOf,
-  rstripSlash,
   specOf,
-  stripSlash,
-  type ByteSource,
+  walkFind,
   type CommandFnResult,
   type CommandOpts,
-  type FileStat,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
 import { stat as emailStat } from '../../../core/email/stat.ts'
 import { EMAIL_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
-import { fnmatch } from '@struktoai/mirage-core'
-import {
-  findSizeMtimeError,
-  invalidFindArg,
-  linkResults,
-  optionsTree,
-} from '@struktoai/mirage-core'
 
 const resolveGlob = resolveGlobOf(EMAIL_IO)
 
-async function walk(
-  accessor: EmailAccessor,
-  path: PathSpec,
-  index: CommandOpts['index'],
-  maxDepth: number | null,
-  depth: number,
-): Promise<string[]> {
-  if (maxDepth !== null && depth > maxDepth) return []
-  let children: string[]
-  try {
-    children = await emailReaddir(accessor, path, index ?? undefined)
-  } catch {
-    return []
-  }
-  const results: string[] = []
-  for (const child of children) {
-    const trimmed = rstripSlash(child)
-    results.push(trimmed)
-    const childSpec = new PathSpec({
-      virtual: trimmed,
-      directory: trimmed,
-      resolved: false,
-      resourcePath: mountKey(trimmed, mountPrefixOf(path.virtual, path.resourcePath)),
-    })
-    // readdir emits plain names, so directory-ness comes from stat (served
-    // from the index entries the readdir above just wrote).
-    let st: FileStat
-    try {
-      st = await emailStat(accessor, childSpec, index ?? undefined)
-    } catch {
-      continue
-    }
-    if (st.type === FileType.DIRECTORY) {
-      const sub = await walk(accessor, childSpec, index, maxDepth, depth + 1)
-      results.push(...sub)
-    }
-  }
-  return results
-}
-
+// Routed through the shared generic walk instead of a bespoke tree walk:
+// the generic owns every flag (-type, -size, -mtime, -empty, -path) and
+// classifies entries through stat, so an attachment named report.pdf is a
+// file and its like-named parent dir stays a directory. It also merges
+// namespace symlinks, which no email readdir can see.
 async function findCommand(
   accessor: EmailAccessor,
   paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const p0 =
-    resolved[0] ??
-    new PathSpec({
-      virtual: '/',
-      directory: '/',
-      resolved: false,
-      resourcePath: '',
-    })
-  const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
-  const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
-  const maxDepthRaw = typeof opts.flags.maxdepth === 'string' ? opts.flags.maxdepth : null
-  const minDepthRaw = typeof opts.flags.mindepth === 'string' ? opts.flags.mindepth : null
-  const maxDepth = maxDepthRaw !== null ? Number.parseInt(maxDepthRaw, 10) : null
-  const minDepth = minDepthRaw !== null ? Number.parseInt(minDepthRaw, 10) : null
-  if (maxDepthRaw !== null && Number.isNaN(maxDepth))
-    return invalidFindArg(maxDepthRaw, '-maxdepth')
-  if (minDepthRaw !== null && Number.isNaN(minDepth))
-    return invalidFindArg(minDepthRaw, '-mindepth')
-  const sizeFlag = typeof opts.flags.size === 'string' ? opts.flags.size : null
-  const mtimeFlag = typeof opts.flags.mtime === 'string' ? opts.flags.mtime : null
-  const sizeMtimeErr = findSizeMtimeError(sizeFlag, mtimeFlag)
-  if (sizeMtimeErr !== null) return sizeMtimeErr
-
-  const allPaths = await walk(accessor, p0, opts.index, maxDepth, 0)
-  const searchKey = stripSlash(p0.mountPath)
-  const baseDepth = searchKey === '' ? -1 : searchKey.split('/').length - 1
-  const results: string[] = []
-  for (const p of [...allPaths].sort()) {
-    const stripped = p.startsWith(mountPrefixOf(p0.virtual, p0.resourcePath))
-      ? p.slice(mountPrefixOf(p0.virtual, p0.resourcePath).length)
-      : p
-    const trimmed = stripSlash(stripped)
-    const depth = trimmed === '' ? -1 : trimmed.split('/').length - (baseDepth + 2)
-    if (minDepth !== null && depth < minDepth) continue
-    const entryName = p.split('/').pop() ?? p
-    if (nameFlag !== null && !fnmatch(entryName, nameFlag)) continue
-    if (inameFlag !== null && !fnmatch(entryName.toLowerCase(), inameFlag.toLowerCase())) continue
-    results.push(p)
-  }
-  // This command walks email itself instead of going through the shared
-  // generic, so it has to merge namespace links the same way the generic
-  // does or a link under an email mount would be invisible here only.
-  const prefix = mountPrefixOf(p0.virtual, p0.resourcePath)
-  results.push(
-    ...(await linkResults(
-      opts.links ?? null,
-      p0.virtual === '/' ? '/' : rstripSlash(p0.virtual),
-      prefix,
-      searchKey,
-      optionsTree({ name: nameFlag, iname: inameFlag }),
-      minDepth,
-      maxDepth,
-      null,
-      null,
-      null,
-      null,
-      false,
-    )),
+  const idx = opts.index ?? undefined
+  const resolved = await resolveGlob(accessor, paths, idx)
+  const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
+    (await emailReaddir(accessor, spec, idx)).length === 0
+  return findGeneric(
+    resolved,
+    texts,
+    opts,
+    (root, options) =>
+      walkFind(
+        root,
+        {
+          readdir: (spec, i) => emailReaddir(accessor, spec, i),
+          stat: async (spec, i) => {
+            const st = await emailStat(accessor, spec, i)
+            return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+          },
+          links: opts.links ?? null,
+        },
+        options,
+        idx,
+      ),
+    undefined,
+    dirEmpty,
   )
-  results.sort()
-  const out: ByteSource = formatRecords(results)
-  return [out, new IOResult()]
 }
 
 export const EMAIL_FIND = command({

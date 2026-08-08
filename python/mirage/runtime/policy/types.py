@@ -204,7 +204,7 @@ class PolicyContext:
 #     def wants(ctx: PolicyContext) -> bool:
 #         return ctx.builtin and "/secret" not in ctx.line
 #
-#     VfsRuntime(script=wants)
+#     VFSRuntime(script=wants)
 #
 #     # workspace yaml: guard.py next to the config file
 #     runtimes:

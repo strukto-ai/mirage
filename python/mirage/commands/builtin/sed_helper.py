@@ -34,7 +34,7 @@ def _apply_repl(m: "re.Match[str]", repl: str) -> str:
         ch = repl[i]
         if ch == "\\" and i + 1 < len(repl):
             nxt = repl[i + 1]
-            if nxt.isdigit():
+            if nxt in "0123456789":
                 grp = m.group(int(nxt))
                 out.append(grp if grp is not None else "")
             elif nxt == "n":
@@ -59,7 +59,7 @@ def _parse_address(addr: str) -> tuple[str, str] | None:
     if addr[0] == "/":
         end = addr.index("/", 1)
         return ("regex", addr[1:end])
-    if addr.isdigit():
+    if addr.isascii() and addr.isdigit():
         return ("line", addr)
     if addr == "$":
         return ("last", "")
@@ -73,9 +73,9 @@ def _consume_address(rest: str) -> tuple[tuple[str, str] | None, str]:
         end = rest.index("/", 1)
         addr = ("regex", rest[1:end])
         return addr, rest[end + 1:]
-    if rest[0].isdigit() or rest[0] == "$":
+    if rest[0] in "0123456789" or rest[0] == "$":
         num = ""
-        while rest and (rest[0].isdigit() or rest[0] == "$"):
+        while rest and (rest[0] in "0123456789" or rest[0] == "$"):
             num += rest[0]
             rest = rest[1:]
         return _parse_address(num), rest
@@ -175,7 +175,7 @@ def _parse_one_command(rest: str) -> tuple[dict[str, Any], str]:
         while idx < len(rest) and rest[idx] in "0123456789gpiImMe":
             expr_flags += rest[idx]
             idx += 1
-        cm = re.search(r"\d+", expr_flags)
+        cm = re.search(r"[0-9]+", expr_flags)
         if cm and int(cm.group()) == 0:
             raise ValueError(
                 "sed: number option to `s' command may not be zero")
@@ -467,7 +467,7 @@ def _execute_program(text: str,
                 # that occurrence is replaced; with `g` that one and every
                 # later one are. Count matches and decide per match so both
                 # `N` and `Ng` work.
-                digits = re.search(r"\d+", eflags)
+                digits = re.search(r"[0-9]+", eflags)
                 nth = int(digits.group()) if digits else 1
                 global_ = "g" in eflags
                 counter = [0]

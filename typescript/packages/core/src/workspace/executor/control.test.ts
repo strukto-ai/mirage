@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import {

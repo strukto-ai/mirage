@@ -45,12 +45,23 @@ export function stripLineContinuation(command: string): string {
 // an error in bash rather than a quoted backtick.
 export function findUnterminatedBacktick(command: string): string | null {
   let quote: string | null = null
+  let dollarQuote = false
   let opened: number | null = null
+  let lastDollar = -2
   let i = 0
   while (i < command.length) {
     const ch = command[i]
     if (quote === "'") {
-      if (ch === "'") quote = null
+      // $'...' takes backslash escapes, so \' does not close it; a
+      // plain '...' treats every backslash literally.
+      if (dollarQuote && ch === '\\') {
+        i += 2
+        continue
+      }
+      if (ch === "'") {
+        quote = null
+        dollarQuote = false
+      }
       i += 1
       continue
     }
@@ -64,8 +75,11 @@ export function findUnterminatedBacktick(command: string): string | null {
       continue
     }
     if (ch === '`') opened = i
-    else if (ch === "'" && quote === null) quote = "'"
-    else if (ch === '"') quote = quote === '"' ? null : '"'
+    else if (ch === "'" && quote === null) {
+      quote = "'"
+      dollarQuote = lastDollar === i - 1
+    } else if (ch === '"') quote = quote === '"' ? null : '"'
+    else if (ch === '$') lastDollar = i
     i += 1
   }
   return opened !== null ? command.slice(opened) : null

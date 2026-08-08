@@ -1,3 +1,4 @@
+import fnmatch
 import io
 import zipfile
 from collections.abc import Awaitable, Callable
@@ -5,6 +6,9 @@ from collections.abc import Awaitable, Callable
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
+
+# Info-ZIP's wording and spacing, verbatim (two spaces after the colon).
+CAUTION_PREFIX = "caution: filename not matched:  "
 
 
 def _resolve_dest(d: str | PathSpec | None, mount_prefix: str) -> str:
@@ -17,12 +21,48 @@ def _resolve_dest(d: str | PathSpec | None, mount_prefix: str) -> str:
     return dest_raw
 
 
+def _spec_index(name: bytes, members: tuple[bytes, ...]) -> int | None:
+    for i, member in enumerate(members):
+        if fnmatch.fnmatchcase(name, member):
+            return i
+    return None
+
+
+def _select(
+        infos: list[zipfile.ZipInfo],
+        members: tuple[str, ...]) -> tuple[list[zipfile.ZipInfo], list[str]]:
+    if not members:
+        return infos, []
+    # Info-ZIP matches filespecs against the encoded name, so `?` stands
+    # for one byte, not one code point: `?.txt` misses `é.txt` and
+    # `??.txt` hits it.
+    encoded = tuple(member.encode() for member in members)
+    # Info-ZIP walks the archive in order and charges each entry to the
+    # first filespec that matches it, so a spec shadowed by an earlier
+    # one reports "filename not matched" even when its file was printed.
+    hit = [False] * len(members)
+    selected: list[zipfile.ZipInfo] = []
+    for info in infos:
+        idx = _spec_index(info.filename.encode(), encoded)
+        if idx is None:
+            continue
+        hit[idx] = True
+        selected.append(info)
+    unmatched = [m for m, h in zip(members, hit) if not h]
+    return selected, unmatched
+
+
+def _cautions(unmatched: list[str]) -> str:
+    return "".join(CAUTION_PREFIX + member + "\n" for member in unmatched)
+
+
 async def unzip(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
+    members: tuple[str, ...] = (),
     o: bool = False,
     args_l: bool = False,
     d: str | PathSpec | None = None,
@@ -35,23 +75,51 @@ async def unzip(
     archive_path = paths[0]
     data = await read_bytes(archive_path)
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+        selected, unmatched = _select(zf.infolist(), members)
         if args_l:
             lines = ["  Length      Name", "---------  ----"]
-            for info in zf.infolist():
+            for info in selected:
                 lines.append(f"{info.file_size:>9}  {info.filename}")
-            return ("\n".join(lines) + "\n").encode(), IOResult()
+            listing = ("\n".join(lines) + "\n").encode()
+            # GNU -l prints no caution lines and only exits 11 when the
+            # member list matched nothing at all.
+            if members and not selected:
+                return listing, IOResult(exit_code=11)
+            return listing, IOResult()
         if t:
-            bad = zf.testzip()
-            if bad is None:
-                msg = f"No errors detected in {archive_path.virtual}\n"
+            if members:
+                bad = None
+                for info in selected:
+                    if info.is_dir():
+                        continue
+                    try:
+                        zf.read(info)
+                    except zipfile.BadZipFile:
+                        bad = info.filename
+                        break
             else:
-                msg = f"first bad file: {bad}\n"
+                bad = zf.testzip()
+            if bad is not None:
+                return f"first bad file: {bad}\n".encode(), IOResult()
+            if unmatched:
+                # GNU -t reports unmatched members on stdout and counts
+                # them as errors.
+                msg = _cautions(unmatched) + (
+                    f"At least one error was detected in "
+                    f"{archive_path.virtual}.\n")
+                return msg.encode(), IOResult(exit_code=11)
+            msg = f"No errors detected in {archive_path.virtual}\n"
             return msg.encode(), IOResult()
         if p:
             chunks: list[bytes] = []
-            for info in zf.infolist():
+            for info in selected:
                 if not info.is_dir():
-                    chunks.append(zf.read(info.filename))
+                    # Read the selected ZipInfo, not its name: a name
+                    # lookup resolves every duplicate to the last one.
+                    chunks.append(zf.read(info))
+            if unmatched:
+                return b"".join(chunks), IOResult(
+                    exit_code=11, stderr=_cautions(unmatched).encode())
             return b"".join(chunks), IOResult()
         mount_prefix = mount_prefix_of(
             archive_path.virtual, archive_path.resource_path) if isinstance(
@@ -59,10 +127,10 @@ async def unzip(
         dest = _resolve_dest(d, mount_prefix)
         writes: dict[str, ByteSource] = {}
         output_lines: list[str] = []
-        for info in zf.infolist():
+        for info in selected:
             if info.is_dir():
                 continue
-            content = zf.read(info.filename)
+            content = zf.read(info)
             entry_name = info.filename.lstrip("/")
             out_path = dest.rstrip("/") + "/" + entry_name
             parent = out_path.rsplit("/", 1)[0] or "/"
@@ -76,6 +144,10 @@ async def unzip(
                 output_lines.append(f"  inflating: {report_path}")
     output = ("\n".join(output_lines) +
               "\n").encode() if output_lines else None
+    if unmatched:
+        return output, IOResult(exit_code=11,
+                                stderr=_cautions(unmatched).encode(),
+                                writes=writes)
     return output, IOResult(writes=writes)
 
 

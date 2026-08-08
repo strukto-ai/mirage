@@ -53,13 +53,21 @@ def find_unterminated_backtick(command: str) -> str | None:
         str | None: text from the unmatched backtick on, or None.
     """
     quote: str | None = None
+    dollar_quote = False
     opened: int | None = None
+    last_dollar = -2
     i = 0
     while i < len(command):
         ch = command[i]
         if quote == "'":
+            # $'...' takes backslash escapes, so \' does not close it;
+            # a plain '...' treats every backslash literally.
+            if dollar_quote and ch == "\\":
+                i += 2
+                continue
             if ch == "'":
                 quote = None
+                dollar_quote = False
             i += 1
             continue
         if ch == "\\":
@@ -74,8 +82,11 @@ def find_unterminated_backtick(command: str) -> str | None:
             opened = i
         elif ch == "'" and quote is None:
             quote = "'"
+            dollar_quote = last_dollar == i - 1
         elif ch == '"':
             quote = None if quote == '"' else '"'
+        elif ch == "$":
+            last_dollar = i
         i += 1
     return command[opened:] if opened is not None else None
 

@@ -21,8 +21,10 @@ import { homeDir } from '../session/shell_dirs.ts'
 import { shlexSplit } from '../../utils/shlex.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { ArithError } from '../../shell/errors.ts'
+import { decodeAnsiC } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
+import { expandBraces, lookupVar } from './variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 export type ExecuteFn = (
   command: string,
@@ -304,15 +306,34 @@ export async function expandNode(
 
   if (ntype === NT.CONCATENATION) {
     const parts: string[] = []
-    for (const child of tsNode.children) {
+    const children = tsNode.children
+    for (let position = 0; position < children.length; position += 1) {
+      const child = children[position]
+      if (child === undefined) continue
+      // A $"..." in a concatenation arrives as an anonymous `$` token
+      // followed by the string node; the `$` is the translation
+      // marker, not text. A bare trailing `$` (a$) has no string after
+      // it and stays literal.
+      if (child.type === '$' && children[position + 1]?.type === NT.STRING) {
+        continue
+      }
       parts.push(await expandNode(child, session, executeFn, callStack))
     }
     return parts.join('')
   }
 
   if (ntype === NT.STRING) {
+    // The newline bytes of a multi-line string belong to no child token,
+    // so each row step re-emits them; the quote tokens anchor the count,
+    // which keeps leading, trailing and blank lines alive ("a\n\nb" is
+    // five bytes in bash).
     const parts: string[] = []
+    let prevEndRow: number | null = null
     for (const child of tsNode.children) {
+      if (prevEndRow !== null) {
+        parts.push('\n'.repeat(Math.max(0, (child.startPosition?.row ?? 0) - prevEndRow)))
+      }
+      prevEndRow = child.endPosition?.row ?? 0
       if (child.type === NT.DQUOTE) continue
       parts.push(await expandNode(child, session, executeFn, callStack))
     }
@@ -334,6 +355,23 @@ export async function expandNode(
   if (ntype === NT.RAW_STRING) {
     const raw = tsNode.text
     return raw.slice(1, -1)
+  }
+
+  if (ntype === NT.ANSI_C_STRING) {
+    const raw = tsNode.text
+    return decodeAnsiC(raw.slice(2, -1))
+  }
+
+  if (ntype === NT.TRANSLATED_STRING) {
+    // $"..." asks for a locale translation; no message catalog is ever
+    // loaded, so the translation is the identity and the word keeps
+    // plain double-quote semantics.
+    for (const child of tsNode.namedChildren) {
+      if (child.type === NT.STRING) {
+        return expandNode(child, session, executeFn, callStack)
+      }
+    }
+    return ''
   }
 
   if (ntype === NT.VARIABLE_ASSIGNMENT) {

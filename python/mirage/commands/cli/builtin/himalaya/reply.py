@@ -39,4 +39,4 @@ async def reply(
                        if fl.as_str("posting_style") == "bottom" else "top"),
         quote_headline=fl.as_str("quote_headline") or "",
     )
-    return await route(inv.config, fl, inv.stdin, source)
+    return await route(inv.config, fl, inv.stdin, source, inv.ops)

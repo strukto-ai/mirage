@@ -26,7 +26,8 @@ import type { Session } from '../session/session.ts'
 import { classifyBarePath } from './classify/index.ts'
 import { expandNode, unescapeHeredoc } from './node.ts'
 import type { ExecuteFn } from './node.ts'
-import { lookupVar, type TSNodeLike } from './variable.ts'
+import { lookupVar } from './variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 // tree-sitter-bash misses bare `$_name` refs preceded by a non-space
 // character inside heredoc bodies (they stay literal text instead of

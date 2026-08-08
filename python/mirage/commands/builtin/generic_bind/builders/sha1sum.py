@@ -37,6 +37,7 @@ async def sha1sum(
     w: bool = False,
     z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    cwd: PathSpec | str = "/",
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["sha1sum"])
@@ -57,7 +58,8 @@ async def sha1sum(
                         ignore_missing=fl.as_bool("ignore_missing"),
                         status=fl.as_bool("status"),
                         quiet=fl.as_bool("quiet"),
-                        warn=w or fl.as_bool("warn")), err)
+                        warn=w or fl.as_bool("warn"),
+                        cwd=cwd), err)
 
 
 BUILDER = Builder('sha1sum', sha1sum, None, False, None, read=True)

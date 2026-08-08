@@ -24,26 +24,16 @@ import {
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
-import { NodeType as NT } from '../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
+import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
+import { escapeGlob } from '../../utils/glob_walk.ts'
 
 // $$ reports the host process id where one exists (Node); browsers have
 // no process, so a fixed positive placeholder keeps the expansion usable.
 const REALM_PID: number = (globalThis as { process?: { pid?: number } }).process?.pid ?? 1
-
-export interface TSNodeLike {
-  type: string
-  text: string
-  children: TSNodeLike[]
-  namedChildren: TSNodeLike[]
-  parent?: TSNodeLike | null
-  isNamed?: boolean
-  isMissing?: boolean
-  startIndex?: number
-  endIndex?: number
-}
 
 export type ExpandChild = (node: TSNodeLike) => Promise<string>
 
@@ -93,6 +83,15 @@ const MULTIWORD_AT_OPS: ReadonlySet<string> = new Set([
 ])
 
 const LITERAL_ARG_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, 'regex'])
+
+// Quote-carrying operand nodes: in pattern position their value matches
+// literally, exactly as a quoted case pattern does.
+const QUOTED_ARG_TYPES: ReadonlySet<string> = new Set([
+  NT.STRING,
+  NT.RAW_STRING,
+  NT.ANSI_C_STRING,
+  NT.TRANSLATED_STRING,
+])
 
 // Operators that handle unset themselves, so `set -u` must not fire
 // on the lookup that feeds them.
@@ -241,35 +240,121 @@ function parseBraces(node: TSNodeLike): BraceParse {
   return { varName, subscript, lengthOp, indirectOp, op, groups }
 }
 
-// Pattern operands (${f%$ext}) arrive as opaque `regex` nodes whose
-// $-references have no child nodes; resolve them textually while
-// keeping every other character (glob syntax) literal.
-function expandDollarRefs(text: string, session: Session, callStack: CallStack | null): string {
-  if (!text.includes('$')) return text
+// Index of the next unescaped `quote`, -1 when it never closes.
+function escapedFind(text: string, start: number, quote: string): number {
+  let i = start
+  const n = text.length
+  while (i < n) {
+    if (text[i] === '\\' && i + 1 < n) {
+      i += 2
+      continue
+    }
+    if (text[i] === quote) return i
+    i += 1
+  }
+  return -1
+}
+
+// A $name/${name} reference starting after the $: the name and the index
+// past it, or null when the $ starts no reference and stays literal.
+function refEnd(text: string, start: number): [string, number] | null {
+  const n = text.length
+  let j = start
+  const braced = text[j] === '{'
+  if (braced) j += 1
+  const from = j
+  while (j < n && /[A-Za-z0-9_]/.test(text[j] ?? '')) j += 1
+  const name = text.slice(from, j)
+  if (name === '') return null
+  if (braced) {
+    if (j >= n || text[j] !== '}') return null
+    j += 1
+  }
+  return [name, j]
+}
+
+// A double-quoted pattern segment: everything in it is literal.
+function dquotedPattern(inner: string, session: Session, callStack: CallStack | null): string {
+  const out: string[] = []
+  let i = 0
+  const n = inner.length
+  while (i < n) {
+    const ch = inner[i] ?? ''
+    if (ch === '\\' && i + 1 < n && '$`"\\'.includes(inner[i + 1] ?? '')) {
+      out.push(escapeGlob(inner[i + 1] ?? ''))
+      i += 2
+      continue
+    }
+    if (ch === '$' && i + 1 < n) {
+      const ref = refEnd(inner, i + 1)
+      if (ref !== null) {
+        out.push(escapeGlob(lookupVar(ref[0], session, callStack)))
+        i = ref[1]
+        continue
+      }
+    }
+    out.push(escapeGlob(ch))
+    i += 1
+  }
+  return out.join('')
+}
+
+// Render an opaque pattern token with bash quoting semantics.
+// Pattern operands (${f%$ext}, ${v#x"a*"}) arrive as opaque `regex` nodes
+// tree-sitter does not parse further, but bash still honors quoting inside
+// them: quoted segments (single, double, or ANSI-C) match literally, a
+// backslash binds the next character, an unquoted $-reference splices a
+// live pattern while a double-quoted one splices literal text, and every
+// other character - glob syntax included - stays live. Literal text is
+// spelled in one-character classes because fnmatch has no escape character.
+function patternText(text: string, session: Session, callStack: CallStack | null): string {
+  if (!text.includes('$') && !text.includes('\\') && !text.includes("'") && !text.includes('"')) {
+    return text
+  }
   const out: string[] = []
   let i = 0
   const n = text.length
   while (i < n) {
     const ch = text[i] ?? ''
-    if (ch !== '$' || i + 1 >= n) {
-      out.push(ch)
-      i += 1
+    if (ch === '\\' && i + 1 < n) {
+      out.push(escapeGlob(text[i + 1] ?? ''))
+      i += 2
       continue
     }
-    let j = i + 1
-    const braced = text[j] === '{'
-    if (braced) j += 1
-    const start = j
-    while (j < n && /[A-Za-z0-9_]/.test(text[j] ?? '')) j += 1
-    const name = text.slice(start, j)
-    if (name === '' || (braced && (j >= n || text[j] !== '}'))) {
-      out.push(ch)
-      i += 1
-      continue
+    if (ch === "'") {
+      const end = text.indexOf("'", i + 1)
+      if (end !== -1) {
+        out.push(escapeGlob(text.slice(i + 1, end)))
+        i = end + 1
+        continue
+      }
     }
-    if (braced) j += 1
-    out.push(lookupVar(name, session, callStack))
-    i = j
+    if (ch === '"') {
+      const end = escapedFind(text, i + 1, '"')
+      if (end !== -1) {
+        out.push(dquotedPattern(text.slice(i + 1, end), session, callStack))
+        i = end + 1
+        continue
+      }
+    }
+    if (ch === '$' && i + 1 < n) {
+      if (text[i + 1] === "'") {
+        const end = escapedFind(text, i + 2, "'")
+        if (end !== -1) {
+          out.push(escapeGlob(decodeAnsiC(text.slice(i + 2, end))))
+          i = end + 1
+          continue
+        }
+      }
+      const ref = refEnd(text, i + 1)
+      if (ref !== null) {
+        out.push(lookupVar(ref[0], session, callStack))
+        i = ref[1]
+        continue
+      }
+    }
+    out.push(ch)
+    i += 1
   }
   return out.join('')
 }
@@ -284,8 +369,14 @@ async function expandOperand(
   if (node.type === NT.CONCATENATION) {
     return expandGroup(node.children, expandChild, patternMode, session, callStack)
   }
+  if (patternMode && QUOTED_ARG_TYPES.has(node.type)) {
+    // Quoted pattern text matches literally, the same rule case
+    // patterns follow: the value, inner expansions included, is
+    // escaped so its glob characters match themselves.
+    return escapeGlob(await expandChild(node))
+  }
   if (patternMode && LITERAL_ARG_TYPES.has(node.type)) {
-    return expandDollarRefs(node.text, session, callStack)
+    return patternText(node.text, session, callStack)
   }
   return expandChild(node)
 }

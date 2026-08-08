@@ -12,7 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource, type FlagView } from '@struktoai/mirage-core'
+import { createHash } from 'node:crypto'
+
+import {
+  assertHeaderValue,
+  encodeBase64Lines,
+  encodeMimeText as encodeText,
+  foldAddressList,
+  foldContentDisposition,
+  foldUnstructured,
+  materialize,
+  type ByteSource,
+  type FlagView,
+} from '@struktoai/mirage-core'
 import type { FetchedMessage } from '../../../../core/email/_client.ts'
 
 type SourceMode = 'reply' | 'forward'
@@ -20,6 +32,13 @@ export type PostingStyle = 'top' | 'bottom'
 
 const PREFIXES: Record<SourceMode, string> = { reply: 'Re: ', forward: 'Fwd: ' }
 const ENC = new TextEncoder()
+
+/** One file attached to an outgoing message. */
+export interface Attachment {
+  filename: string
+  contentType: string
+  data: Uint8Array
+}
 
 export interface Compose {
   sender: string
@@ -29,6 +48,26 @@ export interface Compose {
   subject: string | null
   body: string
   signature: string | null
+  attachments?: readonly Attachment[]
+}
+
+/**
+ * A deterministic multipart boundary for the message's content.
+ *
+ * A random boundary would break byte-for-byte parity with the python
+ * builder and make the no-send stdout non-reproducible. Hashing the
+ * content gives a boundary that cannot occur inside it (the content
+ * would have to contain its own hash) while staying stable across runs
+ * and languages.
+ */
+export function mixedBoundary(body: string, attachments: readonly Attachment[]): string {
+  const digest = createHash('sha256').update(Buffer.from(body, 'utf8'))
+  for (const attachment of attachments) {
+    digest.update(Buffer.from(attachment.filename, 'utf8'))
+    digest.update(Buffer.from(attachment.contentType, 'utf8'))
+    digest.update(attachment.data)
+  }
+  return digest.digest('hex').slice(0, 32)
 }
 
 export interface Source {
@@ -107,35 +146,22 @@ export function composeBody(
   return body
 }
 
-function isAscii(value: string): boolean {
-  for (const char of value) {
-    if ((char.codePointAt(0) ?? 0) > 127) return false
-  }
-  return true
-}
-
-function encodeHeader(value: string): string {
-  if (isAscii(value)) return value
-  return `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`
-}
-
-function wrapBase64(value: string): string {
-  return (value.match(/.{1,76}/g) ?? []).join('\r\n')
-}
-
 /**
  * Assembles an RFC 5322 message from flags and an optional source.
  *
  * Hand-built rather than routed through nodemailer's composer: the raw
  * bytes are the command's output when --send is absent, so they must
- * exist before any transport does.
+ * exist before any transport does. Every header and the body ride the
+ * mime module's ports of python's serializers, so the output stays
+ * byte-identical to EmailMessage.as_bytes(policy=SMTP) - header order,
+ * encoded words, folding, transfer encoding and all (pinned in
+ * integ/fixtures/himalaya/mime_parity.json).
  */
 export function build(compose: Compose, source: Source | null = null): Uint8Array {
   let recipients = [...compose.to]
   let subject = compose.subject
   let sourceText = ''
-  const headers: [string, string][] = [['From', compose.sender]]
-  const threading: [string, string][] = []
+  const headLines: string[] = [foldAddressList('From', [compose.sender])]
   if (source !== null) {
     const original = source.message
     const prefix = PREFIXES[source.mode]
@@ -146,17 +172,33 @@ export function build(compose: Compose, source: Source | null = null): Uint8Arra
       recipients = replyRecipients(original)
     }
     if (original.message_id !== '') {
-      if (source.mode === 'reply') threading.push(['In-Reply-To', original.message_id])
-      threading.push(['References', [...original.references, original.message_id].join(' ')])
+      // Threading headers land before To, matching python's insertion
+      // order in the reference builder.
+      if (source.mode === 'reply') {
+        headLines.push(foldUnstructured('In-Reply-To', original.message_id))
+      }
+      headLines.push(
+        foldUnstructured('References', [...original.references, original.message_id].join(' ')),
+      )
     }
     sourceText = original.body_text
   }
   if (recipients.length === 0) throw new Error('no recipient: pass --to')
-  headers.push(['To', recipients.join(', ')])
-  if (compose.cc.length > 0) headers.push(['Cc', compose.cc.join(', ')])
-  if (compose.bcc.length > 0) headers.push(['Bcc', compose.bcc.join(', ')])
-  headers.push(...threading)
-  headers.push(['Subject', encodeHeader(subject ?? '')])
+  // EmailMessage refuses these outright (header injection), so the
+  // reference implementation never serializes them.
+  for (const value of [
+    compose.sender,
+    ...recipients,
+    ...compose.cc,
+    ...compose.bcc,
+    subject ?? '',
+  ]) {
+    assertHeaderValue(value)
+  }
+  headLines.push(foldAddressList('To', recipients))
+  if (compose.cc.length > 0) headLines.push(foldAddressList('Cc', compose.cc))
+  if (compose.bcc.length > 0) headLines.push(foldAddressList('Bcc', compose.bcc))
+  headLines.push(foldUnstructured('Subject', subject ?? ''))
   const style: PostingStyle = source !== null ? source.postingStyle : 'top'
   const headline = source !== null ? source.quoteHeadline : ''
   const body = composeBody(
@@ -165,19 +207,42 @@ export function build(compose: Compose, source: Source | null = null): Uint8Arra
     compose.signature ?? '',
     style,
   )
-  // Header order matches python's EmailMessage.set_content so the two
-  // implementations serialize the same message byte for byte.
-  const ascii = isAscii(body)
-  headers.push(['Content-Type', 'text/plain; charset="utf-8"'])
-  headers.push(['Content-Transfer-Encoding', ascii ? '7bit' : 'base64'])
-  headers.push(['MIME-Version', '1.0'])
   // SMTP is a CRLF protocol and these bytes go straight onto the wire
-  // (or into `message send`), so the body cannot stay LF-only.
-  const rendered = ascii
-    ? body.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n')
-    : wrapBase64(Buffer.from(body, 'utf8').toString('base64'))
-  const head = headers.map(([key, value]) => `${key}: ${value}`).join('\r\n')
-  return ENC.encode(`${head}\r\n\r\n${rendered}\r\n`)
+  // (or into `message send`), so the LF-built payload cannot stay
+  // LF-only.
+  const { cte, payload } = encodeText(body)
+  const rendered = payload.replaceAll('\n', '\r\n')
+  const attachments = compose.attachments ?? []
+  if (attachments.length === 0) {
+    headLines.push('Content-Type: text/plain; charset="utf-8"')
+    headLines.push(`Content-Transfer-Encoding: ${cte}`)
+    headLines.push('MIME-Version: 1.0')
+    return ENC.encode(`${headLines.join('\r\n')}\r\n\r\n${rendered}`)
+  }
+  // Multipart layout matches EmailMessage.add_attachment: MIME-Version
+  // moves above the multipart Content-Type at the top, the body part
+  // keeps its single-part headers, and each attachment part carries its
+  // own MIME-Version after Content-Disposition.
+  const boundary = mixedBoundary(body, attachments)
+  headLines.push('MIME-Version: 1.0')
+  headLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`)
+  const parts = [
+    `Content-Type: text/plain; charset="utf-8"\r\nContent-Transfer-Encoding: ${cte}\r\n\r\n${rendered}`,
+  ]
+  for (const attachment of attachments) {
+    const attachmentHead =
+      `Content-Type: ${attachment.contentType}\r\n` +
+      `Content-Transfer-Encoding: base64\r\n` +
+      `${foldContentDisposition(attachment.filename)}\r\n` +
+      `MIME-Version: 1.0`
+    // The base64 payload is line-terminated (EmailMessage semantics),
+    // so empty data serializes as zero lines, not one blank line.
+    const encoded = encodeBase64Lines(attachment.data).replaceAll('\n', '\r\n')
+    parts.push(`${attachmentHead}\r\n\r\n${encoded}`)
+  }
+  const head = headLines.join('\r\n')
+  const joined = parts.join(`\r\n--${boundary}\r\n`)
+  return ENC.encode(`${head}\r\n\r\n--${boundary}\r\n${joined}\r\n--${boundary}--\r\n`)
 }
 
 /** Resolves the body from --body, falling back to piped stdin. */

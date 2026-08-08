@@ -27,12 +27,11 @@ vi.mock('./stat.ts', async () => {
 })
 
 import { GmailAccessor } from '../../accessor/gmail.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { walkFind } from '../generic/find.ts'
-import { isDirName } from './readdir.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
 
@@ -47,7 +46,6 @@ async function find(
     {
       readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
       stat: (spec, idx) => statMod.stat(accessor, spec, idx),
-      isDirName: (child) => isDirName(child),
     },
     options,
     index,
@@ -77,8 +75,11 @@ function mockTree(tree: Record<string, string[]>): void {
 const TREE: Record<string, string[]> = {
   '/': ['/INBOX'],
   '/INBOX': ['/INBOX/2026-06-01'],
-  '/INBOX/2026-06-01': ['/INBOX/2026-06-01/Hello__m1.gmail.json'],
+  '/INBOX/2026-06-01': ['/INBOX/2026-06-01/Hello__m1.gmail.json', '/INBOX/2026-06-01/Hello__m1'],
+  '/INBOX/2026-06-01/Hello__m1': ['/INBOX/2026-06-01/Hello__m1/report.pdf'],
 }
+
+const DIRS = new Set(['/INBOX', '/INBOX/2026-06-01', '/INBOX/2026-06-01/Hello__m1'])
 
 const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
@@ -87,20 +88,35 @@ describe('gmail core find', () => {
     vi.mocked(readdirMod.readdir).mockReset()
     vi.mocked(statMod.stat).mockReset()
     // walkFind stats the start path to decide whether to emit it; no
-    // fixture entry for '/' keeps these walks root-less.
-    vi.mocked(statMod.stat).mockImplementation((_accessor, spec) =>
-      Promise.reject(enoent(spec.virtual)),
-    )
+    // fixture entry for '/' keeps these walks root-less. Children classify
+    // through stat, which is what lets an attachment named report.pdf be a
+    // file while its like-named parent dir stays a directory.
+    vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
+      if (DIRS.has(spec.virtual)) {
+        const name = spec.virtual.split('/').pop() ?? ''
+        return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
+      }
+      if (spec.virtual === '/INBOX/2026-06-01/Hello__m1/report.pdf') {
+        return Promise.resolve(new FileStat({ name: 'report.pdf', size: 3, type: FileType.PDF }))
+      }
+      if (spec.virtual === '/INBOX/2026-06-01/Hello__m1.gmail.json') {
+        return Promise.resolve(
+          new FileStat({ name: 'Hello__m1.gmail.json', size: 5, type: FileType.JSON }),
+        )
+      }
+      return Promise.reject(enoent(spec.virtual))
+    })
     mockTree(TREE)
   })
 
-  it('classifies .gmail.json entries as files and label/date dirs without stat', async () => {
+  it('classifies messages and attachments as files, attachment dirs as dirs', async () => {
     const files = await find(makeAccessor(), ROOT, { type: 'f' })
-    expect(files).toEqual(['/INBOX/2026-06-01/Hello__m1.gmail.json'])
+    expect(files).toEqual([
+      '/INBOX/2026-06-01/Hello__m1.gmail.json',
+      '/INBOX/2026-06-01/Hello__m1/report.pdf',
+    ])
     const dirs = await find(makeAccessor(), ROOT, { type: 'd' })
-    expect(dirs).toEqual(['/INBOX', '/INBOX/2026-06-01'])
-    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
-    expect([...new Set(statted)]).toEqual(['/'])
+    expect(dirs).toEqual(['/INBOX', '/INBOX/2026-06-01', '/INBOX/2026-06-01/Hello__m1'])
   })
 
   it('matches message names with globs', async () => {
@@ -115,7 +131,9 @@ describe('gmail core find', () => {
       '/INBOX/2026-06-01',
     ])
     expect(await find(makeAccessor(), ROOT, { minDepth: 3 })).toEqual([
+      '/INBOX/2026-06-01/Hello__m1',
       '/INBOX/2026-06-01/Hello__m1.gmail.json',
+      '/INBOX/2026-06-01/Hello__m1/report.pdf',
     ])
   })
 })
