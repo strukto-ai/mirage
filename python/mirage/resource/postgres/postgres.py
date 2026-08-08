@@ -30,6 +30,9 @@ class PostgresResource(BaseResource):
     accessor: PostgresAccessor
     name: str = ResourceName.POSTGRES
     caches_reads: bool = False
+    # A live store: every readdir must hit the backend, so the index is
+    # not reused across commands. Mirrors the TypeScript resource.
+    index_ttl: float = 0
     PROMPT: str = PROMPT
 
     def __init__(self, config: PostgresConfig) -> None:

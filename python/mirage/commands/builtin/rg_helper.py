@@ -159,7 +159,7 @@ async def rg_folder(
                     results.append(f"{entry}:{pfx}")
             if count_only and file_count > 0:
                 results.append(f"{entry}:{file_count}")
-        except Exception as exc:
+        except WALK_ERRORS as exc:
             if warnings is not None:
                 warnings.append(f"rg: {entry}: {exc}")
 
@@ -210,7 +210,7 @@ async def rg_full(
         try:
             data = (await
                     read_bytes_fn(path)).decode(errors="replace").splitlines()
-        except Exception as exc:
+        except WALK_ERRORS as exc:
             if warnings is not None:
                 warnings.append(f"rg: {path}: {exc}")
             return []
@@ -328,7 +328,7 @@ async def rg_full(
                     results.append(
                         str(file_count
                             ) if no_filename else f"{entry}:{file_count}")
-            except Exception as exc:
+            except WALK_ERRORS as exc:
                 if warnings is not None:
                     warnings.append(f"rg: {entry}: {exc}")
                 continue

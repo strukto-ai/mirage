@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DifyAccessor } from '../../../accessor/dify.ts'
+import { statLight } from '../../../core/dify/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DIFY_FIND } from './find.ts'
 import { DIFY_IO } from './io.ts'
@@ -22,9 +24,14 @@ import { DIFY_SEARCH } from './search.ts'
 
 const DIFY_OVERRIDES = new Set(['find', 'search'])
 
+// ls stats every listed entry, so it keeps the index-only stat instead of
+// paying one document-detail call per row (mirrors _DIFY_LIGHT_STAT_OPS).
+const DIFY_LIGHT_STAT_OPS: CommandIO<DifyAccessor> = { ...DIFY_IO, stat: statLight }
+
 export const DIFY_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DifyAccessor>(ResourceName.DIFY, DIFY_IO, {
     overrides: DIFY_OVERRIDES,
+    opsOverrides: { ls: DIFY_LIGHT_STAT_OPS },
   }),
   ...DIFY_FIND,
   ...DIFY_SEARCH,

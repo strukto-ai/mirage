@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "split_bounds_suffix_length_overflow",
+      "seq": 910051,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2splita && printf 'ab' > /data/t2splita/in && split -a 18446744073709551616 /data/t2splita/in /data/t2splita/x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: invalid suffix length: '18446744073709551616': Value too large for defined data type\n"
+      },
+      "flags": ["a"]
+    },
+    {
+      "id": "split_bounds_byte_count_saturates",
+      "seq": 910052,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2splity && printf 'hello' > /data/t2splity/in && split -b 1Y /data/t2splity/in /data/t2splity/x- && cat /data/t2splity/x-aa",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello",
+        "stderr": ""
+      },
+      "flags": ["b"]
+    },
+    {
+      "id": "split_bounds_numeric_suffix_auto_growth",
+      "seq": 910055,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2sgrow && printf 'qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq' > /data/t2sgrow/in && split -b 1 -d /data/t2sgrow/in /data/t2sgrow/x- && cat /data/t2sgrow/x-89 /data/t2sgrow/x-9000 && ls /data/t2sgrow | grep -c '^x-'",
+      "expect": {
+        "exit": 0,
+        "stdout": "qq91\n",
+        "stderr": ""
+      },
+      "flags": ["b", "d"]
+    },
+    {
+      "id": "split_bounds_explicit_start_exhausts",
+      "seq": 910056,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2sex && printf 'qqq' > /data/t2sex/in && split -b 1 --numeric-suffixes=98 /data/t2sex/in /data/t2sex/x-",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: output file suffixes exhausted\n"
+      },
+      "flags": ["b", "numeric-suffixes"]
+    }
+  ]
+}

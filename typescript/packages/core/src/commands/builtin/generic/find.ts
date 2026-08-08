@@ -507,7 +507,8 @@ export async function findGeneric(
     withLinks.sort()
     matches.push(...respellRaw(withLinks, root.virtual, root.rawPath))
   }
-  matches.sort()
+  // Start points print in operand order (GNU); each root's rows were
+  // sorted above, and a global sort here would interleave them.
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
   if (missing.length > 0) {
     return [out, new IOResult({ stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 })]

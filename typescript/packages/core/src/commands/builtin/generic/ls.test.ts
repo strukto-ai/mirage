@@ -386,7 +386,12 @@ describe('link operands on backends with different readdir shapes', () => {
     targetStat: () => Promise.resolve(null),
   }
 
-  const missing = (p: PathSpec): Promise<never> => Promise.reject(new Error(`ENOENT: ${p.virtual}`))
+  const missing = (p: PathSpec): Promise<never> => {
+    // Stamped like a real backend's ENOENT; bare errors now propagate.
+    const err = new Error(p.virtual) as Error & { code: string }
+    err.code = 'ENOENT'
+    return Promise.reject(err)
+  }
 
   it('reports the link when readdir throws', async () => {
     const [out] = (await lsGeneric(
@@ -408,5 +413,46 @@ describe('link operands on backends with different readdir shapes', () => {
       missing,
     )) as [Uint8Array, unknown]
     expect(new TextDecoder().decode(out)).toContain('flink -> /data/symx/real.txt')
+  })
+})
+
+describe('honest per-entry errors', () => {
+  function enoent(p: string): Error {
+    const e = new Error(p) as Error & { code: string }
+    e.code = 'ENOENT'
+    return e
+  }
+
+  function statFailingEntries(err: Error) {
+    return (p: PathSpec): Promise<FileStat> => (key(p) === '/' ? stat(p) : Promise.reject(err))
+  }
+
+  it('warns per entry and ratchets the exit code on a stamped fs error', async () => {
+    const result = await lsGeneric(
+      [spec('/')],
+      opts({}),
+      readdir,
+      statFailingEntries(enoent('/apple.txt')),
+    )
+    expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
+    const stderr = DEC.decode(result?.[1].stderr as Uint8Array)
+    expect(stderr).toContain("ls: cannot access '/apple.txt': No such file or directory")
+  })
+
+  it('propagates an unstamped backend error instead of laundering it', async () => {
+    // An error with no POSIX code (auth failure, transport prose) must not
+    // become a GNU-shaped 'cannot access' line.
+    const raw = new Error('S3 GET apple.txt failed: 403 Forbidden')
+    await expect(
+      lsGeneric([spec('/')], opts({}), readdir, statFailingEntries(raw)),
+    ).rejects.toThrow('403 Forbidden')
+  })
+
+  it('-d propagates an unstamped stat error', async () => {
+    const raw = new Error('rate limited')
+    const failing = (): Promise<FileStat> => Promise.reject(raw)
+    await expect(lsGeneric([spec('/x')], opts({ d: true }), readdir, failing)).rejects.toThrow(
+      'rate limited',
+    )
   })
 })

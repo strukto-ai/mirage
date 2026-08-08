@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   Mem0Resource,
@@ -30,19 +33,19 @@ import { buildResource, knownResources, register } from './registry.ts'
 // custom resources and legitimately adds names with no ResourceName.
 const BUILTIN_RESOURCES = knownResources()
 
+// The committed dump scripts/check_spec_parity.py diffs against Python. This
+// used to be nine hand-written `toContain` spot-checks, which could not
+// notice that chroma/dify/lancedb/qdrant had no factory at all.
+const SPEC_RESOURCES = resolve(
+  fileURLToPath(import.meta.url),
+  '../../../../../../spec/typescript/node/resources.json',
+)
+
 describe('node resource registry', () => {
-  it('lists known resources sorted', () => {
-    const names = knownResources()
-    expect(names).toContain('ram')
-    expect(names).toContain('disk')
-    expect(names).toContain('redis')
-    expect(names).toContain('s3')
-    expect(names).toContain('postgres')
-    expect(names).toContain('mongodb')
-    expect(names).toContain('onedrive')
-    expect(names).toContain('sharepoint')
-    expect(names).toContain('mem0')
-    expect(names).toEqual([...names].sort())
+  it('matches the committed spec manifest, sorted', () => {
+    const manifest = JSON.parse(readFileSync(SPEC_RESOURCES, 'utf8')) as { registry: string[] }
+    expect(BUILTIN_RESOURCES).toEqual([...manifest.registry].sort())
+    expect(BUILTIN_RESOURCES).toEqual([...BUILTIN_RESOURCES].sort())
   })
 
   // The four Drive-family resources used to redeclare core's GoogleConfig

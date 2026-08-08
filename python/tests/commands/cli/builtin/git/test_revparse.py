@@ -40,6 +40,15 @@ def test_numeric_suffix_is_read():
     assert [(s.first_parent, s.count) for s in steps] == [(True, 3)]
 
 
+def test_unicode_digit_suffix_is_not_a_count():
+    # python's \d and int() both read '٣' as 3, which TypeScript's [0-9]
+    # scan never consumes — the ancestry count stops at ASCII digits in
+    # both languages.
+    _base, steps = split_revision("main~٣")
+    assert [(s.first_parent, s.count) for s in steps] == [(True, 1),
+                                                          (False, 1)]
+
+
 def test_parent_suffix_is_distinguished_from_ancestor():
     _base, steps = split_revision("HEAD^2")
     assert [(s.first_parent, s.count) for s in steps] == [(False, 2)]

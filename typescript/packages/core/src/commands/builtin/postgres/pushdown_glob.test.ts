@@ -119,7 +119,10 @@ describe('postgres grep push-down and globs', () => {
 
     const result = await cmd.fn(makeAccessor(), [globPath()], ['ada'], {
       stdin: null,
-      flags: { l: true },
+      // `args_l`, not a bare `l`: flagKwargName maps the ambiguous short
+      // `-l` onto `args_l` in both languages, so the dispatcher never emits
+      // `l` and a spec-bound FlagView refuses to read one.
+      flags: { args_l: true },
       filetypeFns: null,
       cwd: '/',
       resource: { kind: 'postgres' } as never,

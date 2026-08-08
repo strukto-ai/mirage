@@ -16,16 +16,10 @@ import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
+import { imageTypeForExtension } from '../../utils/filetype.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { read } from './read.ts'
 import { ScopeLevel, detectScope } from './scope.ts'
-
-const IMAGE_TYPES: Record<string, FileType> = {
-  png: FileType.IMAGE_PNG,
-  jpg: FileType.IMAGE_JPEG,
-  jpeg: FileType.IMAGE_JPEG,
-  gif: FileType.IMAGE_GIF,
-}
 
 function nameOf(spec: PathSpec): string {
   const stripped = rstripSlash(spec.virtual)
@@ -52,8 +46,7 @@ export async function stat(
     return new FileStat({ name: nameOf(spec), type: FileType.DIRECTORY })
   }
 
-  const fileType =
-    scope.kind === 'blob' ? (IMAGE_TYPES[config.blobExt] ?? FileType.BINARY) : FileType.TEXT
+  const fileType = scope.kind === 'blob' ? imageTypeForExtension(config.blobExt) : FileType.TEXT
   // The row-dir readdir seeds exact rendered sizes; a cold index falls back
   // to rendering the row, so the size is exact either way.
   if (index !== undefined) {

@@ -34,6 +34,9 @@ class LanceDBResource(BaseResource):
     # readdir seeds exact card sizes from the widened select and stat falls
     # back to rendering the row itself, so sizes are exact either way.
     SIZES_ALWAYS_KNOWN: bool = True
+    # A live store: every readdir must hit the backend, so the index is
+    # not reused across commands. Mirrors the TypeScript resource.
+    index_ttl: float = 0
     PROMPT: str = PROMPT
 
     def __init__(self, config: LanceDBConfig) -> None:

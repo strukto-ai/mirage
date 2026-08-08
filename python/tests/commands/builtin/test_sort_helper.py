@@ -77,6 +77,14 @@ class TestParseKeydef:
         with pytest.raises(SortKeyError):
             parse_keydef("2x", _G, False)
 
+    def test_unicode_digit_field_raises(self):
+        # python's \d also matches Unicode digits (int('١') is 1), which
+        # JS /\d/ and GNU's C-locale parsers reject.
+        with pytest.raises(SortKeyError):
+            parse_keydef("١", _G, False)
+        with pytest.raises(SortKeyError):
+            parse_keydef("2.٣", _G, False)
+
 
 class TestExtract:
 

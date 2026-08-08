@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import TypeVar, overload
+
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.ram import COMMANDS
 from mirage.ops.ram import OPS as RAM_OPS
@@ -21,35 +23,96 @@ from mirage.types import ResourceName
 
 _DEV_NAMES = frozenset({"null", "zero"})
 _ZERO_CHUNK_SIZE = 1 << 20
+_POP_MISSING = object()
+_T = TypeVar("_T")
 
 
 class _DevFiles(dict[str, bytes]):
+    """Real backing store plus a synthetic /null, /zero overlay.
+
+    The synthetic device names read as empty/zeros and swallow writes until
+    they are deleted (GNU: ``rm /dev/null`` succeeds and the path is gone).
+    A deleted name is tombstoned; the next write stores real bytes, which
+    is GNU's rm-then-redirect recreation as a regular file.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tombstones: set[str] = set()
+
+    def _synthetic_active(self, name: str) -> bool:
+        return (name in _DEV_NAMES and name not in self._tombstones
+                and not dict.__contains__(self, "/" + name))
+
+    def _synthetic_names(self) -> list[str]:
+        return [
+            "/" + name for name in ("null", "zero")
+            if self._synthetic_active(name)
+        ]
 
     def __contains__(self, key: object) -> bool:
         if not isinstance(key, str):
             return False
-        name = key.strip("/")
-        return name in _DEV_NAMES
+        if dict.__contains__(self, key):
+            return True
+        return self._synthetic_active(key.strip("/"))
 
     def __getitem__(self, key: str) -> bytes:
+        if dict.__contains__(self, key):
+            return dict.__getitem__(self, key)
         name = key.strip("/")
-        if name == "null":
-            return b""
-        if name == "zero":
-            return b"\x00" * _ZERO_CHUNK_SIZE
+        if self._synthetic_active(name):
+            return b"" if name == "null" else b"\x00" * _ZERO_CHUNK_SIZE
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: bytes) -> None:
-        pass
+        name = key.strip("/")
+        if self._synthetic_active(name):
+            return
+        dict.__setitem__(self, key, value)
+        self._tombstones.discard(name)
 
-    def pop(self, key: str, default=None):
-        return default
+    def __delitem__(self, key: str) -> None:
+        name = key.strip("/")
+        if dict.__contains__(self, key):
+            dict.__delitem__(self, key)
+            if name in _DEV_NAMES:
+                self._tombstones.add(name)
+            return
+        if self._synthetic_active(name):
+            self._tombstones.add(name)
+            return
+        raise KeyError(key)
+
+    @overload
+    def pop(self, key: str, /) -> bytes:
+        ...
+
+    @overload
+    def pop(self, key: str, default: bytes, /) -> bytes:
+        ...
+
+    @overload
+    def pop(self, key: str, default: _T, /) -> bytes | _T:
+        ...
+
+    def pop(self, key: str, default: object = _POP_MISSING, /) -> object:
+        if key not in self:
+            if default is _POP_MISSING:
+                raise KeyError(key)
+            return default
+        value = self[key]
+        del self[key]
+        return value
 
     def __iter__(self):
-        return iter(["/null", "/zero"])
+        return iter([*self._synthetic_names(), *dict.__iter__(self)])
+
+    def __len__(self) -> int:
+        return len(self._synthetic_names()) + dict.__len__(self)
 
     def keys(self):
-        return ["/null", "/zero"]
+        return [*self._synthetic_names(), *dict.keys(self)]
 
 
 class DevStore(RAMStore):

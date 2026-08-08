@@ -14,7 +14,12 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import { createMirageBridge, type MirageBridge, type MirageEntry } from './mirage_bridge.ts'
+import {
+  applyMutation,
+  createMirageBridge,
+  type MirageBridge,
+  type MirageEntry,
+} from './mirage_bridge.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 import { MIRAGE_FS_SHIM_PY } from './mirage_fs_shim.ts'
 
@@ -24,11 +29,11 @@ interface Call {
   bytes?: Uint8Array
 }
 
-// The runtime's post-run drain: close() only marks paths dirty, the
-// flush happens host-side where awaiting the bridge needs no JSPI.
-async function drain(py: PyodideInterface, bridge: MirageBridge): Promise<void> {
-  for (const path of bridge.takeDirty()) {
-    await bridge.flush(path, py.FS.readFile(path) as Uint8Array)
+// The runtime's post-run drain: the guest only records mutations, and
+// they are applied host-side where awaiting the bridge needs no JSPI.
+async function drain(bridge: MirageBridge): Promise<void> {
+  for (const mutation of bridge.takeMutations()) {
+    await applyMutation(bridge, mutation)
   }
 }
 
@@ -86,7 +91,7 @@ describe('mirage_fs_shim', () => {
     lazyFiles.clear()
     lazyListings.clear()
     lazyListErrors.clear()
-    bridge.takeDirty()
+    bridge.takeMutations()
   })
 
   it('flushes a binary write to the bridge on close', async () => {
@@ -95,7 +100,7 @@ describe('mirage_fs_shim', () => {
 with open('/ram/hello.txt', 'wb') as f:
     f.write(b'world')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -110,7 +115,7 @@ with open('/ram/hello.txt', 'wb') as f:
 with open('/tmp/x.txt', 'wb') as f:
     f.write(b'unbridged')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
   })
 
@@ -120,7 +125,7 @@ with open('/tmp/x.txt', 'wb') as f:
 with open('/ram/x.txt', 'w') as f:
     f.write('hello')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -129,14 +134,14 @@ with open('/ram/x.txt', 'w') as f:
     expect(new TextDecoder().decode(w0.bytes)).toBe('hello')
   })
 
-  it('append mode flushes the full file content on close', async () => {
+  it('append mode lands the tail on top of the mount content', async () => {
     preload('/ram/log.txt', new TextEncoder().encode('a'))
     mounts.push('/ram/')
     await py.runPythonAsync(`
 with open('/ram/log.txt', 'ab') as f:
     f.write(b'b')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -152,7 +157,7 @@ with open('/ram/log.txt', 'ab') as f:
 with open('/ram/x.txt', 'wb') as f:
     f.write(b'nope')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
   })
 
@@ -191,7 +196,7 @@ f.close()
       opened = false
     }
     void opened
-    await drain(py, bridge)
+    await drain(bridge)
     expect(calls.filter((c) => c.op === 'WRITE' && c.path === '/ram/../etc/x')).toHaveLength(0)
     expect(calls.filter((c) => c.op === 'WRITE' && c.path === '/etc/x')).toHaveLength(0)
   })
@@ -203,7 +208,7 @@ for i in range(5):
     with open('/ram/loop.txt', 'ab') as f:
         f.write(b'x')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -220,7 +225,7 @@ with open('/ram/data.bin', 'r+b') as f:
     f.seek(2)
     f.write(b'\\x99\\x99')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -236,7 +241,7 @@ with open('/ram/data.bin', 'r+b') as f:
 with open('/ram/x', 'wb') as f:
     f.write(b'y')
 `)
-    await drain(py, bridge)
+    await drain(bridge)
     const writes = calls.filter((c) => c.op === 'WRITE')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
@@ -312,6 +317,52 @@ with open('/ram/cached/a.txt', 'rb') as f:
 `)
     expect(calls.filter((c) => c.op === 'LIST' && c.path === '/ram/cached/')).toHaveLength(1)
     expect(calls.filter((c) => c.op === 'READ' && c.path === '/ram/cached/a.txt')).toHaveLength(1)
+  })
+
+  it('records mutations a MEMFS miss would otherwise drop', async () => {
+    // Nothing here exists in MEMFS: the mount is the authority, and a
+    // path this interpreter never preloaded must not read as absent.
+    mounts.push('/ram/')
+    await py.runPythonAsync(`
+import os
+os.mkdir('/ram/fresh')
+os.remove('/ram/gone.txt')
+os.rmdir('/ram/olddir')
+`)
+    expect(bridge.takeMutations()).toEqual([
+      { kind: 'mkdir', path: '/ram/fresh' },
+      { kind: 'unlink', path: '/ram/gone.txt' },
+      { kind: 'rmdir', path: '/ram/olddir' },
+    ])
+  })
+
+  it('an append records only the tail, never the buffer it started from', async () => {
+    mounts.push('/ram/')
+    await py.runPythonAsync(`
+with open('/ram/unseen.txt', 'ab') as f:
+    f.write(b'tail')
+`)
+    const mutations = bridge.takeMutations()
+    expect(mutations).toHaveLength(1)
+    const only = mutations[0]
+    if (only?.kind !== 'append') throw new Error('expected an append')
+    expect(only.path).toBe('/ram/unseen.txt')
+    expect(new TextDecoder().decode(only.bytes)).toBe('tail')
+  })
+
+  it('a rename across two mounts raises EXDEV and records nothing', async () => {
+    mounts.push('/ram/', '/other/')
+    let raised = ''
+    try {
+      await py.runPythonAsync(`
+import os
+os.rename('/ram/a.txt', '/other/a.txt')
+`)
+    } catch (err) {
+      raised = err instanceof Error ? err.message : String(err)
+    }
+    expect(raised).toMatch(/Invalid cross-device link/)
+    expect(bridge.takeMutations()).toEqual([])
   })
 
   it('lazy backfill failure surfaces as FileNotFoundError', async () => {

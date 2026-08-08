@@ -18,13 +18,16 @@ AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
 
 # Numeric shorthand token like `-5` (head/tail count), never a flag
 # cluster or a path.
-NUMERIC_SHORT = re.compile(r"^-\d+$")
+NUMERIC_SHORT = re.compile(r"^-[0-9]+$")
 
 # Value shapes accepted by int- and float-typed options: the portable
 # core of Python int()/float() and argparse (no whitespace, underscores,
 # inf, or nan, so both languages accept exactly the same strings).
-INT_VALUE = re.compile(r"^[+-]?\d+$")
-FLOAT_VALUE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+# [0-9] and not \d: python's \d also matches Unicode digits, which
+# JS /\d/ and GNU's C-locale parsers reject.
+INT_VALUE = re.compile(r"^[+-]?[0-9]+$")
+FLOAT_VALUE = re.compile(
+    r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$")
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
 # (plus ripgrep and jq upstream docs). Everything else exits 1. Keys are

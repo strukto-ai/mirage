@@ -29,6 +29,7 @@ def envelope(uid: str, day: int) -> dict:
         "uid": uid,
         "subject": f"s{uid}",
         "date": f"Mon, {day:02d} Feb 2026 10:00:00 +0000",
+        "internal_date": f"{day:02d}-Feb-2026 10:00:00 +0000",
     }
 
 
@@ -62,6 +63,9 @@ async def test_list_defaults_to_inbox_and_matches_everything(patched):
     data = json.loads(await materialize(out))
     # Most recent first, like upstream's `envelope list`.
     assert [d["uid"] for d in data] == ["3", "2", "1"]
+    # INTERNALDATE only picks the date directory; it is not an envelope
+    # field, and every envelope renders through the mount's renderer.
+    assert all("internal_date" not in d for d in data)
 
 
 @pytest.mark.asyncio

@@ -32,7 +32,7 @@ BACKUP_CONTROLS = {
 
 DEFAULT_BACKUP_SUFFIX = "~"
 
-_NUMBERED_SUFFIX = re.compile(r"^\.~(\d+)~$")
+_NUMBERED_SUFFIX = re.compile(r"^\.~([0-9]+)~$")
 
 
 def backup_control(cmd_name: str, value: str | bool | None,

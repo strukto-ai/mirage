@@ -192,7 +192,37 @@ function sortedStringify(value: unknown): string {
   )
 }
 
-function emitVariant(name: string, pkgs: readonly string[], modules: ModuleBag[]): void {
+// The two resource-name sets the parity gate compares. `registry` is what
+// `buildResource` can construct by name — the hand-maintained table that
+// workspace YAML and snapshots go through. `command_resources` is what the
+// spec tree already knew: every resource registering at least one builtin
+// command. A name in the second but not the first registers commands yet
+// cannot be mounted by name, which is how chroma/dify/lancedb/qdrant stayed
+// unconstructible in typescript while appearing in every command's `_meta`.
+function emitResources(
+  name: string,
+  knownResources: string[],
+  registry: Record<string, RegisteredCommand[]>,
+): void {
+  const commandResources = new Set<string>()
+  for (const rcs of Object.values(registry)) {
+    for (const rc of rcs) if (rc.resource !== null) commandResources.add(rc.resource)
+  }
+  const payload = {
+    registry: [...knownResources].sort(),
+    command_resources: [...commandResources].sort(),
+  }
+  const path = resolve(SPEC_ROOT, name, 'resources.json')
+  writeFileSync(path, sortedStringify(payload) + '\n')
+  console.log(`emitted ${payload.registry.length} registry names to ${path}`)
+}
+
+function emitVariant(
+  name: string,
+  pkgs: readonly string[],
+  modules: ModuleBag[],
+  knownResources: string[],
+): void {
   assertGroupsReachable(pkgs, modules)
   const registry = collectRegistrations(modules)
   const outDir = resolve(SPEC_ROOT, name, 'general')
@@ -205,6 +235,7 @@ function emitVariant(name: string, pkgs: readonly string[], modules: ModuleBag[]
     writeFileSync(resolve(outDir, `${cmd}.json`), sortedStringify(payload) + '\n')
   }
   console.log(`emitted ${cmdNames.length} specs to ${outDir}`)
+  emitResources(name, knownResources, registry)
 }
 
 function main(): void {
@@ -212,11 +243,13 @@ function main(): void {
     'node',
     ['core', 'node'],
     [Core as unknown as ModuleBag, Node as unknown as ModuleBag],
+    Node.knownResources(),
   )
   emitVariant(
     'browser',
     ['core', 'browser'],
     [Core as unknown as ModuleBag, Browser as unknown as ModuleBag],
+    Browser.knownResources(),
   )
 }
 

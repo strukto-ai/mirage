@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from mimetypes import guess_type as _guess_mime
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -21,15 +20,10 @@ from mirage.core.gmail.labels import list_labels
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import filetype_from_mimetype
+from mirage.utils.filetype import guess_type
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
-
-
-def _guess_filetype(filename: str) -> FileType:
-    mime, _ = _guess_mime(filename)
-    return filetype_from_mimetype(mime or "")
 
 
 async def stat(
@@ -98,7 +92,7 @@ async def stat(
             extra={"message_id": result.entry.id},
         )
     if rt == "gmail/attachment":
-        ft = _guess_filetype(result.entry.vfs_name)
+        ft = guess_type(result.entry.vfs_name)
         return FileStat(
             name=result.entry.vfs_name,
             type=ft,

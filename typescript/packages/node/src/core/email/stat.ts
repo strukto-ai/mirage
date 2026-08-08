@@ -18,28 +18,13 @@ import {
   FileType,
   PathSpec,
   enoent,
+  guessType,
   mountKey,
   mountPrefixOf,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { listFolders } from './folders.ts'
 import { readdir } from './readdir.ts'
-
-function guessType(name: string): FileType {
-  const lower = name.toLowerCase()
-  if (lower.endsWith('.json') || lower.endsWith('.email.json')) return FileType.JSON
-  if (lower.endsWith('.csv')) return FileType.CSV
-  if (lower.endsWith('.png')) return FileType.IMAGE_PNG
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return FileType.IMAGE_JPEG
-  if (lower.endsWith('.gif')) return FileType.IMAGE_GIF
-  if (lower.endsWith('.zip')) return FileType.ZIP
-  if (lower.endsWith('.gz') || lower.endsWith('.gzip')) return FileType.GZIP
-  if (lower.endsWith('.pdf')) return FileType.PDF
-  if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.log')) {
-    return FileType.TEXT
-  }
-  return FileType.BINARY
-}
 
 export async function stat(
   accessor: EmailAccessor,

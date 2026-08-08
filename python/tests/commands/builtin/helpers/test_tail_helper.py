@@ -29,3 +29,11 @@ class TestNumberFlagError:
     def test_invalid_bytes(self):
         assert number_flag_error(
             "tail", None, "xyz") == "tail: invalid number of bytes: 'xyz'\n"
+
+    def test_unicode_digits_are_invalid(self):
+        # python's \d also matches Unicode digits (int('١٢') is 12), which
+        # JS /\d/ and GNU's C-locale parsers reject.
+        assert number_flag_error(
+            "head", "١٢", None) == "head: invalid number of lines: '١٢'\n"
+        assert number_flag_error("tail", None,
+                                 "٥") == "tail: invalid number of bytes: '٥'\n"

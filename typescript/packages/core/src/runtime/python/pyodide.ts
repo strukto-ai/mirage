@@ -26,7 +26,12 @@ import type {
 } from '../types.ts'
 import { createPyodideInterrupter, type PyodideInterrupter } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import { createMirageBridge, preloadInto, type MirageBridge } from './mirage_bridge.ts'
+import {
+  applyMutation,
+  createMirageBridge,
+  preloadInto,
+  type MirageBridge,
+} from './mirage_bridge.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 import { MIRAGE_FS_SHIM_PY } from './mirage_fs_shim.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
@@ -206,7 +211,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       if (armed?.disarm() === 'deadline') {
         throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`)
       }
-      const flushFailures = await this.drainDirty(pyodide)
+      const flushFailures = await this.drainMutations()
       const resultProxy = pyodide.globals.get('_eval_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -236,7 +241,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       }
     } catch (err) {
       const deadline = armed?.disarm() === 'deadline'
-      for (const failure of await this.drainDirty(pyodide)) console.warn(failure)
+      for (const failure of await this.drainMutations()) console.warn(failure)
       if (deadline) {
         throw new EvalError(`pyodide eval timed out after ${String(EVAL_INTERRUPT_SECONDS)}s`, {
           cause: err,
@@ -341,30 +346,36 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   /**
-   * Flush every path the shim marked dirty during the run. The guest
-   * cannot await the bridge from its sync WASM frames without JSPI, so
-   * close() only marks; MEMFS holds the final bytes, and one WRITE per
-   * path covers however many times the script reopened it. Returns one
-   * message per failed flush for the caller's stderr.
+   * Replay every mutation the shim recorded during the run, in the order
+   * the guest performed them. The guest cannot await the bridge from its
+   * sync WASM frames without JSPI, so it only records; ordering is what
+   * makes a create-then-rename or mkdir-then-write sequence land the same
+   * way it ran. Returns one message per failure for the caller's stderr.
    */
-  private async drainDirty(pyodide: PyodideInterface): Promise<string[]> {
-    if (this.bridge === null) return []
+  private async drainMutations(): Promise<string[]> {
+    const bridge = this.bridge
+    if (bridge === null) return []
     const failures: string[] = []
-    for (const path of this.bridge.takeDirty()) {
-      let bytes: Uint8Array
+    const pending = bridge.takeMutations()
+    for (let i = 0; i < pending.length; i++) {
+      const mutation = pending[i]
+      if (mutation === undefined) continue
       try {
-        bytes = pyodide.FS.readFile(path) as Uint8Array
-      } catch {
-        // closed then unlinked locally; unlink does not propagate, so
-        // the mount keeps its previous content
-        console.warn(`mirage flush: ${path} marked dirty but missing from MEMFS, skipped`)
-        continue
-      }
-      try {
-        await this.bridge.flush(path, bytes)
+        await applyMutation(bridge, mutation)
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
-        failures.push(`python3: failed to flush ${path} to mount: ${detail}`)
+        failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)
+        // Stop: the journal is a sequence, not a set. Replaying past a
+        // failure applies later entries against a prerequisite that was
+        // never established, which can put the mount in a state the guest
+        // never produced (a rename landing on a temp file the failed write
+        // left stale). Report what was dropped rather than truncating
+        // silently.
+        const dropped = pending.length - i - 1
+        if (dropped > 0) {
+          failures.push(`python3: skipped ${String(dropped)} later mutation(s) after that failure`)
+        }
+        break
       }
     }
     return failures
@@ -412,7 +423,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       if (armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
-      const flushFailures = await this.drainDirty(pyodide)
+      const flushFailures = await this.drainMutations()
       const resultProxy = pyodide.globals.get('_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown
@@ -445,7 +456,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       // Files closed before the failure are complete in MEMFS, so their
       // marks still flush; failures can only be warned here.
       const deadline = armed?.disarm() === 'deadline'
-      for (const failure of await this.drainDirty(pyodide)) console.warn(failure)
+      for (const failure of await this.drainMutations()) console.warn(failure)
       if (deadline && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
@@ -487,7 +498,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
     try {
       await pyodide.runPythonAsync(PYTHON_REPL_WRAPPER)
-      const flushFailures = await this.drainDirty(pyodide)
+      const flushFailures = await this.drainMutations()
       const resultProxy = pyodide.globals.get('_repl_result') as
         | {
             toJs?: (opts?: Record<string, unknown>) => unknown

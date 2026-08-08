@@ -18,6 +18,7 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { isWalkError } from '../../../utils/errors.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -45,7 +46,8 @@ async function walkTree(
   let entries: string[]
   try {
     entries = await readdir(path)
-  } catch {
+  } catch (err) {
+    if (!isWalkError(err)) throw err
     return { dirs, files, failed: true }
   }
   entries.sort()
@@ -65,7 +67,8 @@ async function walkTree(
     try {
       const s = await stat(sub)
       isDir = s.type === FileType.DIRECTORY
-    } catch {
+    } catch (err) {
+      if (!isWalkError(err)) throw err
       continue
     }
     if (treeOpts.dirsOnly && !isDir) continue

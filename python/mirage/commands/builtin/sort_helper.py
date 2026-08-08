@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import cmp_to_key, partial
 
 _HUMAN_SUFFIXES = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15}
-_VERSION_RE = re.compile(r"(\d+)|(\D+)")
+_VERSION_RE = re.compile(r"([0-9]+)|([^0-9]+)")
 _MONTHS = {
     "jan": 1,
     "feb": 2,
@@ -32,7 +32,7 @@ _MONTHS = {
     "nov": 11,
     "dec": 12,
 }
-_KEYDEF_RE = re.compile(r"^(\d+)(?:\.(\d+))?([a-zA-Z]*)$")
+_KEYDEF_RE = re.compile(r"^([0-9]+)(?:\.([0-9]+))?([a-zA-Z]*)$")
 # GNU key modifier letters. n/g map to numeric; h/V/M/f/r/b are honored;
 # d/i/R are recognized so they still suppress global options (per GNU
 # key_init) but are not yet applied as filters.
@@ -266,7 +266,7 @@ def _leading_number(field: str) -> float:
     field = field.lstrip()
     num_end = 0
     for ch in field:
-        if ch.isdigit() or (ch in ".+-" and num_end == 0):
+        if ch in "0123456789" or (ch in ".+-" and num_end == 0):
             num_end += 1
         else:
             break

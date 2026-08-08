@@ -81,6 +81,174 @@
           }
         }
       ]
+    },
+    {
+      "id": "mkdir_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; os.makedirs('/ram/a/b')\" && ls /ram/a",
+          "expect": {
+            "exit": 0,
+            "stdout": "b\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unlink_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo -n x > /ram/gone.txt && python3 -c \"from pathlib import Path; Path('/ram/gone.txt').unlink()\" && ls /ram",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "rmtree_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir /ram/d && echo -n x > /ram/d/inner.txt && python3 -c \"import shutil; shutil.rmtree('/ram/d')\" && ls /ram",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo -n one > /ram/a.txt && python3 -c \"import os; os.rename('/ram/a.txt', '/ram/b.txt')\" && cat /ram/b.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "one"
+          }
+        }
+      ]
+    },
+    {
+      "id": "append_preserves_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "keep.txt": "base"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/ram/keep.txt', 'a').write('-more')\" && cat /ram/keep.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "base-more"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename_across_mounts_refused",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          },
+          "/other": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo -n keep > /ram/c.txt && python3 -c \"import os; os.rename('/ram/c.txt', '/other/c.txt')\"",
+          "expect": {
+            "exit": 1
+          }
+        },
+        {
+          "command": "cat /ram/c.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep"
+          }
+        }
+      ]
     }
   ]
 }

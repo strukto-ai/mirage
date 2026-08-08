@@ -15,6 +15,7 @@
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { imageTypeForExtension } from '../../utils/filetype.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { read } from './read.ts'
 import { ScopeLevel, detectScope } from './scope.ts'
@@ -23,13 +24,6 @@ function notFound(p: string): Error {
   const err = new Error(p) as Error & { code?: string }
   err.code = 'ENOENT'
   return err
-}
-
-const IMAGE_TYPES: Record<string, FileType> = {
-  png: FileType.IMAGE_PNG,
-  jpg: FileType.IMAGE_JPEG,
-  jpeg: FileType.IMAGE_JPEG,
-  gif: FileType.IMAGE_GIF,
 }
 
 function nameOf(spec: PathSpec): string {
@@ -58,7 +52,7 @@ export async function stat(
     return new FileStat({ name: nameOf(spec), type: FileType.DIRECTORY })
   }
 
-  const fileType = scope.blob ? (IMAGE_TYPES[config.blobExt] ?? FileType.BINARY) : FileType.TEXT
+  const fileType = scope.blob ? imageTypeForExtension(config.blobExt) : FileType.TEXT
   // The row-dir readdir seeds exact card sizes; blob entries and a cold
   // index fall back to rendering the row, so the size is exact either way.
   if (index !== undefined) {

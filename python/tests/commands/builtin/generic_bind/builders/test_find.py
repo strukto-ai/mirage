@@ -106,3 +106,38 @@ async def test_walk_honors_multiple_start_points():
     assert "/mnt/notes.txt" in lines
     assert lines.index("/mnt/table1/rows.jsonl") < lines.index(
         "/mnt/notes.txt")
+
+
+@pytest.mark.asyncio
+async def test_native_find_honors_multiple_start_points():
+    stat_calls: list[str] = []
+
+    async def find_op(_accessor, path, **_kw):
+        key = "/" + path.resource_path.strip("/") if path.resource_path \
+            else "/"
+        if key == "/table1":
+            return ["/table1/rows.jsonl"]
+        if key == "/notes.txt":
+            return ["/notes.txt"]
+        return []
+
+    ops = _ops(stat_calls, find_op=find_op)
+    roots = [
+        PathSpec(virtual="/mnt/table1",
+                 directory="/mnt/table1",
+                 resolved=False,
+                 resource_path="table1"),
+        PathSpec(virtual="/mnt/notes.txt",
+                 directory="/mnt",
+                 resolved=False,
+                 resource_path="notes.txt"),
+    ]
+    stdout, _io = await find(ops, None, roots)
+    data = stdout if isinstance(stdout, bytes) else b""
+    lines = data.decode().splitlines()
+    # The native-op path walks every start point too, in operand order;
+    # it used to drop everything after paths[0].
+    assert "/mnt/table1/rows.jsonl" in lines
+    assert "/mnt/notes.txt" in lines
+    assert lines.index("/mnt/table1/rows.jsonl") < lines.index(
+        "/mnt/notes.txt")

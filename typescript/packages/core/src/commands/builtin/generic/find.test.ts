@@ -60,6 +60,16 @@ describe('generic command find', () => {
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/found.txt\n')
   })
 
+  it('prints start points in operand order without a cross-root sort', async () => {
+    // GNU findutils 4.10.0 (debian:stable-slim): each operand's rows print
+    // before the next operand's, even when a later root sorts earlier.
+    const perRoot = (root: PathSpec): Promise<string[]> =>
+      Promise.resolve(root.virtual === '/sub' ? ['/sub/z.txt'] : ['/a.txt'])
+    const result = await findGeneric([spec('/sub'), spec('/')], [], makeOpts(), perRoot)
+    expect(result?.[1].exitCode).toBe(0)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/sub/z.txt\n/a.txt\n')
+  })
+
   // GNU findutils 4.10.0, pinned on debian:stable-slim:
   //   find <file>             -> <file>   find <file> -type d -> (empty)
   //   find <file> -type f     -> <file>   find <file> -type l -> (empty)

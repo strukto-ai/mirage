@@ -28,14 +28,18 @@ async def od(
     fl = FlagView(flags, spec=SPECS["od"])
     paths = await resolve_or_empty(ops, accessor, paths, index)
     formats = ([t] if isinstance(t, str) else t) or fl.as_list("format")
-    limit_value = N or fl.as_str("read_bytes")
+    # `x or y` would swallow an explicitly empty value, which GNU rejects
+    # loudly (`od -N ''` is an invalid argument, not an absent flag).
+    skip_value = j if j is not None else fl.as_str("skip_bytes")
+    limit_value = N if N is not None else fl.as_str("read_bytes")
     return await generic_od(
         paths,
         read_stream=bound_op(ops.read_stream, accessor, index),
         stdin=stdin,
         address_radix=A or fl.as_str("address_radix") or "o",
-        skip=parse_count(j or fl.as_str("skip_bytes") or "0"),
-        limit=parse_count(limit_value) if limit_value is not None else None,
+        skip=(parse_count(skip_value, "-j") if skip_value is not None else 0),
+        limit=(parse_count(limit_value, "-N")
+               if limit_value is not None else None),
         formats=formats,
     )
 

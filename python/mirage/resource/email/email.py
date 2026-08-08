@@ -34,6 +34,10 @@ class EmailResource(BaseResource):
     # readdir from the full BODY.PEEK[] the listing already fetches, and an
     # attachment's size is its decoded payload length.
     SIZES_ALWAYS_KNOWN: bool = True
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 

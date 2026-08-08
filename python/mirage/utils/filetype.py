@@ -21,6 +21,7 @@ EXTENSION_MAP: dict[str, FileType] = {
     "tsv": FileType.CSV,
     "txt": FileType.TEXT,
     "md": FileType.TEXT,
+    "log": FileType.TEXT,
     "py": FileType.TEXT,
     "js": FileType.TEXT,
     "ts": FileType.TEXT,
@@ -33,6 +34,7 @@ EXTENSION_MAP: dict[str, FileType] = {
     "gif": FileType.IMAGE_GIF,
     "zip": FileType.ZIP,
     "gz": FileType.GZIP,
+    "gzip": FileType.GZIP,
     "pdf": FileType.PDF,
 }
 
@@ -100,6 +102,26 @@ def guess_type(path: str) -> FileType:
     """
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
     return EXTENSION_MAP.get(ext, DEFAULT_TYPE)
+
+
+IMAGE_TYPE_BY_EXTENSION: dict[str, FileType] = {
+    "png": FileType.IMAGE_PNG,
+    "jpg": FileType.IMAGE_JPEG,
+    "jpeg": FileType.IMAGE_JPEG,
+    "gif": FileType.IMAGE_GIF,
+}
+
+
+def image_type_for_extension(ext: str) -> FileType:
+    """Return the FileType for a bare image extension.
+
+    Args:
+        ext (str): extension without the dot (e.g. ``png``).
+
+    Returns:
+        FileType: matched image type, or BINARY for anything else.
+    """
+    return IMAGE_TYPE_BY_EXTENSION.get(ext.lower(), FileType.BINARY)
 
 
 def filetype_from_mimetype(mime: str) -> FileType:

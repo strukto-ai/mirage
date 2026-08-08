@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "id": "od_bounds_uintmax_boundary",
+      "seq": 910053,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2odb && printf '0123456789' > /data/t2odb/f && od -An -tx1 -N 0xffffffffffffffff /data/t2odb/f && od -An -N 18446744073709551616 /data/t2odb/f",
+      "expect": {
+        "exit": 1,
+        "stdout": " 30 31 32 33 34 35 36 37 38 39\n",
+        "stderr": "od: -N argument '18446744073709551616' too large\n"
+      },
+      "flags": ["A", "t", "N"]
+    }
+  ]
+}

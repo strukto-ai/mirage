@@ -46,7 +46,7 @@ def split_revision(revision: str) -> tuple[str, tuple[AncestryStep, ...]]:
         kind = rest[position]
         position += 1
         digits = ""
-        while position < len(rest) and rest[position].isdigit():
+        while position < len(rest) and rest[position] in "0123456789":
             digits += rest[position]
             position += 1
         if digits == "":

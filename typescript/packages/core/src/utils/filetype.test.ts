@@ -12,10 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import { FileType } from '../types.ts'
-import { guessType, mimeTypeFor } from './filetype.ts'
+import {
+  EXTENSION_MAP,
+  IMAGE_TYPE_BY_EXTENSION,
+  MIMETYPE_MAP,
+  MIME_BY_EXTENSION,
+  guessType,
+  imageTypeForExtension,
+  mimeTypeFor,
+} from './filetype.ts'
+
+const FIXTURE = fileURLToPath(
+  new URL('../../../../../integ/fixtures/filetype/tables.json', import.meta.url),
+)
 
 describe('guessType', () => {
   it('maps extensions to their own types (jpg is JPEG, not PNG)', () => {
@@ -23,7 +38,37 @@ describe('guessType', () => {
     expect(guessType('photo.jpeg')).toBe(FileType.IMAGE_JPEG)
     expect(guessType('image.png')).toBe(FileType.IMAGE_PNG)
     expect(guessType('data.jsonl')).toBe(FileType.JSON)
+    expect(guessType('build.log')).toBe(FileType.TEXT)
+    expect(guessType('dump.gzip')).toBe(FileType.GZIP)
     expect(guessType('unknown.blob')).toBe(FileType.BINARY)
+  })
+})
+
+describe('imageTypeForExtension', () => {
+  it('types bare image extensions and defaults to BINARY', () => {
+    expect(imageTypeForExtension('png')).toBe(FileType.IMAGE_PNG)
+    expect(imageTypeForExtension('JPG')).toBe(FileType.IMAGE_JPEG)
+    expect(imageTypeForExtension('txt')).toBe(FileType.BINARY)
+  })
+})
+
+describe('shared parity fixture', () => {
+  // integ/fixtures/filetype/tables.json is the contract: the python suite
+  // (tests/utils/test_filetype.py) asserts the same tables, so an edit on
+  // one side fails the other until the fixture moves with it.
+  const tables = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Record<string, Record<string, string>>
+
+  it('pins the extension table', () => {
+    expect({ ...EXTENSION_MAP }).toEqual(tables.extension_map)
+  })
+
+  it('pins the mime tables', () => {
+    expect({ ...MIME_BY_EXTENSION }).toEqual(tables.mime_by_extension)
+    expect({ ...MIMETYPE_MAP }).toEqual(tables.mimetype_map)
+  })
+
+  it('pins the image extension table', () => {
+    expect({ ...IMAGE_TYPE_BY_EXTENSION }).toEqual(tables.image_type_by_extension)
   })
 })
 

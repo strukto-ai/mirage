@@ -223,6 +223,16 @@ export function isFsError(err: unknown): boolean {
   return typeof code === 'string' && gnuStrerror(code) !== null
 }
 
+// The per-entry swallow set for walk-and-warn commands (ls, tree, rg):
+// every stamped filesystem code plus the unstamped no-mount refusal.
+// Mirrors Python's `except (OSError, ValueError)`, where ValueError is
+// the no-mount spelling. Anything else — auth failures, transport
+// errors, backend bugs — must propagate instead of vanishing from a
+// listing or being laundered into a GNU-shaped 'cannot access' line.
+export function isWalkError(err: unknown): boolean {
+  return isFsError(err) || (err as { noMount?: unknown }).noMount === true
+}
+
 // Re-spell a reported path the way its operand was typed. Backends name paths
 // in virtual space, but GNU quotes the operand as the user wrote it:
 // `cd /data && mkdir -p f.txt/sub` reports 'f.txt', not '/data/f.txt'. The path

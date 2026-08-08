@@ -26,10 +26,99 @@ TYPESCRIPT = [
 ]
 EXCEPTIONS = SPEC / "parity_exceptions.json"
 
-SPEC_FIELDS = ("description", "epilog", "ignore_tokens", "options",
-               "positional", "rest")
-META_FIELDS = ("has_provision", "has_aggregate", "has_write", "filetypes")
 BY_RESOURCE = "_meta.by_resource"
+BY_RESOURCE_KEYS = "_meta.by_resource.keys"
+
+
+def spec_fields(py: dict[str, Any], ts: dict[str, Any]) -> list[str]:
+    """Every top-level spec key either side emits, ``_meta`` excluded.
+
+    A union rather than a fixed allowlist: python dumps with
+    ``asdict(spec)``, so a new ``CommandSpec`` field appears on its own,
+    while the typescript side serializes through hand-written literals and
+    would not. An allowlist hid that asymmetry — both spec-drift gates
+    still pass, because each tree regenerates byte-identically, and parity
+    never looked at the new key.
+
+    Args:
+        py (dict[str, Any]): the python spec payload.
+        ts (dict[str, Any]): the typescript spec payload.
+    """
+    return sorted((set(py) | set(ts)) - {"_meta"})
+
+
+def meta_fields(py_meta: dict[str, Any], ts_meta: dict[str, Any]) -> list[str]:
+    """Every ``_meta`` key either side emits, ``by_resource`` excluded.
+
+    Args:
+        py_meta (dict[str, Any]): the python ``_meta`` block.
+        ts_meta (dict[str, Any]): the typescript ``_meta`` block.
+    """
+    return sorted((set(py_meta) | set(ts_meta)) - {"by_resource"})
+
+
+def check_resources(language_only: set[str], expansions: dict[str, list[str]],
+                    unconstructible: dict[str, dict[str, str]]) -> list[str]:
+    """Registry membership, the surface the command specs cannot see.
+
+    A resource's ``_meta`` entries say it registers commands; nothing said
+    it could be *built* by name. The two sets drifted five times — python
+    had no ``sharepoint`` factory and the typescript registries had no
+    chroma/dify/lancedb/qdrant — while every command spec stayed identical,
+    because registering a command and being constructible are different
+    tables.
+
+    Args:
+        language_only (set[str]): resources that exist in one runtime only.
+        expansions (dict[str, list[str]]): python alias table, so one
+            python name can stand for several typescript ones.
+        unconstructible (dict[str, dict[str, str]]): per-tree names that
+            register commands on purpose without a registry factory.
+    """
+    failures: list[str] = []
+    trees = {
+        "python": SPEC / "python" / "resources.json",
+        "node": SPEC / "typescript" / "node" / "resources.json",
+        "browser": SPEC / "typescript" / "browser" / "resources.json",
+    }
+    loaded: dict[str, dict[str, list[str]]] = {}
+    for tree, path in trees.items():
+        if not path.is_file():
+            return [
+                f"missing {path}\nrun scripts/gen_specs.py and "
+                "typescript/scripts/gen-specs.ts first"
+            ]
+        loaded[tree] = json.loads(path.read_text())
+
+    for tree, payload in loaded.items():
+        registry = set(payload["registry"])
+        allowed = unconstructible.get(tree, {})
+        orphans = sorted(set(payload["command_resources"]) - registry)
+        unexpected = [r for r in orphans if r not in allowed]
+        if unexpected:
+            failures.append(
+                f"{tree}: these resources register builtin commands but "
+                f"cannot be built by name: {unexpected}\n"
+                f"    add a registry factory, or document the omission in "
+                f"{EXCEPTIONS.name} under unconstructible_resources.{tree}")
+        stale = sorted(set(allowed) - set(orphans))
+        if stale:
+            failures.append(f"stale unconstructible_resources.{tree} entries "
+                            f"in {EXCEPTIONS.name}: {stale}")
+
+    py_registry: set[str] = set()
+    for name in loaded["python"]["registry"]:
+        py_registry.update(expansions.get(name, [name]))
+    ts_registry = set(loaded["node"]["registry"]) | set(
+        loaded["browser"]["registry"])
+    only_py = sorted(py_registry - ts_registry - language_only)
+    only_ts = sorted(ts_registry - py_registry - language_only)
+    if only_py:
+        failures.append(f"resources constructible only in python: {only_py}")
+    if only_ts:
+        failures.append(
+            f"resources constructible only in typescript: {only_ts}")
+    return failures
 
 
 def load_dir(path: Path) -> dict[str, Any]:
@@ -78,11 +167,11 @@ def compare_command(py: dict[str, Any], ts: dict[str, Any],
             already stripped of language-only resources.
     """
     diffs: list[str] = []
-    for field in SPEC_FIELDS:
-        if py[field] != ts[field]:
+    for field in spec_fields(py, ts):
+        if py.get(field) != ts.get(field):
             diffs.append(field)
     if set(py_by_resource) != set(ts_by_resource):
-        diffs.append("_meta.resources")
+        diffs.append(BY_RESOURCE_KEYS)
         return diffs
     for name in sorted(py_by_resource):
         a, b = py_by_resource[name], ts_by_resource[name]
@@ -93,8 +182,15 @@ def compare_command(py: dict[str, Any], ts: dict[str, Any],
     # only add signal once those agree; otherwise they restate the same
     # divergence in a coarser form.
     if not any(d.startswith(BY_RESOURCE) for d in diffs):
-        for field in META_FIELDS:
-            if py["_meta"][field] != ts["_meta"][field]:
+        for field in meta_fields(py["_meta"], ts["_meta"]):
+            # `resources` denormalizes by_resource's keys, so it carries the
+            # raw names and needs the same alias expansion and
+            # language-only filtering before the two lists can be compared.
+            if field == "resources":
+                if set(py_by_resource) != set(ts_by_resource):
+                    diffs.append("_meta.resources")
+                continue
+            if py["_meta"].get(field) != ts["_meta"].get(field):
                 diffs.append(f"_meta.{field}")
     return diffs
 
@@ -117,17 +213,23 @@ def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
         return (f"    {BY_RESOURCE}[{name}].{key}: "
                 f"python={py_by_resource[name].get(key)!r} "
                 f"typescript={ts_by_resource[name].get(key)!r}")
-    if diff == "_meta.resources":
+    if diff in (BY_RESOURCE_KEYS, "_meta.resources"):
         a, b = set(py_by_resource), set(ts_by_resource)
         return (f"    {diff}: python-only={sorted(a - b)} "
                 f"typescript-only={sorted(b - a)}")
     if diff.startswith("_meta."):
         key = diff.split(".", 1)[1]
-        return (f"    {diff}: python={py['_meta'][key]!r} "
-                f"typescript={ts['_meta'][key]!r}")
+        return (f"    {diff}: python={py['_meta'].get(key)!r} "
+                f"typescript={ts['_meta'].get(key)!r}")
     if diff == "options":
-        py_by_name = {o["long"] or o["short"]: o for o in py["options"]}
-        ts_by_name = {o["long"] or o["short"]: o for o in ts["options"]}
+        py_by_name = {
+            o["long"] or o["short"]: o
+            for o in py.get("options", [])
+        }
+        ts_by_name = {
+            o["long"] or o["short"]: o
+            for o in ts.get("options", [])
+        }
         lines = [f"    {diff}:"]
         for key in sorted(set(py_by_name) | set(ts_by_name)):
             a, b = py_by_name.get(key), ts_by_name.get(key)
@@ -143,7 +245,35 @@ def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
                         lines.append(f"      {key}.{k}: python={a.get(k)!r} "
                                      f"typescript={b.get(k)!r}")
         return "\n".join(lines)
-    return f"    {diff}: python={py[diff]!r} typescript={ts[diff]!r}"
+    return f"    {diff}: python={py.get(diff)!r} typescript={ts.get(diff)!r}"
+
+
+def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
+    """Divergences between the typescript variants' own spec payloads.
+
+    ``by_resource`` and its denormalized ``resources`` key legitimately
+    differ — a backend registers in only one runtime — but everything else
+    describes the command itself and must match. Python is compared against
+    the node variant, so without this check nothing ever reads
+    ``spec/typescript/browser`` beyond its per-resource metadata.
+
+    Args:
+        variants (list[dict[str, Any]]): one loaded spec tree per variant,
+            node first.
+    """
+    failures: list[str] = []
+    node, browser = variants[0], variants[1]
+    for name in sorted(set(node) & set(browser)):
+        a, b = node[name], browser[name]
+        diffs = [f for f in spec_fields(a, b) if a.get(f) != b.get(f)]
+        diffs += [
+            f"_meta.{f}" for f in meta_fields(a["_meta"], b["_meta"])
+            if f != "resources" and a["_meta"].get(f) != b["_meta"].get(f)
+        ]
+        if diffs:
+            failures.append(f"typescript node and browser disagree on "
+                            f"{name}: {diffs}")
+    return failures
 
 
 def main() -> int:
@@ -151,6 +281,9 @@ def main() -> int:
     expansions: dict[str,
                      list[str]] = exceptions["resource_expansions"]["python"]
     language_only = set(exceptions["language_only_resources"])
+    unconstructible: dict[str,
+                          dict[str,
+                               str]] = exceptions["unconstructible_resources"]
     allowed: dict[str, Any] = exceptions["commands"]
 
     py_specs = load_dir(PYTHON)
@@ -159,12 +292,22 @@ def main() -> int:
     failures: list[str] = []
     used: set[str] = set()
 
-    only_py = sorted(set(py_specs) - set(ts_variants[0]))
-    only_ts = sorted(set(ts_variants[0]) - set(py_specs))
+    # Python has no runtime split, so its command set must equal the union
+    # of the two typescript variants; comparing against node alone would
+    # miss a command only the browser tree registers.
+    ts_names: set[str] = set()
+    for variant in ts_variants:
+        ts_names |= set(variant)
+    only_py = sorted(set(py_specs) - ts_names)
+    only_ts = sorted(ts_names - set(py_specs))
     if only_py:
         failures.append(f"commands only in python: {only_py}")
     if only_ts:
         failures.append(f"commands only in typescript: {only_ts}")
+
+    failures.extend(compare_variants(ts_variants))
+    failures.extend(check_resources(language_only, expansions,
+                                    unconstructible))
 
     for name in sorted(set(py_specs) & set(ts_variants[0])):
         py, ts = py_specs[name], ts_variants[0][name]

@@ -30,6 +30,10 @@ class GitHubCIResource(BaseResource):
     accessor: GitHubCIAccessor
     name: str = ResourceName.GITHUB_CI
     caches_reads: bool = True
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
 
     def __init__(self, config: GitHubCIConfig) -> None:

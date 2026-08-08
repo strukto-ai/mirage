@@ -38,6 +38,7 @@ async def sha384sum(
     w: bool = False,
     z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    cwd: PathSpec | str = "/",
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["sha384sum"])
@@ -60,7 +61,8 @@ async def sha384sum(
                                 ignore_missing=fl.as_bool("ignore_missing"),
                                 status=fl.as_bool("status"),
                                 quiet=fl.as_bool("quiet"),
-                                warn=w or fl.as_bool("warn")), err)
+                                warn=w or fl.as_bool("warn"),
+                                cwd=cwd), err)
 
 
 BUILDER = Builder('sha384sum', sha384sum, None, False, None, read=True)

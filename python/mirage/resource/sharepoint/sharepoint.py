@@ -61,6 +61,10 @@ class SharePointResource(BaseResource):
     # no aggregate-size root item.
     SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _SHAREPOINT_OPS
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
 

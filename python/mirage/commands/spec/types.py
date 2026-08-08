@@ -212,7 +212,13 @@ class FlagView:
             return None
         if isinstance(value, int):
             return value
-        return int(value) if isinstance(value, str) else None
+        if not isinstance(value, str):
+            return None
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError(f"flag '{name}' expects an integer, "
+                             f"got '{value}'") from exc
 
     def as_float(self, name: str) -> float | None:
         value = self._flags.get(self._key(name))
@@ -220,7 +226,13 @@ class FlagView:
             return None
         if isinstance(value, (int, float)):
             return float(value)
-        return float(value) if isinstance(value, str) else None
+        if not isinstance(value, str):
+            return None
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ValueError(f"flag '{name}' expects a number, "
+                             f"got '{value}'") from exc
 
     def as_str(self, name: str) -> str | None:
         value = self._flags.get(self._key(name))

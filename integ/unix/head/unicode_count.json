@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "id": "head_unicode_digit_count_rejected",
+      "seq": 910054,
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/t2headu && printf 'a\nb\n' > /data/t2headu/f && head -n ١٢ /data/t2headu/f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: invalid number of lines: '١٢'\n"
+      },
+      "flags": ["n"]
+    }
+  ]
+}

@@ -20,9 +20,9 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import { formatLsLong } from '../utils/formatting.ts'
-import { gnuStrerror } from '../../../utils/errors.ts'
+import { gnuStrerror, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { respellOne } from '../../../utils/path.ts'
+import { CycleError, respellOne } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
@@ -148,7 +148,8 @@ async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
   try {
     const s = await stat(path)
     return s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
-  } catch {
+  } catch (err) {
+    if (!isWalkError(err)) throw err
     return null
   }
 }
@@ -183,6 +184,7 @@ async function listDir(
     const entry = entries[i]
     if (outcome === undefined || entry === undefined) continue
     if (outcome.status === 'rejected') {
+      if (!isWalkError(outcome.reason)) throw outcome.reason
       // An entry below an operand is never a command-line arg.
       warnings.push({
         message: `ls: cannot access '${entry}': ${errText(outcome.reason)}`,
@@ -220,14 +222,16 @@ async function derefEntry(
   let target: string
   try {
     target = links.resolve(child)
-  } catch {
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
     return null
   }
   const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.resourcePath))
   try {
     const s = await stat(spec)
     return s.with({ name: link.name })
-  } catch {
+  } catch (err) {
+    if (!isWalkError(err)) throw err
     return null
   }
 }
@@ -254,6 +258,7 @@ async function probeOperand(
   try {
     stats = await listDir(readdir, stat, path, opts.all, warnings, opts.links, opts.deref, stat)
   } catch (err) {
+    if (!isWalkError(err)) throw err
     const row = await fileEntry(stat, path)
     if (row !== null) return { path, row, groups: [] }
     const link = linkRow(path, opts.links)
@@ -305,7 +310,8 @@ async function operandKey(operand: Operand, sortBy: SortBy, stat: Stat): Promise
   }
   try {
     return asOperand(await stat(operand.path), operand.path)
-  } catch {
+  } catch (err) {
+    if (!isWalkError(err)) throw err
     // The stat only supplies a sort key; an operand that cannot be statted
     // sorts as if it had none rather than failing the listing.
     return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
@@ -382,6 +388,7 @@ export async function lsGeneric(
         // GNU ls -d prints the operand as given.
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
+        if (!isWalkError(err)) throw err
         warnings.push({
           message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
           serious: true,

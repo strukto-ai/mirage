@@ -91,4 +91,80 @@ describe('PyodideRuntime without JSPI', () => {
     expect(result.exitCode).toBe(0)
     await rt.close()
   }, 60_000)
+
+  it('mutations reach the mount in guest order', async () => {
+    const calls: { op: string; path: string; dst?: string }[] = []
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, dst) => {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      calls.push(dst === undefined ? { op, path } : { op, path, dst })
+      if (op === 'READ') return new Uint8Array()
+      if (op === 'LIST') return []
+      return undefined
+    }
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
+    const result = await rt.run({
+      code: [
+        'import os',
+        "os.mkdir('/ram/box')",
+        "open('/ram/box/f.txt', 'wb').write(b'hi')",
+        "os.rename('/ram/box/f.txt', '/ram/box/g.txt')",
+        "os.remove('/ram/box/g.txt')",
+        "os.rmdir('/ram/box')",
+      ].join('\n'),
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(result.exitCode).toBe(0)
+    const mutations = calls.filter((c) => c.op !== 'READ' && c.op !== 'LIST')
+    expect(mutations).toEqual([
+      { op: 'MKDIR', path: '/ram/box' },
+      { op: 'WRITE', path: '/ram/box/f.txt' },
+      { op: 'RENAME', path: '/ram/box/f.txt', dst: '/ram/box/g.txt' },
+      { op: 'UNLINK', path: '/ram/box/g.txt' },
+      { op: 'RMDIR', path: '/ram/box' },
+    ])
+    await rt.close()
+  }, 60_000)
+
+  it('appending to a file MEMFS never saw extends it, it does not replace it', async () => {
+    // The prefix preloads once per runtime, so a file the mount gained
+    // afterwards is legitimately absent from MEMFS. An append-mode open
+    // then starts from an empty buffer, and shipping that buffer whole
+    // would drop what the mount already held.
+    const files = new Map<string, Uint8Array>()
+    const writes: { path: string; text: string }[] = []
+    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      if (op === 'READ') {
+        const found = files.get(path)
+        if (found === undefined) throw new Error(`no such file: ${path}`)
+        return found
+      }
+      if (op === 'LIST') {
+        return [...files].map(([p, v]) => ({ path: p, size: v.length, isDir: false }))
+      }
+      if (op === 'WRITE' && bytes !== undefined) {
+        files.set(path, new Uint8Array(bytes))
+        writes.push({ path, text: new TextDecoder().decode(bytes) })
+      }
+      return undefined
+    }
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/ram/'])
+    await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
+    files.set('/ram/log.txt', new TextEncoder().encode('a'))
+    const result = await rt.run({
+      code: `\nfor part in ['b', 'c']:\n    with open('/ram/log.txt', 'a') as f:\n        f.write(part)\n`,
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
+    expect(result.exitCode).toBe(0)
+    expect(new TextDecoder().decode(files.get('/ram/log.txt') ?? new Uint8Array())).toBe('abc')
+    await rt.close()
+  }, 60_000)
 })

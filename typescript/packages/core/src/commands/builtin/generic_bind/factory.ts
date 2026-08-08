@@ -51,6 +51,9 @@ function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
   overrides?: ReadonlySet<string>
   provisionOverrides?: Record<string, ProvisionFn<A>>
+  // Per-command adapters that replace the shared adapter when one command
+  // needs a cheaper backend operation (mirrors the Python ops_overrides).
+  opsOverrides?: Record<string, CommandIO<A>>
 }
 
 export function makeGenericCommands<A extends Accessor = Accessor>(
@@ -60,25 +63,26 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
 ): RegisteredCommand[] {
   const skip = options.overrides ?? new Set<string>()
   const provOver = options.provisionOverrides ?? {}
-  const opsBase = ops as CommandIO
+  const opsOver = options.opsOverrides ?? {}
   const commands: RegisteredCommand[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
+    const baseOps = (opsOver[b.name] ?? ops) as CommandIO
     // A backend missing an op a command cannot run without (cp/mv/tee/
     // gunzip/...) doesn't get the command registered, rather than getting
     // one that crashes when invoked.
-    if (!supports(opsBase, b.requirements ?? [])) continue
+    if (!supports(baseOps, b.requirements ?? [])) continue
     const cmdOps =
-      b.read === true ? withReadCache(opsBase) : b.write === true ? opsBase : withStatCache(opsBase)
+      b.read === true ? withReadCache(baseOps) : b.write === true ? baseOps : withStatCache(baseOps)
     const fn: CommandFn = (accessor, paths, texts, opts) =>
       b.fn(cmdOps, accessor, paths, texts, opts)
     const provision =
       b.name in provOver
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)
         : b.provision !== undefined
-          ? b.provision(opsBase.stat)
-          : defaultProvision(b.name, opsBase.stat, resolveGlobOf(opsBase), opsBase.readdir)
-    const aggregate = ops.local !== false ? (b.aggregate ?? null) : null
+          ? b.provision(baseOps.stat)
+          : defaultProvision(b.name, baseOps.stat, resolveGlobOf(baseOps), baseOps.readdir)
+    const aggregate = baseOps.local !== false ? (b.aggregate ?? null) : null
     commands.push(
       ...command({
         name: b.name,
