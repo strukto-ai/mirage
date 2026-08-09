@@ -86,9 +86,8 @@ def test_structure_listing_answers_only_when_something_is_below():
     assert structure_listing(PREFIXES, None, "/base/ghost") is None
     assert structure_listing(PREFIXES, None, "/base") == ["/base/inner"]
     links = _Links({"/base/ghost": {"lnk": "/base"}})
-    assert structure_listing(PREFIXES, links, "/base/ghost") == [
-        "/base/ghost/lnk"
-    ]
+    assert structure_listing(PREFIXES, links,
+                             "/base/ghost") == ["/base/ghost/lnk"]
 
 
 def test_structure_stat_agrees_with_the_listing():

@@ -16,10 +16,12 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied } from '../policy/errors.ts'
+import { Policies } from '../policy/policies.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { Limit, MountMode } from '../types.ts'
-import { enotdir } from '../utils/errors.ts'
+import { enoent, enotdir } from '../utils/errors.ts'
+import { WorkspaceFS } from './fs.ts'
 import { Workspace } from './workspace.ts'
 
 const DEC = new TextDecoder()
@@ -223,5 +225,44 @@ describe('WorkspaceFS policy door', () => {
     const ws = mkGuarded()
     await expect(ws.fs.writeFile('/data/locked/f.txt', 'hi')).rejects.toThrow(PolicyDenied)
     expect(await ws.fs.exists('/data/locked/f.txt')).toBe(false)
+  })
+})
+
+// The resolver-miss structure fallback (a directory that exists only
+// because a mount sits below it) answers with no owning mount, so the
+// gates fire with prefix '' — skipping them would make "no mount here"
+// a policy bypass.
+describe('WorkspaceFS structure fallback still clears admission', () => {
+  class SealInner implements Policy {
+    preOps(ctx: OpsContext): Action | null {
+      if (ctx.path.virtual === '/data/inner') return { kind: 'deny', message: 'sealed\n' }
+      return null
+    }
+  }
+
+  function mkStructureFS(policies: Policies): WorkspaceFS {
+    return new WorkspaceFS(
+      () => Promise.reject(enoent('/data/inner')),
+      new OpsRegistry(),
+      null,
+      null,
+      null,
+      policies,
+      () => '',
+      () => ['/data/inner/deep/'],
+    )
+  }
+
+  it('a policy deny covers the synthetic readdir and stat', async () => {
+    const policies = new Policies()
+    policies.add(new SealInner())
+    const fs = mkStructureFS(policies)
+    await expect(fs.readdir('/data/inner')).rejects.toThrow(PolicyDenied)
+    await expect(fs.stat('/data/inner')).rejects.toThrow(PolicyDenied)
+  })
+
+  it('the synthetic answer serves when no policy objects', async () => {
+    const fs = mkStructureFS(new Policies())
+    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
   })
 })

@@ -109,3 +109,39 @@ async def test_spec_op_twin_holds_on_the_dispatch_door():
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
     assert "frozen" in str(excinfo.value)
+
+
+def _structure_only(dispatcher) -> None:
+    """Point the mocks at a path no mount serves but structure knows:
+    mount_for misses, while a mount deeper down makes the namespace
+    answer readdir/stat for its parent."""
+    namespace = dispatcher._namespace
+    namespace.mount_for = MagicMock(side_effect=ValueError("no mount"))
+    deep = MagicMock()
+    deep.prefix = "/data/locked/inner/deep/"
+    namespace.registry.mounts = MagicMock(return_value=[deep])
+    namespace.links_under = MagicMock(return_value={})
+
+
+@pytest.mark.asyncio
+async def test_structure_fallback_still_clears_admission():
+    # A path with no owning mount can still answer readdir/stat from
+    # namespace structure. That synthetic answer must pass the same
+    # gates as a backend one, or "no mount here" is a policy bypass.
+    policies = Policies()
+    policies.add(DenyLocked())
+    dispatcher, _ = _dispatcher(policies)
+    _structure_only(dispatcher)
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("readdir", _path("/data/locked/inner"))
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("stat", _path("/data/locked/inner"))
+
+
+@pytest.mark.asyncio
+async def test_structure_fallback_serves_when_no_policy_objects():
+    dispatcher, _ = _dispatcher(Policies())
+    _structure_only(dispatcher)
+    result, _ = await dispatcher.dispatch("readdir",
+                                          _path("/data/locked/inner"))
+    assert result == ["/data/locked/inner/deep"]

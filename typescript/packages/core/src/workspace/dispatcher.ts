@@ -108,11 +108,17 @@ export class Dispatcher {
     } catch (err) {
       // No mount serves the path, but the namespace may still know a
       // directory there (a deeper mount, a link). No mount means no
-      // admission gate to key on and no cache to keep straight; the
-      // merged names are session-filtered individually.
+      // cache to keep straight and no owning prefix (the gates see ''),
+      // but admission still fires: a policy that bounds readdir or stat
+      // by path must cover the synthetic answer too. The merged names
+      // are session-filtered individually.
       const fallback = isMissingPath(err) ? this.structureResult(opName, p.virtual) : null
       if (fallback === null) throw err
-      return [fallback, new IOResult()]
+      const fallbackWrite = POLICY_WRITE_OPS.has(opName)
+      await preOpsGate(this.policies, opName, p, fallbackWrite, '')
+      const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
+      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
+      return [gated, new IOResult()]
     }
     const [resource, scope, mode] = resolved
     const mount = this.namespace.mountFor(p.virtual)

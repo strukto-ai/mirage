@@ -18,6 +18,8 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops import Ops
 from mirage.ops.config import OpsMount
+from mirage.policy import (Action, Deny, OpsContext, Policies, Policy,
+                           PolicyDenied)
 from mirage.resource.ram import RAMResource
 from mirage.resource.ram.store import RAMStore
 from mirage.types import FileType, MountMode
@@ -244,3 +246,45 @@ class TestOpsViaRegistry:
         assert ops._registry is not None
         fn = ops._registry.resolve("read", "ram")
         assert fn is not None
+
+
+class _SealInner(Policy):
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        if ctx.path.virtual == "/data/inner":
+            return Deny("sealed\n")
+        return None
+
+
+def _structure_only_ops(policies: Policies | None) -> Ops:
+    """An Ops whose only mount sits below the probed path, so resolve
+    misses at /data/inner and the answer is namespace structure."""
+    mounts = [
+        OpsMount(
+            prefix="/data/inner/deep/",
+            resource_type="ram",
+            accessor=RAMAccessor(RAMStore()),
+            index=RAMIndexCacheStore(),
+            mode=MountMode.WRITE,
+            ops=_ram_registered_ops(),
+        )
+    ]
+    return Ops(mounts, policies=policies)
+
+
+class TestStructureFallbackGates:
+
+    def test_the_synthetic_answer_still_clears_admission(self):
+        # Mirrors the dispatcher door: a policy that bounds readdir or
+        # stat by path must cover a structure-only directory too.
+        policies = Policies()
+        policies.add(_SealInner())
+        ops = _structure_only_ops(policies)
+        with pytest.raises(PolicyDenied):
+            run(ops.readdir("/data/inner"))
+        with pytest.raises(PolicyDenied):
+            run(ops.stat("/data/inner"))
+
+    def test_the_synthetic_answer_serves_when_no_policy_objects(self):
+        ops = _structure_only_ops(Policies())
+        assert run(ops.readdir("/data/inner")) == ["/data/inner/deep"]

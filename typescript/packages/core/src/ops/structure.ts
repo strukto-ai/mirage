@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountAllowed } from '../context/session_context.ts'
-import { stripSlash } from '../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { FileStat, FileType } from '../types.ts'
 import type { NamespaceLinks } from './config.ts'
 
@@ -66,7 +66,7 @@ export function mergeReaddir(
   parent: string,
 ): string[] {
   const present = new Set(entries.map((e) => stripEntry(e)))
-  const base = parent.replace(/\/+$/, '')
+  const base = rstripSlash(parent)
   const merged = [...entries]
   for (const name of [...childMountNames(prefixes, parent), ...linkNames(links, parent)]) {
     if (present.has(name)) continue
@@ -77,7 +77,7 @@ export function mergeReaddir(
 }
 
 function stripEntry(entry: string): string {
-  const trimmed = entry.replace(/\/+$/, '')
+  const trimmed = rstripSlash(entry)
   const slash = trimmed.lastIndexOf('/')
   return slash === -1 ? trimmed : trimmed.slice(slash + 1)
 }

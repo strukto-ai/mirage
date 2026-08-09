@@ -22,8 +22,8 @@ import type { StatOverlay } from '../ops/types.ts'
 import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { type Policies, postOpsGate, preOpsGate } from '../policy/policies.ts'
 import type { Resource } from '../resource/base.ts'
-import type { FileStat, MountMode, PathSpec } from '../types.ts'
-import { FileType } from '../types.ts'
+import type { FileStat, MountMode } from '../types.ts'
+import { FileType, PathSpec } from '../types.ts'
 import { isMissingPath } from '../utils/errors.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
@@ -194,9 +194,17 @@ export class WorkspaceFS {
     try {
       resolved = await this.resolver(path)
     } catch (err) {
+      // No mount serves the path; mirror the dispatcher and fire the
+      // gates anyway (prefixOf answers '' here) so a policy that bounds
+      // readdir by path covers the synthetic answer too.
       const fallback = isMissingPath(err) ? this.structureResult('readdir', path) : null
       if (fallback === null) throw err
-      return fallback as string[]
+      const pathSpec = PathSpec.fromStrPath(path)
+      await this.firePreOps('readdir', path, pathSpec, false)
+      return (
+        ((await this.firePostOps('readdir', path, pathSpec, false, fallback)) as string[] | null) ??
+        []
+      )
     }
     const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
@@ -232,9 +240,12 @@ export class WorkspaceFS {
     try {
       resolved = await this.resolver(path)
     } catch (err) {
+      // Same gate routing as the readdir resolver miss above.
       const fallback = isMissingPath(err) ? this.structureResult('stat', path) : null
       if (fallback === null) throw err
-      return fallback as FileStat
+      const pathSpec = PathSpec.fromStrPath(path)
+      await this.firePreOps('stat', path, pathSpec, false)
+      return (await this.firePostOps('stat', path, pathSpec, false, fallback)) as FileStat
     }
     const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}

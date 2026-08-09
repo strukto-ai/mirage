@@ -235,9 +235,22 @@ class Ops:
             resource_type, rel_path, accessor, index, mode = self._resolve(
                 path)
         except ValueError:
+            # Mirrors the workspace dispatcher: no owning prefix (the
+            # gates see ""), but admission still fires so a policy that
+            # bounds readdir or stat by path covers the synthetic
+            # answer too.
             fallback = self._structure_result(op, path)
             if fallback is None:
                 raise
+            if self._policies is not None:
+                scope = PathSpec(virtual=path,
+                                 directory=path.rsplit("/", 1)[0] or "/",
+                                 resource_path="")
+                await pre_ops_gate(self._policies, op, scope, write, "")
+                bound = await post_ops_gate(self._policies, op, scope, write,
+                                            "", fallback)
+                if bound is not None:
+                    fallback = await apply_op_limit(fallback, bound)
             return fallback
         mount_prefix = self._mount_prefix(path)
         assert_mount_allowed(mount_prefix)

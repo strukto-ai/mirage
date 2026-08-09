@@ -97,11 +97,20 @@ class Dispatcher:
         except ValueError:
             # No mount serves the path, but the namespace may still know
             # a directory there (a deeper mount, a link). No mount means
-            # no admission gate to key on and no cache to keep straight;
-            # the merged names are session-filtered individually.
+            # no cache to keep straight and no owning prefix (the gates
+            # see ""), but admission still fires: a policy that bounds
+            # readdir or stat by path must cover the synthetic answer
+            # too. The merged names are session-filtered individually.
             fallback = self._structure_result(op, path.virtual)
             if fallback is None:
                 raise
+            policies = self._namespace.registry.policies
+            write = op in _POLICY_WRITE_OPS
+            await pre_ops_gate(policies, op, path, write, "")
+            bound = await post_ops_gate(policies, op, path, write, "",
+                                        fallback)
+            if bound is not None:
+                fallback = await apply_op_limit(fallback, bound)
             return fallback, IOResult()
         assert_mount_allowed(mount.prefix)
         # Admission policies fire at the door, before the warm-cache

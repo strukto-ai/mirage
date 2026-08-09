@@ -122,7 +122,8 @@ def scoped_world(runtime: str) -> Workspace:
     return ws
 
 
-async def _sh(ws: Workspace, line: str,
+async def _sh(ws: Workspace,
+              line: str,
               session_id: str | None = None) -> tuple[int, str, str]:
     """Run one shell line, returning exit code and decoded streams.
 
@@ -384,8 +385,10 @@ async def test_fanout_does_not_cross_boundary(line: str, needle: str):
 @pytest.mark.parametrize(
     "runtime,line",
     _guest_cases({
-        "monty": "python3 -c \"print(open('/closed/sec.txt').read())\"",
-        "wasi": "python3 -c \"print(open('/closed/sec.txt').read())\"",
+        "monty":
+        "python3 -c \"print(open('/closed/sec.txt').read())\"",
+        "wasi":
+        "python3 -c \"print(open('/closed/sec.txt').read())\"",
         "quickjs":
         "node -e \"const f = std.open('/closed/sec.txt', 'r'); "
         "console.log(f.readAsString())\"",
@@ -431,7 +434,8 @@ async def test_guest_cannot_follow_link_out_of_scope():
     try:
         assert (await _sh(ws, "ln -s /closed /open/esc"))[0] == 0
         code, out, _ = await _sh(
-            ws, "python3 -c \"print(open('/open/esc/sec.txt').read())\"",
+            ws,
+            "python3 -c \"print(open('/open/esc/sec.txt').read())\"",
             session_id="agent")
         assert code != 0
         assert "SECRET-xyz" not in out
@@ -450,13 +454,15 @@ async def test_guest_cannot_follow_link_out_of_scope():
 @pytest.mark.parametrize(
     "runtime,line",
     _guest_cases({
-        "monty": "cd /base && python3 -c \"print(open('a.txt').read())\"",
-        "wasi": "cd /base && python3 -c \"print(open('a.txt').read())\"",
+        "monty":
+        "cd /base && python3 -c \"print(open('a.txt').read())\"",
+        "wasi":
+        "cd /base && python3 -c \"print(open('a.txt').read())\"",
     }),
 )
 @pytest.mark.xfail(reason=CWD, strict=True)
-async def test_guest_resolves_relative_path_against_cwd(runtime: str,
-                                                        line: str):
+async def test_guest_resolves_relative_path_against_cwd(
+        runtime: str, line: str):
     """A guest launched in ``/base`` reads ``a.txt`` relatively.
 
     Args:

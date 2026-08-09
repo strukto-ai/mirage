@@ -20,6 +20,7 @@ import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { assertMountAllowed } from '../context/session_context.ts'
+import { isMissingPath } from '../utils/errors.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
@@ -387,10 +388,14 @@ export class Workspace {
               let stat: FileStat
               try {
                 stat = (await this.dispatch('stat', entry)) as FileStat
-              } catch {
+              } catch (err) {
                 // A dangling link, or an entry that vanished between
                 // list and stat, must not fail the whole listing; the
-                // guest's own open reports the miss.
+                // guest's own open reports the miss. Anything else
+                // (authorization, a timeout, a backend bug) propagates,
+                // or pyodide's syncMounts would replace a healthy
+                // snapshot with a silently degraded one.
+                if (!isMissingPath(err)) throw err
                 return { path: entry, size: 0, isDir: false, ...(isLink ? { isLink } : {}) }
               }
               const isDir = stat.type === FileType.DIRECTORY
