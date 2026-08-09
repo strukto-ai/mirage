@@ -355,7 +355,11 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
         gets.append((path, params))
         return {"ok": True}
 
-    async def fake_post(config, path, body=None, extra_headers=None):
+    async def fake_post(config,
+                        path,
+                        body=None,
+                        extra_headers=None,
+                        params=None):
         posts.append((path, body))
         return {"ok": True}
 
@@ -378,7 +382,11 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
 async def test_api_builds_nested_bodies(monkeypatch):
     posts = []
 
-    async def fake_post(config, path, body=None, extra_headers=None):
+    async def fake_post(config,
+                        path,
+                        body=None,
+                        extra_headers=None,
+                        params=None):
         posts.append(body)
         return {"ok": True}
 

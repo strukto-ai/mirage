@@ -27,8 +27,10 @@ import { trash } from './pages/trash.ts'
 import { query } from './datasources/query.ts'
 import { whoamiRow } from './whoami.ts'
 import { propertyCell } from './util.ts'
+import { yieldBytes } from '../../../../io/stream.ts'
 
 const DEC = new TextDecoder()
+const ENC = new TextEncoder()
 
 interface Recorded {
   name: string
@@ -227,13 +229,106 @@ describe('ntn verbs', () => {
     await api(makeInv({}, ['v1/users/me']))
     await api(makeInv({}, ['v1/search', 'query=Roadmap']))
     await api(makeInv({}, ['v1/blocks/B1/children', 'page_size==1']))
-    expect(REQUESTS[0]).toEqual({ method: 'GET', path: '/users/me', query: {} })
+    // No `query` key at all when nothing was asked for, which is what
+    // python sends (`params or None`).
+    expect(REQUESTS[0]).toEqual({ method: 'GET', path: '/users/me' })
     expect(REQUESTS[1]).toEqual({ method: 'POST', path: '/search', body: { query: 'Roadmap' } })
     expect(REQUESTS[2]).toEqual({
       method: 'GET',
       path: '/blocks/B1/children',
       query: { page_size: '1' },
     })
+  })
+
+  it('api keeps a query parameter on a call that is not a GET', async () => {
+    // `name==value` is a query parameter whatever the method is. The
+    // non-GET path used to drop params entirely.
+    REQUESTS.length = 0
+    await api(makeInv({}, ['v1/search', 'a=1', 'q==2']))
+    expect(REQUESTS[0]).toEqual({
+      method: 'POST',
+      path: '/search',
+      query: { q: '2' },
+      body: { a: '1' },
+    })
+  })
+
+  it('api sends a non-object --data rather than refusing it', async () => {
+    // There is no client-side object check upstream: probed on the wire,
+    // `-d '[]'` POSTs the array. mirage used to refuse it as a usage error,
+    // so a line the real CLI accepts exited 2 here.
+    REQUESTS.length = 0
+    await api(makeInv({ data: '[]' }, ['v1/search']))
+    // `{}` is falsy, and inferring the method from truthiness sent it as a
+    // GET. The presence of a body source decides the method, not whether the
+    // body has anything in it.
+    await api(makeInv({ data: '{}' }, ['v1/search']))
+    expect(REQUESTS[0]).toEqual({ method: 'POST', path: '/search', body: [] })
+    expect(REQUESTS[1]).toEqual({ method: 'POST', path: '/search', body: {} })
+  })
+
+  it('api refuses conflicting body sources the way upstream does', async () => {
+    const result = await api(makeInv({ data: '{}' }, ['v1/search', 'a=1']))
+    const [, io] = unwrap(result)
+    expect(io.exitCode).toBe(5)
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
+      'error: Request body can come from only one source, but got: ' +
+        '--data, inline body inputs.\n' +
+        '  hint: Use only one of: stdin JSON, `--data`, or ' +
+        '`path=value` / `path:=json` inputs.\n',
+    )
+  })
+
+  it('api refuses a malformed inline input with serde’s words and a hint', async () => {
+    const result = await api(makeInv({}, ['v1/search', 'a:={']))
+    const [, io] = unwrap(result)
+    expect(io.exitCode).toBe(5)
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
+      'error: Failed to parse inline request input: invalid JSON value ' +
+        'in "a:={": EOF while parsing an object at line 1 column 1\n' +
+        '  hint: Use `Header:Value`, `name==value`, `path=value`, or `path:=json`.\n',
+    )
+  })
+
+  it('api names an input with no separator unexpected', async () => {
+    const result = await api(makeInv({}, ['v1/search', 'foo']))
+    const [, io] = unwrap(result)
+    expect(io.exitCode).toBe(5)
+    expect(DEC.decode(io.stderr as Uint8Array)).toContain('unexpected input: "foo"')
+  })
+
+  it('api reads the pipe as a body source', async () => {
+    REQUESTS.length = 0
+    await api(makeInv({}, ['v1/search'], yieldBytes(ENC.encode('{"q":1}'))))
+    expect(REQUESTS[0]).toEqual({ method: 'POST', path: '/search', body: { q: 1 } })
+  })
+
+  it('api refuses a malformed pipe with its own exit 1', async () => {
+    const result = await api(makeInv({}, ['v1/search'], yieldBytes(ENC.encode('{'))))
+    const [, io] = unwrap(result)
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('error: Invalid JSON from stdin\n')
+  })
+
+  it('api treats a blank pipe as no body source at all', async () => {
+    // The conformance harness closes stdin and every other line would
+    // otherwise report a conflict it never asked for.
+    REQUESTS.length = 0
+    const result = await api(makeInv({ data: '{}' }, ['v1/search'], yieldBytes(ENC.encode('  \n'))))
+    const [, io] = unwrap(result)
+    expect(io.exitCode).toBe(0)
+    expect(REQUESTS[0]).toEqual({ method: 'POST', path: '/search', body: {} })
+  })
+
+  it('api names an empty --data in its own words', async () => {
+    const result = await api(makeInv({ data: '  ' }, ['v1/search']))
+    const [, io] = unwrap(result)
+    expect(io.exitCode).toBe(5)
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
+      'error: --data requires a valid JSON value.\n' +
+        '  hint: Pass a JSON string such as `--data \'{"foo":"bar"}\'`, a file ' +
+        'such as `--data @body.json`, or stdin with `--data @-`.\n',
+    )
   })
 
   it('api sends inline headers on the wire', async () => {

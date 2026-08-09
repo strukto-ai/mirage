@@ -19,6 +19,7 @@ import aiohttp
 
 from mirage.core.notion.config import NotionConfig
 from mirage.resource.secrets import reveal_secret
+from mirage.types import JsonValue
 
 # 2025-09-03 is the generation that split databases into data sources: a
 # database became a container of data sources and the column schema moved to
@@ -88,13 +89,19 @@ async def notion_get(
 async def notion_post(
     config: NotionConfig,
     path: str,
-    body: dict[str, Any] | None = None,
+    body: JsonValue = None,
     extra_headers: Mapping[str, str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
     headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=body or {}) as resp:
+        # `body or {}` would rewrite an empty list or a zero into an
+        # object. `ntn api` can be handed any JSON value and sends it
+        # verbatim, so only a genuinely absent body becomes `{}`.
+        sent = body if body is not None else {}
+        async with session.post(url, headers=headers, json=sent,
+                                params=params) as resp:
             data = await resp.json()
             if resp.status >= 400:
                 message = data.get(
@@ -110,14 +117,18 @@ async def notion_post(
 async def notion_patch(
     config: NotionConfig,
     path: str,
-    body: dict[str, Any] | None = None,
+    body: JsonValue = None,
     extra_headers: Mapping[str, str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
     headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
-        async with session.patch(url, headers=headers, json=body
-                                 or {}) as resp:
+        sent = body if body is not None else {}
+        async with session.patch(url,
+                                 headers=headers,
+                                 json=sent,
+                                 params=params) as resp:
             data = await resp.json()
             if resp.status >= 400:
                 message = data.get(
@@ -133,13 +144,16 @@ async def notion_patch(
 async def notion_put(
     config: NotionConfig,
     path: str,
-    body: dict[str, Any] | None = None,
+    body: JsonValue = None,
     extra_headers: Mapping[str, str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
     headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
-        async with session.put(url, headers=headers, json=body or {}) as resp:
+        sent = body if body is not None else {}
+        async with session.put(url, headers=headers, json=sent,
+                               params=params) as resp:
             data = await resp.json()
             if resp.status >= 400:
                 message = data.get(

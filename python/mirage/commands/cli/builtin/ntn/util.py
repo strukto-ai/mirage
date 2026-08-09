@@ -79,6 +79,38 @@ def compact_json(value: JsonValue) -> bytes:
     return f"{text}\n".encode()
 
 
+def rust_debug(text: str) -> str:
+    """Quote a string the way Rust's `{:?}` renders one.
+
+    `ntn` interpolates the offending token into its parse errors with
+    the Debug formatter, so a token carrying a quote, a backslash or a
+    tab comes back escaped. Non-ASCII is left alone, which is why an
+    accented character appears verbatim in the real binary's message.
+
+    Args:
+        text (str): the token to render.
+
+    Returns:
+        str: the token wrapped in quotes, escaped as Rust escapes it.
+    """
+    out = ['"']
+    for char in text:
+        if char in ('"', "\\"):
+            out.append(f"\\{char}")
+        elif char == "\n":
+            out.append("\\n")
+        elif char == "\r":
+            out.append("\\r")
+        elif char == "\t":
+            out.append("\\t")
+        elif ord(char) < 0x20 or ord(char) == 0x7F:
+            out.append(f"\\u{{{ord(char):x}}}")
+        else:
+            out.append(char)
+    out.append('"')
+    return "".join(out)
+
+
 def first_text(texts: tuple[str, ...], what: str) -> str:
     """Take the leading positional operand or refuse the line.
 

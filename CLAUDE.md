@@ -137,6 +137,34 @@ agent discovers state, the CLI is how it acts.
   is read from the session rather than frozen into the spec. The executor fills
   it, so a leaf reads one flag instead of a flag and a fallback.
 
+- **Imitating a Rust CLI means imitating serde_json, so the engine parser does
+  not get to decide.** `ntn api` echoes its JSON parse failures verbatim, and
+  those words are serde_json's (`EOF while parsing an object at line 1 column 1`), which neither `json.loads` nor `JSON.parse` can produce and which the
+  two of them word differently from each other anyway. So
+  `commands/cli/builtin/ntn/serde.py` (`serde.ts`) is a scanner whose only job
+  is that message, and it is the **authority on validity too**: the engine
+  parser runs only on input the scanner already accepted, because the two
+  disagree about what JSON is (python accepts `NaN`, serde refuses it, and
+  silently sending `NaN` is worse than either). Three rules that are easy to
+  get wrong and are pinned by a probed table in `test_serde.py` /
+  `serde.test.ts`: columns count **bytes**, not characters (`["é"x` fails at
+  column 6); a newline advances the line and zeroes the column; and the
+  recursion limit is 128, refused at the opening bracket of the 128th
+  container. Do not "simplify" this to a try/except around the engine parser.
+
+- **`ntn api` has three body sources, and both the order and the exit codes are
+  observable.** stdin, `--data` and inline `path=value` / `path:=json` inputs
+  are each validated in that order, and only then is "more than one source"
+  reported, so a malformed pipe outranks a malformed `--data` and both outrank
+  the conflict. The exit codes are two families, neither of them argparse's 2:
+  a body that arrived malformed is **1** (`error: Invalid JSON from stdin`),
+  while a line the CLI will not interpret at all is **5** (the conflict, an
+  unparseable inline input, an empty `--data`), and those carry a second
+  `  hint:` line. There is **no object check anywhere**: `--data '[]'` posts
+  the array, and any body source at all makes the call a POST even when what
+  it carries is empty, so `--data '{}'` posts rather than falling back to GET
+  on falsiness. `name==value` stays a query parameter whatever the method is.
+
 - **Discoverability is part of shipping a CLI**, and it comes from the spec, so
   it works for a user's own registered CLI exactly as for a builtin one. `man <cli>` and `man <cli> <verb>...` render through `node_help`/`nodeHelp`, the
   same renderer `--help` uses, so a manual cannot drift from the program; bare

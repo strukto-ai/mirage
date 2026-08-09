@@ -14,15 +14,40 @@
 
 import { FlagView } from '../../../spec/types.ts'
 import type { RestCall } from '../../../../core/notion/_client.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { compactJson, firstText, notionTransport, usageError } from './util.ts'
+import { serdeMessage } from './serde.ts'
+import { compactJson, firstText, notionTransport, rustDebug, usageError } from './util.ts'
 
 const ENC = new TextEncoder()
-const BAD_DATA = 'error: Invalid JSON from --data\n'
+const DEC = new TextDecoder()
 
-const METHODS = new Set(['GET', 'POST', 'PATCH'])
+// Every byte below is probed against ntn 0.21.9. The exit codes are not one
+// family: a body that arrived malformed is 1, while a line the CLI refuses to
+// interpret at all is 5, and neither is argparse's 2.
+const BAD_DATA = 'error: Invalid JSON from --data\n'
+const BAD_STDIN = 'error: Invalid JSON from stdin\n'
+const EMPTY_DATA =
+  'error: --data requires a valid JSON value.\n' +
+  '  hint: Pass a JSON string such as `--data \'{"foo":"bar"}\'`, a file ' +
+  'such as `--data @body.json`, or stdin with `--data @-`.\n'
+const INLINE_LEAD = 'error: Failed to parse inline request input: '
+const INLINE_HINT = '  hint: Use `Header:Value`, `name==value`, `path=value`, or `path:=json`.\n'
+const CONFLICT_LEAD = 'error: Request body can come from only one source, but got: '
+const CONFLICT_HINT =
+  '  hint: Use only one of: stdin JSON, `--data`, or `path=value` / `path:=json` inputs.\n'
+const STDIN_SOURCE = 'stdin JSON'
+const DATA_SOURCE = '--data'
+const INLINE_SOURCE = 'inline body inputs'
+const BAD_BODY_EXIT = 1
+const REFUSAL_EXIT = 5
+
+const METHODS = new Set(['GET', 'POST', 'PATCH', 'PUT'])
+
+// One inline input the CLI could not interpret, carrying the clause upstream
+// puts after its fixed lead.
+class InlineRefusal extends Error {}
 
 type Container = Record<string, unknown> | unknown[]
 
@@ -80,11 +105,15 @@ function classify(
   const typed = token.indexOf(':=')
   if (typed !== -1) {
     const name = token.slice(0, typed)
-    try {
-      assign(body, name, JSON.parse(token.slice(typed + 2)))
-    } catch {
-      throw new Error(`${name}:= must be valid JSON`)
+    const raw = token.slice(typed + 2)
+    // serde decides, not JSON.parse: the two disagree about what is valid
+    // and never agree on the wording, and this message is compared byte for
+    // byte against the real binary.
+    const message = serdeMessage(raw)
+    if (message !== null) {
+      throw new InlineRefusal(`invalid JSON value in ${rustDebug(token)}: ${message}`)
     }
+    assign(body, name, JSON.parse(raw))
     return
   }
   const queried = token.indexOf('==')
@@ -102,38 +131,72 @@ function classify(
     assign(body, token.slice(0, equals), token.slice(equals + 1))
     return
   }
-  throw new Error(`unrecognized request input: ${token}`)
+  throw new InlineRefusal(`unexpected input: ${rustDebug(token)}`)
+}
+
+// One of upstream's own refusals, rendered.
+function refusal(stderr: string, code: number): CommandFnResult {
+  return [null, new IOResult({ stderr: ENC.encode(stderr), exitCode: code })]
 }
 
 export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const body: Record<string, unknown> = {}
+  const inline: Record<string, unknown> = {}
   const params: Record<string, unknown> = {}
   const headers: Record<string, string> = {}
   let path: string
   let method: string
+  let body: unknown
+  let named: string[]
   try {
     path = firstText(inv.texts, 'api path')
-    for (const token of inv.texts.slice(1)) classify(token, body, params, headers)
-    const data = fl.asStr('data')
-    if (data !== undefined && data !== '') {
-      if (Object.keys(body).length > 0) throw new Error('request body must come from one source')
-      let decoded: unknown
-      try {
-        decoded = JSON.parse(data)
-      } catch {
-        // Upstream's wording and its exit 1, probed against ntn 0.21.9.
-        // Deliberately not the engine's own parse message, which python and
-        // typescript could never agree on.
-        return [null, new IOResult({ stderr: ENC.encode(BAD_DATA), exitCode: 1 })]
-      }
-      if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
-        throw new Error('--data must be a JSON object')
-      }
-      Object.assign(body, decoded)
+
+    // Upstream validates the three body sources in this order and only then
+    // complains that more than one was given, so a malformed pipe outranks a
+    // malformed --data, and both outrank the conflict. Probed against ntn
+    // 0.21.9; the order is observable and worth keeping.
+    const piped = inv.stdin !== null ? DEC.decode(await materialize(inv.stdin)) : ''
+    const hasStdin = piped.trim() !== ''
+    let stdinBody: unknown
+    if (hasStdin) {
+      if (serdeMessage(piped) !== null) return refusal(BAD_STDIN, BAD_BODY_EXIT)
+      stdinBody = JSON.parse(piped)
     }
-    const hasBody = Object.keys(body).length > 0
-    method = (fl.asStr('method') ?? (hasBody ? 'POST' : 'GET')).toUpperCase()
+
+    const data = fl.asStr('data')
+    const hasData = data !== undefined
+    let dataBody: unknown
+    if (data !== undefined) {
+      if (data.trim() === '') return refusal(EMPTY_DATA, REFUSAL_EXIT)
+      if (serdeMessage(data) !== null) return refusal(BAD_DATA, BAD_BODY_EXIT)
+      dataBody = JSON.parse(data)
+    }
+
+    try {
+      for (const token of inv.texts.slice(1)) classify(token, inline, params, headers)
+    } catch (err) {
+      if (!(err instanceof InlineRefusal)) throw err
+      return refusal(`${INLINE_LEAD}${err.message}\n${INLINE_HINT}`, REFUSAL_EXIT)
+    }
+
+    const hasInline = Object.keys(inline).length > 0
+    named = [
+      ...(hasStdin ? [STDIN_SOURCE] : []),
+      ...(hasData ? [DATA_SOURCE] : []),
+      ...(hasInline ? [INLINE_SOURCE] : []),
+    ]
+    if (named.length > 1) {
+      return refusal(`${CONFLICT_LEAD}${named.join(', ')}.\n${CONFLICT_HINT}`, REFUSAL_EXIT)
+    }
+
+    // A body source makes the call a POST even when what it carries is empty:
+    // `--data {}` posts, and there is no object check anywhere, so a list or
+    // a scalar goes out exactly as it was typed.
+    if (hasStdin) body = stdinBody
+    else if (hasData) body = dataBody
+    else if (hasInline) body = inline
+
+    method = (fl.asStr('method') ?? (named.length > 0 ? 'POST' : 'GET')).toUpperCase()
     if (!METHODS.has(method)) throw new Error(`unsupported method: ${method}`)
   } catch (err) {
     return usageError(err)
@@ -142,8 +205,11 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   const rooted = path.startsWith('/') ? path : `/${path}`
   const route = rooted.startsWith('/v1/') ? rooted.slice(3) : rooted
   const call: RestCall = { method: method as RestCall['method'], path: route }
-  if (method === 'GET') call.query = params
-  else call.body = body
+  // `name==value` is a query parameter whatever the method is, so it rides
+  // alongside the body rather than being dropped once the call stops being
+  // a GET.
+  if (Object.keys(params).length > 0) call.query = params
+  if (method !== 'GET') call.body = body
   if (Object.keys(headers).length > 0) call.headers = headers
   const result = await notionTransport(inv.config, inv.flags).request(call)
   return [compactJson(result), new IOResult()]

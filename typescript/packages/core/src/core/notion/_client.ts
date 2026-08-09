@@ -153,10 +153,14 @@ export interface HttpNotionTransportOptions {
 }
 
 export interface RestCall {
-  method: 'GET' | 'POST' | 'PATCH'
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT'
   path: string
   query?: Record<string, unknown>
-  body?: Record<string, unknown>
+  /**
+   * Any JSON value, not only an object: `ntn api` sends whatever `--data`
+   * or the pipe carried, verbatim, with no client-side object check.
+   */
+  body?: unknown
   /**
    * Per-request headers, which `ntn api` collects from its `Header:Value`
    * inputs. Applied last so a caller can override a default, which is what the

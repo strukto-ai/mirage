@@ -60,6 +60,25 @@ export function compactJson(value: unknown): ByteSource {
   return ENC.encode(`${JSON.stringify(sortDeep(value))}\n`)
 }
 
+// Quote a string the way Rust's `{:?}` renders one. `ntn` interpolates the
+// offending token into its parse errors with the Debug formatter, so a token
+// carrying a quote, a backslash or a tab comes back escaped. Non-ASCII is
+// left alone, which is why an accented character appears verbatim in the real
+// binary's message.
+export function rustDebug(text: string): string {
+  let out = '"'
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0
+    if (char === '"' || char === '\\') out += `\\${char}`
+    else if (char === '\n') out += '\\n'
+    else if (char === '\r') out += '\\r'
+    else if (char === '\t') out += '\\t'
+    else if (code < 0x20 || code === 0x7f) out += `\\u{${code.toString(16)}}`
+    else out += char
+  }
+  return `${out}"`
+}
+
 export function firstText(texts: readonly string[], what: string): string {
   const head = texts[0]
   if (head === undefined || head === '') throw new Error(`${what} is required`)

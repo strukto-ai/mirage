@@ -152,7 +152,7 @@
       "command": "ntn datasources query d5000000-2222-3333-4444-555566667777",
       "expect": {
         "exit": 0,
-        "stdout": "ffff1111-2222-3333-4444-555566667777\t\u2713\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
+        "stdout": "ffff1111-2222-3333-4444-555566667777\t✓\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
         "stderr": ""
       }
     },
@@ -400,7 +400,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "\u2714 Page trashed\n"
+        "stderr": "✔ Page trashed\n"
       }
     },
     {
@@ -466,6 +466,97 @@
         "exit": 1,
         "stdout": "",
         "stderr": "error: Invalid JSON from --data\n"
+      }
+    },
+    {
+      "id": "ntn_api_body_conflict",
+      "seq": 566036,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '{}' a=1",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Request body can come from only one source, but got: --data, inline body inputs.\n  hint: Use only one of: stdin JSON, `--data`, or `path=value` / `path:=json` inputs.\n"
+      }
+    },
+    {
+      "id": "ntn_api_bad_inline",
+      "seq": 566037,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search 'a:={'",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Failed to parse inline request input: invalid JSON value in \"a:={\": EOF while parsing an object at line 1 column 1\n  hint: Use `Header:Value`, `name==value`, `path=value`, or `path:=json`.\n"
+      }
+    },
+    {
+      "id": "ntn_api_unexpected_input",
+      "seq": 566038,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search foo",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Failed to parse inline request input: unexpected input: \"foo\"\n  hint: Use `Header:Value`, `name==value`, `path=value`, or `path:=json`.\n"
+      }
+    },
+    {
+      "id": "ntn_api_empty_data",
+      "seq": 566039,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d ''",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: --data requires a valid JSON value.\n  hint: Pass a JSON string such as `--data '{\"foo\":\"bar\"}'`, a file such as `--data @body.json`, or stdin with `--data @-`.\n"
+      }
+    },
+    {
+      "id": "ntn_api_bad_stdin",
+      "seq": 566040,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "printf '{' | ntn api v1/search",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: Invalid JSON from stdin\n"
+      }
+    },
+    {
+      "id": "ntn_api_data_array",
+      "seq": 566041,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '[]' | jq -r '.results | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_stdin_body",
+      "seq": 566042,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "printf '{\"query\":\"Roadmap\"}' | ntn api v1/search | jq -r '.results[].properties.title.title[0].plain_text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Project Roadmap\n",
+        "stderr": ""
       }
     }
   ]
