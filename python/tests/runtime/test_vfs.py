@@ -38,6 +38,21 @@ class RecordingVFS(RuntimeVFS):
         return None
 
 
+class RecordingDispatch:
+    """Workspace dispatch double, recording what reached the loop."""
+
+    def __init__(self, result=b"payload", raises=None):
+        self.result = result
+        self.raises = raises
+        self.seen = []
+
+    async def __call__(self, op, path, **kwargs):
+        self.seen.append((op, path.virtual))
+        if self.raises is not None:
+            raise self.raises
+        return self.result, None
+
+
 def test_plan_flush_sends_a_tail_when_the_handle_only_extended():
     assert plan_flush(3, 3, b"abcXYZ") == ("append", b"XYZ")
 
@@ -100,24 +115,16 @@ def test_flush_falls_back_to_a_whole_write_and_remembers_the_mount():
 
 @pytest.mark.asyncio
 async def test_call_hops_from_a_worker_thread_to_the_workspace_loop():
-    seen = []
-
-    async def dispatch(op, path, **kwargs):
-        seen.append((op, path.virtual))
-        return b"payload", None
-
+    dispatch = RecordingDispatch()
     vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
     data = await asyncio.to_thread(vfs.read, "/data/f.txt")
     assert data == b"payload"
-    assert seen == [("read", "/data/f.txt")]
+    assert dispatch.seen == [("read", "/data/f.txt")]
 
 
 @pytest.mark.asyncio
 async def test_an_unregistered_op_surfaces_as_not_implemented():
-
-    async def dispatch(op, path, **kwargs):
-        raise OperationNotSupportedError("mkdir")
-
+    dispatch = RecordingDispatch(raises=OperationNotSupportedError("mkdir"))
     vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
     with pytest.raises(NotImplementedError):
         await asyncio.to_thread(vfs.mkdir, "/data/sub")
