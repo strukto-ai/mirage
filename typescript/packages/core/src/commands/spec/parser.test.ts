@@ -876,3 +876,77 @@ describe('flag-driven operand kinds', () => {
     expect(p.paths()).toEqual(['/d/a.json'])
   })
 })
+
+describe("parseCommand — tar's old option style", () => {
+  it('parses a cluster as flags', () => {
+    const p = parseCommand(specOf('tar'), ['xzf', '/data/a.tgz'], '/')
+    expect(p.flags['-x']).toBe(true)
+    expect(p.flags['-z']).toBe(true)
+    expect(p.flags['-f']).toBe('/data/a.tgz')
+    expect(p.paths()).toEqual([])
+    expect(p.pathFlagValues).toEqual(['/data/a.tgz'])
+  })
+
+  it('marks the cluster word TEXT so it is never classified as a path', () => {
+    // The cluster carries no dash, so without an explicit TEXT kind the
+    // shape heuristic would classify it and dispatch would re-read it as
+    // a resolved path instead of letters.
+    const p = parseCommand(specOf('tar'), ['xzf', '/data/a.tgz'], '/')
+    expect(p.wordKinds).toEqual(['str', 'path'])
+  })
+
+  it('keeps operands in their own argv slots', () => {
+    const p = parseCommand(
+      specOf('tar'),
+      ['czf', '/data/a.tgz', '/data/one.txt', '/data/two.txt'],
+      '/',
+    )
+    expect(p.paths()).toEqual(['/data/one.txt', '/data/two.txt'])
+    expect(p.wordKinds).toEqual(['str', 'path', 'path', 'path'])
+  })
+
+  it('binds two value letters in letter order', () => {
+    const p = parseCommand(specOf('tar'), ['xfC', '/data/a.tgz', '/data/out'], '/')
+    expect(p.flags['-f']).toBe('/data/a.tgz')
+    expect(p.flags['-C']).toBe('/data/out')
+  })
+
+  it('keeps a bool letter that follows a value letter', () => {
+    const p = parseCommand(specOf('tar'), ['cfz', '/data/a.tgz'], '/')
+    expect(p.flags['-f']).toBe('/data/a.tgz')
+    expect(p.flags['-z']).toBe(true)
+  })
+
+  it('reports a missing cluster argument instead of throwing', () => {
+    expect(parseCommand(specOf('tar'), ['xzf'], '/').oldOptionNeedsValue).toBe('f')
+  })
+
+  it('reports an undeclared cluster letter as an undeclared option', () => {
+    const p = parseCommand(specOf('tar'), ['xQz', '/data/a.tgz'], '/')
+    expect(p.invalidOptions).toEqual(['Q'])
+    expect(p.oldOptionNeedsValue).toBeNull()
+  })
+
+  it('reports no old option on a dashed line', () => {
+    const p = parseCommand(specOf('tar'), ['-x', '-z', '-f', '/data/a.tgz'], '/')
+    expect(p.oldOptionNeedsValue).toBeNull()
+    expect(p.wordKinds).toEqual([null, null, null, 'path'])
+  })
+
+  it('still accepts long options after the cluster', () => {
+    const p = parseCommand(
+      specOf('tar'),
+      ['xzf', '/data/a.tgz', '--strip-components', '1', '-C', '/data/out'],
+      '/',
+    )
+    expect(p.flags['--strip-components']).toBe('1')
+    expect(p.flags['-C']).toBe('/data/out')
+  })
+
+  it('is off for every other command', () => {
+    // A first word with no dash stays an operand everywhere else.
+    const p = parseCommand(specOf('gzip'), ['dkf'], '/')
+    expect(p.paths()).toEqual(['/dkf'])
+    expect(p.oldOptionNeedsValue).toBeNull()
+  })
+})

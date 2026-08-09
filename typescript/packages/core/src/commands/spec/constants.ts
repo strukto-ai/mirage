@@ -47,6 +47,12 @@ export const FLOAT_VALUE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 // name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp'])
 
+// An old-style cluster letter left without its argument exits 2, not
+// USAGE_EXIT's 64: tar reads the cluster itself and raises its own fatal
+// error, while 64 (EX_USAGE) is what argp returns for a letter it does
+// not know. Pinned on GNU tar 1.35: `tar xzf` is 2, `tar -Q` is 64.
+export const OLD_OPTION_EXIT = 2
+
 export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   grep: 2,
   egrep: 2,

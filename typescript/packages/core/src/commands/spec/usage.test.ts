@@ -21,6 +21,7 @@ import {
   invalidArgumentError,
   missingRequiredError,
   missingValueError,
+  oldOptionError,
   unknownOptionError,
   usageExitCode,
 } from './usage.ts'
@@ -152,5 +153,16 @@ describe('invalidFloatError', () => {
         "Try 'mycli --help' for more information.\n",
     )
     expect(code).toBe(1)
+  })
+})
+
+describe('oldOptionError', () => {
+  it("matches GNU tar's wording", () => {
+    const [msg, code] = oldOptionError('tar', 'f')
+    expect(td.decode(msg)).toBe(
+      "tar: Old option 'f' requires an argument.\n" + "Try 'tar --help' for more information.\n",
+    )
+    // tar's own fatal error, not argp's 64.
+    expect(code).toBe(2)
   })
 })

@@ -606,3 +606,75 @@ def test_operands_stay_paths_without_the_args_flags():
     parsed = parse_command(SPECS["jq"], [".", "/d/a.json"], "/")
     assert parsed.texts() == ["."]
     assert parsed.paths() == ["/d/a.json"]
+
+
+def test_tar_old_style_cluster_parses_as_flags():
+    parsed = parse_command(SPECS["tar"], ["xzf", "/data/a.tgz"], "/")
+    assert parsed.flags["-x"] is True
+    assert parsed.flags["-z"] is True
+    assert parsed.flags["-f"] == "/data/a.tgz"
+    assert parsed.paths() == []
+    assert parsed.path_flag_values == ["/data/a.tgz"]
+
+
+def test_tar_old_style_cluster_word_is_text_not_a_path():
+    # The cluster carries no dash, so without an explicit TEXT kind the
+    # shape heuristic would classify it and dispatch would re-read it as
+    # a resolved path instead of letters.
+    parsed = parse_command(SPECS["tar"], ["xzf", "/data/a.tgz"], "/")
+    assert parsed.word_kinds == ["str", "path"]
+
+
+def test_tar_old_style_operands_keep_their_argv_slots():
+    parsed = parse_command(
+        SPECS["tar"], ["czf", "/data/a.tgz", "/data/one.txt", "/data/two.txt"],
+        "/")
+    assert parsed.paths() == ["/data/one.txt", "/data/two.txt"]
+    assert parsed.word_kinds == ["str", "path", "path", "path"]
+
+
+def test_tar_old_style_two_value_letters_bind_in_letter_order():
+    parsed = parse_command(SPECS["tar"], ["xfC", "/data/a.tgz", "/data/out"],
+                           "/")
+    assert parsed.flags["-f"] == "/data/a.tgz"
+    assert parsed.flags["-C"] == "/data/out"
+
+
+def test_tar_old_style_value_letter_before_bool_letter():
+    parsed = parse_command(SPECS["tar"], ["cfz", "/data/a.tgz"], "/")
+    assert parsed.flags["-f"] == "/data/a.tgz"
+    assert parsed.flags["-z"] is True
+
+
+def test_tar_old_style_missing_argument_is_reported_not_raised():
+    parsed = parse_command(SPECS["tar"], ["xzf"], "/")
+    assert parsed.old_option_needs_value == "f"
+
+
+def test_tar_old_style_undeclared_letter_reports_the_char():
+    parsed = parse_command(SPECS["tar"], ["xQz", "/data/a.tgz"], "/")
+    assert parsed.invalid_options == ["Q"]
+    assert parsed.old_option_needs_value is None
+
+
+def test_tar_dashed_line_reports_no_old_option():
+    parsed = parse_command(SPECS["tar"], ["-x", "-z", "-f", "/data/a.tgz"],
+                           "/")
+    assert parsed.old_option_needs_value is None
+    assert parsed.word_kinds == [None, None, None, "path"]
+
+
+def test_tar_old_style_still_accepts_long_options_after_the_cluster():
+    parsed = parse_command(
+        SPECS["tar"],
+        ["xzf", "/data/a.tgz", "--strip-components", "1", "-C", "/data/out"],
+        "/")
+    assert parsed.flags["--strip-components"] == "1"
+    assert parsed.flags["-C"] == "/data/out"
+
+
+def test_old_option_style_is_off_for_every_other_command():
+    # A first word with no dash stays an operand everywhere else.
+    parsed = parse_command(SPECS["gzip"], ["dkf"], "/")
+    assert parsed.paths() == ["/dkf"]
+    assert parsed.old_option_needs_value is None

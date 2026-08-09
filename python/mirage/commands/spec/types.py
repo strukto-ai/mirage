@@ -170,6 +170,11 @@ class CommandSpec:
     ignore_tokens: frozenset[str] = frozenset()
     description: str | None = None
     epilog: str | None = None
+    # tar's old option style: a first word with no leading dash is a
+    # cluster of option letters whose arguments follow as separate words
+    # (`tar xzf a.tgz`). Expanded by expand_old_style before any other
+    # scanning; see oldstyle.py for the rules and why only tar has it.
+    old_option_style: bool = False
 
 
 class FlagView:
@@ -315,6 +320,13 @@ class ParsedArgs:
     invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
     invalid_float_options: list[tuple[str, str]] = field(default_factory=list)
     missing_required_options: list[str] = field(default_factory=list)
+    # The old-style cluster letter whose argument ran off the end of the
+    # line (`tar xzf` with no archive). Its own report because GNU tar
+    # words it differently and exits differently from every getopt
+    # refusal above, and because it outranks all of them: tar counts the
+    # cluster's argument needs before argp ever validates a letter, so
+    # `tar Qf` and `tar fQ` both name f, not Q.
+    old_option_needs_value: str | None = None
 
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == "path"]

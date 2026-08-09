@@ -228,6 +228,7 @@ export async function handleCli(
     parsed[9],
     parsed[10],
     parsed[11],
+    parsed[12],
   )
   if (refusal !== null) {
     // The dialect is the root's, not the leaf's: a program answers in one

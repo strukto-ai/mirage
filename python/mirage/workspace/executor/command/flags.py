@@ -17,7 +17,7 @@ from mirage.commands.spec import (CommandSpec, flag_kwarg_name, parse_command,
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, invalid_argument_error, invalid_float_error,
     invalid_int_error, missing_required_error, missing_value_error,
-    unknown_option_error)
+    old_option_error, unknown_option_error)
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.types import ParsedCommand
 
@@ -148,7 +148,7 @@ def parse_flags(
             parsed.ambiguous_options, parsed.option_error_kinds,
             parsed.needs_value_options, parsed.invalid_value_options,
             parsed.invalid_int_options, parsed.invalid_float_options,
-            parsed.missing_required_options)
+            parsed.missing_required_options, parsed.old_option_needs_value)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
@@ -169,6 +169,11 @@ def option_error(cmd_name: str,
     """
     if cmd_name == "find":
         return None
+    # An old-style cluster short of an argument outranks every scan error
+    # below: tar counts the cluster's needs before argp validates a
+    # letter, so `tar Qf` and `tar fQ` both name f, not Q.
+    if parsed.old_option_needs_value is not None:
+        return old_option_error(cmd_name, parsed.old_option_needs_value)
     # Scan-order between unknown and ambiguous options: GNU stops at the
     # first offending token, so `grep --c --bogus` reports the ambiguity
     # and the reversed line reports --bogus.

@@ -31,6 +31,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--exclude", type="str"),
         ),
         rest=Operand(type="path"),
+        # `tar xzf a.tgz` is the spelling everyone types.
+        old_option_style=True,
     ),
     'gzip':
     CommandSpec(

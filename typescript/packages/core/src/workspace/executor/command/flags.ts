@@ -20,6 +20,7 @@ import {
   invalidIntError,
   missingRequiredError,
   missingValueError,
+  oldOptionError,
   unknownOptionError,
 } from '../../../commands/spec/usage.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
@@ -69,6 +70,7 @@ export function parseFlags(
   [string, string][],
   [string, string][],
   string[],
+  string | null,
 ] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
   const scopeMap = new Map<string, PathSpec>()
@@ -116,6 +118,7 @@ export function parseFlags(
       parsed.invalidIntOptions,
       parsed.invalidFloatOptions,
       parsed.missingRequiredOptions,
+      parsed.oldOptionNeedsValue,
     ]
   }
 
@@ -125,7 +128,7 @@ export function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], [], [], [], [], [], [], []]
+  return [paths, texts, {}, [], [], [], [], [], [], [], [], [], null]
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is
@@ -141,8 +144,13 @@ export function optionError(
   invalidInt: readonly [string, string][],
   invalidFloat: readonly [string, string][],
   missingRequired: readonly string[],
+  oldOptionNeedsValue: string | null = null,
 ): [Uint8Array, number] | null {
   if (cmdName === 'find') return null
+  // An old-style cluster short of an argument outranks every scan error
+  // below: tar counts the cluster's needs before argp validates a letter,
+  // so `tar Qf` and `tar fQ` both name f, not Q.
+  if (oldOptionNeedsValue !== null) return oldOptionError(cmdName, oldOptionNeedsValue)
   // Scan-order between unknown and ambiguous options: GNU stops at the
   // first offending token, so `grep --c --bogus` reports the ambiguity
   // and the reversed line reports --bogus.

@@ -15,6 +15,7 @@
 import { resolvePath } from '../../utils/path.ts'
 import { type CompiledSpec, compileSpec, expandLong } from './compile.ts'
 import { FLOAT_VALUE, flagKwargName, INT_VALUE, NUMERIC_SHORT } from './constants.ts'
+import { expandOldStyle } from './oldstyle.ts'
 import { type CommandSpec, type ValueType, ParsedArgs } from './types.ts'
 
 // Record a value flag occurrence under its canonical dest. Both spellings
@@ -89,17 +90,25 @@ function matchMixedCluster(tok: string, cs: CompiledSpec): MixedCluster | null {
 export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {
   const cs = compileSpec(spec)
 
+  // tar's old option style is expanded before anything else reads the
+  // line, so classification, routing and dispatch all scan the same
+  // dashed words; scanOrigins maps each of them back to the caller's
+  // argv slot (every synthesized token to the cluster's own slot).
+  const old = spec.oldOptionStyle ? expandOldStyle(cs, argv) : null
+  const scanArgv = old !== null ? old.argv : argv
+  const scanOrigins = old !== null ? old.origins : argv.map((_, idx) => idx)
+
   const cachePaths: string[] = []
   const filteredArgv: string[] = []
   // origIndices[j] = argv position of filteredArgv[j]
   const origIndices: number[] = []
   let i = 0
-  while (i < argv.length) {
-    const cur = argv[i]
+  while (i < scanArgv.length) {
+    const cur = scanArgv[i]
     if (cur === '--cache') {
       i += 1
       for (;;) {
-        const next = argv[i]
+        const next = scanArgv[i]
         if (next === undefined || next.startsWith('-')) break
         cachePaths.push(resolvePath(next, cwd))
         i += 1
@@ -107,7 +116,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     } else {
       if (cur !== undefined) {
         filteredArgv.push(cur)
-        origIndices.push(i)
+        origIndices.push(scanOrigins[i] ?? i)
       }
       i += 1
     }
@@ -128,6 +137,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // operands); kinds must be written at the original positions or one
   // dropped token shifts every later kind onto the wrong word.
   const wordKinds: (ValueType | null)[] = new Array<ValueType | null>(argv.length).fill(null)
+  if (old !== null && old.cluster !== null) {
+    // A cluster carries no dash, so leaving it null would send it to the
+    // shape heuristic and a path-shaped one (`tar sub/a.tgz`) would reach
+    // dispatch resolved and unreadable as letters.
+    wordKinds[0] = 'str'
+  }
   const warnings: string[] = []
   const invalidOptions: string[] = []
   const ambiguousOptions: [string, readonly string[]][] = []
@@ -463,6 +478,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     invalidIntOptions,
     invalidFloatOptions,
     missingRequiredOptions,
+    oldOptionNeedsValue: old !== null ? old.needsValue : null,
     wordKinds,
   })
 }

@@ -206,6 +206,7 @@ export interface CommandSpecInit {
   ignoreTokens?: Iterable<string>
   description?: string | null
   epilog?: string | null
+  oldOptionStyle?: boolean
 }
 
 export class CommandSpec {
@@ -215,6 +216,11 @@ export class CommandSpec {
   readonly ignoreTokens: ReadonlySet<string>
   readonly description: string | null
   readonly epilog: string | null
+  // tar's old option style: a first word with no leading dash is a
+  // cluster of option letters whose arguments follow as separate words
+  // (`tar xzf a.tgz`). Expanded by expandOldStyle before any other
+  // scanning; see oldstyle.ts for the rules and why only tar has it.
+  readonly oldOptionStyle: boolean
 
   constructor(init: CommandSpecInit = {}) {
     this.options = init.options ?? []
@@ -223,6 +229,7 @@ export class CommandSpec {
     this.ignoreTokens = new Set(init.ignoreTokens ?? [])
     this.description = init.description ?? null
     this.epilog = init.epilog ?? null
+    this.oldOptionStyle = init.oldOptionStyle ?? false
     // A subclass (CLISpec) still has its own fields to assign, so only
     // freeze here when constructed directly; subclasses freeze themselves.
     if (new.target === CommandSpec) Object.freeze(this)
@@ -246,6 +253,7 @@ export interface ParsedArgsInit {
   invalidIntOptions?: [string, string][]
   invalidFloatOptions?: [string, string][]
   missingRequiredOptions?: string[]
+  oldOptionNeedsValue?: string | null
 }
 
 export class ParsedArgs {
@@ -278,6 +286,13 @@ export class ParsedArgs {
   readonly invalidIntOptions: [string, string][]
   readonly invalidFloatOptions: [string, string][]
   readonly missingRequiredOptions: string[]
+  // The old-style cluster letter whose argument ran off the end of the
+  // line (`tar xzf` with no archive). Its own report because GNU tar
+  // words it differently and exits differently from every getopt refusal
+  // above, and because it outranks all of them: tar counts the cluster's
+  // argument needs before argp ever validates a letter, so `tar Qf` and
+  // `tar fQ` both name f, not Q.
+  readonly oldOptionNeedsValue: string | null
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -296,6 +311,7 @@ export class ParsedArgs {
     this.invalidIntOptions = init.invalidIntOptions ?? []
     this.invalidFloatOptions = init.invalidFloatOptions ?? []
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
+    this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
   }
 
   paths(): string[] {

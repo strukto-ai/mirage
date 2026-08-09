@@ -50,6 +50,12 @@ USAGE_EXIT = {
     "tar": 64,
 }
 
+# An old-style cluster letter left without its argument exits 2, not
+# USAGE_EXIT's 64: tar reads the cluster itself and raises its own fatal
+# error, while 64 (EX_USAGE) is what argp returns for a letter it does
+# not know. Pinned on GNU tar 1.35: `tar xzf` is 2, `tar -Q` is 64.
+OLD_OPTION_EXIT = 2
+
 # Commands whose `Try '--help'` hint line is prefixed with the command
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 USAGE_HINT_PREFIX = frozenset({"diff", "cmp"})

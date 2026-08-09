@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.constants import USAGE_EXIT, USAGE_HINT_PREFIX
+from mirage.commands.spec.constants import (OLD_OPTION_EXIT, USAGE_EXIT,
+                                            USAGE_HINT_PREFIX)
 from mirage.commands.spec.types import CommandName
 
 
@@ -123,6 +124,23 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         line = f"{cmd_name}: option requires an argument -- '{token}'\n"
     hint = f"Try '{cmd_name} --help' for more information.\n"
     return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
+    """GNU tar refusal for an old-style cluster letter with no argument.
+
+    Shape and exit pinned against GNU tar 1.35 (``tar xzf`` with nothing
+    after it, and ``tar cfC a.tar``, which names C). tar's own wording,
+    capital and full stop included, because it counts the cluster's
+    argument needs before argp sees the line at all.
+
+    Args:
+        cmd_name (str): command name for the message.
+        letter (str): the cluster letter whose argument ran out.
+    """
+    line = f"{cmd_name}: Old option '{letter}' requires an argument.\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), OLD_OPTION_EXIT
 
 
 def invalid_argument_error(cmd_name: str, option: str, value: str,

@@ -53,3 +53,4 @@ class ParsedCommand(NamedTuple):
     invalid_int_options: list[tuple[str, str]]
     invalid_float_options: list[tuple[str, str]]
     missing_required_options: list[str]
+    old_option_needs_value: str | None = None

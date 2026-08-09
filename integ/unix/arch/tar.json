@@ -135,6 +135,102 @@
         "stdout": "data/arch/g.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arch_tar_old_style_roundtrip",
+      "seq": 910057,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/otar && echo otar-data | tee /data/otar/g.txt > /dev/null && tar czf /data/otar/a.tgz /data/otar/g.txt && tar tzf /data/otar/a.tgz && tar xzf /data/otar/a.tgz --strip-components 2 -C /data/otar/out && cat /data/otar/out/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/otar/g.txt\notar-data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_old_style_value_letter_before_bool",
+      "seq": 910058,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/otar2 && echo two | tee /data/otar2/h.txt > /dev/null && tar cfz /data/otar2/b.tgz /data/otar2/h.txt && tar tzf /data/otar2/b.tgz",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/otar2/h.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_old_style_two_value_letters",
+      "seq": 910059,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/otar3 && echo three | tee /data/otar3/i.txt > /dev/null && tar czf /data/otar3/c.tgz /data/otar3/i.txt && tar xzCf /data/otar3/out /data/otar3/c.tgz && cat /data/otar3/out/data/otar3/i.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "three\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_old_style_verbose",
+      "seq": 910060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/otar4 && echo four | tee /data/otar4/j.txt > /dev/null && tar cvzf /data/otar4/d.tgz /data/otar4/j.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/otar4/j.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_old_style_missing_argument",
+      "seq": 910061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar xzf",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: Old option 'f' requires an argument.\nTry 'tar --help' for more information."
+      }
+    },
+    {
+      "id": "arch_tar_old_style_invalid_letter",
+      "seq": 910062,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar xQzf /data/nope.tgz",
+      "expect": {
+        "exit": 64,
+        "stdout": "",
+        "stderr": "tar: invalid option -- 'Q'\nTry 'tar --help' for more information."
+      }
     }
   ]
 }

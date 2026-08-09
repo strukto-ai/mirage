@@ -16,6 +16,7 @@ from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
 from mirage.commands.spec.constants import (FLOAT_VALUE, INT_VALUE,
                                             NUMERIC_SHORT, flag_kwarg_name)
+from mirage.commands.spec.oldstyle import expand_old_style
 from mirage.commands.spec.types import CommandSpec, ParsedArgs, ValueType
 from mirage.utils.path import resolve_path
 
@@ -111,20 +112,28 @@ def parse_command(
 ) -> ParsedArgs:
     cs = compile_spec(spec)
 
+    # tar's old option style is expanded before anything else reads the
+    # line, so classification, routing and dispatch all scan the same
+    # dashed words; scan_origins maps each of them back to the caller's
+    # argv slot (every synthesized token to the cluster's own slot).
+    old = expand_old_style(cs, argv) if spec.old_option_style else None
+    scan_argv = old.argv if old is not None else argv
+    scan_origins = old.origins if old is not None else list(range(len(argv)))
+
     cache_paths: list[str] = []
     filtered_argv: list[str] = []
     # orig_indices[j] = argv position of filtered_argv[j]
     orig_indices: list[int] = []
     i = 0
-    while i < len(argv):
-        if argv[i] == "--cache":
+    while i < len(scan_argv):
+        if scan_argv[i] == "--cache":
             i += 1
-            while i < len(argv) and not argv[i].startswith("-"):
-                cache_paths.append(resolve_path(argv[i], cwd))
+            while i < len(scan_argv) and not scan_argv[i].startswith("-"):
+                cache_paths.append(resolve_path(scan_argv[i], cwd))
                 i += 1
         else:
-            filtered_argv.append(argv[i])
-            orig_indices.append(i)
+            filtered_argv.append(scan_argv[i])
+            orig_indices.append(scan_origins[i])
             i += 1
 
     flags: dict[str, str | bool | int | list[str]] = {}
@@ -142,6 +151,11 @@ def parse_command(
     # only operands); kinds must be written at the original positions
     # or one dropped token shifts every later kind onto the wrong word.
     word_kinds: list[ValueType | None] = [None] * len(argv)
+    if old is not None and old.cluster is not None:
+        # A cluster carries no dash, so leaving it None would send it to
+        # the shape heuristic and a path-shaped one (`tar sub/a.tgz`)
+        # would reach dispatch resolved and unreadable as letters.
+        word_kinds[0] = "str"
     warnings: list[str] = []
     invalid_options: list[str] = []
     ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
@@ -462,6 +476,7 @@ def parse_command(
         invalid_int_options=invalid_int_options,
         invalid_float_options=invalid_float_options,
         missing_required_options=missing_required_options,
+        old_option_needs_value=old.needs_value if old is not None else None,
     )
 
 

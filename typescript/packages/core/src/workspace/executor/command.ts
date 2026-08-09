@@ -232,6 +232,7 @@ export async function handleCommand(
       csParsed[9],
       csParsed[10],
       csParsed[11],
+      csParsed[12],
     )
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
@@ -365,6 +366,7 @@ export async function handleCommand(
     invalidIntOptions,
     invalidFloatOptions,
     missingRequiredOptions,
+    oldOptionNeedsValue,
   ] = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
   const refusal = optionError(
     cmdName,
@@ -376,6 +378,7 @@ export async function handleCommand(
     invalidIntOptions,
     invalidFloatOptions,
     missingRequiredOptions,
+    oldOptionNeedsValue,
   )
   if (refusal !== null) {
     const [msg, code] = refusal

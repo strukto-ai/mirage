@@ -103,3 +103,53 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
     }
   })
 })
+
+describe.each(NATIVE_BACKENDS)('native tar old option style (%s backend)', (kind) => {
+  it('tar czf / tzf / xzf', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('aaa\n'))
+      await env.mirage('tar czf /data/out.tar.gz /data/a.txt')
+      expect(await env.mirage('tar tzf /data/out.tar.gz')).toContain('a.txt')
+      await env.mirage('tar xzf /data/out.tar.gz -C /data/ex')
+      expect(await env.mirage('cat /data/ex/data/a.txt')).toContain('aaa')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('tar cfz still compresses', async () => {
+    // GNU: `tar cfz a.tgz f` gzips, so -f takes the archive and z stays a
+    // flag; listing it back with -z proves the stream is gzip.
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('aaa\n'))
+      await env.mirage('tar cfz /data/out.tar.gz /data/a.txt')
+      expect(await env.mirage('tar tzf /data/out.tar.gz')).toContain('a.txt')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('tar xzCf binds C then f', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('aaa\n'))
+      await env.mirage('tar czf /data/out.tar.gz /data/a.txt')
+      await env.mirage('tar xzCf /data/ex /data/out.tar.gz')
+      expect(await env.mirage('cat /data/ex/data/a.txt')).toContain('aaa')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('tar cvzf lists members', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('aaa\n'))
+      expect(await env.mirage('tar cvzf /data/out.tar.gz /data/a.txt')).toContain('a.txt')
+    } finally {
+      await env.cleanup()
+    }
+  })
+})

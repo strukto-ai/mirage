@@ -57,6 +57,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ long: '--exclude', type: 'str' }),
     ],
     rest: new Operand({ type: 'path' }),
+    // `tar xzf a.tgz` is the spelling everyone types.
+    oldOptionStyle: true,
   }),
   unzip: new CommandSpec({
     options: [
