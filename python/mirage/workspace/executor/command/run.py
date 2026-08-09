@@ -23,7 +23,7 @@ from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.structure import structure_names
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, MountView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.table import VFSRuntime
@@ -160,6 +160,19 @@ def link_view(namespace: Namespace | None,
                                                   dispatch))
 
 
+def mount_roots_below(registry: MountRegistry, virtual: str) -> list[str]:
+    """Mount roots strictly under a path, without the trailing slash.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        virtual (str): absolute virtual path to scan beneath.
+    """
+    return [
+        m.prefix.rstrip("/") or "/"
+        for m in registry.descendant_mounts(virtual)
+    ]
+
+
 def mount_root_of(registry: MountRegistry, virtual: str) -> str:
     """The mount prefix serving a virtual path, "/" when none does.
 
@@ -177,6 +190,23 @@ def mount_root_of(registry: MountRegistry, virtual: str) -> str:
         return registry.mount_for(virtual).prefix
     except ValueError:
         return "/"
+
+
+def mount_view(registry: MountRegistry) -> MountView:
+    """The mount-boundary facts on offer to every command.
+
+    Which commands receive it is decided at dispatch by whether the
+    handler names a ``mounts`` parameter, the same opt-in ``links``
+    uses, so there is no list of boundary-aware commands to keep in
+    step.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+    """
+    return MountView(descendants=functools.partial(mount_roots_below,
+                                                   registry),
+                     is_root=registry.is_mount_root,
+                     root_of=functools.partial(mount_root_of, registry))
 
 
 async def drop_service_caches(registry: MountRegistry,
@@ -344,6 +374,7 @@ async def run_on_mount(
             links=links,
             stat_path=stat_path,
             child_mounts=child_mounts,
+            mounts=mount_view(registry),
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)

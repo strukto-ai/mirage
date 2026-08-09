@@ -17,135 +17,49 @@
     ]
   },
   "description": "Show command history for the session.",
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Clear the command history.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-c",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Delete the entry at the given position; negative counts back from the end.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-d",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Append the args to the history as a single entry without executing them.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-s",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Print the args without storing them.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-p",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Append: no-op (file and store are the same).",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-a",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read: no-op (file and store are the same).",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-r",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Write: no-op (file and store are the same).",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-w",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read-new: no-op (file and store are the same).",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-n",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "str"
   }
 }

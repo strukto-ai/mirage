@@ -15,14 +15,7 @@
     "resources": []
   },
   "description": "Evaluate expressions.",
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
-  "options": [],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "str"
   }
 }

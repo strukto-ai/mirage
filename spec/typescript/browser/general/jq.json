@@ -212,370 +212,142 @@
       "trello"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Use null as the single input value",
       "long": "--null-input",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-n",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read each line as a string instead of JSON",
       "long": "--raw-input",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-R",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read all inputs into one array",
       "long": "--slurp",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-s",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Compact instead of pretty-printed output",
       "long": "--compact-output",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-c",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Output strings without quotes or escapes",
       "long": "--raw-output",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-r",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Implies -r and writes NUL after each output",
       "long": "--raw-output0",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Implies -r and writes no trailing newline",
       "long": "--join-output",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-j",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Escape non-ASCII characters in output",
       "long": "--ascii-output",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-a",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Sort object keys on output",
       "long": "--sort-keys",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-S",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Set the exit status from the last output",
       "long": "--exit-status",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-e",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Indent with tabs",
       "long": "--tab",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Indent with n spaces (max 7)",
       "long": "--indent",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "int",
-      "value_optional": false
+      "type": "int"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Disable colored output (already the default)",
       "long": "--monochrome-output",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-M",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Accepted for compatibility; output is one buffer",
       "long": "--unbuffered",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read the filter from a file",
       "long": "--from-file",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-f",
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read each input as its [path, leaf] events",
       "long": "--stream",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read and write RS-delimited JSON text sequences",
       "long": "--seq",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Set $name to a string value",
       "long": "--arg",
-      "multiple": false,
-      "numeric_shorthand": false,
       "pair": true,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Set $name to a JSON value",
       "long": "--argjson",
-      "multiple": false,
-      "numeric_shorthand": false,
       "pair": true,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Set $name to a file's contents",
       "long": "--rawfile",
-      "multiple": false,
-      "numeric_shorthand": false,
       "pair": true,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Set $name to a file's documents, as an array",
       "long": "--slurpfile",
-      "multiple": false,
-      "numeric_shorthand": false,
       "pair": true,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read the remaining operands as positional string values",
       "long": "--args",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read the remaining operands as positional JSON values",
       "long": "--jsonargs",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Show this help and exit",
       "long": "--help",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-h",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     }
   ],
   "positional": [
@@ -583,12 +355,10 @@
       "provided_by": [
         "-f"
       ],
-      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
-    "provided_by": [],
     "text_when": [
       "--args",
       "--jsonargs"

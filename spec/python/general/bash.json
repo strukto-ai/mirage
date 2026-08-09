@@ -8,180 +8,64 @@
     "resources": []
   },
   "description": "Run a command string through Mirage's shell. Only `-c` is meaningful; other flags are accepted and ignored. `bash` and `sh` are aliases.",
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read commands from the next argument and execute them.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-c",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Read commands from stdin instead of from an argument.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-s",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Login shell. Mirage does not source profile files.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-l",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Interactive flag. Mirage shells are non-interactive.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-i",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Exit on first error.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-e",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Treat unset variables as errors.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-u",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Print commands as they execute.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-x",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Login shell.",
       "long": "--login",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Skip rc files.",
       "long": "--norc",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) Skip profile files.",
       "long": "--noprofile",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "(Ignored) POSIX-conformant mode.",
       "long": "--posix",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "str"
   }
 }

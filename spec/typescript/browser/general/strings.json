@@ -212,31 +212,13 @@
       "trello"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-n",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     }
   ],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

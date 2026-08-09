@@ -212,76 +212,29 @@
       "trello"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--width",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-w",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--spaces",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-s",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--bytes",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-b",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--characters",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-c",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

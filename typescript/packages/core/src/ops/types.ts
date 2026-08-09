@@ -28,12 +28,35 @@ export type StatPath = (path: string) => Promise<FileStat | null>
 // backend.
 export type MountRoot = (path: string) => string
 
-// Immediate child-mount names under a directory, session-filtered. The
-// other half of namespace structure beside links: a nested mount is
-// invisible to the parent mount's backend, so a listing command is
-// handed the names from above, the same names the door merges into its
-// own readdir.
+// Child names the namespace owes a directory (mounts and links, mount
+// names session-filtered). The other half of namespace structure beside
+// link rows: a nested mount is invisible to the parent mount's backend,
+// so a listing command is handed the names from above, the same names
+// the door merges into its own readdir.
 export type ChildMounts = (parent: string) => string[]
+
+// Where the mount boundaries are, as one injected object.
+//
+// A command runs bound to one backend, and that backend cannot see a
+// mount nested inside its own tree: the child's keys live in another
+// resource entirely, so the parent's `readdir` never lists it. A walker
+// that must account for the whole subtree therefore has to be told, the
+// same way `LinkView` tells it about symlinks.
+//
+// Traversal commands that render lines (find, du, grep -r) get this for
+// free from the executor's fan-out, which reruns them per mount and
+// concatenates the output. A command whose output is one binary object
+// (tar, zip) cannot be merged that way, so it reads the boundaries here
+// and says what it did with them.
+export interface MountView {
+  // Mount roots strictly under a path (a walker: tar, zip).
+  descendants(path: string): string[]
+  // Whether a path is a mount root itself.
+  isRoot(path: string): boolean
+  // The mount serving a path, so a walker can tell "still mine" from
+  // "another backend" before it tries to read something it cannot.
+  rootOf(path: string): string
+}
 
 // The symlink facts a command may consult, as one injected object.
 //

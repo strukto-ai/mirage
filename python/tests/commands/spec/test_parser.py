@@ -637,7 +637,7 @@ def test_tar_old_style_two_value_letters_bind_in_letter_order():
     parsed = parse_command(SPECS["tar"], ["xfC", "/data/a.tgz", "/data/out"],
                            "/")
     assert parsed.flags["-f"] == "/data/a.tgz"
-    assert parsed.flags["-C"] == "/data/out"
+    assert parsed.flags["-C"] == ["/data/out"]
 
 
 def test_tar_old_style_value_letter_before_bool_letter():
@@ -670,7 +670,7 @@ def test_tar_old_style_still_accepts_long_options_after_the_cluster():
         ["xzf", "/data/a.tgz", "--strip-components", "1", "-C", "/data/out"],
         "/")
     assert parsed.flags["--strip-components"] == "1"
-    assert parsed.flags["-C"] == "/data/out"
+    assert parsed.flags["-C"] == ["/data/out"]
 
 
 def test_old_option_style_is_off_for_every_other_command():
@@ -678,3 +678,42 @@ def test_old_option_style_is_off_for_every_other_command():
     parsed = parse_command(SPECS["gzip"], ["dkf"], "/")
     assert parsed.paths() == ["/dkf"]
     assert parsed.old_option_needs_value is None
+
+
+def test_operand_base_rebases_the_operands_typed_after_it():
+    # GNU tar's -C is a chdir for the operands that follow it, so the
+    # archive (-f) stays relative to the session cwd while the files move.
+    parsed = parse_command(
+        SPECS["tar"], ["-czf", "out.tgz", "-C", "/work/check", "my_paper"],
+        cwd="/home")
+    assert parsed.paths() == ["/work/check/my_paper"]
+    assert parsed.flags["-f"] == "/home/out.tgz"
+    assert parsed.flags["-C"] == ["/work/check"]
+
+
+def test_operand_base_is_cumulative_like_a_real_chdir():
+    parsed = parse_command(
+        SPECS["tar"], ["-cf", "a.tar", "-C", "d1", "x", "-C", "../d2", "y"],
+        cwd="/work")
+    assert parsed.paths() == ["/work/d1/x", "/work/d2/y"]
+    # Every occurrence is kept in order: GNU chdirs at each one.
+    assert parsed.flags["-C"] == ["/work/d1", "/work/d2"]
+
+
+def test_operand_base_only_moves_what_follows_it():
+    parsed = parse_command(
+        SPECS["tar"], ["-cf", "a.tar", "top.txt", "-C", "/work/e", "e.txt"],
+        cwd="/work")
+    assert parsed.paths() == ["/work/top.txt", "/work/e/e.txt"]
+
+
+def test_operand_base_survives_the_old_style_cluster():
+    parsed = parse_command(SPECS["tar"], ["czf", "a.tgz", "-C", "sub", "x"],
+                           cwd="/work")
+    assert parsed.paths() == ["/work/sub/x"]
+    assert parsed.word_bases[-1] == "/work/sub"
+
+
+def test_word_bases_are_empty_without_an_operand_base():
+    parsed = parse_command(SPECS["cat"], ["a.txt"], cwd="/work")
+    assert parsed.word_bases == [None]

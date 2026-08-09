@@ -107,76 +107,30 @@
       "ssh"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--parents",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-p",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--verbose",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-v",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--mode",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-m",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--context",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-Z",
-      "short_value": true,
       "type": "str",
       "value_optional": true
     }
   ],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

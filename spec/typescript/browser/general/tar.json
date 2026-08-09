@@ -72,181 +72,60 @@
       "sharepoint"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
   "old_option_style": true,
+  "operand_base": "-C",
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-c",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-x",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-t",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-z",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-j",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-J",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-v",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
+      "short": "-h",
+      "type": "bool"
+    },
+    {
       "short": "-f",
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
+      "multiple": true,
       "short": "-C",
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--strip-components",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
       "long": "--exclude",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     }
   ],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

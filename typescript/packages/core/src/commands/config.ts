@@ -18,7 +18,7 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
-import type { ChildMounts, LinkView, StatOverlay, StatPath } from '../ops/types.ts'
+import type { ChildMounts, LinkView, MountView, StatOverlay, StatPath } from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
@@ -71,10 +71,14 @@ export interface CommandOpts {
   // point: only a directory has a subtree to walk, and a start point the
   // router resolved into another mount answers there, not on this mount.
   statPath?: StatPath
-  // Session-filtered child-mount names under a directory: the other
-  // half of namespace structure beside links, merged into listings the
-  // same way link rows are.
+  // Child names the namespace owes a directory (mounts and links): the
+  // other half of namespace structure beside link rows, merged into
+  // listings the same way they are.
   childMounts?: ChildMounts
+  // Where the mount boundaries are, for a walker whose output cannot be
+  // fanned out and concatenated (tar, zip). A nested mount's keys live
+  // in another resource, so this backend's readdir cannot see it.
+  mounts?: MountView
   signal?: AbortSignal
   timeoutSeconds?: number
 }

@@ -3,10 +3,8 @@ import pytest
 from mirage.commands.builtin.generic.diff import diff
 from mirage.commands.builtin.generic.jq import jq
 from mirage.commands.builtin.generic.patch import patch
-from mirage.commands.builtin.generic.tar import tar
 from mirage.commands.builtin.generic.tsort import tsort
 from mirage.commands.builtin.generic.unzip import unzip
-from mirage.commands.builtin.generic.zip_cmd import zip_cmd
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -131,40 +129,6 @@ async def test_jq_no_input():
 
 
 @pytest.mark.asyncio
-async def test_zip_basic():
-    rb, wb, _, _, store = _make_backend({
-        "f1.txt": b"hello",
-        "f2.txt": b"world"
-    })
-    out, io = await zip_cmd(
-        [_spec("out.zip"), _spec("f1.txt"),
-         _spec("f2.txt")],
-        read_bytes=rb,
-        write_bytes=wb)
-    assert b"adding" in out
-    assert "out.zip" in store
-    archive = store["out.zip"]
-    assert archive.startswith(b"PK")
-
-
-@pytest.mark.asyncio
-async def test_zip_quiet():
-    rb, wb, _, _, _ = _make_backend({"f.txt": b"x"})
-    out, _ = await zip_cmd([_spec("o.zip"), _spec("f.txt")],
-                           read_bytes=rb,
-                           write_bytes=wb,
-                           q=True)
-    assert out is None
-
-
-@pytest.mark.asyncio
-async def test_zip_too_few_paths():
-    rb, wb, _, _, _ = _make_backend({})
-    with pytest.raises(ValueError, match="usage"):
-        await zip_cmd([_spec("only.zip")], read_bytes=rb, write_bytes=wb)
-
-
-@pytest.mark.asyncio
 async def test_unzip_extracts():
     import io as _io
     import zipfile
@@ -228,63 +192,6 @@ async def test_unzip_pipe_mode():
                          mkdir_fn=mk,
                          p=True)
     assert out == b"hello"
-
-
-@pytest.mark.asyncio
-async def test_tar_create_and_list():
-    rb, wb, _, mk, store = _make_backend({"a.txt": b"alpha", "b.txt": b"beta"})
-    _, io_res = await tar([_spec("a.txt"), _spec("b.txt")],
-                          read_bytes=rb,
-                          write_bytes=wb,
-                          mkdir_fn=mk,
-                          c=True,
-                          f=_spec("out.tar"))
-    assert "/out.tar" in io_res.writes
-    out, _ = await tar([],
-                       read_bytes=rb,
-                       write_bytes=wb,
-                       mkdir_fn=mk,
-                       t=True,
-                       f=_spec("out.tar"))
-    assert b"a.txt" in out
-    assert b"b.txt" in out
-
-
-@pytest.mark.asyncio
-async def test_tar_extract():
-    rb, wb, _, mk, _ = _make_backend({"x.txt": b"data"})
-    await tar([_spec("x.txt")],
-              read_bytes=rb,
-              write_bytes=wb,
-              mkdir_fn=mk,
-              c=True,
-              f=_spec("a.tar"))
-    _, io_res = await tar([],
-                          read_bytes=rb,
-                          write_bytes=wb,
-                          mkdir_fn=mk,
-                          x=True,
-                          f=_spec("a.tar"),
-                          C=_spec("/out"))
-    assert any("x.txt" in p for p in io_res.writes)
-
-
-@pytest.mark.asyncio
-async def test_tar_requires_mode():
-    rb, wb, _, mk, _ = _make_backend({})
-    with pytest.raises(ValueError, match="-c, -x, or -t"):
-        await tar([], read_bytes=rb, write_bytes=wb, mkdir_fn=mk)
-
-
-@pytest.mark.asyncio
-async def test_tar_requires_f():
-    rb, wb, _, mk, _ = _make_backend({"a.txt": b"x"})
-    with pytest.raises(ValueError, match="-f is required"):
-        await tar([_spec("a.txt")],
-                  read_bytes=rb,
-                  write_bytes=wb,
-                  mkdir_fn=mk,
-                  c=True)
 
 
 @pytest.mark.asyncio

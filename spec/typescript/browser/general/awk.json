@@ -212,55 +212,20 @@
       "trello"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-F",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
       "multiple": true,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-v",
-      "short_value": true,
-      "type": "str",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "long": null,
       "multiple": true,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-f",
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     }
   ],
   "positional": [
@@ -268,13 +233,10 @@
       "provided_by": [
         "-f"
       ],
-      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

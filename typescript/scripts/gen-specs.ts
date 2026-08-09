@@ -22,6 +22,8 @@ import * as Node from '@struktoai/mirage-node'
 
 import type { CommandSpec, Operand, Option, RegisteredCommand } from '@struktoai/mirage-core'
 
+const { CommandSpec: SpecClass, Operand: OperandClass, Option: OptionClass } = Core
+
 const __dirname = resolve(fileURLToPath(import.meta.url), '..')
 const SPEC_ROOT = resolve(__dirname, '..', '..', 'spec', 'typescript')
 const PACKAGES = resolve(__dirname, '..', 'packages')
@@ -143,11 +145,36 @@ function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
   }
 }
 
-function serializeOperand(op: Operand): Record<string, unknown> {
+// A spec dump is a cross-language contract, and restating every default
+// in all 93 files buries the handful of facts each command actually
+// declares. Anything equal to what a default-constructed instance would
+// have carried is dropped, so the defaults come from the class rather
+// than a table that could drift from it. `type` survives even at its
+// default, because what a token *is* is the first thing a reader looks
+// for. Python's `_prune` does the same against its dataclass fields; the
+// two must drop exactly the same keys or the parity gate reports every
+// command.
+function prune(
+  full: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+): Record<string, unknown> {
+  const kept: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(full)) {
+    if (key !== 'type' && JSON.stringify(value) === JSON.stringify(defaults[key])) continue
+    kept[key] = value
+  }
+  return kept
+}
+
+function operandFields(op: Operand): Record<string, unknown> {
   return { provided_by: [...op.providedBy], text_when: [...op.textWhen], type: op.type }
 }
 
-function serializeOption(o: Option): Record<string, unknown> {
+function serializeOperand(op: Operand): Record<string, unknown> {
+  return prune(operandFields(op), operandFields(new OperandClass({})))
+}
+
+function optionFields(o: Option): Record<string, unknown> {
   return {
     choices: o.choices,
     count: o.count,
@@ -165,16 +192,27 @@ function serializeOption(o: Option): Record<string, unknown> {
   }
 }
 
-function serializeSpec(spec: CommandSpec, rcs: RegisteredCommand[]): Record<string, unknown> {
+function serializeOption(o: Option): Record<string, unknown> {
+  return prune(optionFields(o), optionFields(new OptionClass({})))
+}
+
+function specFields(spec: CommandSpec): Record<string, unknown> {
   return {
-    _meta: metaFor(rcs),
     description: spec.description,
     epilog: spec.epilog,
     ignore_tokens: [...spec.ignoreTokens].sort(),
     old_option_style: spec.oldOptionStyle,
+    operand_base: spec.operandBase,
     options: spec.options.map(serializeOption),
     positional: spec.positional.map(serializeOperand),
     rest: spec.rest === null ? null : serializeOperand(spec.rest),
+  }
+}
+
+function serializeSpec(spec: CommandSpec, rcs: RegisteredCommand[]): Record<string, unknown> {
+  return {
+    ...prune(specFields(spec), specFields(new SpecClass({}))),
+    _meta: metaFor(rcs),
   }
 }
 

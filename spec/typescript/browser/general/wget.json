@@ -15,66 +15,29 @@
     "resources": []
   },
   "description": "Retrieve files from the web.",
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Write the downloaded content to the given file.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-O",
-      "short_value": true,
-      "type": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Run quietly with no output.",
-      "long": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-q",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
       "description": "Check that the URL exists without downloading it.",
       "long": "--spider",
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     }
   ],
   "positional": [
     {
-      "provided_by": [],
-      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

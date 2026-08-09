@@ -908,7 +908,7 @@ describe("parseCommand — tar's old option style", () => {
   it('binds two value letters in letter order', () => {
     const p = parseCommand(specOf('tar'), ['xfC', '/data/a.tgz', '/data/out'], '/')
     expect(p.flags['-f']).toBe('/data/a.tgz')
-    expect(p.flags['-C']).toBe('/data/out')
+    expect(p.flags['-C']).toEqual(['/data/out'])
   })
 
   it('keeps a bool letter that follows a value letter', () => {
@@ -940,7 +940,7 @@ describe("parseCommand — tar's old option style", () => {
       '/',
     )
     expect(p.flags['--strip-components']).toBe('1')
-    expect(p.flags['-C']).toBe('/data/out')
+    expect(p.flags['-C']).toEqual(['/data/out'])
   })
 
   it('is off for every other command', () => {
@@ -948,5 +948,59 @@ describe("parseCommand — tar's old option style", () => {
     const p = parseCommand(specOf('gzip'), ['dkf'], '/')
     expect(p.paths()).toEqual(['/dkf'])
     expect(p.oldOptionNeedsValue).toBeNull()
+  })
+})
+
+describe('operandBase (tar -C)', () => {
+  it('re-bases the operands typed after it, leaving -f on the cwd', () => {
+    // GNU tar's -C is a chdir for the operands that follow it, so the
+    // archive stays relative to the session cwd while the files move.
+    const parsed = parseCommand(
+      specOf('tar'),
+      ['-czf', 'out.tgz', '-C', '/work/check', 'my_paper'],
+      '/home',
+    )
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual([
+      '/work/check/my_paper',
+    ])
+    expect(parsed.flags['-f']).toBe('/home/out.tgz')
+    expect(parsed.flags['-C']).toEqual(['/work/check'])
+  })
+
+  it('is cumulative like a real chdir', () => {
+    const parsed = parseCommand(
+      specOf('tar'),
+      ['-cf', 'a.tar', '-C', 'd1', 'x', '-C', '../d2', 'y'],
+      '/work',
+    )
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual([
+      '/work/d1/x',
+      '/work/d2/y',
+    ])
+    // Every occurrence is kept in order: GNU chdirs at each one.
+    expect(parsed.flags['-C']).toEqual(['/work/d1', '/work/d2'])
+  })
+
+  it('only moves what follows it', () => {
+    const parsed = parseCommand(
+      specOf('tar'),
+      ['-cf', 'a.tar', 'top.txt', '-C', '/work/e', 'e.txt'],
+      '/work',
+    )
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual([
+      '/work/top.txt',
+      '/work/e/e.txt',
+    ])
+  })
+
+  it('survives the old-style cluster', () => {
+    const parsed = parseCommand(specOf('tar'), ['czf', 'a.tgz', '-C', 'sub', 'x'], '/work')
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual(['/work/sub/x'])
+    expect(parsed.wordBases.at(-1)).toBe('/work/sub')
+  })
+
+  it('records no bases for a spec that declares none', () => {
+    const parsed = parseCommand(specOf('cat'), ['a.txt'], '/work')
+    expect(parsed.wordBases).toEqual([null])
   })
 })

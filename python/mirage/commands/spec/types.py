@@ -189,6 +189,13 @@ class CommandSpec:
     # (`tar xzf a.tgz`). Expanded by expand_old_style before any other
     # scanning; see oldstyle.py for the rules and why only tar has it.
     old_option_style: bool = False
+    # The spelling of an option that changes directory for the path
+    # operands typed AFTER it (tar's -C). Positional and cumulative, the
+    # way a real chdir is: `tar -cf a.tar -C d1 x -C ../d2 y` reads d1/x
+    # and d1/../d2/y. Only path operands and the option's own value move;
+    # every other path-valued flag keeps resolving against the session
+    # cwd, which is what GNU does with -f.
+    operand_base: str | None = None
 
 
 class FlagView:
@@ -310,6 +317,11 @@ class ParsedArgs:
     text_flag_values: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     word_kinds: list[ValueType | None] = field(default_factory=list)
+    # Per-position base directory, aligned with word_kinds: the absolute
+    # path a word resolves against when an operand_base option (tar's -C)
+    # moved it, and None when the session cwd still applies. Only a spec
+    # declaring operand_base ever fills this.
+    word_bases: list[str | None] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
     # abbreviated longs matching several options (typed prefix, matched

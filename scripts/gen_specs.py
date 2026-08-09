@@ -17,13 +17,14 @@ import json
 import logging
 import pkgutil
 import sys
-from dataclasses import asdict
+from dataclasses import MISSING, Field, asdict, fields
 from pathlib import Path
 from typing import Any
 
 import mirage.commands.builtin
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 from mirage.resource.registry import REGISTRY
 
 logger = logging.getLogger(__name__)
@@ -122,8 +123,55 @@ def _default(o: object) -> object:
     raise TypeError(f"unserializable: {type(o)}")
 
 
+def _default_of(f: Field) -> Any:
+    if f.default_factory is not MISSING:
+        return f.default_factory()
+    return f.default
+
+
+def _prune(payload: dict[str, Any], cls: type) -> dict[str, Any]:
+    """``payload`` without the fields ``cls`` would have defaulted anyway.
+
+    A spec dump is a cross-language contract, and restating every
+    default in all 93 files buries the handful of facts each command
+    actually declares. The defaults come from the dataclass rather than
+    a second table, so a field added to a spec type cannot fall out of
+    step with this. ``type`` survives even at its default, because what
+    a token *is* is the first thing a reader looks for.
+
+    The typescript side prunes against a default-constructed instance
+    for the same reason; the two must drop exactly the same keys or the
+    parity gate reports every command.
+
+    Args:
+        payload (dict[str, Any]): one ``asdict`` level, every key
+            present.
+        cls (type): the dataclass the payload came from.
+    """
+    kept: dict[str, Any] = {}
+    for f in fields(cls):
+        value = payload[f.name]
+        if f.name != "type" and value == _default_of(f):
+            continue
+        kept[f.name] = value
+    return kept
+
+
+def _spec_payload(spec: Any) -> dict[str, Any]:
+    payload = _prune(asdict(spec), CommandSpec)
+    if "options" in payload:
+        payload["options"] = [_prune(o, Option) for o in payload["options"]]
+    if "positional" in payload:
+        payload["positional"] = [
+            _prune(p, Operand) for p in payload["positional"]
+        ]
+    if payload.get("rest") is not None:
+        payload["rest"] = _prune(payload["rest"], Operand)
+    return payload
+
+
 def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
-    payload = asdict(spec)
+    payload = _spec_payload(spec)
     payload["_meta"] = _meta_for(rcs)
     path = OUT / f"{name}.json"
     path.write_text(

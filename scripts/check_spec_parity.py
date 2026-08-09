@@ -222,12 +222,14 @@ def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
         return (f"    {diff}: python={py['_meta'].get(key)!r} "
                 f"typescript={ts['_meta'].get(key)!r}")
     if diff == "options":
+        # An option that declares only one spelling carries only that
+        # key, since the dumps omit anything left at its default.
         py_by_name = {
-            o["long"] or o["short"]: o
+            o.get("long") or o.get("short"): o
             for o in py.get("options", [])
         }
         ts_by_name = {
-            o["long"] or o["short"]: o
+            o.get("long") or o.get("short"): o
             for o in ts.get("options", [])
         }
         lines = [f"    {diff}:"]

@@ -83,6 +83,40 @@ export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): Pa
   )
 }
 
+/**
+ * The path operands a line names positionally, flag values left out.
+ *
+ * Classification turns every path-shaped word into a PathSpec, including the
+ * value of a path-valued flag, so the classified word list cannot tell
+ * `tar -xf a.tar -C /mnt` (extract INTO a mount) from `tar -cf a.tar /mnt`
+ * (archive a whole mount). Only the spec knows which slot a word filled, so
+ * this asks it and keeps the classified spec for each surviving operand,
+ * whose `rawPath` is what a message should name.
+ */
+export function positionalScopes(
+  cmdName: string,
+  argv: string[],
+  cwd: string,
+  words: readonly (string | PathSpec)[],
+): PathSpec[] {
+  const spec = SPECS[cmdName]
+  if (spec === undefined) {
+    return words.filter((p): p is PathSpec => p instanceof PathSpec)
+  }
+  const parsed = parseCommand(spec, argv, cwd)
+  const byVirtual = new Map<string, PathSpec>()
+  for (const word of words) {
+    if (word instanceof PathSpec) byVirtual.set(word.virtual, word)
+  }
+  return parsed.args
+    .filter(([, kind]) => kind === 'path')
+    .map(
+      ([value]) =>
+        byVirtual.get(value) ??
+        new PathSpec({ virtual: value, directory: value, resourcePath: '', rawPath: value }),
+    )
+}
+
 /** Combine positional and path-flag scopes, keeping operand order. */
 export function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): PathSpec[] {
   const merged = [...positional]

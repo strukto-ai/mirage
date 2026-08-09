@@ -49,6 +49,7 @@ DISPATCHER_PARAMS = frozenset({
     "links",
     "stat_path",
     "child_mounts",
+    "mounts",
     "prefix",
     "command",
 })

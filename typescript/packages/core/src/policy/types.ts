@@ -62,7 +62,18 @@ export interface GuardSpec {
 /** Facts about one classified command, as preCommand hooks see it. */
 export interface CommandContext {
   command: string
+  /**
+   * Every path the line names: the positional operands first, then the
+   * values of any path-valued flags. What a path-pattern guard matches on.
+   */
   paths: readonly PathSpec[]
+  /**
+   * The positional operands alone. A rule that reads a slot by position
+   * (mv's source, ln's target, tar's files) has to use this: with the flag
+   * values mixed in, `tar -xf a.tar -C /mnt` would read the `-C`
+   * destination as a file being archived.
+   */
+  operands?: readonly PathSpec[]
   /** Raw argv after the command name; hooks fire before flag parsing. */
   argv: readonly string[]
   cwd: string
