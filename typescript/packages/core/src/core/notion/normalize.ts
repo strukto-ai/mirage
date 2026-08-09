@@ -109,6 +109,19 @@ export function databaseSegmentName(database: Json): string {
   return formatSegment({ id: strOf(database, 'id'), title: extractDatabaseTitle(database) })
 }
 
+// A data source arrives either as the full object (rich-text `title`) or as a
+// stub under a database's `data_sources` (plain `name`). Both name the same
+// thing, so both must render the same directory.
+function extractDataSourceTitle(dataSource: Json): string {
+  const name = pickStringOrNull(dataSource, 'name')
+  if (name !== null && name !== '') return name
+  return extractDatabaseTitle(dataSource)
+}
+
+export function dataSourceSegmentName(dataSource: Json): string {
+  return formatSegment({ id: strOf(dataSource, 'id'), title: extractDataSourceTitle(dataSource) })
+}
+
 export interface NormalizedPage {
   page_id: string
   title: string
@@ -133,6 +146,17 @@ export interface NormalizedDatabase {
   parent: Json
   archived: boolean
   is_inline: boolean
+  data_sources: unknown[]
+}
+
+export interface NormalizedDataSource {
+  data_source_id: string
+  database_id: string
+  title: string
+  created_time: string | null
+  last_edited_time: string | null
+  database_parent: Json
+  archived: boolean
   properties: Json
 }
 
@@ -173,7 +197,24 @@ export function normalizeDatabase(database: Json): NormalizedDatabase {
     parent: asObject(database.parent),
     archived,
     is_inline: boolOf(database, 'is_inline'),
-    properties: asObject(database.properties),
+    data_sources: asArray(database.data_sources),
+  }
+}
+
+export function normalizeDataSource(dataSource: Json): NormalizedDataSource {
+  const archived =
+    dataSource.archived !== undefined
+      ? boolOf(dataSource, 'archived')
+      : boolOf(dataSource, 'in_trash')
+  return {
+    data_source_id: strOf(dataSource, 'id'),
+    database_id: strOf(asObject(dataSource.parent), 'database_id'),
+    title: extractDataSourceTitle(dataSource),
+    created_time: pickStringOrNull(dataSource, 'created_time'),
+    last_edited_time: pickStringOrNull(dataSource, 'last_edited_time'),
+    database_parent: asObject(dataSource.database_parent),
+    archived,
+    properties: asObject(dataSource.properties),
   }
 }
 

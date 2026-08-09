@@ -171,70 +171,104 @@ describe('notion readdir pages', () => {
   })
 })
 
+const DS_ID = 'cccc1111222233334444555566667777'
+
+function database(): Record<string, unknown> {
+  return {
+    id: DB_ID,
+    object: 'database',
+    title: [{ plain_text: 'Tasks' }],
+    url: 'https://notion.test/db',
+    created_time: '2024-01-01T00:00:00Z',
+    last_edited_time: '2024-02-03T00:00:00Z',
+    parent: { type: 'workspace' },
+    data_sources: [{ id: DS_ID, name: 'Tasks' }],
+  }
+}
+
+function dataSource(): Record<string, unknown> {
+  return {
+    id: DS_ID,
+    object: 'data_source',
+    title: [{ plain_text: 'Tasks' }],
+    parent: { type: 'database_id', database_id: DB_ID },
+    properties: { Name: { type: 'title' } },
+  }
+}
+
 describe('notion readdir databases', () => {
-  it('lists databases under the /databases virtual root', async () => {
+  // Search answers with data sources since 2025-09-03, so the set of databases
+  // is their distinct parents and each one costs a retrieve for its title.
+  it('lists databases as the distinct parents of the searched data sources', async () => {
     const transport = new FakeTransport()
     transport.enqueue('API-post-search', {
       results: [
         {
-          id: DB_ID,
-          object: 'database',
+          id: DS_ID,
+          object: 'data_source',
           title: [{ plain_text: 'Tasks' }],
-          last_edited_time: '2024-02-03T00:00:00Z',
+          parent: { type: 'database_id', database_id: DB_ID },
         },
       ],
       has_more: false,
       next_cursor: null,
     })
+    transport.enqueue('API-retrieve-a-database', database())
     const out = await readdir(makeAccessor(transport), spec('/databases'), undefined)
     expect(out).toEqual([`/databases/Tasks__${DB_ID}`])
     expect(transport.invocations[0]?.args).toEqual({
-      filter: { value: 'database', property: 'object' },
+      filter: { value: 'data_source', property: 'object' },
       page_size: 100,
+    })
+    expect(transport.invocations[1]).toEqual({
+      name: 'API-retrieve-a-database',
+      args: { database_id: DB_ID },
     })
   })
 
-  it('lists database row pages under a database directory', async () => {
+  it('lists a database directory as its data sources beside database.json', async () => {
     const transport = new FakeTransport()
-    transport.enqueue('API-post-database-query', {
+    transport.enqueue('API-retrieve-a-database', database())
+    const dirPath = `/databases/Tasks__${DB_ID}`
+    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    expect(out).toEqual([`${dirPath}/database.json`, `${dirPath}/Tasks__${DS_ID}`])
+  })
+
+  it('lists row pages under a data source directory', async () => {
+    const transport = new FakeTransport()
+    transport.enqueue('API-retrieve-a-data-source', dataSource())
+    transport.enqueue('API-post-data-source-query', {
       results: [topPage(TOP1_ID, 'Row A'), { id: 'x', object: 'database' }],
       has_more: false,
       next_cursor: null,
     })
-    const dirPath = `/databases/Tasks__${DB_ID}`
+    const dirPath = `/databases/Tasks__${DB_ID}/Tasks__${DS_ID}`
     const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
-    expect(out).toEqual([`${dirPath}/database.json`, `${dirPath}/Row_A__${TOP1_ID}`])
-    expect(transport.invocations[0]?.args).toEqual({ database_id: DB_ID, page_size: 100 })
+    expect(out).toEqual([`${dirPath}/data_source.json`, `${dirPath}/Row_A__${TOP1_ID}`])
+    expect(transport.invocations[1]?.args).toEqual({ data_source_id: DS_ID, page_size: 100 })
   })
 
-  it('sizes database.json from the search payload', async () => {
-    const database = {
-      id: DB_ID,
-      object: 'database',
-      title: [{ plain_text: 'Tasks' }],
-      url: 'https://notion.test/db',
-      created_time: '2024-01-01T00:00:00Z',
-      last_edited_time: '2024-02-03T00:00:00Z',
-      parent: { type: 'workspace' },
-      properties: { Name: { type: 'title' } },
-    }
+  it('sizes database.json from the retrieved database', async () => {
     const transport = new FakeTransport()
     transport.enqueue('API-post-search', {
-      results: [database],
+      results: [
+        {
+          id: DS_ID,
+          object: 'data_source',
+          parent: { type: 'database_id', database_id: DB_ID },
+        },
+      ],
       has_more: false,
       next_cursor: null,
     })
-    transport.enqueue('API-post-database-query', {
-      results: [],
-      has_more: false,
-      next_cursor: null,
-    })
+    transport.enqueue('API-retrieve-a-database', database())
+    transport.enqueue('API-retrieve-a-database', database())
     const idx = new RAMIndexCacheStore()
     await readdir(makeAccessor(transport), spec('/databases'), idx)
     const dirPath = `/databases/Tasks__${DB_ID}`
     await readdir(makeAccessor(transport), spec(dirPath), idx)
     const lookup = await idx.get(`${dirPath}/database.json`)
-    expect(lookup.entry?.size).toBe(toJsonBytes(normalizeDatabase(database)).byteLength)
+    expect(lookup.entry?.size).toBe(toJsonBytes(normalizeDatabase(database())).byteLength)
   })
 })
 

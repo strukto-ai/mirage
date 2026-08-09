@@ -71,6 +71,8 @@ export function parseFlags(
   [string, string][],
   string[],
   string | null,
+  string[],
+  string[],
 ] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
   const scopeMap = new Map<string, PathSpec>()
@@ -119,6 +121,8 @@ export function parseFlags(
       parsed.invalidFloatOptions,
       parsed.missingRequiredOptions,
       parsed.oldOptionNeedsValue,
+      parsed.missingRequiredOperands,
+      parsed.typedDests,
     ]
   }
 
@@ -128,7 +132,7 @@ export function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], [], [], [], [], [], [], [], null]
+  return [paths, texts, {}, [], [], [], [], [], [], [], [], [], null, [], []]
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is

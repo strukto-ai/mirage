@@ -16,6 +16,11 @@ import re
 
 AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
 
+# Stand-in name for a required operand whose slot declares none, so a
+# refusal that has to name the slot always has a word for it. Bare like
+# every operand name: the brackets are the renderer's.
+ARG_PLACEHOLDER = "ARG"
+
 # Numeric shorthand token like `-5` (head/tail count), never a flag
 # cluster or a path.
 NUMERIC_SHORT = re.compile(r"^-[0-9]+$")

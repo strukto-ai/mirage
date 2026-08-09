@@ -176,6 +176,7 @@ export {
   specFlagNames,
   specOf,
   SPECS,
+  UsageStyle,
 } from './commands/spec/index.ts'
 export { type ByteSource, IOResult, type IOResultInit, materialize } from './io/types.ts'
 export { CachableAsyncIterator } from './io/cachable_iterator.ts'
@@ -669,7 +670,6 @@ export {
   type WalkFlagBag,
   WalkResult,
   type WalkResultInit,
-  UsageStyle,
 } from './commands/cli/types.ts'
 export { cliSpecFor, registerCliSpec, unregisterCliSpec } from './commands/cli/specs.ts'
 export { GWS } from './commands/cli/builtin/gws/index.ts'

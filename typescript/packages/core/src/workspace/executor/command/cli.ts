@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
-import { leafRefusal } from '../../../commands/cli/refusal.ts'
+import { CLAP_EXIT, clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
 import { CLISpec, type CLIInvocation, type CLIVerbOpts } from '../../../commands/cli/types.ts'
 import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import type { CommandDispatch } from '../../../commands/config.ts'
 import type { MountRoot, StatPath } from '../../../ops/types.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
+import { UsageStyle } from '../../../commands/spec/types.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
 import { Operand } from '../../../commands/spec/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
@@ -211,10 +212,13 @@ export async function handleCli(
   // argparse one.
   const [parseSpec, mirageHelp] = parseSpecFor(leaf)
 
+  // The dialect is the root's, not the leaf's: a program answers in one voice
+  // at every level.
+  const style = install.spec.usageStyle
   const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd)
   const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
   if (mirageHelp && flagKwargs.help === true) {
-    const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec))
+    const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
@@ -230,10 +234,18 @@ export async function handleCli(
     parsed[11],
     parsed[12],
   )
+  let msg: Uint8Array | null = null
+  let code = 0
   if (refusal !== null) {
-    // The dialect is the root's, not the leaf's: a program answers in one
-    // voice at every level.
-    const [msg, code] = leafRefusal(install.spec.usageStyle, refusal[0], parsed[4])
+    ;[msg, code] = leafRefusal(style, refusal[0], parsed[4])
+  } else if (parsed[13].length > 0 && style === UsageStyle.CLAP) {
+    // Only clap names the empty slots. Under every other style a required
+    // operand stays the leaf's own business, worded by the command, which is
+    // what every mirage CLI did before this.
+    msg = clapMissingOperands(prog, parseSpec, parsed[13], parsed[14], session.env)
+    code = CLAP_EXIT
+  }
+  if (msg !== null) {
     return [
       null,
       new IOResult({ exitCode: code, stderr: msg }),
@@ -252,6 +264,20 @@ export async function handleCli(
   // Only the injected flag is dropped; a leaf that declared --help
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
+  // An option that names an environment variable takes its value from the
+  // session when the line omits it, so the leaf reads one flag instead of a
+  // flag and a fallback. Here and not in the flat parser because a shell
+  // command's environment is the shell's business, while a CLI's is part of the
+  // program its spec describes.
+  for (const option of parseSpec.options) {
+    const spelling = option.long ?? option.short
+    if (option.env === null || spelling === null) continue
+    const dest = flagKwargName(spelling)
+    const value = session.env[option.env]
+    if (flags[dest] === undefined && value !== undefined && value !== '') {
+      flags[dest] = value
+    }
+  }
 
   // The workspace doors a mount-reading verb needs ride the record as one
   // field. Most CLIs never read it: an API client has no filesystem,

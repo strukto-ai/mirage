@@ -157,7 +157,8 @@ def parse_flags(
             parsed.ambiguous_options, parsed.option_error_kinds,
             parsed.needs_value_options, parsed.invalid_value_options,
             parsed.invalid_int_options, parsed.invalid_float_options,
-            parsed.missing_required_options, parsed.old_option_needs_value)
+            parsed.missing_required_options, parsed.old_option_needs_value,
+            parsed.missing_required_operands, parsed.typed_dests)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]

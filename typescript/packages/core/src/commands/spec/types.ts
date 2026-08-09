@@ -47,6 +47,37 @@ export enum CommandName {
 // touch classification sites.
 export type ValueType = 'bool' | 'str' | 'int' | 'float' | 'path'
 
+/**
+ * Which program's voice a CLI answers usage questions in.
+ *
+ * An installed CLI is not a GNU tool, so a leaf that refuses an option it does
+ * not declare answers in argparse's shape and exit code by default. A CLI that
+ * mimics an existing program has to answer in that program's shape instead:
+ * mirage implements a subset of git, so most of git's real options arrive
+ * undeclared, and an agent that reads the refusal should see what git would
+ * have said rather than learn that it is talking to a reimplementation.
+ *
+ * GIT covers the unknown-option refusal and the exit code, which is what an
+ * undeclared flag produces; every other usage error (a missing value, an
+ * unparseable int) stays in argparse's shape, because those only happen for
+ * options a CLI does declare.
+ *
+ * CLAP additionally governs how help is laid out and how a missing operand is
+ * refused, because a clap program prints a bare description line, spells the
+ * option placeholder `[OPTIONS]`, heads the option list `Options:`, lists
+ * subcommands in declaration order, and names the empty slots rather than
+ * leaving each leaf to word its own complaint. Those are one decision (whose
+ * voice this is), so they read off this knob rather than a second one.
+ *
+ * It lives in the spec layer, not beside the CLI tree, because the help
+ * renderer is the spec's and cannot import upward to reach it.
+ */
+export enum UsageStyle {
+  ARGPARSE = 'argparse',
+  GIT = 'git',
+  CLAP = 'clap',
+}
+
 export interface OptionInit {
   /** Short form, e.g. "-e". */
   short?: string | null
@@ -120,6 +151,23 @@ export interface OptionInit {
    * choices). Presence of a default always satisfies `required`.
    */
   default?: string | null
+  /**
+   * The value's name in a usage line, bare (`VERSION`, rendered
+   * `--notion-version <VERSION>`); the brackets belong to the renderer, which
+   * is the only thing that knows the dialect. Only a program whose usage lines
+   * are rendered in someone else's needs one, since otherwise the name is
+   * derived from the long spelling.
+   */
+  metavar?: string
+  /**
+   * Environment variable that supplies this option when the line omits it.
+   * Distinct from `default`, and not a synonym for it: an env-sourced value
+   * counts as *supplied* (clap echoes it in a usage line, where a defaulted one
+   * is invisible), and it is read from the session rather than frozen into the
+   * spec. Declaring it here is what keeps one fact in one place, since both the
+   * leaf that sends the value and the renderer that reports the line need it.
+   */
+  env?: string
   description?: string
 }
 
@@ -136,6 +184,8 @@ export class Option {
   readonly choices: readonly string[]
   readonly required: boolean
   readonly default: string | null
+  readonly metavar: string | null
+  readonly env: string | null
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -151,6 +201,8 @@ export class Option {
     this.choices = init.choices ?? []
     this.required = init.required ?? false
     this.default = init.default ?? null
+    this.metavar = init.metavar ?? null
+    this.env = init.env ?? null
     this.description = init.description ?? null
     Object.freeze(this)
   }
@@ -177,17 +229,34 @@ export interface OperandInit {
    * Mirage classifies args before a backend is chosen.
    */
   providedBy?: readonly string[]
+  /**
+   * The slot's name in a usage line, bare (`PAGE_ID`, rendered `<PAGE_ID>`
+   * when required and `[PAGE_ID]` when not); the brackets belong to the
+   * renderer, which is the only thing that knows the dialect. Empty renders
+   * the generic `<path>`/`<text>` placeholder the ordinary help uses.
+   */
+  name?: string
+  /**
+   * The line must supply this slot; one that does not is a usage error the
+   * parser reports, rather than something each leaf re-discovers and words
+   * its own way.
+   */
+  required?: boolean
 }
 
 export class Operand {
   readonly type: ValueType
   readonly providedBy: readonly string[]
   readonly textWhen: readonly string[]
+  readonly name: string
+  readonly required: boolean
 
   constructor(init: OperandInit = {}) {
     this.type = init.type ?? 'path'
     this.providedBy = init.providedBy ?? []
     this.textWhen = init.textWhen ?? []
+    this.name = init.name ?? ''
+    this.required = init.required ?? false
     Object.freeze(this)
   }
 }
@@ -253,6 +322,19 @@ export interface ParsedArgsInit {
   invalidIntOptions?: [string, string][]
   invalidFloatOptions?: [string, string][]
   missingRequiredOptions?: string[]
+  /**
+   * Display names of required operand slots the line left empty, in
+   * declaration order. Reported rather than thrown, like every other entry
+   * here, so the dialect that words it is the caller's choice.
+   */
+  missingRequiredOperands?: string[]
+  /**
+   * Dests the line actually carried, in scan order, excluding the ones a
+   * declared default filled in afterwards. A usage line that echoes what was
+   * supplied (clap's) needs exactly this distinction: a defaulted option is
+   * invisible there, a typed one is not.
+   */
+  typedDests?: string[]
   oldOptionNeedsValue?: string | null
 }
 
@@ -286,6 +368,8 @@ export class ParsedArgs {
   readonly invalidIntOptions: [string, string][]
   readonly invalidFloatOptions: [string, string][]
   readonly missingRequiredOptions: string[]
+  readonly missingRequiredOperands: string[]
+  readonly typedDests: string[]
   // The old-style cluster letter whose argument ran off the end of the
   // line (`tar xzf` with no archive). Its own report because GNU tar
   // words it differently and exits differently from every getopt refusal
@@ -311,6 +395,8 @@ export class ParsedArgs {
     this.invalidIntOptions = init.invalidIntOptions ?? []
     this.invalidFloatOptions = init.invalidFloatOptions ?? []
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
+    this.missingRequiredOperands = init.missingRequiredOperands ?? []
+    this.typedDests = init.typedDests ?? []
     this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
   }
 

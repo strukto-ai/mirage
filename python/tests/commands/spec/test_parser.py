@@ -678,3 +678,44 @@ def test_old_option_style_is_off_for_every_other_command():
     parsed = parse_command(SPECS["gzip"], ["dkf"], "/")
     assert parsed.paths() == ["/dkf"]
     assert parsed.old_option_needs_value is None
+
+
+def test_required_operand_is_reported_not_raised():
+    # The parser classifies and reports; the dialect that words the
+    # refusal is the caller's choice, which is why this is a list of
+    # names rather than an exception.
+    spec = CommandSpec(
+        positional=(Operand(type="str", name="PAGE_ID", required=True), ))
+    empty = parse_command(spec, [], "/")
+    assert empty.missing_required_operands == ["PAGE_ID"]
+    filled = parse_command(spec, ["abc"], "/")
+    assert filled.missing_required_operands == []
+
+
+def test_a_flag_that_supplies_a_slot_satisfies_required():
+    # provided_by is the declarative form of grep's `if (!pattern_given)`:
+    # the slot is skipped, so it cannot also be missing.
+    spec = CommandSpec(
+        options=(Option(long="--expr", short="-e", type="str"), ),
+        positional=(Operand(type="str",
+                            name="PATTERN",
+                            required=True,
+                            provided_by=("-e", )), ),
+    )
+    assert parse_command(spec, [],
+                         "/").missing_required_operands == ["PATTERN"]
+    supplied = parse_command(spec, ["-e", "x"], "/")
+    assert supplied.missing_required_operands == []
+
+
+def test_typed_dests_exclude_defaults_and_keep_scan_order():
+    spec = CommandSpec(options=(
+        Option(long="--limit", type="int", default="25"),
+        Option(long="--sort", type="str"),
+        Option(long="--json", type="bool"),
+    ))
+    # --limit is present in flags (the default landed) but was never
+    # typed, which is the whole distinction a clap usage line needs.
+    parsed = parse_command(spec, ["--json", "--sort", "x"], "/")
+    assert parsed.flags["--limit"] == "25"
+    assert parsed.typed_dests == ["--json", "--sort"]

@@ -950,3 +950,43 @@ describe("parseCommand — tar's old option style", () => {
     expect(p.oldOptionNeedsValue).toBeNull()
   })
 })
+
+describe('required operands and typed dests', () => {
+  it('reports a missing required operand rather than throwing', () => {
+    // The parser classifies and reports; the dialect that words the refusal is
+    // the caller's choice, which is why this is a list of names.
+    const spec = new CommandSpec({
+      positional: [new Operand({ type: 'str', name: 'PAGE_ID', required: true })],
+    })
+    expect(parseCommand(spec, [], '/').missingRequiredOperands).toEqual(['PAGE_ID'])
+    expect(parseCommand(spec, ['abc'], '/').missingRequiredOperands).toEqual([])
+  })
+
+  it('lets a flag that supplies a slot satisfy required', () => {
+    // providedBy is the declarative form of grep's `if (!pattern_given)`: the
+    // slot is skipped, so it cannot also be missing.
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--expr', short: '-e', type: 'str' })],
+      positional: [
+        new Operand({ type: 'str', name: 'PATTERN', required: true, providedBy: ['-e'] }),
+      ],
+    })
+    expect(parseCommand(spec, [], '/').missingRequiredOperands).toEqual(['PATTERN'])
+    expect(parseCommand(spec, ['-e', 'x'], '/').missingRequiredOperands).toEqual([])
+  })
+
+  it('excludes defaults from typed dests and keeps scan order', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--limit', type: 'int', default: '25' }),
+        new Option({ long: '--sort', type: 'str' }),
+        new Option({ long: '--json', type: 'bool' }),
+      ],
+    })
+    // --limit is present in flags (the default landed) but was never typed,
+    // which is the whole distinction a clap usage line needs.
+    const parsed = parseCommand(spec, ['--json', '--sort', 'x'], '/')
+    expect(parsed.flags['--limit']).toBe('25')
+    expect(parsed.typedDests).toEqual(['--json', '--sort'])
+  })
+})

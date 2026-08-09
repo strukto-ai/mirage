@@ -12,25 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FlagView } from '../../../../spec/types.ts'
-import { appendBlocks } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import type { NotionConfig } from '../../../../../core/notion/config.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport, parseJsonFlag, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function append(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  let body: Record<string, unknown>
-  try {
-    body = parseJsonFlag(fl.asStr('json'), '--json')
-    if (!('children' in body)) throw new Error('--json must contain children')
-  } catch (err) {
-    return usageError(err)
-  }
-  const result = await appendBlocks(notionTransport(inv.config), fl.asStr('block') ?? '', body)
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
-  return [out, new IOResult()]
+export function token(inv: CLIInvocation): CommandFnResult {
+  const cfg = inv.config as NotionConfig
+  return [ENC.encode(`${cfg.apiKey}\n`), new IOResult()]
 }

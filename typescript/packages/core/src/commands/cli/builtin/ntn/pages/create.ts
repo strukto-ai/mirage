@@ -14,23 +14,43 @@
 
 import { FlagView } from '../../../../spec/types.ts'
 import { createPageRaw } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport, parseJsonFlag, usageError } from '../util.ts'
+import { contentOrStdin, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
+const PARENT_KEYS: Record<string, string> = {
+  page: 'page_id',
+  database: 'database_id',
+  'data-source': 'data_source_id',
+}
+
+function parseParent(spec: string): Record<string, unknown> {
+  const at = spec.indexOf(':')
+  const kind = at === -1 ? spec : spec.slice(0, at)
+  const ident = at === -1 ? '' : spec.slice(at + 1)
+  const key = PARENT_KEYS[kind]
+  if (key === undefined || ident === '') {
+    throw new Error('--parent must be page:<id>, database:<id>, or data-source:<id>')
+  }
+  return { [key]: ident }
+}
 
 export async function create(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  let body: Record<string, unknown>
+  const body: Record<string, unknown> = {}
   try {
-    body = parseJsonFlag(fl.asStr('json'), '--json')
-    if (!('parent' in body)) throw new Error('--json must contain parent')
+    body.markdown = await contentOrStdin(fl.asStr('content'), inv.stdin)
+    // The parent really is optional upstream: omitted, the request goes out
+    // without one and the API decides whether to refuse it.
+    const parent = fl.asStr('parent')
+    if (parent !== undefined && parent !== '') body.parent = parseParent(parent)
   } catch (err) {
     return usageError(err)
   }
-  const page = await createPageRaw(notionTransport(inv.config), body)
-  const out: ByteSource = ENC.encode(JSON.stringify(page))
-  return [out, new IOResult()]
+  const page = await createPageRaw(notionTransport(inv.config, inv.flags), body)
+  if (fl.asBool('json')) return [prettyJson(page), new IOResult()]
+  const id = typeof page.id === 'string' ? page.id : ''
+  return [ENC.encode(`${id}\n`), new IOResult()]
 }

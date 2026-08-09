@@ -12,19 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.builtin.ntn.util import first_text, notion_config
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.normalize import to_json_bytes
 from mirage.core.notion.pages import update_page
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+
+NEEDS_YES = ("error: Cannot confirm in a non-interactive environment.\n"
+             "  hint: Use --yes to skip the confirmation prompt.\n")
 
 
 async def trash(
         inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    page = await update_page(inv.config,
-                             fl.as_str("page") or "", {"in_trash": True})
-    return yield_bytes(to_json_bytes(page)), IOResult()
+    page_id = first_text(inv.texts, "page id")
+    # A mirage session has no terminal, so this is the branch the
+    # upstream CLI takes when it cannot prompt: refuse and say how.
+    # stderr is plain bytes, never a stream: the recorded execution node
+    # materializes it, and a one-shot generator read there would leave
+    # the shell nothing to print.
+    if not fl.as_bool("yes"):
+        return None, IOResult(stderr=NEEDS_YES.encode(), exit_code=1)
+    await update_page(notion_config(inv), page_id, {"in_trash": True})
+    return None, IOResult(stderr="✔ Page trashed\n".encode())

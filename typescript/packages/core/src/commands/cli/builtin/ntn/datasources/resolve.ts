@@ -13,24 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../../spec/types.ts'
-import { createComment } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { getDatabase } from '../../../../../core/notion/pages.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport, parseJsonFlag, usageError } from '../util.ts'
+import { firstText, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function create(inv: CLIInvocation): Promise<CommandFnResult> {
+export async function resolve(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  let body: Record<string, unknown>
+  let databaseId: string
   try {
-    body = parseJsonFlag(fl.asStr('json'), '--json')
-    if (!('parent' in body)) throw new Error('--json must contain parent')
+    databaseId = firstText(inv.texts, 'database id')
   } catch (err) {
     return usageError(err)
   }
-  const comment = await createComment(notionTransport(inv.config), body)
-  const out: ByteSource = ENC.encode(JSON.stringify(comment))
-  return [out, new IOResult()]
+  const database = await getDatabase(notionTransport(inv.config, inv.flags), databaseId)
+  const stubs = Array.isArray(database.data_sources) ? database.data_sources : []
+  if (fl.asBool('json')) {
+    return [prettyJson({ database_id: databaseId, data_sources: stubs }), new IOResult()]
+  }
+  let out = ''
+  for (const one of stubs) {
+    const record = one as Record<string, unknown>
+    const id = typeof record.id === 'string' ? record.id : ''
+    const name = typeof record.name === 'string' ? record.name : ''
+    out += `${id}\t${name}\n`
+  }
+  return [ENC.encode(out), new IOResult()]
 }

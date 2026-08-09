@@ -1343,7 +1343,10 @@
           "resource": "ram",
           "backend": "memory"
         }
-      ]
+      ],
+      "env": {
+        "NOTION_API_VERSION": "2025-09-03"
+      }
     },
     {
       "id": "cli-linear",

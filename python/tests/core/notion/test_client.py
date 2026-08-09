@@ -25,7 +25,7 @@ def test_notion_headers():
     config = NotionConfig(api_key="ntn_test123")
     headers = notion_headers(config)
     assert headers["Authorization"] == "Bearer ntn_test123"
-    assert headers["Notion-Version"] == "2022-06-28"
+    assert headers["Notion-Version"] == "2025-09-03"
     assert headers["Content-Type"] == "application/json"
 
 

@@ -14,18 +14,29 @@
 
 import { FlagView } from '../../../../spec/types.ts'
 import { updatePage } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport } from '../util.ts'
+import { firstText, notionTransport, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
+const NEEDS_YES =
+  'error: Cannot confirm in a non-interactive environment.\n' +
+  '  hint: Use --yes to skip the confirmation prompt.\n'
 
 export async function trash(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const page = await updatePage(notionTransport(inv.config), fl.asStr('page') ?? '', {
-    in_trash: true,
-  })
-  const out: ByteSource = ENC.encode(JSON.stringify(page))
-  return [out, new IOResult()]
+  let pageId: string
+  try {
+    pageId = firstText(inv.texts, 'page id')
+  } catch (err) {
+    return usageError(err)
+  }
+  // A mirage session has no terminal, so this is the branch the upstream CLI
+  // takes when it cannot prompt: refuse and say how.
+  if (!fl.asBool('yes')) {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(NEEDS_YES) })]
+  }
+  await updatePage(notionTransport(inv.config, inv.flags), pageId, { in_trash: true })
+  return [null, new IOResult({ stderr: ENC.encode('✔ Page trashed\n') })]
 }

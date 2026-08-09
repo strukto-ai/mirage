@@ -94,7 +94,6 @@ import { Double, MongoClient } from 'mongodb'
 import pg from 'pg'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
 import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
-import { startMockServer as startNotionMock } from '../../server/notion_server.ts'
 import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 import { startPythonServer } from './server_process.ts'
@@ -363,6 +362,8 @@ const EMAIL_SMTP_PORT = Number(process.env.EMAIL_SMTP_PORT ?? '3025')
 const EMAIL_API_PORT = Number(process.env.EMAIL_API_PORT ?? '8080')
 const EMAIL_USERNAME = 'integ@example.com'
 const EMAIL_PASSWORD = 'secret'
+// Doubles as the workspace id on the fake notion server.
+const NOTION_TOKEN = 'integ-test'
 
 // The GreenMail server is external and shared; its REST API purges every
 // mailbox between runs. Seeding appends RFC822 payloads over IMAP so folder
@@ -678,7 +679,15 @@ async function openGraphConsistency(
 }
 
 async function openNotion(target: Target): Promise<Open> {
-  const { server, port } = await startNotionMock()
+  let base = process.env.NOTION_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('notion target requires NOTION_URL')
+  const reset = await fetch(`${base}/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspace: NOTION_TOKEN }),
+  })
+  if (!reset.ok) throw new Error(`notion /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, NotionResource | RAMResource | [NotionResource, MountMode]> = {}
   for (const mount of target.mounts) {
     if (mount.resource === 'ram') {
@@ -686,21 +695,20 @@ async function openNotion(target: Target): Promise<Open> {
       continue
     }
     const resource = new NotionResource({
-      apiKey: 'integ-test',
-      baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+      apiKey: NOTION_TOKEN,
+      baseUrl: `${base}/v1`,
     })
     mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('ntn') === true) {
     ws.registerCli('ntn', NTN, {
-      api_key: 'integ-test',
-      base_url: `http://127.0.0.1:${String(port)}/v1`,
+      api_key: NOTION_TOKEN,
+      base_url: `${base}/v1`,
     })
   }
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    server.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }

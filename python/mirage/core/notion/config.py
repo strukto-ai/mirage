@@ -18,3 +18,8 @@ from pydantic import BaseModel, SecretStr
 class NotionConfig(BaseModel):
     api_key: SecretStr
     base_url: str = "https://api.notion.com/v1"
+    # None means the generation the client is written against. A CLI
+    # verb overrides it per line from --notion-version, so the override
+    # travels with the config the transport already takes rather than as
+    # a second argument every call site would have to thread.
+    api_version: str | None = None

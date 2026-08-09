@@ -42,14 +42,14 @@ async def search_pages(
     )
 
 
-async def search_databases(
+async def search_data_sources(
     config: NotionConfig,
     query: str = "",
     page_size: int = 100,
 ) -> list[dict[str, Any]]:
     body: dict[str, Any] = {
         "filter": {
-            "value": "database",
+            "value": "data_source",
             "property": "object"
         },
     }
@@ -63,22 +63,73 @@ async def get_database(config: NotionConfig,
     return await notion_get(config, f"/databases/{database_id}")
 
 
-async def query_database(
+async def get_data_source(config: NotionConfig,
+                          data_source_id: str) -> dict[str, Any]:
+    return await notion_get(config, f"/data_sources/{data_source_id}")
+
+
+async def query_data_source(
     config: NotionConfig,
-    database_id: str,
+    data_source_id: str,
     page_size: int = 100,
     body: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     return await paginate_post(
         config,
-        f"/databases/{database_id}/query",
+        f"/data_sources/{data_source_id}/query",
         body or {},
         page_size=page_size,
     )
 
 
+async def query_data_source_page(
+    config: NotionConfig,
+    data_source_id: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Query one page of rows, cursor envelope intact.
+
+    ``ntn datasources query`` is explicitly one page at a time: it
+    honors ``--limit``, reports ``has_more`` and hands the caller the
+    cursor, so it cannot use the paginating helper the mount uses.
+
+    Args:
+        config (NotionConfig): notion API config.
+        data_source_id (str): the data source to query.
+        body (dict[str, Any]): the request body, page size included.
+
+    Returns:
+        dict: the raw list response.
+    """
+    return await notion_post(config, f"/data_sources/{data_source_id}/query",
+                             body)
+
+
 async def get_page(config: NotionConfig, page_id: str) -> dict[str, Any]:
     return await notion_get(config, f"/pages/{page_id}")
+
+
+async def get_self(config: NotionConfig) -> dict[str, Any]:
+    return await notion_get(config, "/users/me")
+
+
+async def get_page_markdown(config: NotionConfig,
+                            page_id: str) -> dict[str, Any]:
+    return await notion_get(config, f"/pages/{page_id}/markdown")
+
+
+async def replace_page_markdown(config: NotionConfig, page_id: str,
+                                markdown: str) -> dict[str, Any]:
+    return await notion_patch(
+        config,
+        f"/pages/{page_id}/markdown",
+        {
+            "type": "replace_content",
+            "replace_content": {
+                "new_str": markdown
+            },
+        },
+    )
 
 
 async def list_block_children(

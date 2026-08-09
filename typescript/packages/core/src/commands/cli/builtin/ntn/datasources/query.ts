@@ -13,27 +13,119 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../../spec/types.ts'
-import { queryDatabase } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { NotionAPIError, type NotionTransport } from '../../../../../core/notion/_client.ts'
+import {
+  getDataSource,
+  getDatabase,
+  queryDataSourcePage,
+} from '../../../../../core/notion/pages.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport, parseJsonFlag, usageError } from '../util.ts'
+import {
+  firstText,
+  notionTransport,
+  parseJsonText,
+  prettyJson,
+  propertyCell,
+  usageError,
+} from '../util.ts'
 
 const ENC = new TextEncoder()
+const DEFAULT_LIMIT = 25
+const DIRECTIONS: Record<string, string> = {
+  asc: 'ascending',
+  ascending: 'ascending',
+  desc: 'descending',
+  descending: 'descending',
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function strOf(record: Record<string, unknown>, key: string): string {
+  const value = record[key]
+  return typeof value === 'string' ? value : ''
+}
+
+// A data source operand may be an id or a full Notion URL.
+function dataSourceRef(operand: string): string {
+  const tail = operand.split('/').pop() ?? operand
+  return tail.split('?')[0] ?? tail
+}
+
+function parseSort(spec: string): Record<string, unknown> {
+  const at = spec.lastIndexOf(' ')
+  if (at > 0) {
+    const tail = spec.slice(at + 1).toLowerCase()
+    const direction = DIRECTIONS[tail]
+    if (direction !== undefined) return { property: spec.slice(0, at), direction }
+  }
+  return { property: spec, direction: 'ascending' }
+}
+
+// A database id is accepted in the same slot as a data source id, so a miss on
+// the data source endpoint is not an error until the database endpoint misses
+// too.
+async function resolveSource(
+  transport: NotionTransport,
+  ref: string,
+): Promise<Record<string, unknown>> {
+  try {
+    return await getDataSource(transport, ref)
+  } catch (err) {
+    if (!(err instanceof NotionAPIError) || err.status !== 404) throw err
+  }
+  const database = await getDatabase(transport, ref)
+  const stubs: unknown[] = Array.isArray(database.data_sources) ? database.data_sources : []
+  const head = stubs[0]
+  if (head === undefined) throw new Error(`database ${ref} has no data sources`)
+  return getDataSource(transport, strOf(asObject(head), 'id'))
+}
 
 export async function query(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  let body: Record<string, unknown>
+  const body: Record<string, unknown> = {}
+  let ref: string
   try {
-    body = parseJsonFlag(fl.asStr('json'), '--json')
+    ref = dataSourceRef(firstText(inv.texts, 'data source id'))
+    body.page_size = fl.asInt('limit') ?? DEFAULT_LIMIT
+    const cursor = fl.asStr('start_cursor')
+    if (cursor !== undefined && cursor !== '') body.start_cursor = cursor
+    const sorts = fl.asList('sort').map(parseSort)
+    if (sorts.length > 0) body.sorts = sorts
+    const inline = fl.asStr('filter')
+    if (inline !== undefined && inline !== '') {
+      body.filter = parseJsonText(inline, '--filter')
+    }
   } catch (err) {
     return usageError(err)
   }
-  const result = await queryDatabase(
-    notionTransport(inv.config),
-    fl.asStr('datasource') ?? '',
-    body,
-  )
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
-  return [out, new IOResult()]
+
+  const transport = notionTransport(inv.config, inv.flags)
+  const dataSource = await resolveSource(transport, ref)
+  const result = await queryDataSourcePage(transport, strOf(dataSource, 'id'), body)
+  if (fl.asBool('json')) return [prettyJson(result), new IOResult()]
+
+  // Columns are the schema's property names in alphabetical order, which is
+  // what the upstream CLI prints whatever order the API reports the schema in.
+  const columns = Object.keys(asObject(dataSource.properties)).sort()
+  const rows = Array.isArray(result.results) ? result.results : []
+  let out = ''
+  for (const row of rows) {
+    const record = asObject(row)
+    const props = asObject(record.properties)
+    const cells = columns.map((name) => propertyCell(props[name]))
+    out += `${[strOf(record, 'id'), ...cells].join('\t')}\n`
+  }
+  const stdout = ENC.encode(out)
+  const cursor = result.next_cursor
+  if (result.has_more === true && typeof cursor === 'string' && cursor !== '') {
+    const notice = `\nMore results available. Use --start-cursor ${cursor} to continue.\n`
+    return [stdout, new IOResult({ stderr: ENC.encode(notice) })]
+  }
+  return [stdout, new IOResult()]
 }

@@ -13,23 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../../spec/types.ts'
-import { updatePage } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { replacePageMarkdown } from '../../../../../core/notion/pages.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport, parseJsonFlag, usageError } from '../util.ts'
+import { contentOrStdin, firstText, notionTransport, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
 export async function edit(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  let body: Record<string, unknown>
+  let pageId: string
+  let markdown: string
   try {
-    body = parseJsonFlag(fl.asStr('json'), '--json')
+    pageId = firstText(inv.texts, 'page id')
+    markdown = await contentOrStdin(fl.asStr('content'), inv.stdin)
   } catch (err) {
     return usageError(err)
   }
-  const page = await updatePage(notionTransport(inv.config), fl.asStr('page') ?? '', body)
-  const out: ByteSource = ENC.encode(JSON.stringify(page))
-  return [out, new IOResult()]
+  await replacePageMarkdown(notionTransport(inv.config, inv.flags), pageId, markdown)
+  return [ENC.encode(`${pageId}\n`), new IOResult()]
 }

@@ -12,6 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Stand-in name for a required operand whose slot declares none, so a
+// refusal that has to name the slot always has a word for it. Bare like
+// every operand name: the brackets are the renderer's.
+export const ARG_PLACEHOLDER = 'ARG'
+
 export const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   l: 'args_l',
   O: 'args_O',

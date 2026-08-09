@@ -22,14 +22,15 @@ from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
                                                  maybe_with_timeout,
                                                  run_with_timeout)
 from mirage.commands.cli.constants import CLI_CONFIG_ENV
-from mirage.commands.cli.refusal import leaf_refusal
+from mirage.commands.cli.refusal import (CLAP_EXIT, clap_missing_operands,
+                                         leaf_refusal)
 from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIVerbOpts
 from mirage.commands.cli.walk import owns_argv, walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import FlagValue, Operand
+from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -230,17 +231,29 @@ async def handle_cli(
     # convention, not an argparse one.
     parse_spec, mirage_help = parse_spec_for(leaf)
 
+    # The dialect is the root's, not the leaf's: a program answers in
+    # one voice at every level.
+    style = install.spec.usage_style
     parsed = parse_flags(list(result.argv), parse_spec, prog, session.cwd)
     if mirage_help and parsed.flag_kwargs.get("help") is True:
-        help_text = render_help(prog, parse_spec).encode()
+        help_text = render_help(prog, parse_spec, style=style).encode()
         return help_text, IOResult(), ExecutionNode(command=cmd_str,
                                                     exit_code=0)
 
     refusal = option_error(prog, parsed)
+    msg: bytes | None = None
+    code = 0
     if refusal is not None:
-        # The dialect is the root's, not the leaf's: a program answers
-        # in one voice at every level.
-        msg, code = leaf_refusal(install.spec.usage_style, refusal[0], parsed)
+        msg, code = leaf_refusal(style, refusal[0], parsed)
+    elif parsed.missing_required_operands and style is UsageStyle.CLAP:
+        # Only clap names the empty slots. Under every other style a
+        # required operand stays the leaf's own business, worded by the
+        # command, which is what every mirage CLI did before this.
+        msg = clap_missing_operands(prog, parse_spec,
+                                    parsed.missing_required_operands,
+                                    parsed.typed_dests, session.env)
+        code = CLAP_EXIT
+    if msg is not None:
         refusal_io = IOResult(exit_code=code, stderr=msg)
         refusal_node = ExecutionNode(command=cmd_str,
                                      exit_code=code,
@@ -259,6 +272,19 @@ async def handle_cli(
         # Only the injected flag is dropped; a leaf that declared
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
+    # An option that names an environment variable takes its value from
+    # the session when the line omits it, so the leaf reads one flag
+    # instead of a flag and a fallback. Here and not in the flat parser
+    # because a shell command's environment is the shell's business,
+    # while a CLI's is part of the program its spec describes.
+    for option in parse_spec.options:
+        spelling = option.long or option.short
+        if option.env is None or spelling is None:
+            continue
+        dest = flag_kwarg_name(spelling)
+        value = session.env.get(option.env)
+        if kw.get(dest) is None and value:
+            kw[dest] = value
 
     # The workspace doors a mount-reading verb needs ride the record as
     # one field. Most CLIs never read it: an API client has no

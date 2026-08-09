@@ -189,7 +189,7 @@ describe('HttpNotionTransport', () => {
     expect(requests[0]?.url).toBe('http://mock/v1/pages/p1')
     expect(requests[0]?.method).toBe('GET')
     expect(requests[0]?.headers.Authorization).toBe('Bearer k-123')
-    expect(requests[0]?.headers['Notion-Version']).toBe('2022-06-28')
+    expect(requests[0]?.headers['Notion-Version']).toBe('2025-09-03')
   })
 
   it('maps API-post-search to POST /search with the args as JSON body', async () => {

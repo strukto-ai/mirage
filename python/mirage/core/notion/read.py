@@ -14,9 +14,11 @@
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.notion.normalize import (normalize_database, normalize_page,
+from mirage.core.notion.normalize import (normalize_data_source,
+                                          normalize_database, normalize_page,
                                           to_json_bytes)
-from mirage.core.notion.pages import get_database, get_page, list_block_tree
+from mirage.core.notion.pages import (get_data_source, get_database, get_page,
+                                      list_block_tree)
 from mirage.core.notion.pathing import split_suffix_id
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -53,7 +55,13 @@ async def read(
         database = await get_database(accessor.config, database_id)
         return to_json_bytes(normalize_database(database))
 
-    if (len(parts) >= 4 and parts[0] == "databases"
+    if (len(parts) == 4 and parts[0] == "databases"
+            and parts[-1] == "data_source.json"):
+        _, data_source_id = split_suffix_id(parts[-2])
+        data_source = await get_data_source(accessor.config, data_source_id)
+        return to_json_bytes(normalize_data_source(data_source))
+
+    if (len(parts) >= 5 and parts[0] == "databases"
             and parts[-1] == "page.json"):
         _, page_id = split_suffix_id(parts[-2])
         return await read_page_json(accessor.config, page_id)

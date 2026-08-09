@@ -14,11 +14,44 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Any, Literal, TypeAlias
 
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.types import PathSpec
+
+
+class UsageStyle(Enum):
+    """Which program's voice a CLI answers usage questions in.
+
+    An installed CLI is not a GNU tool, so a leaf that refuses an option
+    it does not declare answers in argparse's shape and exit code by
+    default. A CLI that mimics an existing program has to answer in that
+    program's shape instead: mirage implements a subset of git, so most
+    of git's real options arrive undeclared, and an agent that reads the
+    refusal should see what git would have said rather than learn that
+    it is talking to a reimplementation.
+
+    GIT covers the unknown-option refusal and the exit code, which is
+    what an undeclared flag produces; every other usage error (a missing
+    value, an unparseable int) stays in argparse's shape, because those
+    only happen for options a CLI does declare.
+
+    CLAP additionally governs how help is laid out and how a missing
+    operand is refused, because a clap program prints a bare description
+    line, spells the option placeholder ``[OPTIONS]``, heads the option
+    list ``Options:``, lists subcommands in declaration order, and names
+    the empty slots rather than leaving each leaf to word its own
+    complaint. Those are one decision (whose voice this is), so they
+    read off this knob rather than a second one.
+
+    It lives in the spec layer, not beside the CLI tree, because the
+    help renderer is the spec's and cannot import upward to reach it.
+    """
+
+    ARGPARSE = "argparse"
+    GIT = "git"
+    CLAP = "clap"
 
 
 class CommandName(StrEnum):
@@ -132,6 +165,20 @@ class Option:
             if it had been typed (a "path" default resolves and routes, a
             defaulted value must satisfy choices). Presence of a default
             always satisfies ``required``.
+        metavar (str | None): the value's name in a usage line, bare
+            (``VERSION``, rendered ``--notion-version <VERSION>``); the
+            brackets belong to the renderer, which is the only thing
+            that knows the dialect. Only a program whose usage lines are
+            rendered in someone else's needs one, since otherwise the
+            name is derived from the long spelling.
+        env (str | None): environment variable that supplies this option
+            when the line omits it. Distinct from ``default``, and not a
+            synonym for it: an env-sourced value counts as *supplied*
+            (clap echoes it in a usage line, where a defaulted one is
+            invisible), and it is read from the session rather than
+            frozen into the spec. Declaring it here is what keeps one
+            fact in one place, since both the leaf that sends the value
+            and the renderer that reports the line need it.
         description (str | None): help text.
     """
     short: str | None = None
@@ -146,6 +193,8 @@ class Option:
     choices: tuple[str, ...] = ()
     required: bool = False
     default: str | None = None
+    metavar: str | None = None
+    env: str | None = None
     description: str | None = None
 
 
@@ -170,10 +219,20 @@ class Operand:
             clap names ``required_unless_present`` and docopt expresses as
             alternate usage patterns. It lives in the spec, not in command
             code, because Mirage classifies args before a backend is chosen.
+        name (str): the slot's name in a usage line, bare (``PAGE_ID``,
+            rendered ``<PAGE_ID>`` when required and ``[PAGE_ID]`` when
+            not); the brackets belong to the renderer, which is the only
+            thing that knows the dialect. Empty renders the generic
+            ``<path>``/``<text>`` placeholder the ordinary help uses.
+        required (bool): the line must supply this slot; one that does
+            not is a usage error the parser reports, rather than
+            something each leaf re-discovers and words its own way.
     """
     type: ValueType = "path"
     provided_by: tuple[str, ...] = ()
     text_when: tuple[str, ...] = ()
+    name: str = ""
+    required: bool = False
 
 
 @dataclass(frozen=True)
@@ -334,6 +393,15 @@ class ParsedArgs:
     invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
     invalid_float_options: list[tuple[str, str]] = field(default_factory=list)
     missing_required_options: list[str] = field(default_factory=list)
+    # Display names of required operand slots the line left empty, in
+    # declaration order. Reported rather than raised, like every other
+    # entry here, so the dialect that words it is the caller's choice.
+    missing_required_operands: list[str] = field(default_factory=list)
+    # Dests the line actually carried, in scan order, excluding the ones
+    # a declared default filled in afterwards. A usage line that echoes
+    # what was supplied (clap's) needs exactly this distinction: a
+    # defaulted option is invisible there, a typed one is not.
+    typed_dests: list[str] = field(default_factory=list)
     # The old-style cluster letter whose argument ran off the end of the
     # line (`tar xzf` with no archive). Its own report because GNU tar
     # words it differently and exits differently from every getopt

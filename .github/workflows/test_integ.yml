@@ -297,6 +297,17 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
 
+      - name: Start fake Notion API (Prisma)
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
+        run: |
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notionsrv.log && break; sleep 1; done
+          cat /tmp/notionsrv.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
+
       - name: Run notion integ (TS, mock server, JSON harness)
         working-directory: integ
         env:
@@ -306,6 +317,18 @@ jobs:
       - name: Run notion MCP/REST parity check (TS)
         working-directory: integ
         run: pnpm exec tsx notion_mcp_parity.ts
+
+      # Runs every cli-ntn case through the REAL Notion CLI against the same
+      # fake, so the goldens the battery asserts are by construction what the
+      # official binary prints. Pinned by version; the script refuses any other.
+      - name: Run ntn CLI conformance against the real binary
+        working-directory: integ
+        run: |
+          # Installed outside the pnpm workspace so it cannot disturb
+          # node_modules the rest of the job depends on.
+          mkdir -p /tmp/ntncli
+          (cd /tmp/ntncli && npm i --no-audit --no-fund ntn@0.21.9)
+          NTN_BIN=/tmp/ntncli/node_modules/.bin/ntn pnpm exec tsx ntn_conformance.ts
 
       - name: Run lancedb integ (TS, embedded, JSON harness)
         working-directory: integ
@@ -615,6 +638,34 @@ jobs:
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
+
+      # The notion fake is a Node server shared by both hosts, so this
+      # otherwise python-only job needs node to start it. No package build is
+      # required: notion_server.ts imports only node, prisma and the MCP sdk.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Start fake Notion API (Prisma)
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
+        run: |
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notionsrv.log && break; sleep 1; done
+          cat /tmp/notionsrv.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
 
       - name: Run notion integ (mock server, JSON harness)
         env:
@@ -1194,7 +1245,7 @@ jobs:
         if: matrix.facet == 'chat' || matrix.facet == 'cli'
         working-directory: integ
         env:
-          SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
+          INTEG_DB_URL: file:/tmp/mirage-slack-ci.db
         run: |
           ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
           nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slack.log 2>&1 &
@@ -1212,13 +1263,21 @@ jobs:
 
       # The ntn and linear CLIs ride the notion mock (self-started by each
       # runner under NOTION_ENABLED) and the fake Linear GraphQL server.
-      - name: Start fake Linear API and enable the Notion mock
+      - name: Start fake Linear API and the Notion mock
         if: matrix.facet == 'cli'
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
         run: |
           nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
           for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/linear.log && break; sleep 1; done
           cat /tmp/linear.log
           echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+          cd integ
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notion.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notion.log && break; sleep 1; done
+          cat /tmp/notion.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
           echo "NOTION_ENABLED=1" >> "$GITHUB_ENV"
 
       - name: Start fake Dify API

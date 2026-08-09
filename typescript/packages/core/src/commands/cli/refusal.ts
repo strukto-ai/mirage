@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { USAGE_EXIT } from './constants.ts'
-import { UsageStyle } from './types.ts'
+import { operandSlot, optionMetavar } from '../spec/help.ts'
+import { type CommandSpec, UsageStyle } from '../spec/types.ts'
 
 export const ARGPARSE_EXIT = 2
+export const CLAP_EXIT = 2
 const LONG_PREFIX = '--'
 
 const ENC = new TextEncoder()
@@ -38,12 +40,83 @@ export function gitUnknownOption(token: string): Uint8Array {
 }
 
 /**
+ * The options a clap usage line echoes back, in clap's order.
+ *
+ * clap reprints the options the line carried, in the order they were typed,
+ * then the ones an environment variable supplied. A *defaulted* option is not
+ * among them: pinned against ntn 0.21.9, whose --limit declares `[default: 25]`
+ * and never appears unless it was typed.
+ *
+ * @param spec the leaf's grammar, for spellings and value names
+ * @param typed dests the line carried, in scan order (canonical dashed
+ *   spellings, the key space the parser records flags under)
+ * @param env the session environment, read for the options that declare one
+ */
+export function clapSupplied(
+  spec: CommandSpec,
+  typed: readonly string[],
+  env: Readonly<Record<string, string>>,
+): string[] {
+  const byDest = new Map(spec.options.map((opt) => [opt.long ?? opt.short ?? '', opt]))
+  const bits: string[] = []
+  for (const dest of typed) {
+    const opt = byDest.get(dest)
+    if (opt === undefined) continue
+    bits.push(opt.type === 'bool' ? dest : `${dest} <${optionMetavar(opt)}>`)
+  }
+  for (const [dest, opt] of byDest) {
+    if (opt.env === null || typed.includes(dest) || !(opt.env in env)) continue
+    bits.push(`${dest} <${optionMetavar(opt)}>`)
+  }
+  return bits
+}
+
+/** Every operand slot of a leaf, as a clap usage line spells them. */
+function clapOperands(spec: CommandSpec): string[] {
+  const slots = spec.positional.map((operand) => operandSlot(operand))
+  if (spec.rest !== null) slots.push(operandSlot(spec.rest, !spec.rest.required))
+  return slots
+}
+
+/**
+ * clap's refusal for required operands the line did not supply.
+ *
+ * Pinned against ntn 0.21.9: the empty slots are listed one per line under a
+ * fixed heading, then a usage line that carries the options the line supplied
+ * and every operand slot, then the "try --help" footer. The usage line names
+ * only what was supplied, which is why it is rebuilt here rather than taken
+ * from the help page.
+ *
+ * @param prog the full display path of the leaf ("ntn pages get")
+ * @param spec the leaf's grammar
+ * @param missing bare names of the empty required slots
+ * @param typed dests the line carried, in scan order
+ * @param env the session environment
+ */
+export function clapMissingOperands(
+  prog: string,
+  spec: CommandSpec,
+  missing: readonly string[],
+  typed: readonly string[],
+  env: Readonly<Record<string, string>>,
+): Uint8Array {
+  const named = missing.map((name) => `  <${name}>`).join('\n')
+  const usage = [prog, ...clapSupplied(spec, typed, env), ...clapOperands(spec)].join(' ')
+  return ENC.encode(
+    'error: the following required arguments were not provided:\n' +
+      `${named}\n\nUsage: ${usage}\n\n` +
+      "For more information, try '--help'.\n",
+  )
+}
+
+/**
  * The message and exit code a leaf answers a bad option with.
  *
  * A leaf usage error exits 2 under argparse's style regardless of the GNU
  * USAGE_EXIT table, because an installed CLI name is never a GNU tool with its
  * own pinned exit. git exits 129 for the same mistake, which is neither that
- * nor its own 128 for a fatal.
+ * nor its own 128 for a fatal. clap exits 2, agreeing with argparse by
+ * coincidence rather than by lineage.
  *
  * @param style the dialect the CLI's root declares
  * @param argparseMessage the message the spec machinery built, used as-is for
@@ -56,6 +129,7 @@ export function leafRefusal(
   argparseMessage: Uint8Array,
   invalidOptions: readonly string[],
 ): [Uint8Array, number] {
+  if (style === UsageStyle.CLAP) return [argparseMessage, CLAP_EXIT]
   if (style !== UsageStyle.GIT) return [argparseMessage, ARGPARSE_EXIT]
   const first = invalidOptions[0]
   if (first !== undefined) return [gitUnknownOption(first), USAGE_EXIT]

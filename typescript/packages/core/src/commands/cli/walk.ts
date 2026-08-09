@@ -16,6 +16,7 @@ import { HELP_OPTION } from '../config.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
 import { renderHelp } from '../spec/help.ts'
+import { UsageStyle } from '../spec/types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
@@ -84,7 +85,11 @@ export function ownsArgv(node: CLISpec): boolean {
  * git). `name` is the full display path as typed ('gws gmail'), so a
  * renamed install renders its own spelling.
  */
-export function nodeHelp(name: string, node: CLISpec): string {
+export function nodeHelp(
+  name: string,
+  node: CLISpec,
+  style: UsageStyle = UsageStyle.ARGPARSE,
+): string {
   const rows: [string, string][] = node.subcommands.map((child) => [
     verbDisplay(child),
     child.description ?? '',
@@ -99,7 +104,7 @@ export function nodeHelp(name: string, node: CLISpec): string {
       ? node
       : // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
         new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
-  return renderHelp(name, listed, rows)
+  return renderHelp(name, listed, rows, style)
 }
 
 /**
@@ -107,9 +112,9 @@ export function nodeHelp(name: string, node: CLISpec): string {
  * git's shape (`unknown option: --zzz` followed by the usage listing, exit
  * 129). One wording for every level; git itself uses two.
  */
-function usageError(name: string, node: CLISpec, message: string): WalkResult {
+function usageError(name: string, node: CLISpec, message: string, style: UsageStyle): WalkResult {
   return new WalkResult({
-    output: ENC.encode(`${message}\n\n${nodeHelp(name, node)}`),
+    output: ENC.encode(`${message}\n\n${nodeHelp(name, node, style)}`),
     stream: 'stderr',
     exitCode: USAGE_EXIT,
   })
@@ -166,6 +171,7 @@ function matchShort(
   flags: WalkFlagBag,
   token: string,
   nextToken: string | undefined,
+  style: UsageStyle,
 ): [number, WalkResult | null] | null {
   for (const vf of cs.attachSpellings) {
     if (token.startsWith(vf) && token.length > vf.length) {
@@ -176,7 +182,7 @@ function matchShort(
   for (const vf of cs.valueSpellings) {
     if (token === vf) {
       if (nextToken === undefined) {
-        return [0, usageError(name, node, `error: option '${vf}' requires a value`)]
+        return [0, usageError(name, node, `error: option '${vf}' requires a value`, style)]
       }
       recordValue(flags, cs, vf, nextToken)
       return [2, null]
@@ -250,6 +256,7 @@ function finishNode(
   cs: CompiledSpec,
   flags: WalkFlagBag,
   cwd: string,
+  style: UsageStyle,
 ): WalkResult | null {
   for (const [dest, value] of cs.defaults) {
     if (!(dest in flags)) {
@@ -269,7 +276,7 @@ function finishNode(
       const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
       for (const part of candidates) {
         if (!pattern.test(part)) {
-          return usageError(name, node, `error: option '${dest}' expects a numerical value`)
+          return usageError(name, node, `error: option '${dest}' expects a numerical value`, style)
         }
       }
     }
@@ -279,13 +286,13 @@ function finishNode(
     const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
     for (const part of candidates) {
       if (!allowed.includes(part)) {
-        return usageError(name, node, `error: invalid argument '${part}' for '${dest}'`)
+        return usageError(name, node, `error: invalid argument '${part}' for '${dest}'`, style)
       }
     }
   }
   for (const dest of cs.requiredDests) {
     if (!(dest in flags)) {
-      return usageError(name, node, `error: option '${dest}' is required`)
+      return usageError(name, node, `error: option '${dest}' is required`, style)
     }
   }
   return null
@@ -308,6 +315,9 @@ function finishNode(
  */
 export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd = '/'): WalkResult {
   let node = spec
+  // Read once off the root and never off a node: a program answers in one
+  // voice at every level, so a subcommand cannot pick its own.
+  const style = spec.usageStyle
   let path: string[] = []
   const flags: WalkFlagBag = {}
   let i = 0
@@ -347,6 +357,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
               name,
               node,
               `error: ambiguous option: ${spelling.slice(2)} (could be ${possible})`,
+              style,
             )
           }
         }
@@ -361,7 +372,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
           }
         } else if (cs.longBoolSpellings.has(spelling)) {
           if (attached !== null) {
-            return usageError(name, node, `error: option '${spelling}' takes no value`)
+            return usageError(name, node, `error: option '${spelling}' takes no value`, style)
           }
           recordBool(flags, cs, spelling)
         } else if (cs.longValueSpellings.has(spelling)) {
@@ -372,15 +383,15 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
             i += 1
             recordValue(flags, cs, spelling, next)
           } else {
-            return usageError(name, node, `error: option '${spelling}' requires a value`)
+            return usageError(name, node, `error: option '${spelling}' requires a value`, style)
           }
         } else if (spelling === '--help') {
           if (attached !== null) {
-            return usageError(name, node, `error: option '${spelling}' takes no value`)
+            return usageError(name, node, `error: option '${spelling}' takes no value`, style)
           }
-          return new WalkResult({ output: ENC.encode(nodeHelp(name, node)) })
+          return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
         } else {
-          return usageError(name, node, `unknown option: ${spelling}`)
+          return usageError(name, node, `unknown option: ${spelling}`, style)
         }
         i += 1
         continue
@@ -389,7 +400,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
         // Declared multi-char shorts (find-style -name) match the whole
         // token before any cluster splitting, longest first, the same
         // precedence the flat parser uses.
-        const whole = matchShort(name, node, cs, flags, token, argv[i + 1])
+        const whole = matchShort(name, node, cs, flags, token, argv[i + 1], style)
         if (whole !== null) {
           const [consumed, refused] = whole
           if (refused !== null) return refused
@@ -421,12 +432,12 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
           }
         }
         if (error !== null) {
-          return usageError(name, node, error)
+          return usageError(name, node, error, style)
         }
         i += 1
         continue
       }
-      const refused = finishNode(name, node, cs, flags, cwd)
+      const refused = finishNode(name, node, cs, flags, cwd, style)
       if (refused !== null) return refused
       // An alias resolves to its canonical node; the path records the
       // canonical name (argparse prog attribution: errors under `gws co`
@@ -442,10 +453,10 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
       break
     }
     if (descended) continue
-    const refused = finishNode(name, node, cs, flags, cwd)
+    const refused = finishNode(name, node, cs, flags, cwd, style)
     if (refused !== null) return refused
     return new WalkResult({
-      output: ENC.encode(nodeHelp(name, node)),
+      output: ENC.encode(nodeHelp(name, node, style)),
       stream: 'stdout',
       exitCode: 1,
     })

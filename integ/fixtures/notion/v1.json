@@ -1,0 +1,433 @@
+{
+  "defaults": {
+    "created_time": "2026-01-01T00:00:00.000Z",
+    "last_edited_time": "2026-01-02T00:00:00.000Z",
+    "created_by": "user-1",
+    "last_edited_by": "user-2",
+    "url_base": "https://notion.example/"
+  },
+  "databases": [
+    {
+      "id": "eeee1111-2222-3333-4444-555566667777",
+      "title": "Tasks",
+      "parent": {
+        "type": "workspace"
+      },
+      "is_inline": false,
+      "properties": {
+        "Name": {
+          "id": "title",
+          "name": "Name",
+          "type": "title",
+          "title": {}
+        },
+        "Priority": {
+          "id": "pri",
+          "name": "Priority",
+          "type": "number",
+          "number": {
+            "format": "number"
+          }
+        },
+        "Done": {
+          "id": "dn",
+          "name": "Done",
+          "type": "checkbox",
+          "checkbox": {}
+        },
+        "Stage": {
+          "id": "st",
+          "name": "Stage",
+          "type": "select",
+          "select": {
+            "options": [
+              {
+                "id": "s1",
+                "name": "Draft",
+                "color": "gray"
+              },
+              {
+                "id": "s2",
+                "name": "Review",
+                "color": "blue"
+              }
+            ]
+          }
+        },
+        "Tags": {
+          "id": "tg",
+          "name": "Tags",
+          "type": "multi_select",
+          "multi_select": {
+            "options": [
+              {
+                "id": "t1",
+                "name": "infra",
+                "color": "green"
+              },
+              {
+                "id": "t2",
+                "name": "docs",
+                "color": "yellow"
+              }
+            ]
+          }
+        },
+        "Due": {
+          "id": "du",
+          "name": "Due",
+          "type": "date",
+          "date": {}
+        },
+        "Link": {
+          "id": "lk",
+          "name": "Link",
+          "type": "url",
+          "url": {}
+        },
+        "Notes": {
+          "id": "nt",
+          "name": "Notes",
+          "type": "rich_text",
+          "rich_text": {}
+        }
+      }
+    }
+  ],
+  "pages": [
+    {
+      "id": "aaaa1111-2222-3333-4444-555566667777",
+      "title": "Project Roadmap",
+      "parent": {
+        "type": "workspace"
+      }
+    },
+    {
+      "id": "bbbb2222-3333-4444-5555-666677778888",
+      "title": "Notes",
+      "parent": {
+        "type": "workspace"
+      }
+    },
+    {
+      "id": "cccc1111-2222-3333-4444-555566667777",
+      "title": "Q1 Goals",
+      "parent": {
+        "type": "page_id",
+        "id": "aaaa1111-2222-3333-4444-555566667777"
+      }
+    },
+    {
+      "id": "ffff1111-2222-3333-4444-555566667777",
+      "title": "Write spec",
+      "parent": {
+        "type": "database_id",
+        "id": "eeee1111-2222-3333-4444-555566667777"
+      },
+      "properties": {
+        "Name": {
+          "id": "title",
+          "type": "title",
+          "title": [
+            {
+              "type": "text",
+              "plain_text": "Write spec",
+              "text": {
+                "content": "Write spec"
+              }
+            }
+          ]
+        },
+        "Priority": {
+          "id": "pri",
+          "type": "number",
+          "number": 2
+        },
+        "Done": {
+          "id": "dn",
+          "type": "checkbox",
+          "checkbox": true
+        },
+        "Stage": {
+          "id": "st",
+          "type": "select",
+          "select": {
+            "id": "s2",
+            "name": "Review",
+            "color": "blue"
+          }
+        },
+        "Tags": {
+          "id": "tg",
+          "type": "multi_select",
+          "multi_select": [
+            {
+              "id": "t1",
+              "name": "infra",
+              "color": "green"
+            },
+            {
+              "id": "t2",
+              "name": "docs",
+              "color": "yellow"
+            }
+          ]
+        },
+        "Due": {
+          "id": "du",
+          "type": "date",
+          "date": {
+            "start": "2026-02-01",
+            "end": null,
+            "time_zone": null
+          }
+        },
+        "Link": {
+          "id": "lk",
+          "type": "url",
+          "url": "https://example.com/spec"
+        },
+        "Notes": {
+          "id": "nt",
+          "type": "rich_text",
+          "rich_text": [
+            {
+              "type": "text",
+              "plain_text": "needs review",
+              "text": {
+                "content": "needs review"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ffff2222-3333-4444-5555-666677778888",
+      "title": "Ship beta",
+      "parent": {
+        "type": "database_id",
+        "id": "eeee1111-2222-3333-4444-555566667777"
+      },
+      "properties": {
+        "Name": {
+          "id": "title",
+          "type": "title",
+          "title": [
+            {
+              "type": "text",
+              "plain_text": "Ship beta",
+              "text": {
+                "content": "Ship beta"
+              }
+            }
+          ]
+        },
+        "Priority": {
+          "id": "pri",
+          "type": "number",
+          "number": 1
+        },
+        "Done": {
+          "id": "dn",
+          "type": "checkbox",
+          "checkbox": false
+        },
+        "Stage": {
+          "id": "st",
+          "type": "select",
+          "select": null
+        },
+        "Tags": {
+          "id": "tg",
+          "type": "multi_select",
+          "multi_select": []
+        },
+        "Due": {
+          "id": "du",
+          "type": "date",
+          "date": null
+        },
+        "Link": {
+          "id": "lk",
+          "type": "url",
+          "url": null
+        },
+        "Notes": {
+          "id": "nt",
+          "type": "rich_text",
+          "rich_text": []
+        }
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b-a1",
+      "parent": "aaaa1111-2222-3333-4444-555566667777",
+      "type": "heading_1",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "Roadmap",
+            "annotations": {},
+            "text": {
+              "content": "Roadmap"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "b-a2",
+      "parent": "aaaa1111-2222-3333-4444-555566667777",
+      "type": "paragraph",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "Ship the ",
+            "annotations": {},
+            "text": {
+              "content": "Ship the "
+            }
+          },
+          {
+            "type": "text",
+            "plain_text": "beta",
+            "annotations": {
+              "bold": true
+            },
+            "text": {
+              "content": "beta"
+            }
+          },
+          {
+            "type": "text",
+            "plain_text": " soon",
+            "annotations": {},
+            "text": {
+              "content": " soon"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dddd2222-3333-4444-5555-666677778888",
+      "parent": "aaaa1111-2222-3333-4444-555566667777",
+      "type": "bulleted_list_item",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "phase one",
+            "annotations": {},
+            "text": {
+              "content": "phase one"
+            }
+          }
+        ]
+      },
+      "has_children": true
+    },
+    {
+      "id": "b-a4",
+      "parent": "aaaa1111-2222-3333-4444-555566667777",
+      "type": "code",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "print(1)",
+            "annotations": {},
+            "text": {
+              "content": "print(1)"
+            }
+          }
+        ],
+        "language": "python"
+      }
+    },
+    {
+      "id": "cccc1111-2222-3333-4444-555566667777",
+      "parent": "aaaa1111-2222-3333-4444-555566667777",
+      "type": "child_page",
+      "payload": {
+        "title": "Q1 Goals"
+      },
+      "has_children": true
+    },
+    {
+      "id": "b-b1",
+      "parent": "bbbb2222-3333-4444-5555-666677778888",
+      "type": "paragraph",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "alpha beta gamma",
+            "annotations": {},
+            "text": {
+              "content": "alpha beta gamma"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "b-b2",
+      "parent": "bbbb2222-3333-4444-5555-666677778888",
+      "type": "to_do",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "done item",
+            "annotations": {},
+            "text": {
+              "content": "done item"
+            }
+          }
+        ],
+        "checked": true
+      }
+    },
+    {
+      "id": "b-c1",
+      "parent": "cccc1111-2222-3333-4444-555566667777",
+      "type": "paragraph",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "Q1 contents",
+            "annotations": {},
+            "text": {
+              "content": "Q1 contents"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "b-d1",
+      "parent": "dddd2222-3333-4444-5555-666677778888",
+      "type": "bulleted_list_item",
+      "payload": {
+        "rich_text": [
+          {
+            "type": "text",
+            "plain_text": "phase one detail",
+            "annotations": {},
+            "text": {
+              "content": "phase one detail"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "comments": []
+}

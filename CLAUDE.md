@@ -89,6 +89,54 @@ agent discovers state, the CLI is how it acts.
   is what `type -a` prints). The generator is lazy so the winner still costs one
   probe. Do not add a second precedence list.
 
+- **A CLI that mimics a real program is gated against that program.**
+  `ntn` is the worked example: every case in `integ/cli/ntn.json` is asserted
+  twice, once by the shared battery inside a mirage workspace and once by
+  `integ/ntn_conformance.ts`, which runs the *same shell line* with the real
+  npm `ntn` binary pointed at the same fake through `NOTION_API_BASE_URL`. A
+  golden both agree on is by construction what the official CLI prints, so the
+  grammar cannot drift from upstream without a red build. Four rules keep it
+  honest. The binary's version is pinned (the script refuses any other).
+  **Both runs share one environment**, declared as `env` on the target in
+  `integ/targets.json` and read from there by both hosts and by the
+  conformance runner: an option that reads a variable renders differently
+  with and without it, so two environments would mean two different lines
+  were being compared. That map must carry `NOTION_API_VERSION`, and the
+  runner fails loudly if it does not, because unset `ntn` resolves the newest
+  version by fetching developers.notion.com at startup and every case starts
+  depending on the network. A case the upstream binary cannot answer carries a
+  `conformance_skip` string saying why, never a silent omission; **there are
+  none today**, and the only two cases the runner passes over are the ones
+  whose line reads a `/notion` mount path, which no bare binary can have. And
+  the harness spawns **asynchronously**: the fake is served by the same event
+  loop, so a synchronous spawn deadlocks the loop that has to answer the
+  child's request, which is the FUSE self-touch trap in another costume.
+
+- **`UsageStyle` is how a mimicking CLI answers in its original's voice**, and
+  it is read off the ROOT spec at every level, never off the node, because a
+  program answers in one voice throughout. It lives in `commands/spec/types.py`
+  (`types.ts`), not beside the CLI tree, because the help renderer is the
+  spec's and cannot import upward. `ARGPARSE` is the default; `GIT` rewords the
+  unknown-option refusal and its exit code; `CLAP` additionally governs help
+  layout (bare description line, `[OPTIONS]`/`<COMMAND>`, `Options:` not
+  `Flags:`, subcommands in declaration order rather than sorted) and the
+  missing-operand refusal. `ntn` is the CLAP one. Adding a dialect means adding
+  a member here, not a second knob: help layout, refusal wording and exit code
+  are one decision about whose program this imitates.
+
+  Three spec fields exist only to serve those foreign usage lines, and all
+  three hold **bare names with no brackets**, because only the renderer knows
+  the dialect that wraps them: `Operand.name` (`PAGE_ID`, rendered `<PAGE_ID>`
+  required and `[PAGE_ID]` not), `Operand.required` (the parser reports the
+  empty slot rather than each leaf re-discovering and rewording it), and
+  `Option.metavar` (`VERSION`, rendered `--notion-version <VERSION>`; derived
+  from the long spelling when absent, which covers most options and is why only
+  the four upstream overrides declare one). `Option.env` is a fourth and is
+  **not** a synonym for `default`: an env-sourced value counts as *supplied*,
+  so clap echoes it in a usage line where a defaulted one is invisible, and it
+  is read from the session rather than frozen into the spec. The executor fills
+  it, so a leaf reads one flag instead of a flag and a fallback.
+
 - **Discoverability is part of shipping a CLI**, and it comes from the spec, so
   it works for a user's own registered CLI exactly as for a builtin one. `man <cli>` and `man <cli> <verb>...` render through `node_help`/`nodeHelp`, the
   same renderer `--help` uses, so a manual cannot drift from the program; bare
@@ -96,6 +144,37 @@ agent discovers state, the CLI is how it acts.
   kind (`type -t` prints `cli`, a sixth word beside bash's five, because reusing
   `file` would promise `type -p` a path that does not exist). `which` prints the
   bare name, never a fabricated path.
+
+## Notion data sources
+
+The notion backend speaks **`Notion-Version: 2025-09-03`**, the generation that
+split a database into a container plus one or more *data sources*. The split is
+not cosmetic and it is not optional:
+
+- **The database object no longer carries `properties`.** The column schema
+  lives only on the data source, so `GET /v1/databases/{id}` answers with
+  `data_sources: [{id, name}]` and nothing to render a schema from. Do not
+  synthesize one back onto the container; the fake deliberately omits it so
+  anything that still reads a column list off a database fails loudly.
+- **The mount nests accordingly**, because that is where the data is:
+  `databases/<Title>__<db-id>/database.json` is the container, and
+  `databases/<Title>__<db-id>/<Name>__<ds-id>/data_source.json` is the schema,
+  with the row pages under the data source. A row page therefore sits at depth
+  4 under `databases/`, not 3; `readdir`/`read`/`stat` all key on that in both
+  languages. The name stutters for a single-source database because Notion
+  names the auto-created data source after its database, which is honest and
+  disappears the moment a database holds two.
+- **A row's parent is its data source**: `{type: "data_source_id", data_source_id, database_id}`. The database id rides along because Notion
+  kept emitting it, and the fake stores rows keyed by database, which is the
+  same fact one derivation away.
+- **`/search` rejects `filter.value = "database"`** at this version; the
+  searchable schema-bearing object is `data_source`. Listing databases is
+  therefore "search data sources, take the distinct parents, retrieve each",
+  which costs one extra call per database and is the only way to get the
+  title and url the directory is named and rendered from.
+- ids are **not interchangeable**: a data source id is not its database id.
+  The fake derives one from the other (`d5000000` + the database's tail) rather
+  than reusing it, precisely so an id mix-up cannot pass.
 
 ## Symlinks
 

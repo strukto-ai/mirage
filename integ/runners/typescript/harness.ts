@@ -67,6 +67,10 @@ export interface Target {
   // mapping form ({ '/data': 'read' }) or the list form (['/data'], which
   // inherits the mount's own mode).
   sessions?: Record<string, Record<string, string> | string[]>
+  // Session environment every case on this target runs under. The
+  // conformance runner passes the same map to the real binary, so a CLI
+  // option that reads a variable is compared under one environment.
+  env?: Record<string, string>
 }
 
 export interface Expect {
@@ -133,6 +137,7 @@ export interface ExecWorkspace {
   cache: { clear(): Promise<void> }
   mounts(): readonly { resource: { index?: { clear(): Promise<void> } } }[]
   createSession(sessionId: string, options: { mounts: Record<string, string> | string[] }): unknown
+  env: Record<string, string>
   close(): Promise<void>
 }
 

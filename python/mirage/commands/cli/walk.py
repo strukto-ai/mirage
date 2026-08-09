@@ -22,6 +22,7 @@ from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
 from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
 from mirage.commands.spec.help import render_help
+from mirage.commands.spec.types import UsageStyle
 from mirage.utils.path import resolve_path
 
 
@@ -91,7 +92,9 @@ def owns_argv(node: CLISpec) -> bool:
             and not node.positional and node.rest is None)
 
 
-def node_help(name: str, node: CLISpec) -> str:
+def node_help(name: str,
+              node: CLISpec,
+              style: UsageStyle = UsageStyle.ARGPARSE) -> str:
     """A group node's help: the ordinary command help plus Commands rows.
 
     One renderer serves leaves and groups (a group is a spec whose
@@ -104,6 +107,9 @@ def node_help(name: str, node: CLISpec) -> str:
             head word is the installed name, so a renamed install
             renders its own spelling.
         node (CLISpec): the group node.
+        style (UsageStyle): the ROOT's dialect, never the node's: a
+            program answers in one voice at every level, the same rule
+            the leaf refusal follows.
     """
     rows = [(_verb_display(child), child.description or "")
             for child in node.subcommands]
@@ -117,10 +123,11 @@ def node_help(name: str, node: CLISpec) -> str:
         listed = node
     else:
         listed = replace(node, options=node.options + (HELP_OPTION, ))
-    return render_help(name, listed, subcommands=rows)
+    return render_help(name, listed, subcommands=rows, style=style)
 
 
-def _usage_error(name: str, node: CLISpec, message: str) -> WalkResult:
+def _usage_error(name: str, node: CLISpec, message: str,
+                 style: UsageStyle) -> WalkResult:
     """Group-level option refusal: message plus the node's usage block.
 
     Mirrors git's shape (`unknown option: --zzz` followed by the usage
@@ -130,8 +137,9 @@ def _usage_error(name: str, node: CLISpec, message: str) -> WalkResult:
         name (str): display path walked so far, e.g. "gws gmail".
         node (CLISpec): the group node being parsed.
         message (str): first line of the refusal.
+        style (UsageStyle): the root's dialect, for the usage block.
     """
-    text = f"{message}\n\n{node_help(name, node)}"
+    text = f"{message}\n\n{node_help(name, node, style)}"
     return WalkResult(output=text.encode(),
                       stream="stderr",
                       exit_code=USAGE_EXIT)
@@ -187,9 +195,9 @@ def _record_value(flags: FlagBag, cs: CompiledSpec, spelling: str,
         flags[dest] = value
 
 
-def _match_short(
-        name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag, token: str,
-        next_token: str | None) -> tuple[int, WalkResult | None] | None:
+def _match_short(name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag,
+                 token: str, next_token: str | None,
+                 style: UsageStyle) -> tuple[int, WalkResult | None] | None:
     """Match a whole short token against declared spellings.
 
     Mirrors the flat parser's precedence before cluster splitting:
@@ -206,6 +214,7 @@ def _match_short(
         flags (FlagBag): accumulated group flags.
         token (str): the short token as typed.
         next_token (str | None): the following word, when any.
+        style (UsageStyle): the root's dialect, for any refusal.
     """
     for vf in cs.attach_spellings:
         if token.startswith(vf) and len(token) > len(vf):
@@ -216,7 +225,8 @@ def _match_short(
             if next_token is None:
                 return (0,
                         _usage_error(name, node,
-                                     f"error: option '{vf}' requires a value"))
+                                     f"error: option '{vf}' requires a value",
+                                     style))
             _record_value(flags, cs, vf, next_token)
             return (2, None)
         if token.startswith(vf) and len(token) > len(vf):
@@ -280,7 +290,7 @@ def _resolve_group_paths(cs: CompiledSpec, flags: FlagBag, cwd: str) -> None:
 
 
 def _finish_node(name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag,
-                 cwd: str) -> WalkResult | None:
+                 cwd: str, style: UsageStyle) -> WalkResult | None:
     """Apply a node's declarative option rules after its scan.
 
     Defaults land as if typed and PATH values resolve, then choices and
@@ -293,6 +303,7 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag,
         cs (CompiledSpec): the node's compiled tables.
         flags (FlagBag): accumulated group flags.
         cwd (str): current working directory, for PATH values.
+        style (UsageStyle): the root's dialect, for any refusal.
     """
     for dest, default in cs.defaults.items():
         if dest not in flags:
@@ -314,7 +325,8 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag,
                 if not pattern.match(part):
                     return _usage_error(
                         name, node,
-                        f"error: option '{dest}' expects a numerical value")
+                        f"error: option '{dest}' expects a numerical value",
+                        style)
     for dest, allowed in cs.choices_by_dest.items():
         value = flags.get(dest)
         candidates = value if isinstance(
@@ -323,11 +335,11 @@ def _finish_node(name: str, node: CLISpec, cs: CompiledSpec, flags: FlagBag,
             if part not in allowed:
                 return _usage_error(
                     name, node,
-                    f"error: invalid argument '{part}' for '{dest}'")
+                    f"error: invalid argument '{part}' for '{dest}'", style)
     for dest in cs.required_dests:
         if dest not in flags:
             return _usage_error(name, node,
-                                f"error: option '{dest}' is required")
+                                f"error: option '{dest}' is required", style)
     return None
 
 
@@ -355,6 +367,9 @@ def walk(head: str,
             group option resolves the way a leaf option does.
     """
     node = spec
+    # Read once off the root and never off a node: a program answers in
+    # one voice at every level, so a subcommand cannot pick its own.
+    style = spec.usage_style
     path: tuple[str, ...] = ()
     flags: FlagBag = {}
     i = 0
@@ -391,7 +406,7 @@ def walk(head: str,
                         return _usage_error(
                             name, node,
                             f"error: ambiguous option: {spelling[2:]} "
-                            f"(could be {possible})")
+                            f"(could be {possible})", style)
                 # Optional-value longs sit in BOTH long_bool_spellings and
                 # long_optional_spellings, so the optional test runs first
                 # or --color=auto would be refused as taking no value.
@@ -404,7 +419,8 @@ def walk(head: str,
                     if eq:
                         return _usage_error(
                             name, node,
-                            f"error: option '{spelling}' takes no value")
+                            f"error: option '{spelling}' takes no value",
+                            style)
                     _record_bool(flags, cs, spelling)
                 elif spelling in cs.long_value_spellings:
                     if eq:
@@ -415,16 +431,19 @@ def walk(head: str,
                     else:
                         return _usage_error(
                             name, node,
-                            f"error: option '{spelling}' requires a value")
+                            f"error: option '{spelling}' requires a value",
+                            style)
                 elif spelling == "--help":
                     if eq:
                         return _usage_error(
                             name, node,
-                            f"error: option '{spelling}' takes no value")
-                    return WalkResult(output=node_help(name, node).encode())
+                            f"error: option '{spelling}' takes no value",
+                            style)
+                    return WalkResult(
+                        output=node_help(name, node, style).encode())
                 else:
                     return _usage_error(name, node,
-                                        f"unknown option: {spelling}")
+                                        f"unknown option: {spelling}", style)
                 i += 1
                 continue
             if not options_ended and token.startswith("-") and token != "-":
@@ -433,7 +452,7 @@ def walk(head: str,
                 # the same precedence the flat parser uses.
                 whole = _match_short(
                     name, node, cs, flags, token,
-                    argv[i + 1] if i + 1 < len(argv) else None)
+                    argv[i + 1] if i + 1 < len(argv) else None, style)
                 if whole is not None:
                     consumed, refused = whole
                     if refused is not None:
@@ -462,10 +481,10 @@ def walk(head: str,
                         error = f"unknown option: {spelling}"
                         break
                 if error is not None:
-                    return _usage_error(name, node, error)
+                    return _usage_error(name, node, error, style)
                 i += 1
                 continue
-            refused = _finish_node(name, node, cs, flags, cwd)
+            refused = _finish_node(name, node, cs, flags, cwd, style)
             if refused is not None:
                 return refused
             # An alias resolves to its canonical node; the path records
@@ -481,9 +500,9 @@ def walk(head: str,
             break
         if descended:
             continue
-        refused = _finish_node(name, node, cs, flags, cwd)
+        refused = _finish_node(name, node, cs, flags, cwd, style)
         if refused is not None:
             return refused
-        return WalkResult(output=node_help(name, node).encode(),
+        return WalkResult(output=node_help(name, node, style).encode(),
                           stream="stdout",
                           exit_code=1)

@@ -111,7 +111,9 @@ function renderManEntry(name: string, hits: ManHit[]): string {
 function renderCliEntry(head: string, verbs: readonly string[], spec: CLISpec): string | null {
   const found = findNode(spec, verbs)
   if (found === null) return null
-  return nodeHelp([head, ...found.path].join(' '), found.node)
+  // The root's dialect, so a manual page reads exactly like the --help it
+  // renders from.
+  return nodeHelp([head, ...found.path].join(' '), found.node, spec.usageStyle)
 }
 
 /** The installed-CLI section of the bare `man` listing. */

@@ -115,6 +115,8 @@ EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
 EMAIL_USERNAME = "integ@example.com"
 EMAIL_PASSWORD = "secret"
+# Doubles as the workspace id on the fake notion server.
+NOTION_TOKEN = "integ-test"
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
@@ -332,11 +334,6 @@ def _load_dropbox_server() -> ModuleType:
 def _load_ssh_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
-
-
-def _load_notion_server() -> ModuleType:
-    return _load_module(
-        Path(__file__).resolve().parents[2] / "server" / "notion_server.py")
 
 
 def _load_box_server() -> ModuleType:
@@ -1265,31 +1262,44 @@ class SharePointService:
 
 
 class NotionService:
+    """Points notion mounts at the shared fake Notion REST API.
 
-    def __init__(self, server, port: int) -> None:
-        self.server = server
-        self.port = port
+    The server (integ/server/notion_server.ts) is external, Prisma-backed and
+    shared across both hosts; /reset re-seeds it to the fixture. The api key
+    doubles as the workspace id on that server, the way a real Notion
+    integration token scopes you to one workspace, so scenarios that use
+    different keys do not see each other's writes.
+
+    Args:
+        url (str): NOTION_URL origin (the REST surface lives under /v1).
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
 
     @classmethod
     async def create(cls) -> "NotionService":
-        module = _load_notion_server()
-        server, port = module.start_server()
-        return cls(server, port)
+        url = os.environ["NOTION_URL"].rstrip("/")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{url}/reset",
+                                    json={"workspace": NOTION_TOKEN}) as resp:
+                resp.raise_for_status()
+        return cls(url)
 
     def resource(self, mount: dict) -> NotionResource:
-        return NotionResource(config=NotionConfig(
-            api_key="integ-test", base_url=f"http://127.0.0.1:{self.port}/v1"))
+        return NotionResource(config=NotionConfig(api_key=NOTION_TOKEN,
+                                                  base_url=f"{self.url}/v1"))
 
     def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
         return {
             "ntn": (cli_spec_for("ntn"), {
-                "api_key": "integ-test",
-                "base_url": f"http://127.0.0.1:{self.port}/v1",
+                "api_key": NOTION_TOKEN,
+                "base_url": f"{self.url}/v1",
             }),
         }
 
     async def teardown(self) -> None:
-        self.server.shutdown()
+        return None
 
 
 LANCEDB_ROWS = [
@@ -2180,6 +2190,11 @@ async def open_target(
     for cli_name in target.get("clis", []):
         spec, config = cli_install(service, cli_name)
         ws.register_cli(cli_name, spec, config)
+    # A target's declared environment. A CLI whose spec reads a variable
+    # (ntn's --notion-version off NOTION_API_VERSION) behaves differently
+    # with and without it, so the conformance runner passes the same map
+    # to the real binary and the comparison stays like for like.
+    ws.env.update(target.get("env", {}))
     return ws, functools.partial(teardown_target, [ws], cleanups, service)
 
 
@@ -2198,6 +2213,11 @@ async def open_consistency(
                         mode=MountMode.WRITE,
                         consistency=consistency)
     shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
+    # Same rule as open_target: a target's declared environment reaches
+    # every workspace a case can run against, or a consistency scenario
+    # would silently run under a different one.
+    read_ws.env.update(target.get("env", {}))
+    shadow_ws.env.update(target.get("env", {}))
     return (
         read_ws,
         functools.partial(mutate_write, shadow_ws),

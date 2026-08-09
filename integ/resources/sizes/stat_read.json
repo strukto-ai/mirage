@@ -661,7 +661,7 @@
       "command": "stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/database.json",
       "expect": {
         "exit": 0,
-        "stdout": "626\n",
+        "stdout": "463\n",
         "stderr": ""
       }
     },
@@ -674,7 +674,7 @@
       "command": "cat /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/database.json | wc -c",
       "expect": {
         "exit": 0,
-        "stdout": "626\n",
+        "stdout": "463\n",
         "stderr": ""
       }
     },

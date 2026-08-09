@@ -19,7 +19,11 @@ import aiohttp
 from mirage.core.notion.config import NotionConfig
 from mirage.resource.secrets import reveal_secret
 
-API_VERSION = "2022-06-28"
+# 2025-09-03 is the generation that split databases into data sources: a
+# database became a container of data sources and the column schema moved to
+# the data source, so `/databases/{id}` no longer answers with `properties` and
+# `/search` rejects `filter.value = "database"`.
+API_VERSION = "2025-09-03"
 MAX_PAGE_SIZE = 100
 
 
@@ -40,7 +44,7 @@ class NotionAPIError(RuntimeError):
 def notion_headers(config: NotionConfig) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {reveal_secret(config.api_key)}",
-        "Notion-Version": API_VERSION,
+        "Notion-Version": config.api_version or API_VERSION,
         "Content-Type": "application/json",
     }
 
@@ -97,6 +101,27 @@ async def notion_patch(
     async with aiohttp.ClientSession() as session:
         async with session.patch(url, headers=headers, json=body
                                  or {}) as resp:
+            data = await resp.json()
+            if resp.status >= 400:
+                message = data.get(
+                    "message") or f"Notion API error: HTTP {resp.status}"
+                raise NotionAPIError(
+                    message,
+                    status=resp.status,
+                    code=data.get("code"),
+                )
+            return data
+
+
+async def notion_put(
+    config: NotionConfig,
+    path: str,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    url = f"{config.base_url}{path}"
+    headers = notion_headers(config)
+    async with aiohttp.ClientSession() as session:
+        async with session.put(url, headers=headers, json=body or {}) as resp:
             data = await resp.json()
             if resp.status >= 400:
                 message = data.get(

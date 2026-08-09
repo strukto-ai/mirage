@@ -12,23 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.ntn.util import parse_json_flag
+from mirage.commands.cli.builtin.ntn.util import (first_text, notion_config,
+                                                  pretty_json)
 from mirage.commands.cli.types import CLIInvocation
-from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.normalize import to_json_bytes
-from mirage.core.notion.pages import append_blocks
+from mirage.core.notion.pages import get_database
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import JsonValue
 
 
-async def append(
+async def resolve(
         inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    body = parse_json_flag(fl.as_str("json"), "--json")
-    if "children" not in body:
-        raise UsageError("--json must contain children")
-    result = await append_blocks(inv.config, fl.as_str("block") or "", body)
-    return yield_bytes(to_json_bytes(result)), IOResult()
+    database_id = first_text(inv.texts, "database id")
+    database = await get_database(notion_config(inv), database_id)
+    stubs = database.get("data_sources") or []
+    if fl.as_bool("json"):
+        payload: dict[str, JsonValue] = {
+            "database_id": database_id,
+            "data_sources": stubs,
+        }
+        return yield_bytes(pretty_json(payload)), IOResult()
+    lines = [
+        f"{one.get('id', '')}\t{one.get('name', '')}\n" for one in stubs
+        if isinstance(one, dict)
+    ]
+    return yield_bytes("".join(lines).encode()), IOResult()

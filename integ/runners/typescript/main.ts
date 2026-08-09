@@ -61,6 +61,11 @@ async function runTarget(
 ): Promise<void> {
   const { ws, cleanup } = await ADAPTERS[target.mounts[0].resource](target)
   try {
+    // A target's declared environment. A CLI whose spec reads a variable
+    // (ntn's --notion-version off NOTION_API_VERSION) behaves differently with
+    // and without it, so the conformance runner passes the same map to the real
+    // binary and the comparison stays like for like.
+    Object.assign(ws.env, target.env ?? {})
     for (const mount of target.mounts) {
       await seedFixture(ws, mount.fixture, mount.path, root)
       if (mount.seed_root) await seedMountRoot(ws, mount.path)
@@ -95,6 +100,10 @@ async function runTarget(
       c.consistency === 'always' ? ConsistencyPolicy.ALWAYS : ConsistencyPolicy.LAZY
     const opened = await consistencyAdapter(target, policy)
     try {
+      // Same rule as the ordinary path: a target's declared environment reaches
+      // every workspace a case can run against, or a consistency scenario would
+      // silently run under a different one.
+      Object.assign(opened.ws.env, target.env ?? {})
       const { exitCode, out } = await runScenario(opened.ws, opened.mutate, c.scenario)
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: '' })

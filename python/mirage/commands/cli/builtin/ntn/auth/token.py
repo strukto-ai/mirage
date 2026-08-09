@@ -12,23 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.ntn.util import parse_json_flag
 from mirage.commands.cli.types import CLIInvocation
-from mirage.commands.errors import UsageError
-from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.normalize import to_json_bytes
-from mirage.core.notion.pages import create_comment
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.resource.secrets import reveal_secret
 
 
-async def create(
+async def token(
         inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    body = parse_json_flag(fl.as_str("json"), "--json")
-    if "parent" not in body:
-        raise UsageError("--json must contain parent")
-    comment = await create_comment(inv.config, body)
-    return yield_bytes(to_json_bytes(comment)), IOResult()
+    secret = reveal_secret(inv.config.api_key)
+    return yield_bytes(f"{secret}\n".encode()), IOResult()

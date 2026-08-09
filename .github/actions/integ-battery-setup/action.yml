@@ -146,7 +146,7 @@ runs:
       working-directory: integ
       shell: bash
       env:
-        SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
+        INTEG_DB_URL: file:/tmp/mirage-slack-ci.db
       run: |
         ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
         nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slacksrv.log 2>&1 &

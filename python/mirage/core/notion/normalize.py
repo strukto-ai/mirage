@@ -58,7 +58,24 @@ def normalize_database(database: dict[str, Any]) -> dict[str, Any]:
         "parent": database.get("parent", {}),
         "archived": database.get("archived", database.get("in_trash", False)),
         "is_inline": database.get("is_inline", False),
-        "properties": database.get("properties", {}),
+        "data_sources": database.get("data_sources", []),
+    }
+
+
+def normalize_data_source(data_source: dict[str, Any]) -> dict[str, Any]:
+    title_items = data_source.get("title", [])
+    title = "".join(item.get("plain_text", "") for item in title_items)
+    parent = data_source.get("parent", {})
+    return {
+        "data_source_id": data_source.get("id", ""),
+        "database_id": parent.get("database_id", ""),
+        "title": title,
+        "created_time": data_source.get("created_time", ""),
+        "last_edited_time": data_source.get("last_edited_time", ""),
+        "database_parent": data_source.get("database_parent", {}),
+        "archived": data_source.get("archived",
+                                    data_source.get("in_trash", False)),
+        "properties": data_source.get("properties", {}),
     }
 
 

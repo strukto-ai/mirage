@@ -3,118 +3,231 @@
     {
       "id": "ntn_help_head",
       "seq": 566000,
-      "targets": ["cli-ntn"],
-      "command": "ntn --help | head -n 1",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn --help | head -n 3",
       "expect": {
         "exit": 0,
-        "stdout": "ntn: Notion API client\n",
+        "stdout": "Notion CLI (Beta)\n\nUsage: ntn [OPTIONS] <COMMAND>\n",
         "stderr": ""
       }
     },
     {
       "id": "ntn_pages_group_help",
       "seq": 566001,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages --help | head -n 1",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages --help | head -n 3",
       "expect": {
         "exit": 0,
-        "stdout": "ntn pages: Manage pages\n",
+        "stdout": "Manage pages\n\nUsage: ntn pages [OPTIONS] <COMMAND>\n",
         "stderr": ""
       }
     },
     {
-      "id": "ntn_missing_required",
+      "id": "ntn_whoami",
       "seq": 566002,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages get",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn whoami",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "ntn pages get: option '--page' is required\nTry 'ntn pages get --help' for more information.\n"
+        "exit": 0,
+        "stdout": "e0000000-0000-4000-8000-000000000001\tmirage-integ\tbot\t\te0000000-0000-4000-8000-000000000002\tinteg-test\te0000000-0000-4000-8000-000000000002\tinteg-test\tworkspace\n",
+        "stderr": ""
       }
     },
     {
-      "id": "ntn_malformed_json",
+      "id": "ntn_whoami_json",
       "seq": 566003,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages create --json '{not json'",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn whoami --json | jq -r '.bot.workspace_name'",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "--json must be valid JSON\n"
+        "exit": 0,
+        "stdout": "integ-test\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_auth_token",
+      "seq": 566004,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn auth token",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ-test\n",
+        "stderr": ""
       }
     },
     {
       "id": "ntn_pages_get",
-      "seq": 566004,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages get --page aaaa1111-2222-3333-4444-555566667777 | jq -r '.properties.title.title[0].plain_text'",
-      "expect": {
-        "exit": 0,
-        "stdout": "Project Roadmap\n",
-        "stderr": ""
-      }
-    },
-    {
-      "id": "ntn_pages_create",
       "seq": 566005,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages create --json '{\"parent\":{\"page_id\":\"aaaa1111-2222-3333-4444-555566667777\"},\"properties\":{\"title\":[{\"text\":{\"content\":\"CLI page\"}}]}}' | jq -r '.id'",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages get aaaa1111-2222-3333-4444-555566667777 | head -n 3",
       "expect": {
         "exit": 0,
-        "stdout": "page_cli_created\n",
+        "stdout": "---\ntitle: Project Roadmap\n---\n",
         "stderr": ""
       }
     },
     {
-      "id": "ntn_pages_edit",
+      "id": "ntn_pages_get_body",
       "seq": 566006,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages edit --page bbbb2222-3333-4444-5555-666677778888 --json '{\"archived\":true}' | jq -r '.archived'",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages get aaaa1111-2222-3333-4444-555566667777 | tail -n 2",
       "expect": {
         "exit": 0,
-        "stdout": "true\n",
+        "stdout": "\n  Q1 contents\n",
         "stderr": ""
       }
     },
     {
-      "id": "ntn_pages_trash",
+      "id": "ntn_pages_get_json",
       "seq": 566007,
-      "targets": ["cli-ntn"],
-      "command": "ntn pages trash --page bbbb2222-3333-4444-5555-666677778888 | jq -r '.in_trash'",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages get aaaa1111-2222-3333-4444-555566667777 --json | jq -r '.markdown.object, .page.object'",
       "expect": {
         "exit": 0,
-        "stdout": "true\n",
+        "stdout": "page_markdown\npage\n",
         "stderr": ""
       }
     },
     {
-      "id": "ntn_blocks_append",
+      "id": "ntn_pages_get_missing",
       "seq": 566008,
-      "targets": ["cli-ntn"],
-      "command": "ntn blocks append --block aaaa1111-2222-3333-4444-555566667777 --json '{\"children\":[{\"type\":\"paragraph\",\"paragraph\":{\"rich_text\":[{\"text\":{\"content\":\"hi\"}}]}}]}' | jq -r '.results | length'",
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages get",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: the following required arguments were not provided:\n  <PAGE_ID>\n\nUsage: ntn pages get --notion-version <VERSION> <PAGE_ID>\n\nFor more information, try '--help'.\n"
+      }
+    },
+    {
+      "id": "ntn_datasources_resolve",
+      "seq": 566009,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources resolve eeee1111-2222-3333-4444-555566667777",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "d5000000-2222-3333-4444-555566667777\tTasks\n",
         "stderr": ""
       }
     },
     {
-      "id": "ntn_comments_create",
-      "seq": 566009,
-      "targets": ["cli-ntn"],
-      "command": "ntn comments create --json '{\"parent\":{\"page_id\":\"aaaa1111-2222-3333-4444-555566667777\"},\"rich_text\":[{\"text\":{\"content\":\"Nice\"}}]}' | jq -r '.id'",
+      "id": "ntn_datasources_resolve_json",
+      "seq": 566010,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources resolve eeee1111-2222-3333-4444-555566667777 --json | jq -r '.data_sources[0].name'",
       "expect": {
         "exit": 0,
-        "stdout": "comment_cli_created\n",
+        "stdout": "Tasks\n",
         "stderr": ""
       }
     },
     {
       "id": "ntn_datasources_query",
-      "seq": 566010,
-      "targets": ["cli-ntn"],
-      "command": "ntn datasources query --datasource eeee1111-2222-3333-4444-555566667777 | jq length",
+      "seq": 566011,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777",
+      "expect": {
+        "exit": 0,
+        "stdout": "ffff1111-2222-3333-4444-555566667777\t\u2713\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_datasources_query_by_database",
+      "seq": 566012,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query eeee1111-2222-3333-4444-555566667777 | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "Write spec\nShip beta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_datasources_query_limit",
+      "seq": 566013,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --limit 1 | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "Write spec\n",
+        "stderr": "\nMore results available. Use --start-cursor 1 to continue.\n"
+      }
+    },
+    {
+      "id": "ntn_datasources_query_cursor",
+      "seq": 566014,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --limit 1 --start-cursor 1 | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "Ship beta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_datasources_query_sort",
+      "seq": 566015,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 -s 'Priority asc' | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "Ship beta\nWrite spec\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_datasources_query_filter",
+      "seq": 566016,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --filter '{\"property\":\"Priority\",\"number\":{\"greater_than\":1}}' | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "Write spec\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_datasources_query_json",
+      "seq": 566017,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --json | jq -r '.results | length'",
       "expect": {
         "exit": 0,
         "stdout": "2\n",
@@ -122,13 +235,210 @@
       }
     },
     {
-      "id": "ntn_search",
-      "seq": 566011,
-      "targets": ["cli-ntn"],
-      "command": "ntn search --query Roadmap | jq -r '.[].title'",
+      "id": "ntn_api_users_me",
+      "seq": 566018,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/users/me | jq -r '.name'",
       "expect": {
         "exit": 0,
-        "stdout": "Project Roadmap\nNotes\nQ1 Goals\n",
+        "stdout": "mirage-integ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_search",
+      "seq": 566019,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '{\"query\":\"Roadmap\"}' | jq -r '.results[].properties.title.title[0].plain_text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Project Roadmap\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_search_inline",
+      "seq": 566020,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search query=Roadmap | jq -r '.results | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_query_param",
+      "seq": 566021,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/blocks/aaaa1111-2222-3333-4444-555566667777/children page_size==1 | jq -r '.has_more, .next_cursor'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_compact_sorted",
+      "seq": 566022,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/users/me | cut -c1-40",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"avatar_url\":null,\"bot\":{\"owner\":{\"type\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_pages_create",
+      "seq": 566023,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages create --content '# CLI page' --parent page:aaaa1111-2222-3333-4444-555566667777",
+      "expect": {
+        "exit": 0,
+        "stdout": "a0000000-0000-4000-8000-000000000001\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_created_page_persists",
+      "seq": 566024,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages get a0000000-0000-4000-8000-000000000001 | head -n 2 | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "title: CLI page\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_pages_create_into_data_source",
+      "seq": 566025,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages create --content '# Row page' --parent data-source:d5000000-2222-3333-4444-555566667777 && ntn datasources query d5000000-2222-3333-4444-555566667777 | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "a0000000-0000-4000-8000-000000000002\nWrite spec\nShip beta\nRow page\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_pages_create_stdin",
+      "seq": 566026,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "echo '# Piped page' | ntn pages create --parent page:aaaa1111-2222-3333-4444-555566667777",
+      "expect": {
+        "exit": 0,
+        "stdout": "a0000000-0000-4000-8000-000000000003\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_pages_edit",
+      "seq": 566027,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages edit a0000000-0000-4000-8000-000000000003 --content '# Edited body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a0000000-0000-4000-8000-000000000003\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_edited_page_reads_back",
+      "seq": 566028,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages get a0000000-0000-4000-8000-000000000003 | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n# Edited body\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_pages_trash_needs_yes",
+      "seq": 566029,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages trash bbbb2222-3333-4444-5555-666677778888",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: Cannot confirm in a non-interactive environment.\n  hint: Use --yes to skip the confirmation prompt.\n"
+      }
+    },
+    {
+      "id": "ntn_pages_trash",
+      "seq": 566030,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages trash bbbb2222-3333-4444-5555-666677778888 --yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "\u2714 Page trashed\n"
+      }
+    },
+    {
+      "id": "ntn_trashed_page_leaves_search",
+      "seq": 566031,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '{\"query\":\"Notes\"}' | jq -r '.results | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_created_page_in_mount_listing",
+      "seq": 566032,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ls /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/",
+      "expect": {
+        "exit": 0,
+        "stdout": "CLI_page__a0000000-0000-4000-8000-000000000001\nPiped_page__a0000000-0000-4000-8000-000000000003\nQ1_Goals__cccc1111-2222-3333-4444-555566667777\npage.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_created_row_in_mount_listing",
+      "seq": 566033,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ls /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/",
+      "expect": {
+        "exit": 0,
+        "stdout": "Row_page__a0000000-0000-4000-8000-000000000002\nShip_beta__ffff2222-3333-4444-5555-666677778888\nWrite_spec__ffff1111-2222-3333-4444-555566667777\ndata_source.json\n",
         "stderr": ""
       }
     }

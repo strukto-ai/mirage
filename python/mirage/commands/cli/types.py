@@ -14,39 +14,17 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
-from mirage.commands.spec.types import CommandSpec, FlagValue, ParsedFlagValue
+from mirage.commands.spec.types import (CommandSpec, FlagValue,
+                                        ParsedFlagValue, UsageStyle)
 from mirage.io.types import ByteSource
 from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec, ResourceName
-
-
-class UsageStyle(Enum):
-    """Which program's usage-error dialect a CLI speaks.
-
-    An installed CLI is not a GNU tool, so a leaf that refuses an option
-    it does not declare answers in argparse's shape and exit code by
-    default. A CLI that mimics an existing program has to answer in that
-    program's shape instead: mirage implements a subset of git, so most
-    of git's real options arrive undeclared, and an agent that reads the
-    refusal should see what git would have said rather than learn that
-    it is talking to a reimplementation.
-
-    Covers the unknown-option refusal and the exit code, which is what
-    an undeclared flag produces. Every other usage error (a missing
-    value, an unparseable int) stays in argparse's shape for both
-    styles, because those only happen for options a CLI does declare.
-    """
-
-    ARGPARSE = "argparse"
-    GIT = "git"
-
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.

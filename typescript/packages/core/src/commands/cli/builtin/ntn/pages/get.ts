@@ -13,17 +13,29 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../../spec/types.ts'
-import { getPage } from '../../../../../core/notion/pages.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { getPage, getPageMarkdown } from '../../../../../core/notion/pages.ts'
+import { extractTitle } from '../../../../../core/notion/normalize.ts'
+import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { notionTransport } from '../util.ts'
+import { firstText, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
 export async function get(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
-  const page = await getPage(notionTransport(inv.config), fl.asStr('page') ?? '')
-  const out: ByteSource = ENC.encode(JSON.stringify(page))
-  return [out, new IOResult()]
+  let pageId: string
+  try {
+    pageId = firstText(inv.texts, 'page id')
+  } catch (err) {
+    return usageError(err)
+  }
+  const transport = notionTransport(inv.config, inv.flags)
+  // Both calls happen either way: the body comes from the markdown endpoint
+  // and the title heading the frontmatter only exists on the page object.
+  const rendered = await getPageMarkdown(transport, pageId)
+  const page = await getPage(transport, pageId)
+  if (fl.asBool('json')) return [prettyJson({ markdown: rendered, page }), new IOResult()]
+  const body = typeof rendered.markdown === 'string' ? rendered.markdown : ''
+  return [ENC.encode(`---\ntitle: ${extractTitle(page)}\n---\n\n${body}`), new IOResult()]
 }

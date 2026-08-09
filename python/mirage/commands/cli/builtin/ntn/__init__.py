@@ -12,138 +12,193 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.ntn.blocks.append import append
-from mirage.commands.cli.builtin.ntn.comments.create import \
-    create as comment_create
+from mirage.commands.cli.builtin.ntn.api import api
+from mirage.commands.cli.builtin.ntn.auth.token import token
 from mirage.commands.cli.builtin.ntn.datasources.query import query
+from mirage.commands.cli.builtin.ntn.datasources.resolve import resolve
 from mirage.commands.cli.builtin.ntn.pages.create import create
 from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
 from mirage.commands.cli.builtin.ntn.pages.trash import trash
-from mirage.commands.cli.builtin.ntn.search import search
+from mirage.commands.cli.builtin.ntn.whoami import whoami
 from mirage.commands.cli.types import CLISpec
-from mirage.commands.spec.types import Option
+from mirage.commands.spec.types import Operand, Option, UsageStyle
 from mirage.core.notion.config import NotionConfig
 
-# The ntn program tree, following the official Notion CLI grammar
-# (`ntn pages get/create/edit/trash`, `ntn datasources query`). blocks,
-# comments and search are mirage extensions spelled with the REST API's
-# nouns; the official CLI reaches them through `ntn api`, which mirage
-# does not ship (the TypeScript transport speaks MCP tool names, not
-# raw REST paths). Install with a NotionConfig.
+# Operand names are upstream's, verbatim: they are what the refusal for
+# a missing one prints, so they are part of the grammar rather than
+# documentation. Each verb names its own, which is why there is no one
+# shared ID slot.
+PAGE_ID = Operand(type="str", name="PAGE_ID", required=True)
+DATA_SOURCE_ID = Operand(type="str", name="ID_OR_URL", required=True)
+DATABASE_ID = Operand(type="str", name="ID", required=True)
+API_PATH = Operand(type="str", name="PATH")
+JSON_OUT = Option(long="--json",
+                  type="bool",
+                  description="Output the raw API response as JSON")
+PLAIN = Option(long="--plain",
+               type="bool",
+               description="Output as tab-separated values with no headers")
+# NOTION_API_VERSION is upstream's own environment fallback, and naming
+# it here is what makes the flag real: the executor fills the value from
+# the session, so a leaf reads one flag rather than a flag and a
+# fallback, and a usage line counts the option as supplied the way clap
+# does.
+NOTION_VERSION = Option(long="--notion-version",
+                        type="str",
+                        metavar="VERSION",
+                        env="NOTION_API_VERSION",
+                        description="Override the Notion-Version header")
+CONTENT = Option(long="--content",
+                 type="str",
+                 description="Markdown body (also read from stdin)")
+
+# The ntn program tree, matching the official Notion CLI's grammar verb
+# for verb: ids are positional, `pages get` renders Markdown with a
+# frontmatter title, and the REST surface that has no typed verb is
+# reached through `ntn api` exactly as upstream reaches it. There is no
+# `ntn blocks`/`ntn comments`/`ntn search`; those are `ntn api
+# v1/blocks/...`, `ntn api v1/comments` and `ntn api v1/search`.
+# Upstream's interactive and deploy verbs (`login`, `logout`, `update`,
+# `workers`, `notion-as-code`, `doctor`, `files`) are out of scope for a
+# virtualized CLI. Install with a NotionConfig.
 NTN = CLISpec(
     name="ntn",
-    description="Notion API client",
+    description="Notion CLI (Beta)",
     config_model=NotionConfig,
+    # Upstream is a clap program, so this one answers in clap's voice:
+    # its help layout and its refusal for a missing operand are pinned
+    # against the real binary by integ/ntn_conformance.ts.
+    usage_style=UsageStyle.CLAP,
     subcommands=(
+        CLISpec(
+            name="api",
+            description="Call the public Notion API (beta)",
+            fn=api,
+            write=True,
+            rest=API_PATH,
+            options=(
+                Option(long="--data",
+                       short="-d",
+                       type="str",
+                       description="Use a JSON string as the request body"),
+                Option(long="--method",
+                       short="-X",
+                       type="str",
+                       description="Override the inferred HTTP method"),
+                NOTION_VERSION,
+            ),
+        ),
+        CLISpec(
+            name="auth",
+            description="Inspect authentication credentials",
+            subcommands=(CLISpec(
+                name="token",
+                description="Print the current authentication token",
+                fn=token,
+            ), ),
+        ),
+        CLISpec(
+            name="datasources",
+            description="Manage data sources",
+            subcommands=(
+                CLISpec(
+                    name="query",
+                    description="Query pages in a data source",
+                    fn=query,
+                    positional=(DATA_SOURCE_ID, ),
+                    options=(
+                        Option(long="--limit",
+                               type="int",
+                               description="Maximum rows to return"),
+                        Option(long="--start-cursor",
+                               type="str",
+                               description="Cursor to resume from"),
+                        Option(long="--sort",
+                               short="-s",
+                               type="str",
+                               multiple=True,
+                               metavar="SPEC",
+                               description="'<property> [asc|desc]'"),
+                        Option(long="--filter",
+                               type="str",
+                               metavar="JSON",
+                               description="Filter as a JSON object"),
+                        Option(long="--filter-file",
+                               type="path",
+                               metavar="PATH",
+                               description="Read the filter from a file"),
+                        JSON_OUT,
+                        PLAIN,
+                        NOTION_VERSION,
+                    ),
+                ),
+                CLISpec(
+                    name="resolve",
+                    description=("Resolve a Notion database ID to its "
+                                 "data source IDs"),
+                    fn=resolve,
+                    positional=(DATABASE_ID, ),
+                    options=(JSON_OUT, NOTION_VERSION),
+                ),
+            ),
+        ),
         CLISpec(
             name="pages",
             description="Manage pages",
             subcommands=(
                 CLISpec(
                     name="get",
-                    description="Retrieve a page",
+                    description="Retrieve a page as Markdown",
                     fn=get,
-                    options=(Option(long="--page", type="str",
-                                    required=True), ),
+                    positional=(PAGE_ID, ),
+                    options=(JSON_OUT, NOTION_VERSION),
                 ),
                 CLISpec(
                     name="create",
-                    description="Create a page from a JSON body",
+                    description="Create a page from Markdown content",
                     fn=create,
                     write=True,
-                    options=(Option(
-                        long="--json",
-                        type="str",
-                        required=True,
-                        description=("Page body with parent and properties, "
-                                     "as the POST /pages API resource"),
-                    ), ),
-                ),
-                CLISpec(
-                    name="edit",
-                    description="Update a page's properties from JSON",
-                    fn=edit,
-                    write=True,
                     options=(
-                        Option(long="--page", type="str", required=True),
-                        Option(long="--json",
-                               type="str",
-                               required=True,
-                               description="PATCH /pages body"),
+                        CONTENT,
+                        Option(
+                            long="--parent",
+                            type="str",
+                            description=("page:<id>, database:<id>, or "
+                                         "data-source:<id>"),
+                        ),
+                        JSON_OUT,
+                        NOTION_VERSION,
                     ),
                 ),
                 CLISpec(
+                    name="edit",
+                    description="Edit a page's content from Markdown",
+                    fn=edit,
+                    write=True,
+                    positional=(PAGE_ID, ),
+                    options=(CONTENT, JSON_OUT, NOTION_VERSION),
+                ),
+                CLISpec(
                     name="trash",
-                    description="Move a page to the trash",
+                    description="Trash a page",
                     fn=trash,
                     write=True,
-                    options=(Option(long="--page", type="str",
-                                    required=True), ),
+                    positional=(PAGE_ID, ),
+                    options=(
+                        Option(long="--yes",
+                               type="bool",
+                               description="Skip the confirmation prompt"),
+                        NOTION_VERSION,
+                    ),
                 ),
             ),
         ),
         CLISpec(
-            name="blocks",
-            description="Manage blocks",
-            subcommands=(CLISpec(
-                name="append",
-                description="Append child blocks to a block or page",
-                fn=append,
-                write=True,
-                options=(
-                    Option(long="--block", type="str", required=True),
-                    Option(long="--json",
-                           type="str",
-                           required=True,
-                           description="Body with a children array"),
-                ),
-            ), ),
-        ),
-        CLISpec(
-            name="comments",
-            description="Manage comments",
-            subcommands=(CLISpec(
-                name="create",
-                description="Add a comment to a page or discussion",
-                fn=comment_create,
-                write=True,
-                options=(Option(
-                    long="--json",
-                    type="str",
-                    required=True,
-                    description="Body with parent and rich_text",
-                ), ),
-            ), ),
-        ),
-        CLISpec(
-            name="datasources",
-            description="Query data sources",
-            subcommands=(CLISpec(
-                name="query",
-                description="Query a database's pages",
-                fn=query,
-                options=(
-                    Option(long="--datasource",
-                           type="str",
-                           required=True,
-                           description="Database ID"),
-                    Option(long="--json",
-                           type="str",
-                           description="Filter and sorts body"),
-                ),
-            ), ),
-        ),
-        CLISpec(
-            name="search",
-            description="Search pages by title",
-            fn=search,
-            options=(
-                Option(long="--query", type="str", required=True),
-                Option(long="--limit",
-                       type="int",
-                       description="Max results (default: 20)"),
-            ),
+            name="whoami",
+            description="Show the authenticated Notion user",
+            fn=whoami,
+            options=(JSON_OUT, PLAIN, NOTION_VERSION),
         ),
     ),
 )

@@ -32,6 +32,31 @@ def database_dirname(database: dict[str, Any]) -> str:
     return f"{label}__{database['id']}"
 
 
+def data_source_dirname(data_source: dict[str, Any]) -> str:
+    title = extract_data_source_title(data_source)
+    label = sanitize_name(title) if title else "untitled"
+    return f"{label}__{data_source['id']}"
+
+
+def extract_data_source_title(data_source: dict[str, Any]) -> str:
+    """Read a data source's label from either shape it arrives in.
+
+    The data source object carries rich-text ``title``; the stubs listed
+    under a database's ``data_sources`` carry a plain ``name``. Both name
+    the same thing, so both must render the same directory.
+
+    Args:
+        data_source (dict[str, Any]): a data source object or stub.
+
+    Returns:
+        str: the plain-text label, empty when neither field is present.
+    """
+    name = data_source.get("name")
+    if isinstance(name, str):
+        return name
+    return extract_database_title(data_source)
+
+
 def extract_title(page: dict[str, Any]) -> str:
     props = page.get("properties", {})
     for prop in props.values():

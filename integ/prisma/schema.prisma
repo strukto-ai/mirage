@@ -1,8 +1,14 @@
-// Fake-Slack workspace schema for the integ battery. One shared Node server
-// (integ/server/slack.ts) serves the Slack Web API from this SQLite store,
-// seeded from integ/fixtures/slack/v1.json; the Python and TypeScript battery
-// hosts both call it over HTTP. Flat scalar FKs (no @relation) — the fake
-// queries each table explicitly.
+// Shared store for the fake-service integ servers. Prisma allows exactly one
+// datasource per schema, so every fake that wants a database lives here and
+// each server pushes this schema into its own SQLite file (INTEG_DB_URL) and
+// touches only its own tables. Flat scalar FKs (no @relation) — the fakes
+// query each table explicitly.
+//
+// Slack (integ/server/slack.ts, fixtures/slack/v1.json): Channel, User,
+// Message, SlackFile, Pin.
+// Notion (integ/server/notion_server.ts, fixtures/notion/v1.json): the
+// Notion* models, every one scoped by workspaceId so parallel scenarios can
+// share one server without clobbering each other.
 
 generator client {
   provider = "prisma-client-js"
@@ -10,7 +16,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("SLACK_DB_URL")
+  url      = env("INTEG_DB_URL")
 }
 
 model Channel {
@@ -33,13 +39,13 @@ model User {
 }
 
 model Message {
-  pk           Int     @id @default(autoincrement())
-  channelId    String
-  ts           String
-  userId       String
-  text         String
-  type         String  @default("message")
-  threadTs     String?
+  pk            Int     @id @default(autoincrement())
+  channelId     String
+  ts            String
+  userId        String
+  text          String
+  type          String  @default("message")
+  threadTs      String?
   reactionsJson String?
 }
 
@@ -55,4 +61,97 @@ model SlackFile {
   timestamp   Int
   content     String
   contentPath String?
+}
+
+model Pin {
+  channelId String
+  ts        String
+  createdBy String @default("UBOT")
+  created   Int    @default(0)
+
+  @@id([channelId, ts])
+}
+
+// A Notion child page is one object seen two ways: it is a NotionPage row and
+// a NotionBlock row of type child_page carrying the *same* id. Creating a page
+// under a page_id parent must write both, or readdir and block-children
+// disagree about the tree.
+model NotionPage {
+  id             String
+  workspaceId    String
+  parentType     String
+  parentId       String?
+  titleText      String
+  propertiesJson String
+  iconJson       String?
+  coverJson      String?
+  archived       Boolean @default(false)
+  inTrash        Boolean @default(false)
+  createdTime    String
+  lastEditedTime String
+  createdBy      String
+  lastEditedBy   String
+  url            String
+  position       Int     @default(0)
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId])
+}
+
+model NotionDatabase {
+  id              String
+  workspaceId     String
+  parentType      String
+  parentId        String?
+  titleText       String
+  titleJson       String
+  descriptionJson String?
+  propertiesJson  String
+  isInline        Boolean @default(false)
+  archived        Boolean @default(false)
+  inTrash         Boolean @default(false)
+  createdTime     String
+  lastEditedTime  String
+  createdBy       String
+  lastEditedBy    String
+  url             String
+  position        Int     @default(0)
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId])
+}
+
+model NotionBlock {
+  id             String
+  workspaceId    String
+  parentId       String
+  position       Int
+  type           String
+  payloadJson    String
+  hasChildren    Boolean @default(false)
+  archived       Boolean @default(false)
+  inTrash        Boolean @default(false)
+  createdTime    String
+  lastEditedTime String
+  createdBy      String
+  lastEditedBy   String
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId, position])
+}
+
+model NotionComment {
+  id             String
+  workspaceId    String
+  parentType     String
+  parentId       String
+  discussionId   String
+  richTextJson   String
+  createdTime    String
+  lastEditedTime String
+  createdBy      String
+  position       Int    @default(0)
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId])
 }
