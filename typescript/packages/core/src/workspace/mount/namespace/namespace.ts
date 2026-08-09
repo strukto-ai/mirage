@@ -428,6 +428,10 @@ export class Namespace {
     return this.registry.mountFor(path)
   }
 
+  mountPrefixes(): string[] {
+    return this.registry.mountPrefixes()
+  }
+
   isMountRoot(path: string): boolean {
     return this.registry.isMountRoot(path)
   }

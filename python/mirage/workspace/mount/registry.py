@@ -251,40 +251,6 @@ class MountRegistry:
         out.sort(key=lambda m: m.prefix)
         return out
 
-    def child_mount_names(
-        self,
-        parent_path: str,
-        include_hidden: bool = False,
-    ) -> list[str]:
-        """Names of immediate child mounts under parent_path.
-
-        Args:
-            parent_path (str): directory whose child mounts to enumerate.
-            include_hidden (bool): include names starting with '.'.
-        """
-        stripped = parent_path.strip("/")
-        norm = "/" + stripped + "/" if stripped else "/"
-        seen: set[str] = set()
-        out: list[str] = []
-        for m in self._mounts:
-            if m.prefix == norm:
-                continue
-            if not m.prefix.startswith(norm):
-                continue
-            rest = m.prefix[len(norm):]
-            slash = rest.find("/")
-            name = rest if slash == -1 else rest[:slash]
-            if name == "":
-                continue
-            if not include_hidden and name.startswith("."):
-                continue
-            if name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
-        out.sort()
-        return out
-
     def mount_for(self, path: str) -> MountEntry:
         """Find the mount that handles this path."""
         norm = "/" + path.strip("/")

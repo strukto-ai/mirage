@@ -21,6 +21,8 @@ from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.io import IOResult
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
+from mirage.ops.structure import (merge_readdir, structure_listing,
+                                  structure_stat)
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -64,13 +66,43 @@ class Dispatcher:
     def reconciler(self) -> Reconciler:
         return self._reconciler
 
+    def _structure_result(self, op: str,
+                          virtual: str) -> list[str] | FileStat | None:
+        """The namespace's own answer for a path no backend serves.
+
+        Child mounts and symlinks are structure the door owns, so a
+        directory that exists only because a mount or link sits below it
+        still lists and stats. None for any other op, or when the
+        namespace knows nothing at ``virtual``.
+
+        Args:
+            op (str): the dispatched op name.
+            virtual (str): the virtual path being answered.
+        """
+        prefixes = [m.prefix for m in self._namespace.registry.mounts()]
+        if op == "readdir":
+            return structure_listing(prefixes, self._namespace, virtual)
+        if op == "stat":
+            return structure_stat(prefixes, self._namespace, virtual)
+        return None
+
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
         if op not in NO_FOLLOW_OPS:
             followed = self._namespace.follow(path.virtual)
             if followed != path.virtual:
                 path = PathSpec.from_str_path(followed)
-        mount = self._namespace.mount_for(path.virtual)
+        try:
+            mount = self._namespace.mount_for(path.virtual)
+        except ValueError:
+            # No mount serves the path, but the namespace may still know
+            # a directory there (a deeper mount, a link). No mount means
+            # no admission gate to key on and no cache to keep straight;
+            # the merged names are session-filtered individually.
+            fallback = self._structure_result(op, path.virtual)
+            if fallback is None:
+                raise
+            return fallback, IOResult()
         assert_mount_allowed(mount.prefix)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
@@ -103,8 +135,14 @@ class Dispatcher:
         try:
             result = await mount.execute_op(op, path.virtual, **kwargs)
         except FileNotFoundError:
-            await self._reconciler.on_op_missing(op, path.virtual)
-            raise
+            result = self._structure_result(op, path.virtual)
+            if result is None:
+                await self._reconciler.on_op_missing(op, path.virtual)
+                raise
+        if op == "readdir":
+            result = merge_readdir(
+                result, [m.prefix for m in self._namespace.registry.mounts()],
+                self._namespace, path.virtual)
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)

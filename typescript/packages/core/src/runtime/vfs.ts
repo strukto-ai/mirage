@@ -28,6 +28,10 @@ export interface VFSEntry {
   path: string
   size: number
   isDir: boolean
+  // A namespace symlink. Marked so a whole-tree preload can skip it:
+  // stat follows links, so a directory link would otherwise read as a
+  // plain directory and a cyclic one would recurse the walk forever.
+  isLink?: boolean
 }
 
 /** One path's metadata, in the shape every guest encoder needs. */

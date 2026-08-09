@@ -62,6 +62,20 @@ def _session_mode(mount_prefix: str) -> "MountMode | None":
     return sess.mount_modes.get(_norm_prefix(mount_prefix))
 
 
+def mount_allowed(mount_prefix: str) -> bool:
+    """Whether the current session may touch this mount at all.
+
+    The non-raising twin of ``assert_mount_allowed``, for enumeration:
+    structure merges and fan-outs filter names through it, so a scoped
+    session never learns that an ungranted mount exists. True when no
+    session is bound or the session is unrestricted.
+
+    Args:
+        mount_prefix (str): the mount's prefix, e.g. ``/s3``.
+    """
+    return _session_mode(mount_prefix) is not None
+
+
 def assert_mount_allowed(mount_prefix: str) -> None:
     """Raise PermissionError if the current session may not touch this mount.
 

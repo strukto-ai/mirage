@@ -89,6 +89,8 @@ describe('bare invocations default to the cwd', () => {
     const ws = await makeWs()
     const io = await ws.execute('ls')
     expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io).startsWith('a.txt\nsub')).toBe(true)
+    // The dev mount is a row like any other now, so it sorts into the
+    // listing instead of trailing it the way the old stdout patch did.
+    expect(stdoutStr(io).startsWith('a.txt\ndev\nsub')).toBe(true)
   })
 })

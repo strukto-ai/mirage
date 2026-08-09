@@ -27,6 +27,8 @@ import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
+import { mergeReaddir, structureListing, structureStat } from '../ops/structure.ts'
+import { isMissingPath } from '../utils/errors.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
@@ -76,13 +78,43 @@ export class Dispatcher {
     this.reconciler = new Reconciler(cache, namespace, opsRegistry, consistency)
   }
 
+  /**
+   * The namespace's own answer for a path no backend serves.
+   *
+   * Child mounts and symlinks are structure the door owns, so a
+   * directory that exists only because a mount or link sits below it
+   * still lists and stats. Null for any other op, or when the
+   * namespace knows nothing at `virtual`.
+   */
+  private structureResult(opName: string, virtual: string): string[] | FileStat | null {
+    if (opName === 'readdir') {
+      return structureListing(this.namespace.mountPrefixes(), this.namespace, virtual)
+    }
+    if (opName === 'stat') {
+      return structureStat(this.namespace.mountPrefixes(), this.namespace, virtual)
+    }
+    return null
+  }
+
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
     let p = path
     if (!NO_FOLLOW_OPS.has(opName)) {
       const followed = this.namespace.follow(path.virtual)
       if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
     }
-    const [resource, scope, mode] = await this.namespace.resolve(p.virtual, false)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.namespace.resolve(p.virtual, false)
+    } catch (err) {
+      // No mount serves the path, but the namespace may still know a
+      // directory there (a deeper mount, a link). No mount means no
+      // admission gate to key on and no cache to keep straight; the
+      // merged names are session-filtered individually.
+      const fallback = isMissingPath(err) ? this.structureResult(opName, p.virtual) : null
+      if (fallback === null) throw err
+      return [fallback, new IOResult()]
+    }
+    const [resource, scope, mode] = resolved
     const mount = this.namespace.mountFor(p.virtual)
     const mountPrefix = mount?.prefix ?? '/'
     // Admission policies fire at the door, before the warm-cache early
@@ -168,8 +200,15 @@ export class Dispatcher {
         ),
       )
     } catch (err) {
-      await this.reconciler.onOpMissing(opName, p.virtual, err)
-      throw err
+      const fallback = isMissingPath(err) ? this.structureResult(opName, p.virtual) : null
+      if (fallback === null) {
+        await this.reconciler.onOpMissing(opName, p.virtual, err)
+        throw err
+      }
+      result = fallback
+    }
+    if (opName === 'readdir' && Array.isArray(result)) {
+      result = mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual)
     }
     if (DISPATCH_WRITE_OPS.has(opName)) {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null

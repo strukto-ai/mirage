@@ -18,7 +18,7 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { ChildMounts, LinkView } from '../../../ops/types.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { gnuStrerror, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -54,6 +54,11 @@ interface WalkOpts {
   // dereferenced directory link then carries FileType.DIRECTORY, which
   // is what makes -R descend it.
   deref: boolean
+  // Session-filtered child-mount names: the other half of namespace
+  // structure beside links, merged as directory rows. Withheld under
+  // -R, where the cross-mount fan-out assembles the recursive listing
+  // one mount at a time.
+  childMounts: ChildMounts | null
 }
 
 // One ls operand once its kind is known. `row` is set when the operand is not
@@ -174,6 +179,7 @@ async function listDir(
   links: LinkView | null,
   deref: boolean,
   stat2: Stat,
+  childMounts: ChildMounts | null,
 ): Promise<FileStat[]> {
   const entries = await readdir(dir)
   const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
@@ -197,8 +203,14 @@ async function listDir(
   const seen = new Set(stats.map((s) => s.name))
   for (const link of links?.children(dir.virtual) ?? []) {
     if (seen.has(link.name)) continue
+    seen.add(link.name)
     const resolved = deref && links !== null ? await derefEntry(dir, link, links, stat2) : null
     stats.push(resolved ?? link)
+  }
+  for (const name of childMounts?.(dir.virtual) ?? []) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    stats.push(new FileStat({ name, type: FileType.DIRECTORY }))
   }
   return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
 }
@@ -256,7 +268,17 @@ async function probeOperand(
 ): Promise<Operand> {
   let stats: FileStat[]
   try {
-    stats = await listDir(readdir, stat, path, opts.all, warnings, opts.links, opts.deref, stat)
+    stats = await listDir(
+      readdir,
+      stat,
+      path,
+      opts.all,
+      warnings,
+      opts.links,
+      opts.deref,
+      stat,
+      opts.recursive ? null : opts.childMounts,
+    )
   } catch (err) {
     if (!isWalkError(err)) throw err
     const row = await fileEntry(stat, path)
@@ -400,7 +422,15 @@ export async function lsGeneric(
     return finish(lines, warnings)
   }
 
-  const walkOpts: WalkOpts = { all, sortBy, reverse, recursive, links, deref }
+  const walkOpts: WalkOpts = {
+    all,
+    sortBy,
+    reverse,
+    recursive,
+    links,
+    deref,
+    childMounts: opts.childMounts ?? null,
+  }
   const probed: Operand[] = []
   for (const p of targets) {
     probed.push(await probeOperand(readdir, stat, p, walkOpts, warnings, true))

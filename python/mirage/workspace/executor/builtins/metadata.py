@@ -317,6 +317,7 @@ async def _apply_attrs(
 
 
 async def _walk_stats(
+    namespace: Namespace,
     dispatch: Callable[..., Any],
     root: PathSpec,
     root_stat: FileStat,
@@ -325,11 +326,14 @@ async def _walk_stats(
 
     Each entry's stat is captured during the walk because chmod's
     symbolic clauses (``u+x``) build on the entry's own current mode.
-    Symlinks never appear: they are namespace state, so no backend
-    readdir reports one, which is exactly GNU chmod -R's rule of
-    changing neither a traversed link nor its referent.
+    Symlinks are skipped by name: the door's readdir reports them (they
+    are namespace structure), GNU chmod -R changes neither a traversed
+    link nor its referent, and the skip must come before the stat
+    because stat follows a link and would descend through a directory
+    link.
 
     Args:
+        namespace (Namespace): addressing authority (link table).
         dispatch (Callable): op dispatcher.
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
@@ -340,6 +344,8 @@ async def _walk_stats(
         directory = queue.pop(0)
         children, _ = await dispatch("readdir", directory)
         for child_virtual in children:
+            if namespace.is_link(child_virtual):
+                continue
             child = PathSpec.from_str_path(child_virtual)
             child_stat, _ = await dispatch("stat", child)
             entries.append((child, child_stat))
@@ -367,7 +373,7 @@ async def _walk_owned(
         root (PathSpec): subtree root.
         root_stat (FileStat): the root's stat, already read.
     """
-    walked = await _walk_stats(dispatch, root, root_stat)
+    walked = await _walk_stats(namespace, dispatch, root, root_stat)
     links = [path for path, _stat in namespace.link_stats_below(root.virtual)]
     return [path for path, _stat in walked], links
 
@@ -409,7 +415,7 @@ async def handle_chmod(
             continue
         resolved, stat = found
         if recursive:
-            entries = await _walk_stats(dispatch, resolved, stat)
+            entries = await _walk_stats(namespace, dispatch, resolved, stat)
         else:
             entries = [(resolved, stat)]
         for path, path_stat in entries:

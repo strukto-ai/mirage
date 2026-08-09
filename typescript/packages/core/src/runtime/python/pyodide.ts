@@ -95,6 +95,24 @@ function servable(prefix: string): boolean {
   return mountpointOf(prefix) !== ''
 }
 
+/**
+ * Drop every prefix nested inside another: only the shallowest of a
+ * nested pair earns an Emscripten mountpoint, and its preload descends
+ * into the child through the door's merged readdir.
+ *
+ * Args:
+ *   prefixes: slash-terminated mount prefixes.
+ */
+function maximalPrefixes(prefixes: readonly string[]): string[] {
+  const shallowFirst = [...prefixes].sort((a, b) => a.length - b.length)
+  const out: string[] = []
+  for (const p of shallowFirst) {
+    if (out.some((kept) => p.startsWith(kept))) continue
+    out.push(p)
+  }
+  return out
+}
+
 function runtimeEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
@@ -381,11 +399,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
           `root; python will not see it`,
       )
     }
-    // `prefixes()` is longest-first, which is the order routing wants
-    // and the reverse of the order the mount table wants: mounting
-    // /data over an existing /data/inner orphans the child. So unmount
-    // deepest-first and mount shallowest-first.
-    const wanted = new Set(all.filter(servable))
+    // Only maximal prefixes become Emscripten mounts: the bridge routes
+    // every op by full path and the door's readdir lists a nested
+    // mount's name under its parent, so a child mount is served through
+    // the parent's mountpoint. A second Emscripten mount inside the
+    // first would be orphaned when the parent remounts.
+    const wanted = new Set(maximalPrefixes(all.filter(servable)))
     for (const prefix of [...this.mounted].sort((a, b) => b.length - a.length)) {
       if (wanted.has(prefix)) continue
       pyodide.FS.unmount(mountpointOf(prefix))

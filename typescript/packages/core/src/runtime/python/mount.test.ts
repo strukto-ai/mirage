@@ -44,14 +44,22 @@ function makeBridge(): {
     if (op === 'READ') return Promise.resolve(files.get(path) ?? new Uint8Array())
     const prefix = path
     const entries: { path: string; size: number; isDir: boolean }[] = []
+    const dirs = new Set<string>()
     for (const [p, content] of files) {
       if (p.startsWith(prefix)) {
         const rest = p.slice(prefix.length)
         if (!rest.includes('/')) {
           entries.push({ path: p, size: content.length, isDir: false })
+        } else {
+          const seg = rest.split('/', 1)[0] ?? ''
+          if (seg !== '') dirs.add(prefix + seg)
         }
       }
     }
+    // The real door merges child mounts and directories into readdir
+    // (R1), so the double reports them too: preload descends through
+    // them exactly as it does against a live workspace.
+    for (const d of dirs) entries.push({ path: d, size: 0, isDir: true })
     return Promise.resolve(entries)
   }
   return { dispatch, calls, files }
@@ -170,8 +178,10 @@ describe('PyodideRuntime mount visibility', () => {
   }, 60_000)
 
   it('a nested prefix stays reachable under its parent mount', async () => {
-    // prefixes() is longest-first; mounting in that order puts /data
-    // over the /data/inner mounted a moment earlier and orphans it.
+    // Only the maximal prefix earns an Emscripten mountpoint; the
+    // nested mount's content arrives through the parent's preload,
+    // which descends the door's merged readdir. Mounting both used to
+    // orphan the child under the parent's mountpoint.
     const { dispatch, files } = makeBridge()
     files.set('/data/outer.txt', new TextEncoder().encode('OUTER'))
     files.set('/data/inner/deep.txt', new TextEncoder().encode('DEEP'))

@@ -16,6 +16,7 @@ from mirage.commands.builtin.find_eval import FindEntry, keep
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.errors import FindParseError
 from mirage.commands.spec.types import FlagValue
+from mirage.context import mount_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -30,6 +31,25 @@ _TRAVERSAL_CMDS = frozenset({"find", "tree", "du"})
 
 def _path_segments(path: str) -> list[str]:
     return [s for s in path.strip("/").split("/") if s]
+
+
+def _allowed_descendants(registry: MountRegistry,
+                         path: str) -> list[MountEntry]:
+    """Descendant mounts the current session may see.
+
+    A fan-out rooted above a session boundary must not walk into an
+    ungranted mount: enumerating it through the raw registry is exactly
+    how `grep -r x /` leaked a walled-off mount's contents. The filter
+    matches the door's structure merge, so the fan-out stays an
+    unobservable optimization.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        path (str): parent path to scan beneath.
+    """
+    return [
+        m for m in registry.descendant_mounts(path) if mount_allowed(m.prefix)
+    ]
 
 
 def _depth_flag_value(raw: FlagValue | None) -> int | None:
@@ -59,7 +79,7 @@ def _should_fan_out(
     if not paths:
         return False
     target = paths[0].virtual
-    if not registry.descendant_mounts(target):
+    if not _allowed_descendants(registry, target):
         return False
     if cmd_name in _TRAVERSAL_CMDS:
         return True
@@ -269,8 +289,13 @@ async def _fan_out_traversal(
     mirage's per-mount find doesn't emit the path argument itself.
     """
     target_path = paths[0].virtual
-    descendants = registry.descendant_mounts(target_path)
-    descendant_prefixes = [m.prefix.rstrip("/") for m in descendants]
+    descendants = _allowed_descendants(registry, target_path)
+    # The shadow filter keeps the raw list on purpose: a mount the
+    # session cannot see still shadows the primary backend's keys under
+    # its prefix, the walk just never descends into it.
+    descendant_prefixes = [
+        m.prefix.rstrip("/") for m in registry.descendant_mounts(target_path)
+    ]
 
     all_stdout: list[bytes] = []
     merged_io = IOResult()

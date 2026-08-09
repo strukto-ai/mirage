@@ -6,7 +6,7 @@ from mirage.commands.builtin.utils.formatting import format_ls_long
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.io.types import IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import ChildMounts, LinkView
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
@@ -228,6 +228,7 @@ async def _stat_entries(
     index: IndexCacheStore,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[list[FileStat], list[LsWarning]]:
     """Stat every name in a directory, plus the symlinks living there.
 
@@ -245,6 +246,10 @@ async def _stat_entries(
             name instead of the link row. A dereferenced directory link
             then carries FileType.DIRECTORY, which is what makes -R
             descend it.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names under a directory. A nested mount is namespace
+            structure the backend readdir cannot name, merged here like
+            a link row.
     """
     stats: list[FileStat] = []
     warnings: list[LsWarning] = []
@@ -273,9 +278,18 @@ async def _stat_entries(
             continue
         if not all_files and link.name.startswith("."):
             continue
+        seen.add(link.name)
         resolved = (await _deref_entry(path, link, links, stat, index)
                     if deref and links is not None else None)
         stats.append(resolved if resolved is not None else link)
+    for name in (child_mounts(path.virtual)
+                 if child_mounts is not None else []):
+        if name in seen:
+            continue
+        if not all_files and name.startswith("."):
+            continue
+        seen.add(name)
+        stats.append(FileStat(name=name, type=FileType.DIRECTORY))
     return stats, warnings
 
 
@@ -292,6 +306,7 @@ async def probe_operand(
     index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -307,6 +322,10 @@ async def probe_operand(
             a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names. Withheld under ``-R``: the walk cannot descend into
+            another mount's backend, so the recursive listing is the
+            cross-mount fan-out's to assemble, one mount at a time.
     """
     warnings: list[LsWarning] = []
     try:
@@ -335,13 +354,15 @@ async def probe_operand(
         if link_row is not None:
             return Operand(path, link_row, []), warnings
 
-    entries, entry_ws = await _stat_entries(path,
-                                            names,
-                                            stat=stat,
-                                            all_files=all_files,
-                                            index=index,
-                                            links=links,
-                                            deref=deref)
+    entries, entry_ws = await _stat_entries(
+        path,
+        names,
+        stat=stat,
+        all_files=all_files,
+        index=index,
+        links=links,
+        deref=deref,
+        child_mounts=None if recursive else child_mounts)
     warnings.extend(entry_ws)
     entries = sort_stats(entries, sort_by, reverse)
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
@@ -380,6 +401,7 @@ async def walk(
     index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> WalkResult:
     """Flat listing for one operand: a directory's entries, or the operand
     itself when it is not one. ``recursive`` flattens the whole subtree in
@@ -398,6 +420,8 @@ async def walk(
             a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names to merge into a directory listing.
     """
     if list_dir:
         link_row = _link_row(path, links)
@@ -425,7 +449,8 @@ async def walk(
                                             command_line_arg=command_line_arg,
                                             index=index,
                                             links=links,
-                                            deref=deref)
+                                            deref=deref,
+                                            child_mounts=child_mounts)
     if operand.row is not None:
         return WalkResult([operand.row], warnings)
     entries = [e for _, group in operand.groups for e in group]
@@ -507,6 +532,7 @@ async def ls(
     index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -546,7 +572,8 @@ async def ls(
                                             recursive=recursive,
                                             index=index,
                                             links=links,
-                                            deref=deref)
+                                            deref=deref,
+                                            child_mounts=child_mounts)
         warnings.extend(p_ws)
         operands.append(operand)
     if len(operands) > 1:

@@ -28,6 +28,13 @@ export type StatPath = (path: string) => Promise<FileStat | null>
 // backend.
 export type MountRoot = (path: string) => string
 
+// Immediate child-mount names under a directory, session-filtered. The
+// other half of namespace structure beside links: a nested mount is
+// invisible to the parent mount's backend, so a listing command is
+// handed the names from above, the same names the door merges into its
+// own readdir.
+export type ChildMounts = (parent: string) => string[]
+
 // The symlink facts a command may consult, as one injected object.
 //
 // Symlinks live in the workspace namespace and no backend can see them,

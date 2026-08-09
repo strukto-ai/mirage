@@ -17,6 +17,7 @@ import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
 import { getExtension } from '../commands/resolve.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
+import { mergeReaddir, structureListing, structureStat } from '../ops/structure.ts'
 import type { StatOverlay } from '../ops/types.ts'
 import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { type Policies, postOpsGate, preOpsGate } from '../policy/policies.ts'
@@ -48,6 +49,12 @@ export class WorkspaceFS {
   // direct construction in tests.
   private readonly policies: Policies | null
   private readonly prefixOf: PrefixOf | null
+  // Live view of the workspace mount prefixes, for the structure merge:
+  // this facade is a second door beside the dispatcher until they
+  // collapse (R2), so both must answer readdir and stat with the same
+  // namespace structure. Null means no structure to merge (direct
+  // construction in tests).
+  private readonly prefixes: (() => string[]) | null
 
   constructor(
     resolver: Resolver,
@@ -57,6 +64,7 @@ export class WorkspaceFS {
     statOverlay: StatOverlay | null = null,
     policies: Policies | null = null,
     prefixOf: PrefixOf | null = null,
+    prefixes: (() => string[]) | null = null,
   ) {
     this.resolver = resolver
     this.ops = ops
@@ -65,6 +73,20 @@ export class WorkspaceFS {
     this.statOverlay = statOverlay
     this.policies = policies
     this.prefixOf = prefixOf
+    this.prefixes = prefixes
+  }
+
+  /**
+   * The namespace's own answer for a path no backend serves, mirroring
+   * the dispatcher: a directory that exists only because a mount or a
+   * link sits below it still lists and stats. Null for any other op,
+   * or when the namespace knows nothing at `path`.
+   */
+  private structureResult(op: string, path: string): string[] | FileStat | null {
+    if (this.prefixes === null) return null
+    if (op === 'readdir') return structureListing(this.prefixes(), this.links, path)
+    if (op === 'stat') return structureStat(this.prefixes(), this.links, path)
+    return null
   }
 
   private follow(op: string, path: string): string {
@@ -168,17 +190,35 @@ export class WorkspaceFS {
   async readdir(path: string): Promise<string[]> {
     const start = Date.now()
     path = this.follow('readdir', path)
-    const [resource, pathSpec] = await this.resolver(path)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.resolver(path)
+    } catch (err) {
+      const fallback = isMissingPath(err) ? this.structureResult('readdir', path) : null
+      if (fallback === null) throw err
+      return fallback as string[]
+    }
+    const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     await this.firePreOps('readdir', path, pathSpec, false)
-    const result = (await this.ops.call(
-      'readdir',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-      [],
-      kwargs,
-    )) as string[] | null
+    let result: string[] | null
+    try {
+      result = (await this.ops.call(
+        'readdir',
+        resource.kind,
+        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+        pathSpec,
+        [],
+        kwargs,
+      )) as string[] | null
+    } catch (err) {
+      const fallback = isMissingPath(err) ? this.structureResult('readdir', path) : null
+      if (fallback === null) throw err
+      result = fallback as string[]
+    }
+    if (this.prefixes !== null) {
+      result = mergeReaddir(result ?? [], this.prefixes(), this.links, path)
+    }
     await this.record('readdir', path, resource.kind, 0, start)
     return (
       ((await this.firePostOps('readdir', path, pathSpec, false, result)) as string[] | null) ?? []
@@ -188,17 +228,32 @@ export class WorkspaceFS {
   async stat(path: string): Promise<FileStat> {
     const start = Date.now()
     path = this.follow('stat', path)
-    const [resource, pathSpec] = await this.resolver(path)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.resolver(path)
+    } catch (err) {
+      const fallback = isMissingPath(err) ? this.structureResult('stat', path) : null
+      if (fallback === null) throw err
+      return fallback as FileStat
+    }
+    const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     await this.firePreOps('stat', path, pathSpec, false)
-    let result = (await this.ops.call(
-      'stat',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-      [],
-      kwargs,
-    )) as FileStat
+    let result: FileStat
+    try {
+      result = (await this.ops.call(
+        'stat',
+        resource.kind,
+        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+        pathSpec,
+        [],
+        kwargs,
+      )) as FileStat
+    } catch (err) {
+      const fallback = isMissingPath(err) ? this.structureResult('stat', path) : null
+      if (fallback === null) throw err
+      result = fallback as FileStat
+    }
     await this.record('stat', path, resource.kind, 0, start)
     result = (await this.firePostOps('stat', path, pathSpec, false, result)) as FileStat
     if (this.statOverlay !== null) return this.statOverlay(path, result)

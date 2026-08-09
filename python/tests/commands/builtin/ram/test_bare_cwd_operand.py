@@ -87,5 +87,6 @@ async def test_ls_bare_still_lists_the_cwd(workspace):
     io = await seeded.execute("ls", cwd="/")
     assert io.exit_code == 0
     out = (io.stdout or b"").decode()
-    assert out.startswith("a.txt\nsub")
-    assert "dev" in out
+    # The dev mount is a row like any other now, so it sorts into the
+    # listing instead of trailing it the way the old stdout patch did.
+    assert out.startswith("a.txt\ndev\nsub")

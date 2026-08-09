@@ -261,6 +261,7 @@ export class Workspace {
       (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
       this.registry.policies,
       (path) => this.registry.mountFor(path)?.prefix ?? '',
+      () => this.registry.mountPrefixes(),
     )
   }
 
@@ -382,9 +383,23 @@ export class Workspace {
               // skip the stat; unmarked entries (e.g. RAM) need one to
               // learn dir-ness.
               if (entry.endsWith('/')) return { path: entry, size: 0, isDir: true }
-              const stat = (await this.dispatch('stat', entry)) as FileStat
+              const isLink = this.namespace.isLink(entry)
+              let stat: FileStat
+              try {
+                stat = (await this.dispatch('stat', entry)) as FileStat
+              } catch {
+                // A dangling link, or an entry that vanished between
+                // list and stat, must not fail the whole listing; the
+                // guest's own open reports the miss.
+                return { path: entry, size: 0, isDir: false, ...(isLink ? { isLink } : {}) }
+              }
               const isDir = stat.type === FileType.DIRECTORY
-              return { path: entry, size: isDir ? 0 : (stat.size ?? 0), isDir }
+              return {
+                path: entry,
+                size: isDir ? 0 : (stat.size ?? 0),
+                isDir,
+                ...(isLink ? { isLink } : {}),
+              }
             }),
           )
         }

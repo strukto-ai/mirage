@@ -257,23 +257,8 @@ export class MountRegistry {
     return out.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0))
   }
 
-  childMountNames(parentPath: string, includeHidden = false): string[] {
-    const norm = normalizePrefix(parentPath)
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const m of this.mountList) {
-      if (m.prefix === norm) continue
-      if (!m.prefix.startsWith(norm)) continue
-      const rest = m.prefix.slice(norm.length)
-      const slash = rest.indexOf('/')
-      const name = slash === -1 ? rest : rest.slice(0, slash)
-      if (name === '') continue
-      if (!includeHidden && name.startsWith('.')) continue
-      if (seen.has(name)) continue
-      seen.add(name)
-      out.push(name)
-    }
-    return out.sort()
+  mountPrefixes(): string[] {
+    return this.mountList.map((m) => m.prefix)
   }
 
   opsMounts(): OpsMountInfo[] {

@@ -261,6 +261,13 @@ class WasmVFS:
         return sorted(entries.items())
 
     def _readdir_root(self) -> list[tuple[str, int]]:
+        """Merge the build directory's root listing with the core's.
+
+        The core's readdir already carries mount structure (the door
+        merges child mounts and links), so no prefix synthesis happens
+        here; mount entries arrive kind-unknown and guests stat lazily,
+        which the door also answers for structure-only directories.
+        """
         entries: dict[str, int] = {}
         if self._build is not None:
             for name, kind in self._build.readdir("/"):
@@ -268,7 +275,4 @@ class WasmVFS:
         if self._core is not None:
             for name, kind in self._readdir_core("/"):
                 entries.setdefault(name, kind)
-            for prefix in self._prefixes():
-                top = prefix.lstrip("/").split("/", 1)[0]
-                entries[top] = FT_DIR
         return sorted(entries.items())

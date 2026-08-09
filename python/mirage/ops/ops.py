@@ -27,6 +27,8 @@ from mirage.observe.context import push_mount_prefix
 from mirage.ops.config import (NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks,
                                OpsMount)
 from mirage.ops.registry import OpsRegistry, RegisteredOp
+from mirage.ops.structure import (merge_readdir, structure_listing,
+                                  structure_stat)
 from mirage.ops.types import StatOverlay
 from mirage.policy import Policies, post_ops_gate, pre_ops_gate
 from mirage.types import FileStat, MountMode, PathSpec
@@ -201,6 +203,25 @@ class Ops:
         if self._on_write is not None:
             await self._on_write(path, observed)
 
+    def _structure_result(self, op: str,
+                          path: str) -> "list[str] | FileStat | None":
+        """The namespace's own answer for a path no backend serves.
+
+        Mirrors the workspace dispatcher: a directory that exists only
+        because a mount or a link sits below it still lists and stats,
+        so FUSE and programmatic callers agree with the shell. None for
+        any other op, or when the namespace knows nothing at ``path``.
+
+        Args:
+            op (str): the op name.
+            path (str): the virtual path being answered.
+        """
+        if op == "readdir":
+            return structure_listing(self.mount_prefixes(), self._links, path)
+        if op == "stat":
+            return structure_stat(self.mount_prefixes(), self._links, path)
+        return None
+
     async def _call(self,
                     op: str,
                     path: str,
@@ -210,7 +231,14 @@ class Ops:
         start = int(time.monotonic() * 1000)
         if self._links is not None and op not in NO_FOLLOW_OPS:
             path = self._links.follow(path)
-        resource_type, rel_path, accessor, index, mode = self._resolve(path)
+        try:
+            resource_type, rel_path, accessor, index, mode = self._resolve(
+                path)
+        except ValueError:
+            fallback = self._structure_result(op, path)
+            if fallback is None:
+                raise
+            return fallback
         mount_prefix = self._mount_prefix(path)
         assert_mount_allowed(mount_prefix)
         if write and effective_mount_mode(mount_prefix,
@@ -234,8 +262,15 @@ class Ops:
                                                filetype=filetype,
                                                index=index,
                                                **kwargs)
+        except FileNotFoundError:
+            result = self._structure_result(op, path)
+            if result is None:
+                raise
         finally:
             push_mount_prefix(prev_prefix)
+        if op == "readdir":
+            result = merge_readdir(result, self.mount_prefixes(), self._links,
+                                   path)
         if isinstance(result, (bytes, bytearray)):
             nbytes = len(result)
         else:

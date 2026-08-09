@@ -18,7 +18,7 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
-import type { LinkView, StatOverlay, StatPath } from '../ops/types.ts'
+import type { ChildMounts, LinkView, StatOverlay, StatPath } from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
@@ -71,6 +71,10 @@ export interface CommandOpts {
   // point: only a directory has a subtree to walk, and a start point the
   // router resolved into another mount answers there, not on this mount.
   statPath?: StatPath
+  // Session-filtered child-mount names under a directory: the other
+  // half of namespace structure beside links, merged into listings the
+  // same way link rows are.
+  childMounts?: ChildMounts
   signal?: AbortSignal
   timeoutSeconds?: number
 }

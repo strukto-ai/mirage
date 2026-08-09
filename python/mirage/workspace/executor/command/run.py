@@ -15,13 +15,13 @@
 import functools
 from typing import Any
 
-from mirage.commands.builtin.generic.ls import LS_FAILURE
 from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
+from mirage.ops.structure import child_mount_names
 from mirage.ops.types import LinkView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
@@ -113,6 +113,21 @@ def scalar_find_flags(
         k: (v[-1] if isinstance(v, list) and v else v)
         for k, v in flag_kwargs.items()
     }
+
+
+def registry_child_mounts(registry: MountRegistry, parent: str) -> list[str]:
+    """Session-filtered child-mount names under ``parent``.
+
+    The ``child_mounts`` fact offered to listing commands: the same
+    names the door merges into its own readdir, derived from the same
+    prefixes, so the shell and the ops surface cannot disagree about
+    which mounts a directory holds.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        parent (str): directory whose child mounts to enumerate.
+    """
+    return child_mount_names([m.prefix for m in registry.mounts()], parent)
 
 
 def link_view(namespace: Namespace | None,
@@ -298,6 +313,7 @@ async def run_on_mount(
     links = link_view(namespace, dispatch)
     stat_path = (functools.partial(path_stat, dispatch)
                  if dispatch is not None else None)
+    child_mounts = functools.partial(registry_child_mounts, registry)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)
@@ -321,6 +337,7 @@ async def run_on_mount(
             stat_overlay=stat_overlay,
             links=links,
             stat_path=stat_path,
+            child_mounts=child_mounts,
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)
@@ -340,13 +357,6 @@ async def run_on_mount(
         return None, IOResult(exit_code=1,
                               stderr=format_fs_error(cmd_name, exc, paths))
 
-    # A minor problem (exit 1: an entry below the operand could not be
-    # stat'd) still lists the directory, so the mount and link rows belong
-    # in that output; only a failed operand (exit 2) has nothing to augment.
-    if cmd_name == "ls" and io.exit_code != LS_FAILURE:
-        stdout = await inject_child_mounts(stdout, registry, paths,
-                                           flag_kwargs, session.cwd)
-
     if cmd_name == "find":
         stdout, action_err = await _apply_find_actions(stdout, flag_kwargs,
                                                        registry, session.cwd)
@@ -362,70 +372,3 @@ async def run_on_mount(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     return wrap_cachable_streams(stdout, io)
-
-
-def listed_names(existing: str, long_form: bool) -> set[str]:
-    """Names already rendered in an ls listing, for injection dedup.
-
-    Long rows come in two shapes: the degraded ``mode\t-\t-\tname``
-    form used for entries with neither size nor mtime, and the full GNU
-    row whose name is the ninth whitespace-separated field. Splitting on
-    tabs alone reads a full row as a single field, so a name would never
-    match and an injected row could duplicate an entry the backend
-    already listed.
-
-    Args:
-        existing (str): the backend's rendered ls output.
-        long_form (bool): whether -l rows are being parsed.
-    """
-    names: set[str] = set()
-    for line in existing.split("\n"):
-        if line == "":
-            continue
-        if not long_form:
-            names.add(line.rstrip("/*@|="))
-        elif "\t" in line:
-            names.add(line.split("\t")[-1])
-        else:
-            parts = line.split(maxsplit=8)
-            if len(parts) == 9:
-                names.add(parts[8])
-    names.discard("")
-    return names
-
-
-async def inject_child_mounts(
-    stdout: ByteSource | None,
-    registry: MountRegistry,
-    paths: list[PathSpec],
-    flag_kwargs: dict[str, FlagValue],
-    cwd: str,
-) -> ByteSource | None:
-    if flag_kwargs.get("d") is True or flag_kwargs.get("R") is True:
-        return stdout
-    if len(paths) > 1:
-        return stdout
-    listed = paths[0].virtual if paths else cwd
-    include_hidden = (flag_kwargs.get("a") is True
-                      or flag_kwargs.get("A") is True)
-    child_names = registry.child_mount_names(listed, include_hidden)
-    if not child_names:
-        return stdout
-
-    existing_bytes = await materialize(stdout) if stdout is not None else b""
-    existing = existing_bytes.decode("utf-8")
-    long_form = flag_kwargs.get("args_l") is True
-    classify = flag_kwargs.get("F") is True
-    present = listed_names(existing, long_form)
-    extras: list[str] = []
-    for name in child_names:
-        if name in present:
-            continue
-        if long_form:
-            extras.append(f"d\t-\t-\t{name}")
-        else:
-            extras.append(f"{name}/" if classify else name)
-    if not extras:
-        return stdout
-    sep = "" if existing == "" or existing.endswith("\n") else "\n"
-    return (existing + sep + "\n".join(extras)).encode("utf-8")

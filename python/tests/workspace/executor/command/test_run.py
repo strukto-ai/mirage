@@ -20,43 +20,31 @@ from mirage.types import MountMode, ResourceName
 from mirage.utils.params import accepts_kwarg
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.run import (drop_service_caches,
-                                                   link_view, listed_names)
-
-_LONG_ROW = "-rw-r--r-- 1 user user 6 Aug  2 18:54 real.txt"
-_DEGRADED_ROW = "d\t-\t-\tsub"
+                                                   link_view,
+                                                   registry_child_mounts)
 
 
-def test_short_form_reads_plain_names():
-    assert listed_names("a.txt\nb.txt\n", False) == {"a.txt", "b.txt"}
+class _FakeMount:
+
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
 
 
-def test_short_form_strips_classify_suffixes():
-    assert listed_names("dir/\nlink@\nexe*\n", False) == {"dir", "link", "exe"}
+class _FakeRegistry:
+    """Enough of MountRegistry for the child_mounts fact to bind against."""
+
+    def __init__(self, prefixes: list[str]) -> None:
+        self._prefixes = prefixes
+
+    def mounts(self) -> list[_FakeMount]:
+        return [_FakeMount(p) for p in self._prefixes]
 
 
-def test_long_form_reads_the_name_out_of_a_full_gnu_row():
-    """The name is the ninth whitespace field; splitting on tabs alone
-    read the whole row as one field, so dedup silently never matched."""
-    assert listed_names(_LONG_ROW, True) == {"real.txt"}
-
-
-def test_long_form_still_reads_the_degraded_tab_row():
-    assert listed_names(_DEGRADED_ROW, True) == {"sub"}
-
-
-def test_long_form_handles_both_row_shapes_at_once():
-    listing = f"{_LONG_ROW}\n{_DEGRADED_ROW}\n"
-    assert listed_names(listing, True) == {"real.txt", "sub"}
-
-
-def test_a_name_containing_spaces_survives():
-    row = "-rw-r--r-- 1 user user 6 Aug  2 18:54 two words.txt"
-    assert listed_names(row, True) == {"two words.txt"}
-
-
-def test_blank_lines_contribute_nothing():
-    assert listed_names("\n\n", True) == set()
-    assert listed_names("\n\n", False) == set()
+def test_registry_child_mounts_derives_from_the_mount_table():
+    reg = _FakeRegistry(["/base/", "/base/inner/", "/dev/"])
+    assert registry_child_mounts(reg, "/base") == ["inner"]
+    assert registry_child_mounts(reg, "/") == ["base", "dev"]
+    assert registry_child_mounts(reg, "/dev") == []
 
 
 class _FakeNamespace:

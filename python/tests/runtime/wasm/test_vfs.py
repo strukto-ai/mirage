@@ -16,6 +16,7 @@ import errno as host_errno
 
 import pytest
 
+from mirage.ops.structure import merge_readdir
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
 from mirage.runtime.wasm.config import WasmFsConfig
@@ -82,7 +83,9 @@ class FakeVFS(RuntimeVFS):
             out += [d + "/" for d in self.dirs if d.startswith(prefix)]
             if not out and path not in self.dirs and path != "/":
                 raise FileNotFoundError(path)
-            return sorted(out)
+            # The real door merges child-mount names into readdir; the
+            # double rides the same helper so it cannot drift from it.
+            return sorted(merge_readdir(out, self.prefixes(), None, path))
         raise NotImplementedError(op)
 
 
@@ -153,10 +156,13 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     bridge = FakeVFS(files={"/root.txt": b""}, prefixes=["/data/", "/logs/"])
     fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    # Mount entries arrive through the core readdir (the door merges
+    # them), so their kind is unknown here; guests stat lazily and the
+    # door answers a directory for a structure-only path.
     assert fs.readdir("/") == [
-        ("data", FT_DIR),
+        ("data", FT_UNKNOWN),
         ("lib", FT_DIR),
-        ("logs", FT_DIR),
+        ("logs", FT_UNKNOWN),
         ("python.wasm", FT_REG),
         ("root.txt", FT_UNKNOWN),
     ]

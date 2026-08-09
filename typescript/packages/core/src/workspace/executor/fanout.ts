@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountAllowed } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -38,6 +39,19 @@ function pathSegments(path: string): string[] {
   return path.split('/').filter((s) => s !== '')
 }
 
+/**
+ * Descendant mounts the current session may see.
+ *
+ * A fan-out rooted above a session boundary must not walk into an
+ * ungranted mount: enumerating it through the raw registry is exactly
+ * how `grep -r x /` leaked a walled-off mount's contents. The filter
+ * matches the door's structure merge, so the fan-out stays an
+ * unobservable optimization.
+ */
+function allowedDescendants(registry: MountRegistry, path: string): MountEntry[] {
+  return registry.descendantMounts(path).filter((m) => mountAllowed(m.prefix))
+}
+
 export function shouldFanOut(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -45,7 +59,7 @@ export function shouldFanOut(
   registry: MountRegistry,
 ): boolean {
   if (paths.length === 0 || paths[0] === undefined) return false
-  if (registry.descendantMounts(paths[0].virtual).length === 0) return false
+  if (allowedDescendants(registry, paths[0].virtual).length === 0) return false
   if (TRAVERSAL_CMDS.has(cmdName)) return true
   if (cmdName === 'grep') {
     return flagKwargs.r === true || flagKwargs.R === true || flagKwargs.recursive === true
@@ -196,8 +210,11 @@ export async function fanOutTraversal(
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
-  const descendants = registry.descendantMounts(targetPath)
-  const descendantPrefixes = descendants.map((m) => rstripSlash(m.prefix))
+  const descendants = allowedDescendants(registry, targetPath)
+  // The shadow filter keeps the raw list on purpose: a mount the
+  // session cannot see still shadows the primary backend's keys under
+  // its prefix, the walk just never descends into it.
+  const descendantPrefixes = registry.descendantMounts(targetPath).map((m) => rstripSlash(m.prefix))
 
   const allStdout: Uint8Array[] = []
   let mergedIo = new IOResult()
