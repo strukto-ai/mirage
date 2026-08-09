@@ -15,7 +15,7 @@
 import type { LinkView, MountView } from '../../../../ops/types.ts'
 import { type FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan } from './types.ts'
 
 // A mount boundary is a filesystem boundary, so both archivers stop at
@@ -54,7 +54,7 @@ function linkTarget(stat: FileStat): string {
 // absolute virtual paths; reading their bytes needs the backend key too,
 // which is the virtual path with this mount's prefix removed.
 function childSpec(virtual: string, root: PathSpec): PathSpec {
-  const cut = rstripSlash(root.virtual).length - root.resourcePath.replace(/^\/+|\/+$/g, '').length
+  const cut = rstripSlash(root.virtual).length - stripSlash(root.resourcePath).length
   const prefix = rstripSlash(root.virtual.slice(0, cut))
   const slash = virtual.lastIndexOf('/')
   return new PathSpec({
