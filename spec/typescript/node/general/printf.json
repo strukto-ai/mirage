@@ -7,25 +7,12 @@
     "has_write": false,
     "resources": []
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
-  "options": [],
   "positional": [
     {
-      "name": "",
-      "provided_by": [],
-      "required": false,
-      "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
-    "name": "",
-    "provided_by": [],
-    "required": false,
-    "text_when": [],
     "type": "str"
   }
 }

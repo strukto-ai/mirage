@@ -107,61 +107,20 @@
       "ssh"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "old_option_style": false,
   "options": [
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "env": null,
       "long": "--append",
-      "metavar": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-a",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "env": null,
       "long": "--ignore-interrupts",
-      "metavar": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-i",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "choices": [],
-      "count": false,
-      "default": null,
-      "description": null,
-      "env": null,
-      "long": null,
-      "metavar": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
       "short": "-p",
-      "short_value": true,
-      "type": "bool",
-      "value_optional": false
+      "type": "bool"
     },
     {
       "choices": [
@@ -170,28 +129,12 @@
         "exit",
         "exit-nopipe"
       ],
-      "count": false,
-      "default": null,
-      "description": null,
-      "env": null,
       "long": "--output-error",
-      "metavar": null,
-      "multiple": false,
-      "numeric_shorthand": false,
-      "pair": false,
-      "required": false,
-      "short": null,
-      "short_value": true,
       "type": "str",
       "value_optional": true
     }
   ],
-  "positional": [],
   "rest": {
-    "name": "",
-    "provided_by": [],
-    "required": false,
-    "text_when": [],
     "type": "path"
   }
 }

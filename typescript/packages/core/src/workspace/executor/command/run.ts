@@ -19,7 +19,7 @@ import { assertMountAllowed, MountNotAllowedError } from '../../../context/sessi
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { LinkView, StatOverlay, StatPath } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatOverlay, StatPath } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { linkTargetStat, pathExists, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
@@ -126,6 +126,21 @@ function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileS
  */
 export function mountRootOf(registry: MountRegistry, virtual: string): string {
   return registry.mountFor(virtual)?.prefix ?? '/'
+}
+
+/**
+ * The mount-boundary facts on offer to every command.
+ *
+ * A command that does not read `mounts` off its context simply ignores it, so
+ * there is no list of boundary-aware commands to keep in step.
+ */
+function mountView(registry: MountRegistry): MountView {
+  return {
+    descendants: (path: string) =>
+      registry.descendantMounts(path).map((m) => rstripSlash(m.prefix) || '/'),
+    isRoot: (path: string) => registry.isMountRoot(path),
+    rootOf: (path: string) => mountRootOf(registry, path),
+  }
 }
 
 /**
@@ -262,6 +277,7 @@ export async function runOnMount(
       ...(statOverlay !== null ? { statOverlay } : {}),
       ...(links !== null ? { links } : {}),
       statPath,
+      mounts: mountView(registry),
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
     })

@@ -25,14 +25,22 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-j"),
             Option(short="-J"),
             Option(short="-v"),
+            # -h archives what a symlink points at instead of the link.
+            Option(short="-h"),
             Option(short="-f", type="path"),
-            Option(short="-C", type="path"),
+            # Every occurrence is kept, in order: GNU chdirs at each
+            # one and fails at the first it cannot enter, so the
+            # planner has to see them all, not just the last.
+            Option(short="-C", type="path", multiple=True),
             Option(long="--strip-components", type="str"),
             Option(long="--exclude", type="str"),
         ),
         rest=Operand(type="path"),
         # `tar xzf a.tgz` is the spelling everyone types.
         old_option_style=True,
+        # -C is a chdir for the operands after it, not a flag the command
+        # reads once: `tar -cf a.tar -C d x` archives d/x as `x`.
+        operand_base="-C",
     ),
     'gzip':
     CommandSpec(
@@ -69,6 +77,13 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-r"),
             Option(short="-j"),
             Option(short="-q"),
+            # -y stores a symlink as a symlink; without it zip archives
+            # what the link points at, which is tar's -h inverted.
+            Option(short="-y"),
+            # Info-ZIP reads -x as a variadic list of patterns; mirage
+            # takes one per occurrence, since its spec has no variadic
+            # option value and `-x a -x b` says the same thing.
+            Option(short="-x", type="str", multiple=True),
         ),
         rest=Operand(type="path"),
     ),

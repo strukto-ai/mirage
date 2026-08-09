@@ -128,17 +128,23 @@ async def unzip(
         writes: dict[str, ByteSource] = {}
         output_lines: list[str] = []
         for info in selected:
+            entry_name = info.filename.lstrip("/")
+            out_path = dest.rstrip("/") + "/" + entry_name.rstrip("/")
+            report_path = (mount_prefix +
+                           out_path) if mount_prefix else out_path
             if info.is_dir():
+                # A directory entry is the only record an empty
+                # directory leaves, so it has to be recreated even
+                # though nothing is written inside it.
+                await mkdir_fn(PathSpec.from_str_path(out_path), parents=True)
+                if not q:
+                    output_lines.append(f"   creating: {report_path}/")
                 continue
             content = zf.read(info)
-            entry_name = info.filename.lstrip("/")
-            out_path = dest.rstrip("/") + "/" + entry_name
             parent = out_path.rsplit("/", 1)[0] or "/"
             if parent != "/":
                 await mkdir_fn(PathSpec.from_str_path(parent), parents=True)
             await write_bytes(PathSpec.from_str_path(out_path), content)
-            report_path = (mount_prefix +
-                           out_path) if mount_prefix else out_path
             writes[out_path] = content
             if not q:
                 output_lines.append(f"  inflating: {report_path}")

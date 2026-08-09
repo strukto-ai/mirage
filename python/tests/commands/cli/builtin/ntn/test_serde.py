@@ -75,9 +75,26 @@ PROBED = [
 ]
 
 VALID = [
-    "{}", "[]", "0", "-0", "1.5", "1e5", "1E5", "1e-5", "true", "false",
-    "null", '""', '"ok"', '"\\n"', '"é"', "[[]]", '{"a":{"b":{}}}',
-    '{"a":1}  ', "123456789012345678901234567890", '"\\ud800\\udc00"',
+    "{}",
+    "[]",
+    "0",
+    "-0",
+    "1.5",
+    "1e5",
+    "1E5",
+    "1e-5",
+    "true",
+    "false",
+    "null",
+    '""',
+    '"ok"',
+    '"\\n"',
+    '"é"',
+    "[[]]",
+    '{"a":{"b":{}}}',
+    '{"a":1}  ',
+    "123456789012345678901234567890",
+    '"\\ud800\\udc00"',
 ]
 
 
@@ -99,8 +116,10 @@ def test_the_column_counts_bytes_not_characters():
 
 
 def test_a_newline_advances_the_line_and_zeroes_the_column():
-    assert serde_message("{\n") == "EOF while parsing an object at line 2 column 0"
-    assert serde_message("[1,\n2") == "EOF while parsing a list at line 2 column 1"
+    assert serde_message(
+        "{\n") == "EOF while parsing an object at line 2 column 0"
+    assert serde_message(
+        "[1,\n2") == "EOF while parsing a list at line 2 column 1"
     assert serde_message('"a\nb"') == (
         "control character (\\u0000-\\u001F) found while parsing a string "
         "at line 2 column 0")

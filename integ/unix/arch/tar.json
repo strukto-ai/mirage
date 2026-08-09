@@ -31,7 +31,7 @@
       "expect": {
         "exit": 0,
         "stdout": "data/arch/g.txt\n",
-        "stderr": ""
+        "stderr": "tar: Removing leading `/' from member names\n"
       }
     },
     {
@@ -133,7 +133,7 @@
       "expect": {
         "exit": 0,
         "stdout": "data/arch/g.txt\n",
-        "stderr": ""
+        "stderr": "tar: Removing leading `/' from member names\n"
       }
     },
     {
@@ -149,7 +149,7 @@
       "expect": {
         "exit": 0,
         "stdout": "data/otar/g.txt\notar-data\n",
-        "stderr": ""
+        "stderr": "tar: Removing leading `/' from member names\n"
       }
     },
     {
@@ -165,7 +165,7 @@
       "expect": {
         "exit": 0,
         "stdout": "data/otar2/h.txt\n",
-        "stderr": ""
+        "stderr": "tar: Removing leading `/' from member names\n"
       }
     },
     {
@@ -181,7 +181,7 @@
       "expect": {
         "exit": 0,
         "stdout": "three\n",
-        "stderr": ""
+        "stderr": "tar: Removing leading `/' from member names\n"
       }
     },
     {
@@ -197,7 +197,7 @@
       "expect": {
         "exit": 0,
         "stdout": "data/otar4/j.txt\n",
-        "stderr": ""
+        "stderr": "tar: Removing leading `/' from member names\n"
       }
     },
     {
@@ -231,6 +231,311 @@
         "stdout": "",
         "stderr": "tar: invalid option -- 'Q'\nTry 'tar --help' for more information."
       }
+    },
+    {
+      "id": "arch_tar_create_directory",
+      "seq": 910063,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tdir/sub && echo aa | tee /data/tdir/a.txt > /dev/null && echo bb | tee /data/tdir/sub/b.txt > /dev/null && tar -c -v -f /data/tdir.tar -C /data tdir && tar -t -f /data/tdir.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "tdir/\ntdir/a.txt\ntdir/sub/\ntdir/sub/b.txt\ntdir/\ntdir/a.txt\ntdir/sub/\ntdir/sub/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C",
+        "v",
+        "t"
+      ]
+    },
+    {
+      "id": "arch_tar_dash_c_bases_the_operand",
+      "seq": 910064,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tcin/paper && echo p | tee /data/tcin/paper/p.txt > /dev/null && tar -c -z -f /data/tc.tgz -C /data/tcin paper && tar -t -z -f /data/tc.tgz",
+      "expect": {
+        "exit": 0,
+        "stdout": "paper/\npaper/p.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C",
+        "z",
+        "t"
+      ]
+    },
+    {
+      "id": "arch_tar_directory_round_trips_through_extract",
+      "seq": 910065,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/trt/sub && echo rt | tee /data/trt/sub/r.txt > /dev/null && tar -c -f /data/trt.tar -C /data trt && tar -x -f /data/trt.tar -C /data/trtout && cat /data/trtout/trt/sub/r.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "x",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_exclude_prunes_the_subtree",
+      "seq": 910066,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tex/sub && echo a | tee /data/tex/a.txt > /dev/null && echo b | tee /data/tex/sub/b.txt > /dev/null && tar -c -f /data/tex.tar --exclude sub -C /data tex && tar -t -f /data/tex.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "tex/\ntex/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C",
+        "t",
+        "exclude"
+      ]
+    },
+    {
+      "id": "arch_tar_missing_operand_exits_two",
+      "seq": 910067,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tmiss && tar -c -f /data/tmiss.tar -C /data/tmiss nope.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: nope.txt: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_refuses_an_empty_archive",
+      "seq": 910068,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar -c -f /data/tempty.tar",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: Cowardly refusing to create an empty archive\nTry 'tar --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "arch_tar_refuses_a_directory_it_cannot_enter",
+      "seq": 910069,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar -c -f /data/tnodir.tar -C /data/tnodir a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: /data/tnodir: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_refuses_a_mount_root_operand",
+      "seq": 910070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tar -c -f /data/tmount.tar /data",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: /data: Cannot open: Device or resource busy\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "arch_zip_refuses_a_mount_root_operand",
+      "seq": 910071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zip -r /data/zmount.zip /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "zip: cannot read '/data': Device or resource busy\n"
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_cp_refuses_a_mount_root_source",
+      "seq": 910072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/cpdst && cp -r /data /data/cpdst",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot copy '/data': Device or resource busy\n"
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_tar_stores_a_symlink_operand_as_a_link",
+      "seq": 910085,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/sl && echo alpha > /data/sl/a.txt && ln -s /data/sl/a.txt /data/sl/l && tar -cf /data/sl.tar -C /data/sl l && tar -xf /data/sl.tar -C /data/sl/out 2>/dev/null; readlink /data/sl/l",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sl/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_two_links_to_one_target_are_not_a_loop",
+      "seq": 910086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tl && echo beta > /data/tl/b.txt && ln -s /data/tl/b.txt /data/tl/one && ln -s /data/tl/b.txt /data/tl/two && tar -chf /data/tl.tar -C /data/tl . 2>/dev/null; tar -chf /data/tl2.tar -C /data tl && tar -tf /data/tl2.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "tl/\ntl/b.txt\ntl/one\ntl/two\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "h",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_reports_a_symlink_cycle_per_member",
+      "seq": 910087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/cy && ln -s /data/cy/b /data/cy/a && ln -s /data/cy/a /data/cy/b && tar -chf /data/cy.tar -C /data cy; echo exit=$?; tar -tf /data/cy.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=2\ncy/\n",
+        "stderr": "tar: cy/a: Cannot stat: Too many levels of symbolic links\ntar: cy/b: Cannot stat: Too many levels of symbolic links\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "c",
+        "h",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_fails_at_the_first_unenterable_c",
+      "seq": 910088,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/cgood && echo y > /data/cgood/y.txt && tar -cf /data/cc.tar -C /data/cmissing x -C /data/cgood y.txt; echo exit=$?; ls /data/cc.tar",
+      "expect": {
+        "exit": 2,
+        "stdout": "exit=2\n",
+        "stderr": "tar: /data/cmissing: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now\nls: cannot access '/data/cc.tar': No such file or directory\n"
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_listing_is_not_a_mount_root_source",
+      "seq": 910089,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/ml && echo m > /data/ml/m.txt && tar -cf /data/ml.tar -C /data ml && tar -tf /data/ml.tar data; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "ml/\nml/m.txt\nexit=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
     }
   ]
 }

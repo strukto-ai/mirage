@@ -27,7 +27,8 @@ from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
-from mirage.workspace.executor.command.routing import path_flag_scopes
+from mirage.workspace.executor.command.routing import (path_flag_scopes,
+                                                       positional_scopes)
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
@@ -283,6 +284,9 @@ async def _run_argv(
         deny = await registry.policies.pre_command(
             CommandContext(command=name,
                            paths=tuple(scopes),
+                           operands=tuple(
+                               positional_scopes(name, args, session.cwd,
+                                                 operands)),
                            argv=tuple(args),
                            cwd=session.cwd,
                            registry=registry))

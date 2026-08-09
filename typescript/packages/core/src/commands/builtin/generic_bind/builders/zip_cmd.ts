@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FileStat, PathSpec } from '../../../../types.ts'
 import { zipGeneric } from '../../generic/zip_cmd.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { walkOf } from '../archive_io.ts'
 
 export const ZIP_BUILDER: Builder = {
   name: 'zip',
@@ -26,11 +28,11 @@ export const ZIP_BUILDER: Builder = {
       throw new Error('zip: backend provides no write op')
     }
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return zipGeneric(
-      resolved,
-      opts,
-      (p) => ops.readStream(accessor, p, idx),
-      (p, d) => write(accessor, p, d),
-    )
+    return zipGeneric(resolved, opts, {
+      stream: (p) => ops.readStream(accessor, p, idx),
+      write: (p, data) => write(accessor, p, data),
+      stat: async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx),
+      walk: walkOf(ops, accessor, idx),
+    })
   },
 }

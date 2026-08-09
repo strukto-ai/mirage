@@ -53,6 +53,45 @@ def _set_value_flag(
         flags[name] = value
 
 
+def _rebase(
+    flags: dict[str, ParsedFlagValue],
+    cs: CompiledSpec,
+    spelling: str,
+    value: str,
+    base: str,
+) -> str:
+    """Fold one option occurrence into the operand base directory.
+
+    Called after every value-flag record. Only the spec's declared
+    ``operand_base`` option moves the base, and it moves it the way a
+    chdir does: relative to wherever the previous occurrence left it, so
+    ``-C d1 ... -C ../d2`` lands in ``d1/../d2``. The resolved absolute
+    path replaces the raw value in the flag bag, so the later path-flag
+    pass has nothing left to resolve.
+
+    Args:
+        flags (dict): parsed flag bag, updated in place.
+        cs (CompiledSpec): compiled spec tables.
+        spelling (str): dashed spelling as typed.
+        value (str): the flag's value.
+        base (str): the base directory in effect before this occurrence.
+
+    Returns:
+        str: the base directory in effect after this occurrence.
+    """
+    if cs.base_dest is None or cs.dest_of(spelling) != cs.base_dest:
+        return base
+    moved = resolve_path(value, base)
+    bag = flags.get(cs.base_dest)
+    if isinstance(bag, list) and bag:
+        # An accumulating option already appended the raw value; the
+        # resolved one replaces it so nothing resolves it twice.
+        bag[-1] = moved
+    else:
+        flags[cs.base_dest] = moved
+    return moved
+
+
 def _set_bool_flag(
     flags: dict[str, ParsedFlagValue],
     cs: CompiledSpec,
@@ -158,6 +197,13 @@ def parse_command(
         # the shape heuristic and a path-shaped one (`tar sub/a.tgz`)
         # would reach dispatch resolved and unreadable as letters.
         word_kinds[0] = "str"
+    # The directory the next path operand resolves against, and where it
+    # was for each word already read. It only ever moves for a spec that
+    # declares operand_base, so every other command records None
+    # throughout and the classifier keeps using the session cwd.
+    base = cwd
+    word_bases: list[str | None] = [None] * len(argv)
+    raw_bases: list[str] = []
     warnings: list[str] = []
     invalid_options: list[str] = []
     ambiguous_options: list[tuple[str, tuple[str, ...]]] = []
@@ -182,6 +228,7 @@ def parse_command(
         if end_of_flags:
             raw_args.append(tok)
             raw_indices.append(orig_indices[i])
+            raw_bases.append(base)
             i += 1
             continue
 
@@ -222,6 +269,9 @@ def parse_command(
                   and i + 1 < len(filtered_argv)):
                 _set_value_flag(flags, cs, etok, filtered_argv[i + 1])
                 word_kinds[orig_indices[i + 1]] = cs.kind_of[etok]
+                if cs.dest_of(etok) == cs.base_dest:
+                    word_bases[orig_indices[i + 1]] = base
+                base = _rebase(flags, cs, etok, filtered_argv[i + 1], base)
                 i += 2
             elif is_pair:
                 if eq == -1:
@@ -236,12 +286,14 @@ def parse_command(
                 if eq != -1 and (spelling in cs.long_value_spellings
                                  or spelling in cs.long_optional_spellings):
                     _set_value_flag(flags, cs, spelling, tok[eq + 1:])
+                    base = _rebase(flags, cs, spelling, tok[eq + 1:], base)
                 elif etok in cs.long_value_spellings:
                     # Declared value flag at end of line with no argument.
                     needs_value_options.append(etok)
                 elif lenient_dash_operands:
                     raw_args.append(tok)
                     raw_indices.append(orig_indices[i])
+                    raw_bases.append(base)
                 else:
                     invalid_options.append(tok)
                     option_error_kinds.append("invalid")
@@ -257,6 +309,7 @@ def parse_command(
             for vf in cs.attach_spellings:
                 if tok.startswith(vf) and len(tok) > len(vf):
                     _set_value_flag(flags, cs, vf, tok[len(vf):])
+                    base = _rebase(flags, cs, vf, tok[len(vf):], base)
                     i += 1
                     matched_optional = True
                     break
@@ -267,11 +320,15 @@ def parse_command(
                 if tok == vf and i + 1 < len(filtered_argv):
                     _set_value_flag(flags, cs, vf, filtered_argv[i + 1])
                     word_kinds[orig_indices[i + 1]] = cs.kind_of[vf]
+                    if cs.dest_of(vf) == cs.base_dest:
+                        word_bases[orig_indices[i + 1]] = base
+                    base = _rebase(flags, cs, vf, filtered_argv[i + 1], base)
                     i += 2
                     matched_value = True
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
                     _set_value_flag(flags, cs, vf, tok[len(vf):])
+                    base = _rebase(flags, cs, vf, tok[len(vf):], base)
                     i += 1
                     matched_value = True
                     break
@@ -301,6 +358,7 @@ def parse_command(
                     for name in cluster_bools:
                         _set_bool_flag(flags, cs, name)
                     _set_value_flag(flags, cs, vflag, attached)
+                    base = _rebase(flags, cs, vflag, attached, base)
                     i += 1
                     continue
                 if i + 1 < len(filtered_argv):
@@ -308,12 +366,17 @@ def parse_command(
                         _set_bool_flag(flags, cs, name)
                     _set_value_flag(flags, cs, vflag, filtered_argv[i + 1])
                     word_kinds[orig_indices[i + 1]] = cs.kind_of[vflag]
+                    if cs.dest_of(vflag) == cs.base_dest:
+                        word_bases[orig_indices[i + 1]] = base
+                    base = _rebase(flags, cs, vflag, filtered_argv[i + 1],
+                                   base)
                     i += 2
                     continue
 
             if lenient_dash_operands or NUMERIC_SHORT.match(tok):
                 raw_args.append(tok)
                 raw_indices.append(orig_indices[i])
+                raw_bases.append(base)
             elif tok in cs.value_spellings or (mixed is not None
                                                and mixed[2] is None):
                 # A declared value flag (alone or ending a cluster) with no
@@ -339,6 +402,7 @@ def parse_command(
 
         raw_args.append(tok)
         raw_indices.append(orig_indices[i])
+        raw_bases.append(base)
         i += 1
 
     # Snapshot before defaults land, because "typed" and "present" stop
@@ -443,8 +507,13 @@ def parse_command(
         else:
             kind = overflow_kind
         if kind == "path":
-            classified.append((resolve_path(arg, cwd), "path"))
+            # Against the base an operand_base option left in effect at
+            # this position, which is the session cwd for every command
+            # that declares none.
+            classified.append((resolve_path(arg, raw_bases[j]), "path"))
             raw_operands.append((arg, "path"))
+            if raw_bases[j] != cwd:
+                word_bases[raw_indices[j]] = raw_bases[j]
         else:
             classified.append((arg, kind))
             raw_operands.append((arg, kind))
@@ -491,6 +560,7 @@ def parse_command(
         text_flag_values=text_flag_values,
         warnings=warnings,
         word_kinds=word_kinds,
+        word_bases=word_bases,
         invalid_options=invalid_options,
         ambiguous_options=ambiguous_options,
         option_error_kinds=option_error_kinds,

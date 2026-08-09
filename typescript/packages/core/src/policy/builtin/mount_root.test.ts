@@ -39,8 +39,9 @@ function ctx(
   paths: PathSpec[],
   argv: string[] = [],
   reg: MountRegistry = registry(),
+  operands?: PathSpec[],
 ): CommandContext {
-  return { command, paths, argv, cwd: '/', registry: reg }
+  return { command, paths, operands: operands ?? paths, argv, cwd: '/', registry: reg }
 }
 
 describe('MountRootPolicy', () => {
@@ -103,5 +104,68 @@ describe('MountRootPolicy', () => {
     expect(hasParentsFlag(['-pv'])).toBe(true)
     expect(hasParentsFlag(['--print'])).toBe(false)
     expect(hasParentsFlag(['x', '-r'])).toBe(false)
+  })
+})
+
+describe('MountRootPolicy: whole-mount archivers', () => {
+  it.each([
+    ['tar', 'tar: /data: Cannot open: Device or resource busy'],
+    ['zip', "zip: cannot read '/data': Device or resource busy"],
+    ['cp', "cp: cannot copy '/data': Device or resource busy"],
+  ])('refuses %s with a mount root in a source slot', (cmd, needle) => {
+    // zip's first operand is the archive it writes, cp's last is the
+    // destination, so each line puts the mount root in a source slot.
+    const operands: Record<string, PathSpec[]> = {
+      tar: [path('/data')],
+      zip: [path('/out.zip'), path('/data')],
+      cp: [path('/data'), path('/dst')],
+    }
+    const argv = cmd === 'tar' ? ['-cf', '/out.tar'] : []
+    const deny = new MountRootPolicy().preCommand(ctx(cmd, operands[cmd] ?? [], argv))
+    expect(deny).not.toBeNull()
+    expect(deny && 'message' in deny ? deny.message : '').toContain(needle)
+  })
+
+  it("names tar's operand as typed and exits 2", () => {
+    const deny = new MountRootPolicy().preCommand(
+      ctx('tar', [path('/data', '.')], ['-cf', '/out.tar']),
+    )
+    expect(deny && 'message' in deny ? deny.message : '').toContain('tar: .: Cannot open')
+    expect(deny && 'message' in deny ? deny.message : '').toContain('Error is not recoverable')
+    expect(deny && 'exitCode' in deny ? deny.exitCode : 0).toBe(2)
+  })
+
+  it.each([
+    [['-cf', '/a.tar'], true],
+    [['--create', '-f', '/a.tar'], true],
+    [['cf', '/a.tar'], true],
+    [['-tf', '/a.tar'], false],
+    [['-xf', '/a.tar'], false],
+    [['xzf', '/a.tar'], false],
+    [['-xf', '/a.tar', '-C', '/cache'], false],
+  ])('only tar create reads its operands from the filesystem: %s', (argv, denied) => {
+    // Under -t and -x an operand names a member, not a path, so a
+    // selector spelling a mount root must not deny the listing.
+    const deny = new MountRootPolicy().preCommand(ctx('tar', [path('/data')], argv))
+    expect(deny !== null).toBe(denied)
+  })
+
+  it('allows extracting into a mount root', () => {
+    // `-C /data` is a path-valued flag, so it reaches paths but never
+    // operands; refusing it would block the safe direction.
+    const deny = new MountRootPolicy().preCommand(
+      ctx('tar', [path('/archive.tar'), path('/data')], [], registry(), [path('/archive.tar')]),
+    )
+    expect(deny).toBeNull()
+  })
+
+  it('allows copying into a mount root', () => {
+    const deny = new MountRootPolicy().preCommand(ctx('cp', [path('/src/a.txt'), path('/data')]))
+    expect(deny).toBeNull()
+  })
+
+  it("does not read zip's archive slot as a source", () => {
+    const deny = new MountRootPolicy().preCommand(ctx('zip', [path('/data'), path('/src/a.txt')]))
+    expect(deny).toBeNull()
   })
 })

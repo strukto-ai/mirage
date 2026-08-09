@@ -31,7 +31,7 @@ from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
 from mirage.ops.registry import RegisteredOp
-from mirage.ops.types import LinkView, StatOverlay, StatPath
+from mirage.ops.types import LinkView, MountView, StatOverlay, StatPath
 from mirage.policy import resolve_limit
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
@@ -446,6 +446,7 @@ class MountEntry:
         stat_overlay: StatOverlay | None = None,
         links: LinkView | None = None,
         stat_path: StatPath | None = None,
+        mounts: MountView | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -465,7 +466,10 @@ class MountEntry:
             links (LinkView | None): the namespace's symlink facts.
             stat_path (StatPath | None): dispatcher-backed stat of one
                 path, for a traversal command's start point.
-                All three reach only the handlers that name them as a
+            mounts (MountView | None): where the mount boundaries are,
+                for a walker whose output cannot be fanned out and
+                concatenated (tar, zip).
+                All four reach only the handlers that name them as a
                 parameter, so no list of command names is kept here.
         """
         extension = get_extension(paths[0].virtual) if paths else None
@@ -533,6 +537,7 @@ class MountEntry:
             "stat_overlay": stat_overlay,
             "links": links,
             "stat_path": stat_path,
+            "mounts": mounts,
         }
         offered = {k: v for k, v in offered.items() if v is not None}
         if runtime is not None:

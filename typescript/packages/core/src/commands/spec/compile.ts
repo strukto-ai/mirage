@@ -85,6 +85,9 @@ export class CompiledSpec {
   readonly numericDest: string | null
   /** Kind of the rest operand. */
   readonly restKind: ValueType | null
+  // Canonical spelling of the option that re-bases the path operands
+  // after it (CommandSpec.operandBase, tar's -C).
+  readonly baseDest: string | null
 
   constructor(fields: {
     boolSpellings: ReadonlySet<string>
@@ -108,6 +111,7 @@ export class CompiledSpec {
     defaults: ReadonlyMap<string, string>
     numericDest: string | null
     restKind: ValueType | null
+    baseDest: string | null
   }) {
     this.boolSpellings = fields.boolSpellings
     this.valueSpellings = fields.valueSpellings
@@ -130,6 +134,7 @@ export class CompiledSpec {
     this.defaults = fields.defaults
     this.numericDest = fields.numericDest
     this.restKind = fields.restKind
+    this.baseDest = fields.baseDest
   }
 
   /** Canonical spelling for a typed spelling. */
@@ -261,6 +266,17 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     }
   }
 
+  let baseDest: string | null = null
+  if (spec.operandBase !== null) {
+    baseDest = dest.get(spec.operandBase) ?? null
+    if (baseDest === null) {
+      throw new Error(`operandBase '${spec.operandBase}' is not a declared option`)
+    }
+    if (kindByDest.get(baseDest) !== 'path' || pairDests.has(baseDest)) {
+      throw new Error(`operandBase '${spec.operandBase}' must be a single-token path option`)
+    }
+  }
+
   // Longest first so an attached match can never be stolen by a shorter
   // spelling that happens to prefix it (-name vs -n).
   valueSpellings.sort((a, b) => b.length - a.length)
@@ -288,6 +304,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     defaults,
     numericDest,
     restKind: spec.rest !== null ? spec.rest.type : null,
+    baseDest,
   })
   CACHE.set(spec, compiled)
   return compiled
