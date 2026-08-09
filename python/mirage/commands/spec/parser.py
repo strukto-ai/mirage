@@ -81,7 +81,13 @@ def _rebase(
     if cs.base_dest is None or cs.dest_of(spelling) != cs.base_dest:
         return base
     moved = resolve_path(value, base)
-    flags[cs.base_dest] = moved
+    bag = flags.get(cs.base_dest)
+    if isinstance(bag, list) and bag:
+        # An accumulating option already appended the raw value; the
+        # resolved one replaces it so nothing resolves it twice.
+        bag[-1] = moved
+    else:
+        flags[cs.base_dest] = moved
     return moved
 
 

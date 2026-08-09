@@ -1,5 +1,6 @@
 import io
 import tarfile
+from dataclasses import replace
 
 import pytest
 
@@ -8,6 +9,7 @@ from mirage.commands.builtin.generic.tar import (excluded, member_name, pruned,
 from mirage.ops.types import LinkView, MountView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import CycleError
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
@@ -93,6 +95,15 @@ def _links(entries: dict[str, str]) -> LinkView:
         exists=exists,
         target_stat=target_stat,
     )
+
+
+def _cycle(entries: dict[str, str]) -> LinkView:
+    """A LinkView whose resolve raises ELOOP, as the namespace does."""
+
+    def resolve(path):
+        raise CycleError(path)
+
+    return replace(_links(entries), resolve=resolve)
 
 
 def _mounts(descendants: tuple[str, ...] = (),
@@ -234,7 +245,7 @@ async def test_create_refuses_a_directory_it_cannot_enter():
     _, io_res = await _create(tree, [_raw("/nodir/a.txt", "a.txt")],
                               c=True,
                               f=_spec("/out.tar"),
-                              C=_raw("/nodir", "nodir"))
+                              C=[_raw("/nodir", "nodir")])
     assert io_res.exit_code == 2
     err = io_res.stderr.decode()
     assert "tar: nodir: Cannot open: No such file or directory" in err
@@ -343,7 +354,7 @@ async def test_extract_recreates_directories_including_empty_ones():
     _, io_res = await _create(tree, [],
                               x=True,
                               f=_spec("/out.tar"),
-                              C=_spec("/out"))
+                              C=[_spec("/out")])
     assert any("d/a.txt" in path for path in io_res.writes)
     assert "/out/d/empty" in tree.dirs
 
@@ -359,7 +370,7 @@ async def test_extract_strips_leading_components():
                               x=True,
                               f=_spec("/out.tar"),
                               strip_components="2",
-                              C=_spec("/out"))
+                              C=[_spec("/out")])
     assert "/out/a.txt" in io_res.writes
 
 
@@ -375,3 +386,73 @@ async def test_requires_an_archive():
     tree = _Tree({"/a.txt": b"x"})
     with pytest.raises(ValueError, match="-f is required"):
         await _create(tree, [_spec("/a.txt")], c=True)
+
+
+@pytest.mark.asyncio
+async def test_create_fails_at_the_first_unenterable_c_not_the_last():
+    """GNU chdirs at each -C, so a bad early one stops the whole run.
+
+    Checking only the parsed flag's final value archived the operands
+    that followed the bad one and named the wrong subject.
+    """
+    tree = _Tree({"/good/y.txt": b"y"}, dirs=("/good", ))
+    _, io_res = await _create(
+        tree, [_raw("/good/y.txt", "y.txt")],
+        c=True,
+        f=_spec("/out.tar"),
+        C=[_raw("/missing", "missing"),
+           _raw("/good", "good")])
+    assert io_res.exit_code == 2
+    err = io_res.stderr.decode()
+    assert "tar: missing: Cannot open: No such file or directory" in err
+    assert "Error is not recoverable" in err
+    assert not io_res.writes
+
+
+@pytest.mark.asyncio
+async def test_two_links_to_one_target_are_not_a_loop():
+    tree = _Tree({"/d/a.txt": b"alpha"}, dirs=("/d", ))
+    links = _links({"/d/one": "/d/a.txt", "/d/two": "/d/a.txt"})
+    _, io_res = await _create(tree, [_raw("/d", "d")],
+                              c=True,
+                              h=True,
+                              f=_spec("/out.tar"),
+                              links=links)
+    assert io_res.exit_code == 0
+    assert io_res.stderr == b""
+    assert _names(
+        io_res.writes["/out.tar"]) == ["d/", "d/a.txt", "d/one", "d/two"]
+
+
+@pytest.mark.asyncio
+async def test_a_symlink_cycle_is_reported_per_member_and_keeps_the_directory(
+):
+    tree = _Tree({}, dirs=("/d", ))
+    links = _cycle({"/d/a": "/d/b", "/d/b": "/d/a"})
+    _, io_res = await _create(tree, [_raw("/d", "d")],
+                              c=True,
+                              h=True,
+                              f=_spec("/out.tar"),
+                              links=links)
+    assert io_res.exit_code == 2
+    err = io_res.stderr.decode()
+    assert "tar: d/a: Cannot stat: Too many levels of symbolic links" in err
+    assert "tar: d/b: Cannot stat: Too many levels of symbolic links" in err
+    # GNU keeps the directory entry rather than aborting the archive.
+    assert _names(io_res.writes["/out.tar"]) == ["d/"]
+
+
+@pytest.mark.asyncio
+async def test_a_symlink_operand_is_stored_as_a_symlink():
+    """The router must not dereference it before the planner sees it."""
+    tree = _Tree({"/d/a.txt": b"alpha"}, dirs=("/d", ))
+    links = _links({"/link": "/d/a.txt"})
+    _, io_res = await _create(tree, [_raw("/link", "link")],
+                              c=True,
+                              f=_spec("/out.tar"),
+                              links=links)
+    with tarfile.open(fileobj=io.BytesIO(io_res.writes["/out.tar"])) as tf:
+        member = tf.getmember("link")
+    assert member.issym()
+    assert member.size == 0
+    assert member.linkname == "/d/a.txt"

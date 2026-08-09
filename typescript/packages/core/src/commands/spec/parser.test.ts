@@ -908,7 +908,7 @@ describe("parseCommand — tar's old option style", () => {
   it('binds two value letters in letter order', () => {
     const p = parseCommand(specOf('tar'), ['xfC', '/data/a.tgz', '/data/out'], '/')
     expect(p.flags['-f']).toBe('/data/a.tgz')
-    expect(p.flags['-C']).toBe('/data/out')
+    expect(p.flags['-C']).toEqual(['/data/out'])
   })
 
   it('keeps a bool letter that follows a value letter', () => {
@@ -940,7 +940,7 @@ describe("parseCommand — tar's old option style", () => {
       '/',
     )
     expect(p.flags['--strip-components']).toBe('1')
-    expect(p.flags['-C']).toBe('/data/out')
+    expect(p.flags['-C']).toEqual(['/data/out'])
   })
 
   it('is off for every other command', () => {
@@ -964,7 +964,7 @@ describe('operandBase (tar -C)', () => {
       '/work/check/my_paper',
     ])
     expect(parsed.flags['-f']).toBe('/home/out.tgz')
-    expect(parsed.flags['-C']).toBe('/work/check')
+    expect(parsed.flags['-C']).toEqual(['/work/check'])
   })
 
   it('is cumulative like a real chdir', () => {
@@ -977,7 +977,8 @@ describe('operandBase (tar -C)', () => {
       '/work/d1/x',
       '/work/d2/y',
     ])
-    expect(parsed.flags['-C']).toBe('/work/d2')
+    // Every occurrence is kept in order: GNU chdirs at each one.
+    expect(parsed.flags['-C']).toEqual(['/work/d1', '/work/d2'])
   })
 
   it('only moves what follows it', () => {

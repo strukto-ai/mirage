@@ -37,6 +37,38 @@ def has_symlink_flag(argv: tuple[str, ...]) -> bool:
     return False
 
 
+def is_create_mode(argv: tuple[str, ...]) -> bool:
+    """Whether a tar line reads the filesystem rather than an archive.
+
+    Only ``-c`` makes tar's operands source paths. Under ``-t`` and
+    ``-x`` they are member selectors matched against names inside the
+    archive, so a selector that happens to spell a mount root is not a
+    mount at all and refusing it would deny an ordinary listing.
+
+    Scanned raw for the same reason :func:`has_symlink_flag` is: the
+    policy fires before flag parsing. Only the first word may be GNU's
+    dashless option cluster (``tar cf a.tar d``), so a later bare word
+    is an operand and cannot turn the mode on.
+
+    Args:
+        argv (tuple[str, ...]): raw argv after the command name.
+    """
+    for i, tok in enumerate(argv):
+        if not isinstance(tok, str):
+            continue
+        if tok == "--create":
+            return True
+        if tok.startswith("--"):
+            continue
+        if tok.startswith("-"):
+            if "c" in tok[1:]:
+                return True
+            continue
+        if i == 0 and "c" in tok:
+            return True
+    return False
+
+
 def has_parents_flag(argv: tuple[str, ...]) -> bool:
     """Spot mkdir's -p/--parents by raw token scan.
 
@@ -139,7 +171,10 @@ class MountRootPolicy(Policy):
                 return Deny(f"ln: failed to create {kind} "
                             f"'{ctx.paths[-1].virtual}': File exists\n")
         elif cmd == "tar":
-            root = first_root(ctx.registry, ctx.operands)
+            # Only -c reads the filesystem; -t and -x match their
+            # operands against names inside the archive.
+            root = (first_root(ctx.registry, ctx.operands)
+                    if is_create_mode(ctx.argv) else None)
             if root is not None:
                 return Deny(
                     f"tar: {root.raw_path}: Cannot open: "

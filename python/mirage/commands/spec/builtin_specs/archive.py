@@ -28,7 +28,10 @@ SPECS: dict[str, CommandSpec] = {
             # -h archives what a symlink points at instead of the link.
             Option(short="-h"),
             Option(short="-f", type="path"),
-            Option(short="-C", type="path"),
+            # Every occurrence is kept, in order: GNU chdirs at each
+            # one and fails at the first it cannot enter, so the
+            # planner has to see them all, not just the last.
+            Option(short="-C", type="path", multiple=True),
             Option(long="--strip-components", type="str"),
             Option(long="--exclude", type="str"),
         ),

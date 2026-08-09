@@ -108,7 +108,7 @@ async def plan_create(
     stat: StatFn,
     walk: WalkFn,
     is_dir: DirProbe,
-    directory: PathSpec | None = None,
+    directories: list[PathSpec] | None = None,
     links: LinkView | None = None,
     mounts: MountView | None = None,
 ) -> CreateResult:
@@ -130,21 +130,25 @@ async def plan_create(
         dereference (bool): ``-h``, archive what a symlink points at.
         stat (StatFn): backend stat, raising when nothing is there.
         walk (WalkFn): subtree listing, by find type.
-        is_dir (DirProbe): whether ``directory`` can be entered.
-        directory (PathSpec | None): the ``-C`` the operands were based
-            on, checked here because GNU chdirs before reading anything.
+        is_dir (DirProbe): whether a ``-C`` can be entered.
+        directories (list[PathSpec] | None): every ``-C`` the operands
+            were based on, in order, checked here because GNU chdirs at
+            each one before reading anything.
         links (LinkView | None): the namespace's symlink facts.
         mounts (MountView | None): where the mount boundaries are.
     """
     if not paths:
         return _refusal([EMPTY_ARCHIVE, USAGE_HINT])
-    if directory is not None and not await is_dir(directory):
-        # GNU chdirs before reading a single operand, so a -C it cannot
-        # enter is fatal for the whole run and no archive is written.
-        return _refusal([
-            f"tar: {directory.raw_path}: Cannot open: "
-            "No such file or directory", FATAL_TRAILER
-        ])
+    for directory in directories or []:
+        # GNU chdirs at each -C in turn, before reading a single
+        # operand, so the FIRST one it cannot enter is fatal for the
+        # whole run and no members are written. Checking only the last
+        # would archive the operands that followed a bad earlier one.
+        if not await is_dir(directory):
+            return _refusal([
+                f"tar: {directory.raw_path}: Cannot open: "
+                "No such file or directory", FATAL_TRAILER
+            ])
     members: list[Member] = []
     notices: list[str] = []
     absolute_seen = False
@@ -164,8 +168,7 @@ async def plan_create(
             if not problem.fatal:
                 notices.append(f"tar: {shown}: {problem.reason}")
                 continue
-            notices.append(f"tar: {shown}: Cannot stat: "
-                           "No such file or directory")
+            notices.append(f"tar: {shown}: Cannot stat: {problem.reason}")
             exit_code = CREATE_ERROR_EXIT
         if scan.missing:
             continue

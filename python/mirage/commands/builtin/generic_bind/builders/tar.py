@@ -41,7 +41,7 @@ async def tar(
     v: bool = False,
     h: bool = False,
     f: PathSpec | None = None,
-    C: PathSpec | None = None,
+    C: list[PathSpec] | None = None,
     strip_components: str | None = None,
     exclude: str | None = None,
     index: IndexCacheStore = NULL_INDEX,

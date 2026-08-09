@@ -112,6 +112,7 @@
       "type": "path"
     },
     {
+      "multiple": true,
       "short": "-C",
       "type": "path"
     },

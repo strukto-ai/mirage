@@ -151,7 +151,9 @@ export async function tarGeneric(
     ]
   }
   const fFlag = fl.asStr('f') ?? null
-  const CFlag = fl.asStr('C') ?? null
+  const CFlags = fl.asList('C')
+  // Only the last -C is a destination; create checks every one.
+  const CFlag = CFlags.length > 0 ? (CFlags[CFlags.length - 1] ?? null) : null
   const stripN = fl.asInt('strip_components') ?? 0
   const exclude = fl.asStr('exclude') ?? null
   const mountPrefix = opts.mountPrefix ?? ''
@@ -170,7 +172,7 @@ export async function tarGeneric(
       stat: deps.stat,
       walk: deps.walk,
       isDir: deps.isDir,
-      directory: CFlag !== null ? makePathSpec(CFlag, mountPrefix) : null,
+      directories: CFlags.map((c) => makePathSpec(c, mountPrefix)),
       links: opts.links ?? null,
       mounts: opts.mounts ?? null,
     })

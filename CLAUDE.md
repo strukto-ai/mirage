@@ -122,7 +122,7 @@ never lists it. Two mechanisms follow from that, and they are separate.
   `zip warning:` prefix). This is deliberate: descending would archive
   by accident exactly what the mount-root refusal below forbids on
   purpose.
-- **`MountRootPolicy` refuses a mount root in a source slot** for `tar`,
+- **`MountRootPolicy` refuses a mount root in a source slot** for `tar -c`,
   `zip` and `cp`, on top of the POSIX EBUSY rules it already enforces
   for `rm`/`rmdir`/`mv`/`mkdir`/`touch`/`ln`. Real tar and cp allow it;
   mirage does not, because the mount table is the deployment's
@@ -134,7 +134,12 @@ never lists it. Two mechanisms follow from that, and they are separate.
   legal, while `tar -cf a.tar /mnt` must not. `positional_scopes` /
   `positionalScopes` (`executor/command/routing`) is what tells the two
   apart, since classification turns every path-shaped word into a
-  PathSpec whether it filled an operand slot or a flag's value.
+  PathSpec whether it filled an operand slot or a flag's value. Mode
+  matters too: only `tar -c` reads its operands from the filesystem, so
+  `is_create_mode` / `isCreateMode` gates the refusal. Under `-t` and
+  `-x` an operand is a member selector matched inside the archive, and
+  refusing one that happens to spell a mount root would deny an
+  ordinary listing.
 
 ## An option that chdirs: `operand_base`
 
@@ -205,8 +210,15 @@ they bite:
 Follow policy is two symmetric tables in `workspace/route/constants.py`, both
 read off the raw command line (operand rewriting happens before flag parsing):
 `NO_FOLLOW_COMMANDS` lists commands that lstat (`rm`, `mv`, `ln`, `readlink`,
-`rmdir`, `unlink`, `stat`, `file`, `du`, `find`), with `DEREFERENCE_FLAGS`
-naming the flag that turns following back on (`-L`). `find` states its policy as
+`rmdir`, `unlink`, `stat`, `file`, `du`, `find`, `tar`, `zip`), with
+`DEREFERENCE_FLAGS` naming the flag that turns following back on (`-L`).
+`tar` and `zip` are in that list for a different reason and deliberately carry
+no `DEREFERENCE_FLAGS` entry: they dereference too, but their planner has to be
+the one doing it. Rewriting the operand in the router hands the planner a
+target it can no longer tell was reached through a link, so `tar` stored a
+regular file where GNU stores a symlink member, and neither archiver could
+apply its own cross-mount refusal or ELOOP wording. `tar -h` and `zip -y` are
+read by `scan_operand` instead. `find` states its policy as
 a leading `-P`/`-H`/`-L` option instead, last one wins, so it lives in
 `LAST_WINS_LINK_OPTIONS`;
 `NO_FOLLOW_FLAGS` is the mirror, for a following command that a flag makes lstat
@@ -378,6 +390,15 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   reason extraction has to `mkdir` for one. **A symlink is a symlink
   member** (`SYMTYPE`, target in `linkname`), never a file of its
   target's bytes, unless `-h` says to follow it.
+  **Two links to one target are not a loop**, and both are archived; the
+  only loop is one `resolve` refuses to resolve, since the namespace
+  already walks the chain under a hop limit and raises `CycleError` at
+  the end of it. That arrives as a fatal `Problem` carrying GNU's
+  `Too many levels of symbolic links`, reported per member with the
+  directory entry kept, rather than as an exception that aborts the
+  plan. **Every `-C` is checked, not just the last**: GNU chdirs at each
+  one and fails at the first it cannot enter, so the option accumulates
+  (`multiple=True`) and the planner walks the list.
   Two deliberate divergences from GNU, both documented in place:
   siblings are sorted rather than emitted in readdir order (the same
   choice `du` makes, for the same reason), and a descendant mount is

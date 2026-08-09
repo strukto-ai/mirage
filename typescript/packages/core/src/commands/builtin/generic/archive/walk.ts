@@ -15,6 +15,7 @@
 import type { LinkView, MountView } from '../../../../ops/types.ts'
 import { type FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
+import { CycleError } from '../../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan } from './types.ts'
 
@@ -23,8 +24,11 @@ import type { Entry, MemberKind, Problem, Scan } from './types.ts'
 // would archive by accident exactly what the mount-root refusal forbids
 // on purpose.
 export const OTHER_FILESYSTEM = 'file is on a different filesystem; not dumped'
-// Following a link back to something already followed on this operand.
-const LOOP_SKIP = 'symbolic link loop; not dumped'
+// Why a path could not be reached, in GNU's strerror wording. Both ride
+// on a fatal Problem; tar prints them after "Cannot stat: " and Info-ZIP
+// words every unreachable name the same way, so it ignores the reason.
+const NO_SUCH = 'No such file or directory'
+const TOO_MANY_LEVELS = 'Too many levels of symbolic links'
 
 export type StatFn = (path: PathSpec) => Promise<FileStat>
 export type WalkFn = (path: PathSpec, findType: string) => Promise<string[]>
@@ -127,39 +131,42 @@ async function subtree(
 // What dereferencing puts in the archive in place of one symlink.
 //
 // The member keeps the link's own name and takes the target's content,
-// which is what dereferencing means. Two cases stay out of reach and are
-// reported rather than guessed at: a target on another mount (whose
-// bytes this backend cannot read, the same boundary a nested mount
-// draws) and a target already followed on this operand, which is a loop.
-// The third return value says the link could not be stat'd at all.
+// which is what dereferencing means. Two links resolving to the same
+// file are not a loop and both are archived; a real loop is whatever
+// `resolve` refuses to resolve, since the namespace already walks the
+// chain under a hop limit and raises ELOOP at the end of it. The third
+// return value is why the link was unreachable, empty when it was not.
 async function follow(
   virtual: string,
   root: PathSpec,
   deps: ScanDeps,
-  seen: Set<string>,
-): Promise<[Entry[], string[], boolean]> {
+): Promise<[Entry[], string[], string]> {
   const links = deps.links ?? null
-  if (links === null) return [[], [], false]
-  const target = links.resolve(virtual)
-  if (!sameMount(deps.mounts ?? null, virtual, target)) return [[], [OTHER_FILESYSTEM], false]
-  if (seen.has(target)) return [[], [LOOP_SKIP], false]
-  seen.add(target)
+  if (links === null) return [[], [], '']
+  let target: string
+  try {
+    target = links.resolve(virtual)
+  } catch (e) {
+    if (!(e instanceof CycleError)) throw e
+    return [[], [], TOO_MANY_LEVELS]
+  }
+  if (!sameMount(deps.mounts ?? null, virtual, target)) return [[], [OTHER_FILESYSTEM], '']
   const spec = childSpec(target, root)
   let targetStat: FileStat
   try {
     targetStat = await deps.stat(spec)
   } catch {
-    return [[], [], true]
+    return [[], [], NO_SUCH]
   }
   if (targetStat.type !== FileType.DIRECTORY) {
-    return [[{ namePath: virtual, kind: 'file', read: spec }], [], false]
+    return [[{ namePath: virtual, kind: 'file', read: spec }], [], '']
   }
-  if (!deps.recurse) return [[{ namePath: virtual, kind: 'dir' }], [], false]
+  if (!deps.recurse) return [[{ namePath: virtual, kind: 'dir' }], [], '']
   const [entries, crossings] = await subtree(root, target, virtual, deps)
   return [
     [{ namePath: virtual, kind: 'dir' }, ...entries],
     crossings.map(() => OTHER_FILESYSTEM),
-    false,
+    '',
   ]
 }
 
@@ -177,15 +184,19 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
   let entries: Entry[] = []
   let crossings: string[] = []
   const problems: Problem[] = []
-  const seen = new Set<string>()
   const links = deps.links ?? null
   const linkStat = links !== null ? links.statAt(path.virtual) : null
   if (linkStat !== null && !deps.dereference) {
     entries.push({ namePath: base, kind: 'link', target: linkTarget(linkStat) })
   } else if (linkStat !== null) {
-    const [followed, why, fatal] = await follow(base, path, deps, seen)
-    if (fatal) {
-      return { entries: [], crossings: [], problems: [{ path: base, fatal: true }], missing: true }
+    const [followed, why, unreachable] = await follow(base, path, deps)
+    if (unreachable !== '') {
+      return {
+        entries: [],
+        crossings: [],
+        problems: [{ path: base, reason: unreachable, fatal: true }],
+        missing: true,
+      }
     }
     entries.push(...followed)
     problems.push(...why.map((reason) => ({ path: base, reason })))
@@ -194,7 +205,12 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
     try {
       rootStat = await deps.stat(path)
     } catch {
-      return { entries: [], crossings: [], problems: [{ path: base, fatal: true }], missing: true }
+      return {
+        entries: [],
+        crossings: [],
+        problems: [{ path: base, reason: NO_SUCH, fatal: true }],
+        missing: true,
+      }
     }
     if (rootStat.type !== FileType.DIRECTORY) {
       entries.push({ namePath: base, kind: 'file', read: path })
@@ -214,9 +230,9 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
         expanded.push(entry)
         continue
       }
-      const [followed, why, fatal] = await follow(entry.namePath, path, deps, seen)
-      if (fatal) {
-        problems.push({ path: entry.namePath, fatal: true })
+      const [followed, why, unreachable] = await follow(entry.namePath, path, deps)
+      if (unreachable !== '') {
+        problems.push({ path: entry.namePath, reason: unreachable, fatal: true })
         continue
       }
       expanded.push(...followed)

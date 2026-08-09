@@ -163,14 +163,15 @@ async def tar(
     v: bool = False,
     h: bool = False,
     f: PathSpec | None = None,
-    C: PathSpec | None = None,
+    C: list[PathSpec] | None = None,
     strip_components: str | None = None,
     exclude: str | None = None,
     links: LinkView | None = None,
     mounts: MountView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     archive = f if f else None
-    dest_path = C.mount_path if C else "/"
+    # Only the last -C is a destination; create checks every one.
+    dest_path = C[-1].mount_path if C else "/"
     mode_suffix = _compression_suffix(z, j, J)
     strip_n = int(strip_components) if strip_components else 0
     if c:
@@ -183,7 +184,7 @@ async def tar(
                                  stat=stat,
                                  walk=walk,
                                  is_dir=is_dir,
-                                 directory=C,
+                                 directories=C or [],
                                  links=links,
                                  mounts=mounts)
         if not plan.write:

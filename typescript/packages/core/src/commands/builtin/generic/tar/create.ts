@@ -49,9 +49,9 @@ export interface CreateDeps {
   stat: StatFn
   walk: WalkFn
   isDir: DirProbe
-  // The `-C` the operands were based on, checked inside the plan
-  // because GNU chdirs before reading anything.
-  directory?: PathSpec | null
+  // Every `-C` the operands were based on, in order, checked inside
+  // the plan because GNU chdirs at each one before reading anything.
+  directories?: readonly PathSpec[]
   links?: LinkView | null
   mounts?: MountView | null
 }
@@ -122,14 +122,17 @@ export async function planCreate(
   deps: CreateDeps,
 ): Promise<CreateResult> {
   if (paths.length === 0) return refusal([EMPTY_ARCHIVE, USAGE_HINT])
-  const directory = deps.directory ?? null
-  if (directory !== null && !(await deps.isDir(directory))) {
-    // GNU chdirs before reading a single operand, so a -C it cannot
-    // enter is fatal for the whole run and no archive is written.
-    return refusal([
-      `tar: ${directory.rawPath}: Cannot open: No such file or directory`,
-      FATAL_TRAILER,
-    ])
+  for (const directory of deps.directories ?? []) {
+    // GNU chdirs at each -C in turn, before reading a single operand,
+    // so the FIRST one it cannot enter is fatal for the whole run and
+    // no members are written. Checking only the last would archive the
+    // operands that followed a bad earlier one.
+    if (!(await deps.isDir(directory))) {
+      return refusal([
+        `tar: ${directory.rawPath}: Cannot open: No such file or directory`,
+        FATAL_TRAILER,
+      ])
+    }
   }
   const members: Member[] = []
   const notices: string[] = []
@@ -152,7 +155,7 @@ export async function planCreate(
         notices.push(`tar: ${shown}: ${problem.reason ?? ''}`)
         continue
       }
-      notices.push(`tar: ${shown}: Cannot stat: No such file or directory`)
+      notices.push(`tar: ${shown}: Cannot stat: ${problem.reason ?? ''}`)
       exitCode = CREATE_ERROR_EXIT
     }
     if (scan.missing) continue

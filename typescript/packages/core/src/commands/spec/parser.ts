@@ -57,7 +57,14 @@ function rebase(
 ): string {
   if (cs.baseDest === null || cs.destOf(spelling) !== cs.baseDest) return base
   const moved = resolvePath(value, base)
-  flags[cs.baseDest] = moved
+  const bag = flags[cs.baseDest]
+  if (Array.isArray(bag) && bag.length > 0) {
+    // An accumulating option already appended the raw value; the
+    // resolved one replaces it so nothing resolves it twice.
+    bag[bag.length - 1] = moved
+  } else {
+    flags[cs.baseDest] = moved
+  }
   return moved
 }
 

@@ -45,6 +45,32 @@ export function hasParentsFlag(argv: readonly string[]): boolean {
   return false
 }
 
+/**
+ * Whether a tar line reads the filesystem rather than an archive.
+ *
+ * Only `-c` makes tar's operands source paths. Under `-t` and `-x` they are
+ * member selectors matched against names inside the archive, so a selector
+ * that happens to spell a mount root is not a mount at all and refusing it
+ * would deny an ordinary listing.
+ *
+ * Scanned raw for the same reason hasSymlinkFlag is: the policy fires before
+ * flag parsing. Only the first word may be GNU's dashless option cluster
+ * (`tar cf a.tar d`), so a later bare word is an operand and cannot turn the
+ * mode on.
+ */
+function isCreateMode(argv: readonly string[]): boolean {
+  for (const [i, tok] of argv.entries()) {
+    if (tok === '--create') return true
+    if (tok.startsWith('--')) continue
+    if (tok.startsWith('-')) {
+      if (tok.slice(1).includes('c')) return true
+      continue
+    }
+    if (i === 0 && tok.includes('c')) return true
+  }
+  return false
+}
+
 function deny(message: string, exitCode = 1): Deny {
   return { kind: 'deny', message, exitCode }
 }
@@ -147,7 +173,9 @@ export class MountRootPolicy implements Policy {
     const operands = ctx.operands ?? ctx.paths
 
     if (cmd === 'tar') {
-      const root = firstRoot(isRoot, operands)
+      // Only -c reads the filesystem; -t and -x match their operands
+      // against names inside the archive.
+      const root = isCreateMode(ctx.argv) ? firstRoot(isRoot, operands) : null
       if (root !== null) {
         return deny(
           `tar: ${root.rawPath}: Cannot open: Device or resource busy\n` +

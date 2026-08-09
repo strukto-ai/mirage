@@ -54,7 +54,10 @@ export const SPECS: Record<string, CommandSpec> = {
       // -h archives what a symlink points at instead of the link.
       new Option({ short: '-h' }),
       new Option({ short: '-f', type: 'path' }),
-      new Option({ short: '-C', type: 'path' }),
+      // Every occurrence is kept, in order: GNU chdirs at each one and
+      // fails at the first it cannot enter, so the planner has to see
+      // them all, not just the last.
+      new Option({ short: '-C', type: 'path', multiple: true }),
       new Option({ long: '--strip-components', type: 'str' }),
       new Option({ long: '--exclude', type: 'str' }),
     ],

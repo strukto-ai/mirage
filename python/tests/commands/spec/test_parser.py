@@ -637,7 +637,7 @@ def test_tar_old_style_two_value_letters_bind_in_letter_order():
     parsed = parse_command(SPECS["tar"], ["xfC", "/data/a.tgz", "/data/out"],
                            "/")
     assert parsed.flags["-f"] == "/data/a.tgz"
-    assert parsed.flags["-C"] == "/data/out"
+    assert parsed.flags["-C"] == ["/data/out"]
 
 
 def test_tar_old_style_value_letter_before_bool_letter():
@@ -670,7 +670,7 @@ def test_tar_old_style_still_accepts_long_options_after_the_cluster():
         ["xzf", "/data/a.tgz", "--strip-components", "1", "-C", "/data/out"],
         "/")
     assert parsed.flags["--strip-components"] == "1"
-    assert parsed.flags["-C"] == "/data/out"
+    assert parsed.flags["-C"] == ["/data/out"]
 
 
 def test_old_option_style_is_off_for_every_other_command():
@@ -688,7 +688,7 @@ def test_operand_base_rebases_the_operands_typed_after_it():
         cwd="/home")
     assert parsed.paths() == ["/work/check/my_paper"]
     assert parsed.flags["-f"] == "/home/out.tgz"
-    assert parsed.flags["-C"] == "/work/check"
+    assert parsed.flags["-C"] == ["/work/check"]
 
 
 def test_operand_base_is_cumulative_like_a_real_chdir():
@@ -696,7 +696,8 @@ def test_operand_base_is_cumulative_like_a_real_chdir():
         SPECS["tar"], ["-cf", "a.tar", "-C", "d1", "x", "-C", "../d2", "y"],
         cwd="/work")
     assert parsed.paths() == ["/work/d1/x", "/work/d2/y"]
-    assert parsed.flags["-C"] == "/work/d2"
+    # Every occurrence is kept in order: GNU chdirs at each one.
+    assert parsed.flags["-C"] == ["/work/d1", "/work/d2"]
 
 
 def test_operand_base_only_moves_what_follows_it():

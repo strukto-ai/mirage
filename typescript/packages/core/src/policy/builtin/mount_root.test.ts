@@ -120,16 +120,34 @@ describe('MountRootPolicy: whole-mount archivers', () => {
       zip: [path('/out.zip'), path('/data')],
       cp: [path('/data'), path('/dst')],
     }
-    const deny = new MountRootPolicy().preCommand(ctx(cmd, operands[cmd] ?? []))
+    const argv = cmd === 'tar' ? ['-cf', '/out.tar'] : []
+    const deny = new MountRootPolicy().preCommand(ctx(cmd, operands[cmd] ?? [], argv))
     expect(deny).not.toBeNull()
     expect(deny && 'message' in deny ? deny.message : '').toContain(needle)
   })
 
   it("names tar's operand as typed and exits 2", () => {
-    const deny = new MountRootPolicy().preCommand(ctx('tar', [path('/data', '.')]))
+    const deny = new MountRootPolicy().preCommand(
+      ctx('tar', [path('/data', '.')], ['-cf', '/out.tar']),
+    )
     expect(deny && 'message' in deny ? deny.message : '').toContain('tar: .: Cannot open')
     expect(deny && 'message' in deny ? deny.message : '').toContain('Error is not recoverable')
     expect(deny && 'exitCode' in deny ? deny.exitCode : 0).toBe(2)
+  })
+
+  it.each([
+    [['-cf', '/a.tar'], true],
+    [['--create', '-f', '/a.tar'], true],
+    [['cf', '/a.tar'], true],
+    [['-tf', '/a.tar'], false],
+    [['-xf', '/a.tar'], false],
+    [['xzf', '/a.tar'], false],
+    [['-xf', '/a.tar', '-C', '/cache'], false],
+  ])('only tar create reads its operands from the filesystem: %s', (argv, denied) => {
+    // Under -t and -x an operand names a member, not a path, so a
+    // selector spelling a mount root must not deny the listing.
+    const deny = new MountRootPolicy().preCommand(ctx('tar', [path('/data')], argv))
+    expect(deny !== null).toBe(denied)
   })
 
   it('allows extracting into a mount root', () => {

@@ -5,14 +5,18 @@ from mirage.commands.builtin.generic.archive.types import (Entry, MemberKind,
 from mirage.ops.types import LinkView, MountView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import CycleError
 
 # A mount boundary is a filesystem boundary, so both archivers stop at
 # one and say so in GNU tar's --one-file-system wording. Descending would
 # archive by accident exactly what the mount-root refusal forbids on
 # purpose.
 OTHER_FILESYSTEM = "file is on a different filesystem; not dumped"
-# Following a link back to something already followed on this operand.
-LOOP_SKIP = "symbolic link loop; not dumped"
+# Why a path could not be reached, in GNU's strerror wording. Both ride
+# on a fatal Problem; tar prints them after "Cannot stat: " and Info-ZIP
+# words every unreachable name the same way, so it ignores the reason.
+NO_SUCH = "No such file or directory"
+TOO_MANY_LEVELS = "Too many levels of symbolic links"
 
 StatFn = Callable[[PathSpec], Awaitable[FileStat]]
 WalkFn = Callable[[PathSpec, str], Awaitable[list[str]]]
@@ -126,17 +130,15 @@ async def follow(
     walk: WalkFn,
     links: LinkView | None,
     mounts: MountView | None,
-    seen: set[str],
     recurse: bool,
-) -> tuple[list[Entry], list[str], bool]:
+) -> tuple[list[Entry], list[str], str]:
     """What dereferencing puts in the archive in place of one symlink.
 
     The member keeps the link's own name and takes the target's content,
-    which is what dereferencing means. Two cases stay out of reach and
-    are reported rather than guessed at: a target on another mount
-    (whose bytes this backend cannot read, the same boundary a nested
-    mount draws) and a target already followed on this operand, which is
-    a loop.
+    which is what dereferencing means. Two links resolving to the same
+    file are not a loop and both are archived; a real loop is whatever
+    ``resolve`` refuses to resolve, since the namespace already walks
+    the chain under a hop limit and raises ELOOP at the end of it.
 
     Args:
         virtual (str): the link's absolute virtual path.
@@ -145,35 +147,34 @@ async def follow(
         walk (WalkFn): subtree listing, by find type.
         links (LinkView | None): the namespace's symlink facts.
         mounts (MountView | None): where the mount boundaries are.
-        seen (set[str]): targets already followed under this operand.
         recurse (bool): whether a target directory contributes its
             contents as well as itself.
 
     Returns:
-        tuple: the entries, why anything was skipped, and whether the
-        link could not be stat'd at all.
+        tuple: the entries, why anything was skipped, and why the link
+        was unreachable at all (empty when it was reached).
     """
     if links is None:
-        return [], [], False
-    target = links.resolve(virtual)
+        return [], [], ""
+    try:
+        target = links.resolve(virtual)
+    except CycleError:
+        return [], [], TOO_MANY_LEVELS
     if not same_mount(mounts, virtual, target):
-        return [], [OTHER_FILESYSTEM], False
-    if target in seen:
-        return [], [LOOP_SKIP], False
-    seen.add(target)
+        return [], [OTHER_FILESYSTEM], ""
     spec = child_spec(target, root)
     try:
         target_stat = await stat(spec)
     except (FileNotFoundError, ValueError):
-        return [], [], True
+        return [], [], NO_SUCH
     if target_stat.type != FileType.DIRECTORY:
-        return [Entry(name_path=virtual, kind="file", read=spec)], [], False
+        return [Entry(name_path=virtual, kind="file", read=spec)], [], ""
     if not recurse:
-        return [Entry(name_path=virtual, kind="dir")], [], False
+        return [Entry(name_path=virtual, kind="dir")], [], ""
     entries, crossings = await subtree(root, target, virtual, walk, links,
                                        mounts)
     reasons = [OTHER_FILESYSTEM] * len(crossings)
-    return [Entry(name_path=virtual, kind="dir"), *entries], reasons, False
+    return [Entry(name_path=virtual, kind="dir"), *entries], reasons, ""
 
 
 async def scan_operand(
@@ -211,16 +212,17 @@ async def scan_operand(
     entries: list[Entry] = []
     crossings: list[str] = []
     problems: list[Problem] = []
-    seen: set[str] = set()
     link_stat = links.stat_at(path.virtual) if links is not None else None
     if link_stat is not None and not dereference:
         entries.append(
             Entry(name_path=base, kind="link", target=link_target(link_stat)))
     elif link_stat is not None:
-        followed, why, fatal = await follow(base, path, stat, walk, links,
-                                            mounts, seen, recurse)
-        if fatal:
-            return Scan(problems=(Problem(path=base, fatal=True), ),
+        followed, why, unreachable = await follow(base, path, stat, walk,
+                                                  links, mounts, recurse)
+        if unreachable:
+            return Scan(problems=(Problem(path=base,
+                                          reason=unreachable,
+                                          fatal=True), ),
                         missing=True)
         entries.extend(followed)
         problems.extend(Problem(path=base, reason=reason) for reason in why)
@@ -228,7 +230,9 @@ async def scan_operand(
         try:
             root_stat = await stat(path)
         except (FileNotFoundError, ValueError):
-            return Scan(problems=(Problem(path=base, fatal=True), ),
+            return Scan(problems=(Problem(path=base,
+                                          reason=NO_SUCH,
+                                          fatal=True), ),
                         missing=True)
         if root_stat.type != FileType.DIRECTORY:
             entries.append(Entry(name_path=base, kind="file", read=path))
@@ -244,11 +248,14 @@ async def scan_operand(
             if entry.kind != "link":
                 expanded.append(entry)
                 continue
-            followed, why, fatal = await follow(entry.name_path, path, stat,
-                                                walk, links, mounts, seen,
-                                                recurse)
-            if fatal:
-                problems.append(Problem(path=entry.name_path, fatal=True))
+            followed, why, unreachable = await follow(entry.name_path, path,
+                                                      stat, walk, links,
+                                                      mounts, recurse)
+            if unreachable:
+                problems.append(
+                    Problem(path=entry.name_path,
+                            reason=unreachable,
+                            fatal=True))
                 continue
             expanded.extend(followed)
             problems.extend(

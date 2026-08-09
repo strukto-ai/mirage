@@ -434,6 +434,108 @@
       "flags": [
         "r"
       ]
+    },
+    {
+      "id": "arch_tar_stores_a_symlink_operand_as_a_link",
+      "seq": 910085,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/sl && echo alpha > /data/sl/a.txt && ln -s /data/sl/a.txt /data/sl/l && tar -cf /data/sl.tar -C /data/sl l && tar -xf /data/sl.tar -C /data/sl/out 2>/dev/null; readlink /data/sl/l",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sl/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_two_links_to_one_target_are_not_a_loop",
+      "seq": 910086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tl && echo beta > /data/tl/b.txt && ln -s /data/tl/b.txt /data/tl/one && ln -s /data/tl/b.txt /data/tl/two && tar -chf /data/tl.tar -C /data/tl . 2>/dev/null; tar -chf /data/tl2.tar -C /data tl && tar -tf /data/tl2.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "tl/\ntl/b.txt\ntl/one\ntl/two\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "h",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_reports_a_symlink_cycle_per_member",
+      "seq": 910087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/cy && ln -s /data/cy/b /data/cy/a && ln -s /data/cy/a /data/cy/b && tar -chf /data/cy.tar -C /data cy; echo exit=$?; tar -tf /data/cy.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=2\ncy/\n",
+        "stderr": "tar: cy/a: Cannot stat: Too many levels of symbolic links\ntar: cy/b: Cannot stat: Too many levels of symbolic links\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "c",
+        "h",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_fails_at_the_first_unenterable_c",
+      "seq": 910088,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/cgood && echo y > /data/cgood/y.txt && tar -cf /data/cc.tar -C /data/cmissing x -C /data/cgood y.txt; echo exit=$?; ls /data/cc.tar",
+      "expect": {
+        "exit": 2,
+        "stdout": "exit=2\n",
+        "stderr": "tar: /data/cmissing: Cannot open: No such file or directory\ntar: Error is not recoverable: exiting now\nls: cannot access '/data/cc.tar': No such file or directory\n"
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
+    },
+    {
+      "id": "arch_tar_listing_is_not_a_mount_root_source",
+      "seq": 910089,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/ml && echo m > /data/ml/m.txt && tar -cf /data/ml.tar -C /data ml && tar -tf /data/ml.tar data; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "ml/\nml/m.txt\nexit=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "C"
+      ]
     }
   ]
 }

@@ -66,6 +66,14 @@ export const JOB_BUILTINS: ReadonlySet<string> = new Set(['wait', 'fg', 'kill', 
 // `stat`, `file` and `du` are here because GNU lstats for all three,
 // but each takes -L to dereference after all, which `dereferences`
 // reads back out of the command line.
+//
+// `tar` and `zip` are here for a different reason and deliberately
+// carry no DEREFERENCE_FLAGS entry: they dereference too, but their
+// planner has to be the one doing it. Rewriting the operand up here
+// would hand the planner a target it can no longer tell was reached
+// through a link, so `tar` could not store a symlink member at all and
+// neither archiver could apply its own cross-mount refusal or ELOOP
+// wording. tar's -h and zip's -y are read by the planner instead.
 export const NO_FOLLOW_COMMANDS: ReadonlySet<string> = new Set([
   'rm',
   'mv',
@@ -77,6 +85,8 @@ export const NO_FOLLOW_COMMANDS: ReadonlySet<string> = new Set([
   'file',
   'du',
   'find',
+  'tar',
+  'zip',
 ])
 
 // Per-command flags that turn a no-follow command back into a

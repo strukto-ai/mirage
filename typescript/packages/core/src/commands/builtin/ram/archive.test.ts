@@ -17,7 +17,9 @@ import { describe, expect, it } from 'vitest'
 import type { RegisteredCommand } from '../../config.ts'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
-import { PathSpec } from '../../../types.ts'
+import type { LinkView } from '../../../ops/types.ts'
+import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
+import { CycleError } from '../../../utils/path.ts'
 const RAM_TAR = RAM_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
 const RAM_ZIP = RAM_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
 const RAM_UNZIP = RAM_COMMANDS.filter((c) => c.name === 'unzip' && c.filetype == null)
@@ -37,6 +39,38 @@ function dirSpec(virtual: string, raw: string): PathSpec {
   })
 }
 
+// The namespace's symlink facts, as the dispatcher would offer them.
+function linkView(entries: Record<string, string>, cycles = false): LinkView {
+  const statOf = (path: string): FileStat =>
+    ({
+      name: path,
+      type: FileType.SYMLINK,
+      size: (entries[path] ?? '').length,
+      extra: { [LINK_TARGET_KEY]: entries[path] ?? '' },
+    }) as FileStat
+  return {
+    statAt: (p) => (p in entries ? statOf(p) : null),
+    children: () => [],
+    subtree: (dir) =>
+      Object.keys(entries)
+        .sort()
+        .filter((k) => k.startsWith(rstrip(dir) + '/'))
+        .map((k) => [k, statOf(k)] as [string, FileStat]),
+    resolve: (p) => {
+      // The namespace walks the chain under a hop limit and raises
+      // ELOOP at the end of it; a real cycle never returns a target.
+      if (cycles) throw new CycleError(p)
+      return entries[p] ?? p
+    },
+    exists: (p) => Promise.resolve(p in entries),
+    targetStat: () => Promise.resolve(null),
+  }
+}
+
+function rstrip(s: string): string {
+  return s.endsWith('/') ? s.slice(0, -1) : s
+}
+
 interface CmdResult {
   out: Uint8Array
   writes: Record<string, Uint8Array>
@@ -51,6 +85,7 @@ async function runCmd(
   flags: Record<string, string | boolean | number | string[]>,
   texts: string[] = [],
   mountPrefix = '',
+  links: LinkView | null = null,
 ): Promise<CmdResult> {
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
@@ -61,6 +96,7 @@ async function runCmd(
     cwd: '/',
     resource,
     mountPrefix,
+    ...(links !== null ? { links } : {}),
   })
   if (result === null) {
     return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }
@@ -634,5 +670,83 @@ describe('unzip members', () => {
     expect(resource.store.files.has('/ext/docProps/app.xml')).toBe(false)
     expect(r.exitCode).toBe(11)
     expect(DEC.decode(r.stderr)).toBe(`${CAUTION}NOSUCHFILE.xml\n`)
+  })
+})
+
+describe('archive planner regressions', () => {
+  it('two links to one target are not a loop', async () => {
+    // GNU tar -h and Info-ZIP both store the two names.
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    resource.store.files.set('/d/a.txt', ENC.encode('alpha'))
+    const links = linkView({ '/d/one': '/d/a.txt', '/d/two': '/d/a.txt' })
+    const { out, exitCode, stderr } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/d', 'd')],
+      { c: true, h: true, v: true, f: '/out.tar' },
+      [],
+      '',
+      links,
+    )
+    expect(exitCode).toBe(0)
+    expect(DEC.decode(stderr)).toBe('')
+    expect(DEC.decode(out).trim().split('\n')).toEqual(['d/', 'd/a.txt', 'd/one', 'd/two'])
+  })
+
+  it('a real cycle is one fatal problem per member and keeps the directory', async () => {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    const links = linkView({ '/d/a': '/d/b', '/d/b': '/d/a' }, true)
+    const { exitCode, stderr } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/d', 'd')],
+      { c: true, h: true, f: '/out.tar' },
+      [],
+      '',
+      links,
+    )
+    expect(exitCode).toBe(2)
+    const text = DEC.decode(stderr)
+    expect(text).toContain('tar: d/a: Cannot stat: Too many levels of symbolic links')
+    expect(text).toContain('tar: d/b: Cannot stat: Too many levels of symbolic links')
+  })
+
+  it('stores a symlink operand as a symlink rather than its target', async () => {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    resource.store.files.set('/d/a.txt', ENC.encode('alpha'))
+    const links = linkView({ '/link': '/d/a.txt' })
+    const { out } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/link', 'link')],
+      { c: true, v: true, f: '/out.tar' },
+      [],
+      '',
+      links,
+    )
+    expect(DEC.decode(out).trim()).toBe('link')
+    const { out: listed } = await runCmd(RAM_TAR, resource, [], { t: true, f: '/out.tar' })
+    expect(DEC.decode(listed).trim()).toBe('link')
+  })
+
+  it('fails at the first unenterable -C, not the last', async () => {
+    // GNU chdirs at each -C, so a bad early one stops the whole run.
+    const resource = new RAMResource()
+    resource.store.dirs.add('/good')
+    resource.store.files.set('/good/y.txt', ENC.encode('y'))
+    const { exitCode, stderr } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/good/y.txt', 'y.txt')],
+      { c: true, f: '/out.tar', C: ['/missing', '/good'] },
+    )
+    expect(exitCode).toBe(2)
+    const text = DEC.decode(stderr)
+    expect(text).toContain('tar: /missing: Cannot open: No such file or directory')
+    expect(text).toContain('Error is not recoverable')
+    expect(resource.store.files.has('/out.tar')).toBe(false)
   })
 })
