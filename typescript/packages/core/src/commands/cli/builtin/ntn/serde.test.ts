@@ -106,6 +106,16 @@ describe('serde messages', () => {
     expect(serdeMessage(text)).toBeNull()
   })
 
+  it.each(VALID)('accepts nothing JSON.parse would reject: %j', (text) => {
+    // `api` calls JSON.parse only on input this scanner accepted, so a
+    // document it passes has to parse. A gap here would put a raw parse
+    // failure back on the command's error path, which is the failure the
+    // scanner was introduced to remove.
+    expect(() => {
+      JSON.parse(text)
+    }).not.toThrow()
+  })
+
   it('counts columns in bytes, not characters', () => {
     // `é` is two bytes, so the offending `x` sits at column 6 even though it
     // is the fifth character.

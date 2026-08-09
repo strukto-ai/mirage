@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+
 import pytest
 
 from mirage.commands.cli.builtin.ntn.serde import serde_message
@@ -106,6 +108,15 @@ def test_the_message_is_serdes_own(text: str, message: str):
 @pytest.mark.parametrize("text", VALID)
 def test_a_document_serde_accepts_reports_nothing(text: str):
     assert serde_message(text) is None
+
+
+@pytest.mark.parametrize("text", VALID)
+def test_nothing_the_scanner_accepts_can_still_raise(text: str):
+    # `api` calls json.loads only on input this scanner accepted, so a
+    # document it passes has to parse. A gap here would put a raw
+    # JSONDecodeError back on the command's error path, which is the
+    # failure the scanner was introduced to remove.
+    json.loads(text)
 
 
 def test_the_column_counts_bytes_not_characters():
