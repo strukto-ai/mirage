@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.s3.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatOverlay
@@ -44,7 +45,7 @@ async def stat(
     index: IndexCacheStore,
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")

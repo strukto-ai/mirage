@@ -17,7 +17,7 @@ from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -82,7 +82,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
 async def grep(
     paths: list[PathSpec],
     texts: Sequence[str] = (),
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
@@ -100,7 +100,7 @@ async def grep(
             stdin.
         texts (Sequence[str]): positional TEXT operands (the pattern unless
             -e/-f supplied it).
-        flags (Mapping[str, object] | None): raw flag kwargs from the
+        flags (Mapping[str, FlagValue] | None): raw flag kwargs from the
             dispatcher (e, f, i, v, n, c, args_l, w, F, o, q, r, R, m,
             A, B, C).
         readdir (Callable[..., Awaitable[list[str]]]): Directory reader.

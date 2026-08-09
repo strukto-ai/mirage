@@ -21,6 +21,7 @@ from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import IO, resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.provision.types import ProvisionResult
@@ -53,7 +54,7 @@ async def du_provision(
     paths: list[PathSpec],
     *texts: str,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("du " + " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
@@ -69,13 +70,12 @@ async def du(
     s: bool = False,
     a: bool = False,
     max_depth: str | None = None,
-    d: str | None = None,
     c: bool = False,
     index: IndexCacheStore,
     cwd: PathSpec | str = "/",
     L: bool = False,
     links: LinkView | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     out = await run_du(
         paths,
@@ -89,7 +89,6 @@ async def du(
         h=h,
         c=c,
         max_depth=max_depth,
-        d=d,
         links=None if L else links,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

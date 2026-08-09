@@ -19,11 +19,11 @@ from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes, relay
 from mirage.commands.builtin.generic.paste import paste as generic_paste
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec
 
 
-async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, object],
+async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
                     dispatch: Callable[..., Any]) -> CrossResult:
     """Paste files on different mounts via the shared generic paste.
 

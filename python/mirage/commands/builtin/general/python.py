@@ -19,6 +19,7 @@ from mirage.commands.builtin.general.interpreter import (resolve_source,
                                                          run_code)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.runtime.base import Runtime
 from mirage.types import PathSpec
@@ -36,7 +37,7 @@ async def _python3(
     exec_allowed: bool = True,
     runtime: Runtime | None = None,
     runtime_unavailable: str | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> CommandOutput:
     error, prepared = await resolve_source("python3", paths, texts, c, stdin,
                                            dispatch, cwd, exec_allowed)

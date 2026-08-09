@@ -21,7 +21,7 @@ from mirage.core.qdrant.query import (distinct_values, list_tables,
                                       rows_matching)
 from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.core.qdrant.scope import QdrantGroupScope, ScopeLevel, detect_scope
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
     return names
 
 
-def _blob_size(value: object) -> int | None:
+def _blob_size(value: JsonValue) -> int | None:
     # A payload whose blob column holds something undecodable must not take
     # the whole listing down with it: leave the size unknown and let read()
     # raise the same error it always did.

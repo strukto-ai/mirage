@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
@@ -20,7 +21,7 @@ from mirage.workspace.mount import MountRegistry
 
 async def _apply_find_actions(
     stdout: ByteSource | None,
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     registry: MountRegistry,
     cwd: str,
 ) -> tuple[ByteSource | None, bytes]:

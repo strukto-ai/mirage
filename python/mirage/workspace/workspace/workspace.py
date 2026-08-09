@@ -37,8 +37,8 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision, PolicyFn
 from mirage.shell.job_table import JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
-                          MountBackend, MountMode, PathSpec, StateKey,
-                          parse_mount_mode)
+                          JsonValue, MountBackend, MountMode, PathSpec,
+                          StateKey, parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
@@ -293,7 +293,7 @@ class Workspace:
     def register_cli(self,
                      name: str,
                      spec: CLISpec,
-                     config: dict[str, object] | None = None) -> CLIInstall:
+                     config: dict[str, JsonValue] | None = None) -> CLIInstall:
         """Install a CLI under a head word, fully separate from mounts.
 
         Args:
@@ -301,7 +301,7 @@ class Workspace:
                 two installs of one spec under different names are two
                 accounts).
             spec (CLISpec): the program tree.
-            config (dict[str, object] | None): installation config,
+            config (dict[str, JsonValue] | None): installation config,
                 validated through the spec's ``config_model`` (fail
                 loud at install time).
         """

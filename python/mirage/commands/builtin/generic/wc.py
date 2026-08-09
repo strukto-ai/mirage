@@ -7,7 +7,7 @@ from typing import Any, Callable
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.stream import ensure_stream
@@ -25,7 +25,7 @@ class WCFlags:
     total: str = "auto"
 
 
-def parse_flags(flags: Mapping[str, object]) -> WCFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> WCFlags:
     fl = FlagView(flags, spec=SPECS["wc"])
     total = fl.as_str("total") or "auto"
     if total not in _TOTAL_MODES:

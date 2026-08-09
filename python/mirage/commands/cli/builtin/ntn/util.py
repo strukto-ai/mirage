@@ -15,13 +15,16 @@
 import json
 
 from mirage.commands.errors import UsageError
+from mirage.commands.spec.types import FlagValue
+from mirage.types import JsonValue
 
 
-def parse_json_flag(value: object, flag: str) -> dict[str, object]:
+def parse_json_flag(value: FlagValue | None,
+                    flag: str) -> dict[str, JsonValue]:
     """Parse a JSON-object flag, sharing the gws wording.
 
     Args:
-        value (object): the raw flag value from the bag.
+        value (FlagValue | None): the raw flag value from the bag.
         flag (str): the flag's spelling for error messages.
 
     Returns:

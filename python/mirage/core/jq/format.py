@@ -17,13 +17,14 @@ import json
 import orjson
 
 from mirage.core.jq.types import DEFAULT_INDENT, RS, JqOptions
+from mirage.types import JsonValue
 
 NUL = b"\x00"
 NEWLINE = b"\n"
 RS_BYTES = RS.encode()
 
 
-def _dumps(value: object, opts: JqOptions) -> bytes:
+def _dumps(value: JsonValue, opts: JqOptions) -> bytes:
     """Serialize one output value the way jq's dumper would.
 
     orjson serves the two shapes it can express (compact and the default
@@ -62,7 +63,7 @@ def _terminator(opts: JqOptions) -> bytes:
     return b"" if opts.join_output else NEWLINE
 
 
-def format_one(value: object, opts: JqOptions) -> bytes:
+def format_one(value: JsonValue, opts: JqOptions) -> bytes:
     """Render one output value with its separator.
 
     Args:
@@ -80,11 +81,11 @@ def format_one(value: object, opts: JqOptions) -> bytes:
     return prefix + body + _terminator(opts)
 
 
-def format_jq_output(outputs: list[object], opts: JqOptions) -> bytes:
+def format_jq_output(outputs: list[JsonValue], opts: JqOptions) -> bytes:
     """Render every output of a jq program, one per line.
 
     Args:
-        outputs (list[object]): values the program emitted, in order.
+        outputs (list[JsonValue]): values the program emitted, in order.
         opts (JqOptions): resolved output options.
     """
     return b"".join(format_one(value, opts) for value in outputs)

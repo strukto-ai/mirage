@@ -18,6 +18,7 @@ from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -90,7 +91,7 @@ async def expr(
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         return b"\n", IOResult(exit_code=2)

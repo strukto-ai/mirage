@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic.truncate import \
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -18,12 +18,11 @@ async def truncate(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    s: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["truncate"])
-    size = s or fl.as_str("size")
+    size = fl.as_str("size")
     if size is None:
         raise ValueError("truncate: you must specify either '--size' or '-s'")
     truncate_fn = ops.require(Operation.TRUNCATE)

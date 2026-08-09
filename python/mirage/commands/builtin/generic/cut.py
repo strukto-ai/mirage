@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.cut_helper import cut_stream, parse_ranges
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -23,7 +23,7 @@ class CutFlags:
     zero_terminated: bool = False
 
 
-def parse_flags(flags: Mapping[str, object]) -> CutFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
     fl = FlagView(flags, spec=SPECS["cut"])
     bytes_range = fl.as_str("bytes")
     chars_range = fl.as_str("characters")
@@ -72,8 +72,8 @@ async def cut(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
-    **legacy_flags: object,
+    flags: Mapping[str, FlagValue] | None = None,
+    **legacy_flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags if flags is not None else legacy_flags)

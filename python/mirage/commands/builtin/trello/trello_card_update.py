@@ -17,7 +17,7 @@ import json
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.builtin.trello._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, FlagView, Option
+from mirage.commands.spec.types import CommandSpec, FlagValue, FlagView, Option
 from mirage.core.trello._client import card_update
 from mirage.core.trello.normalize import normalize_card
 from mirage.io.stream import yield_bytes
@@ -40,7 +40,7 @@ async def trello_card_update(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(_extra, spec=SPEC)
     config = accessor.config

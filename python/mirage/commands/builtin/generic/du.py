@@ -413,7 +413,6 @@ async def run_du(
     h: bool = False,
     c: bool = False,
     max_depth: str | None = None,
-    d: str | None = None,
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
 ) -> DuOutput:
@@ -436,18 +435,13 @@ async def run_du(
         h (bool): -h.
         c (bool): -c.
         max_depth (str | None): raw --max-depth text.
-        d (str | None): raw -d text, the short spelling of --max-depth.
         truncated (Callable[[], bool] | None): whether a walk was cut off.
         links (LinkView | None): the namespace's symlink facts.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
     """
-    flags = parse_flags(s=s,
-                        a=a,
-                        h=h,
-                        c=c,
-                        max_depth=max_depth if max_depth is not None else d)
+    flags = parse_flags(s=s, a=a, h=h, c=c, max_depth=max_depth)
     present, missing = await du_operands(paths,
                                          cwd,
                                          resolve_glob,

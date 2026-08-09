@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic.comm import comm as generic_comm
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,9 +30,8 @@ async def comm(
     *texts: str,
     stdin: ByteSource | None = None,
     check_order: bool = False,
-    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["comm"])
     if not ops.is_mounted(accessor) or len(paths) < 2:
@@ -47,7 +46,7 @@ async def comm(
         check_order=check_order or fl.as_bool("check_order"),
         output_delimiter=fl.as_str("output_delimiter") or "\t",
         total=fl.as_bool("total"),
-        zero_terminated=z or fl.as_bool("zero_terminated"),
+        zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 

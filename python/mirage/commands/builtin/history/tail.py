@@ -24,6 +24,7 @@ from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
 from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
@@ -45,7 +46,7 @@ async def tail(
     q: bool = False,
     v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None
     from_line: int | None = None

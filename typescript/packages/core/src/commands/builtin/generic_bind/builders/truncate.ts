@@ -1,4 +1,6 @@
 import { truncateGeneric } from '../../generic/truncate.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const TRUNCATE_BUILDER: Builder = {
@@ -6,8 +8,8 @@ export const TRUNCATE_BUILDER: Builder = {
   write: true,
   requirements: ['truncate'],
   fn: async (ops, accessor, paths, _texts, opts) => {
-    const sizeValue = opts.flags.size
-    if (typeof sizeValue !== 'string') {
+    const sizeValue = new FlagView(opts.flags, specOf('truncate')).asStr('size')
+    if (sizeValue === undefined) {
       throw new Error("truncate: you must specify either '--size' or '-s'")
     }
     const { truncate } = ops

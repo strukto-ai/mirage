@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
+from mirage.commands.spec.types import FlagValue
 from mirage.context import effective_mount_mode
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
@@ -432,7 +433,7 @@ class MountEntry:
         cmd_name: str,
         paths: list[PathSpec],
         texts: list[str],
-        flag_kwargs: dict[str, object],
+        flag_kwargs: dict[str, FlagValue],
         *,
         stdin: ByteSource | None = None,
         cwd: str = "/",
@@ -500,11 +501,12 @@ class MountEntry:
                                                 v.virtual, mount_prefix))
             elif isinstance(v, list) and v and all(
                     isinstance(item, PathSpec) for item in v):
+                specs = [item for item in v if isinstance(item, PathSpec)]
                 kw[k] = [
                     dataclasses.replace(item,
                                         resource_path=mount_key(
                                             item.virtual, mount_prefix))
-                    for item in v
+                    for item in specs
                 ]
             else:
                 kw[k] = v

@@ -20,13 +20,13 @@ from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes, transfer_primitives)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec, PrimitiveCopy
 
 
 async def run_cp(
         scopes: list[PathSpec],
-        flag_kwargs: dict[str, object],
+        flag_kwargs: dict[str, FlagValue],
         dispatch: Callable[..., Any],
         storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.

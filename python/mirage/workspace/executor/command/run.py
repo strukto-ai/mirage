@@ -18,6 +18,7 @@ from typing import Any
 from mirage.commands.builtin.generic.ls import LS_FAILURE
 from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.errors import UsageError
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -103,7 +104,8 @@ def line_runtime_for(
     return runtime, None
 
 
-def scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, object]:
+def scalar_find_flags(
+        flag_kwargs: dict[str, FlagValue]) -> dict[str, FlagValue]:
     # `multiple=True` on find value-flags makes parse_to_kwargs emit
     # lists; bespoke backend wrappers read these as scalars. Migrated
     # backends read the expression from `texts` and ignore flag_kwargs.
@@ -227,7 +229,7 @@ async def run_on_mount(
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
@@ -396,7 +398,7 @@ async def inject_child_mounts(
     stdout: ByteSource | None,
     registry: MountRegistry,
     paths: list[PathSpec],
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     cwd: str,
 ) -> ByteSource | None:
     if flag_kwargs.get("d") is True or flag_kwargs.get("R") is True:

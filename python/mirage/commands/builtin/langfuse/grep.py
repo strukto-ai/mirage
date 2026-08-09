@@ -26,7 +26,7 @@ from mirage.commands.builtin.langfuse.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.langfuse._client import (fetch_datasets, fetch_prompts,
                                           fetch_sessions, fetch_traces)
 from mirage.core.langfuse.read import read as langfuse_read
@@ -114,7 +114,7 @@ async def grep_provision(
     accessor: LangfuseAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor, paths,
@@ -132,7 +132,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)

@@ -17,6 +17,7 @@ from mirage.commands.builtin.lancedb._provision import metadata_provision
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.lancedb.search import search_rows_output
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -28,7 +29,7 @@ async def search_provision(
     accessor: LanceDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("search " + " ".join(texts))
 
@@ -45,7 +46,7 @@ async def search(
     method: str = "semantic",
     top_k: str | int | None = None,
     threshold: str | float = 0.0,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("search: query is required")

@@ -32,6 +32,7 @@ from mirage.core.linear.normalize import (normalize_comment, normalize_cycle,
                                           to_json_bytes)
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import JsonValue
 
 
 def _require_team(fl: FlagView) -> str:
@@ -42,9 +43,9 @@ def _require_team(fl: FlagView) -> str:
 
 
 async def _project_issue_rows(config: LinearConfig, team_id: str,
-                              project_id: str) -> list[dict[str, object]]:
+                              project_id: str) -> list[dict[str, JsonValue]]:
     team_issues = await list_team_issues(config, team_id)
-    rows: list[dict[str, object]] = []
+    rows: list[dict[str, JsonValue]] = []
     for issue in team_issues:
         if (issue.get("project") or {}).get("id") != project_id:
             continue
@@ -176,10 +177,10 @@ async def _run_comment_list(config: LinearConfig, texts: tuple[str, ...],
     ])
 
 
-async def _all_users(config: LinearConfig) -> list[dict[str, object]]:
+async def _all_users(config: LinearConfig) -> list[dict[str, JsonValue]]:
     teams = await list_teams(config)
     seen: set[str] = set()
-    users: list[dict[str, object]] = []
+    users: list[dict[str, JsonValue]] = []
     for team in teams:
         for user in await list_team_members(config, team["id"]):
             uid = user.get("id")

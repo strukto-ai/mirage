@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandName, FlagView
+from mirage.commands.spec.types import CommandName, FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
@@ -36,7 +36,7 @@ def _parse_count(value: str | None) -> int | None:
     return count
 
 
-def parse_flags(flags: Mapping[str, object]) -> UniqFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
     fl = FlagView(flags, spec=SPECS["uniq"])
     raw_all = fl.raw("all_repeated")
     all_repeated: str | None = None
@@ -175,7 +175,7 @@ async def uniq(
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     count: bool = False,
     duplicates_only: bool = False,
     unique_only: bool = False,

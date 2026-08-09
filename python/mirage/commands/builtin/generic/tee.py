@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import fs_error_line, fs_strerror
@@ -14,7 +14,7 @@ class TeeFlags:
     append: bool = False
 
 
-def parse_flags(flags: Mapping[str, object]) -> TeeFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> TeeFlags:
     # --output-error values are validated declaratively: the spec's
     # choices= makes the parser report any other value and the executor
     # refuse with GNU's ARGMATCH shape before tee runs.
@@ -53,7 +53,7 @@ async def tee(
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")

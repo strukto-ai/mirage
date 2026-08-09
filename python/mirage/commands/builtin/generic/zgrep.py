@@ -9,7 +9,7 @@ from mirage.commands.builtin.grep_helper import (build_pattern_str,
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -131,7 +131,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
 async def zgrep(
     paths: list[PathSpec],
     texts: Sequence[str] = (),
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     stdin: ByteSource | None = None,

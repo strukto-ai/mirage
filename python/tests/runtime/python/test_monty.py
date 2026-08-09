@@ -324,6 +324,23 @@ def test_monty_rename_routes_to_dispatch():
     assert dispatch.files["/s3/b.txt"] == b"one"
 
 
+def test_monty_unlink_after_rename_reaches_the_mount():
+    # monty 0.0.19 renames a file without restamping its own path, so
+    # the following unlink used to die with KeyError('a.txt') after the
+    # rename had already landed on the backend.
+    dispatch = FakeDispatch({"/s3/a.txt": b"one"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, lambda: [])
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "Path('/s3/a.txt').rename('/s3/b.txt')\n"
+                    "Path('/s3/b.txt').unlink()")))
+    assert result.exit_code == 0, result.stderr
+    assert dispatch.unlinked == ["/s3/b.txt"]
+    assert "/s3/b.txt" not in dispatch.files
+
+
 def test_monty_rmdir_routes_to_dispatch():
     dispatch = FakeDispatch({"/s3/dir/keep.txt": b"x"})
     runtime = MontyRuntime()
@@ -359,14 +376,14 @@ async def test_monty_runs_off_loop_and_cancellation_halts():
 
 
 def test_monty_missing_extra_raises(monkeypatch):
-    import mirage.runtime.python.monty as monty_module
+    import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
         MontyRuntime()
 
 
 def test_python3_reports_missing_extra(monkeypatch):
-    import mirage.runtime.python.monty as monty_module
+    import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
     io = asyncio.run(ws.execute("python3 -c 'print(1)'"))
@@ -375,7 +392,7 @@ def test_python3_reports_missing_extra(monkeypatch):
 
 
 def test_workspace_explicit_monty_fails_loud(monkeypatch):
-    import mirage.runtime.python.monty as monty_module
+    import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
         Workspace({"/data": RAMResource()},
@@ -611,7 +628,7 @@ async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
     itself: one leaked lease would not exhaust a CPU-sized pool, so a
     later eval succeeding proves nothing.
     """
-    import mirage.runtime.python.monty as monty_mod
+    import mirage.runtime.python.monty.runtime as monty_mod
     released: list[object] = []
     original = monty_mod._release
 

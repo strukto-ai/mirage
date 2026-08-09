@@ -23,7 +23,7 @@ from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
 from mirage.commands.builtin.utils.wrap import call_read_bytes
 from mirage.commands.errors import UsageError
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -169,7 +169,7 @@ _PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
 _PUSHDOWN_FILTER_STR = ("type", "glob")
 
 
-def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:
+def has_search_shaping_flags(flags: Mapping[str, FlagValue] | None) -> bool:
     """True when a flag alters the match set or output shape of grep/rg.
 
     A search push-down prints each matching record as one whole line, so it
@@ -180,7 +180,7 @@ def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:
     specs (rg simply never sets the grep-only keys).
 
     Args:
-        flags (Mapping[str, object] | None): raw flag kwargs.
+        flags (Mapping[str, FlagValue] | None): raw flag kwargs.
     """
     fl = FlagView(flags)
     if any(fl.as_bool(k) for k in _PUSHDOWN_SHAPING_BOOL):
@@ -190,7 +190,7 @@ def has_search_shaping_flags(flags: Mapping[str, object] | None) -> bool:
     return any(fl.as_str(k) is not None for k in _PUSHDOWN_FILTER_STR)
 
 
-def search_pushdown_ok(flags: Mapping[str, object] | None,
+def search_pushdown_ok(flags: Mapping[str, FlagValue] | None,
                        pattern: str) -> bool:
     """True when a literal-substring push-down faithfully reproduces grep/rg.
 
@@ -202,7 +202,7 @@ def search_pushdown_ok(flags: Mapping[str, object] | None,
     has_search_shaping_flags alone instead.
 
     Args:
-        flags (Mapping[str, object] | None): raw flag kwargs.
+        flags (Mapping[str, FlagValue] | None): raw flag kwargs.
         pattern (str): the resolved search pattern.
     """
     if "\n" in pattern:
@@ -256,9 +256,9 @@ async def resolve_pattern(
 
     pattern_file = flags.raw("f")
     if isinstance(pattern_file, (PathSpec, list)):
-        files = (pattern_file
-                 if isinstance(pattern_file, list) else [pattern_file])
-        for pf in files:
+        raw = (pattern_file
+               if isinstance(pattern_file, list) else [pattern_file])
+        for pf in [item for item in raw if isinstance(item, PathSpec)]:
             file_data = await call_read_bytes(read_bytes,
                                               pf,
                                               prefix=mount_prefix_of(

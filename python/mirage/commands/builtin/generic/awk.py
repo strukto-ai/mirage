@@ -10,7 +10,7 @@ from mirage.commands.builtin.utils.formatting import format_number, to_number
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -235,7 +235,7 @@ async def _awk_stream(
 async def awk(
     paths: list[PathSpec],
     texts: Sequence[str] = (),
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
@@ -252,7 +252,7 @@ async def awk(
             consume stdin.
         texts (Sequence[str]): positional TEXT operands (the program unless
             -f supplied it).
-        flags (Mapping[str, object] | None): raw flag kwargs from the
+        flags (Mapping[str, FlagValue] | None): raw flag kwargs from the
             dispatcher (F, v, f).
         read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader used
             for the -f program file.

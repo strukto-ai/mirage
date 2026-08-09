@@ -26,7 +26,8 @@ from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue,
                                   PrefixSource, RunArgs, RunResult,
                                   ScriptSource)
-from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.wasm import WasmRuntime, WasmVFS
 
 wasmtime: Any
 try:
@@ -142,9 +143,10 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
         # alone, so the js command keeps its spelling.
         named = [args.prog] if args.prog else []
         argv += ["-e", args.code, *named, *args.args]
-        bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
-                  if self._dispatch is not None else None)
-        fs = GuestFs(bridge=bridge, mount_prefixes=self._mount_prefixes)
+        core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
+                           self._mount_prefixes)
+                if self._dispatch is not None else None)
+        fs = WasmVFS(core=core)
         stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,

@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import split_readable
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.types import FlagValue
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain, chain_cachables
 from mirage.io.types import ByteSource, IOResult
@@ -33,7 +34,7 @@ async def cat(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     wants_display = needs_display(flags)
     if paths and ops.is_mounted(accessor):

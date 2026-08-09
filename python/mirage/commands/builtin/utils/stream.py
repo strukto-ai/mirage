@@ -12,10 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TypeVar
 
 from mirage.io.types import ByteSource
+
+# The backend config a platform command threads through to its reader.
+# Generic rather than a union: the config and the reader that consumes
+# it must be the same backend's, which a union would not enforce.
+ConfigT = TypeVar("ConfigT")
 
 
 async def _read_stdin_async(stdin: ByteSource | None) -> bytes | None:
@@ -51,8 +56,8 @@ def _resolve_source(
 
 
 async def resolve_text_input(
-    read_bytes: Callable[..., Any],
-    config: object,
+    read_bytes: Callable[[ConfigT, str], Awaitable[bytes]],
+    config: ConfigT,
     *,
     inline_text: str | None,
     file_path: str | None,

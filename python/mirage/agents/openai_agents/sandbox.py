@@ -178,6 +178,8 @@ class MirageSandboxClient(BaseSandboxClient[None]):
 
     def deserialize_session_state(
         self,
+        # `object`, not JsonValue: the base class in the agents SDK
+        # declares it, and narrowing an override breaks Liskov.
         payload: dict[str, object],
     ) -> SandboxSessionState:
         return MirageSandboxSessionState.model_validate(payload)

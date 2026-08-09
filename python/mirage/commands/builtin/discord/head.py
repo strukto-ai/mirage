@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.discord._client import discord_get
 from mirage.core.discord.history import date_to_snowflake
 from mirage.core.discord.read import read as discord_read
@@ -37,7 +38,7 @@ async def head_provision(
     accessor: DiscordAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor, paths,
@@ -55,7 +56,7 @@ async def head(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

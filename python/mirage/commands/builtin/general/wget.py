@@ -20,6 +20,7 @@ from mirage.commands.builtin.utils.http import HttpConnectError, _http_get
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import WALK_ERRORS
@@ -48,7 +49,7 @@ async def wget(
     spider: bool = False,
     dispatch: Callable[..., Any] | None = None,
     cwd: PathSpec | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise UsageError(USAGE, exit_code=EXIT_GENERIC)

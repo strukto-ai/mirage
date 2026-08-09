@@ -13,13 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.grep_helper import BINARY_EXTENSIONS
 from mirage.commands.resolve import get_extension
+from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.constants import flag_kwarg_name
+from mirage.commands.spec.types import CommandSpec, FlagValue, FlagView
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import FileType, PathSpec
@@ -30,6 +33,46 @@ logger = logging.getLogger(__name__)
 # Cap on entries visited by a planning walk (grep -r): beyond it the
 # estimate degrades to an UNKNOWN floor instead of walking forever.
 MAX_PLAN_WALK = 1000
+
+
+def _flag_of(spec: CommandSpec | None, spelling: str,
+             flags: Mapping[str, FlagValue]) -> FlagValue | None:
+    """Read the option a spelling names, whatever this command calls it.
+
+    A provision function is shared across commands, so it cannot name a
+    dest the way a handler does: ``-c`` is ``bytes`` on head and ``c`` on
+    tail. Resolving the spelling through the compiled spec asks the
+    question the estimator actually means -- "the -c option of whichever
+    command this is" -- and returns None when the command does not
+    declare it at all.
+
+    Args:
+        spec (CommandSpec | None): the invoked command's spec.
+        spelling (str): dashed spelling as typed, e.g. ``-c``.
+        flags (Mapping[str, FlagValue]): the parsed flag bag.
+    """
+    if spec is None:
+        return None
+    dest = compile_spec(spec).dest.get(spelling)
+    if dest is None:
+        return None
+    return FlagView(flags, spec=spec).raw(flag_kwarg_name(dest))
+
+
+def _walks_a_subtree(spec: CommandSpec | None,
+                     flags: Mapping[str, FlagValue]) -> bool:
+    """Whether -r/-R asked this command to recurse.
+
+    Only a boolean -r/-R means recursion: ``touch -r REF`` names a
+    reference file and walks nothing, so a value-typed option under the
+    same spelling never counts.
+
+    Args:
+        spec (CommandSpec | None): the invoked command's spec.
+        flags (Mapping[str, FlagValue]): the parsed flag bag.
+    """
+    return any(
+        _flag_of(spec, spelling, flags) is True for spelling in ("-r", "-R"))
 
 
 async def _expand_globs(
@@ -191,10 +234,9 @@ def make_head_tail_provision(
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        n: str | int | None = None,
-        c: str | int | None = None,
+        spec: CommandSpec | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **kwargs,
+        **flags: FlagValue,
     ) -> ProvisionResult:
         if not paths:
             # Pathless invocations are stdin-driven (pipe stage, heredoc,
@@ -215,10 +257,8 @@ def make_head_tail_provision(
                 precision=Precision.UNKNOWN,
             )
         # A byte-count -c only; boolean -c flags (e.g. file -c) don't cap.
-        # head spells the cap 'bytes' (the canonical -c/--bytes dest);
-        # tail declares -c short-only, so its cap still arrives as 'c'.
-        cap = c if c is not None else kwargs.get("bytes")
-        if cap is not None and not isinstance(cap, bool):
+        cap = _flag_of(spec, "-c", flags)
+        if isinstance(cap, (str, int)) and not isinstance(cap, bool):
             c_bytes = int(cap)
             total = sum(min(c_bytes, size) for _, size in resolved)
             return ProvisionResult(
@@ -374,12 +414,12 @@ def make_sed_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
         paths: list[PathSpec],
         *_args: str,
         command: str = "",
-        i: bool = False,
+        spec: CommandSpec | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        **kwargs,
+        **flags: FlagValue,
     ) -> ProvisionResult:
         result = await base(accessor, paths, command=command, index=index)
-        if i:
+        if _flag_of(spec, "-i", flags) is not None:
             result.precision = Precision.UNKNOWN
         return result
 
@@ -403,14 +443,13 @@ def make_search_provision(
         paths: list[PathSpec],
         *texts: str,
         command: str = "",
+        spec: CommandSpec | None = None,
         index: IndexCacheStore = NULL_INDEX,
-        r: bool = False,
-        R: bool = False,
-        **kwargs,
+        **flags: FlagValue,
     ) -> ProvisionResult:
         rendered = (command or ""
                     ) + " " + " ".join(list(texts) + [str(p) for p in paths])
-        if (r or R) and readdir is not None and paths:
+        if _walks_a_subtree(spec, flags) and readdir is not None and paths:
             roots = await _expand_globs(resolve_glob, accessor, paths, index)
             sized, complete = await _walk_files(readdir, stat, accessor, roots,
                                                 index)
@@ -511,10 +550,9 @@ async def write_metadata_provision(
     paths: list[PathSpec],
     *_args: str,
     command: str = "",
-    r: bool = False,
-    R: bool = False,
+    spec: CommandSpec | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> ProvisionResult:
     """Provision for metadata-only writes (rm, mkdir, touch, ln).
 
@@ -523,7 +561,8 @@ async def write_metadata_provision(
     count is only a floor and precision degrades to UNKNOWN.
     """
     n = max(1, len(paths) if paths else 1)
-    precision = Precision.UNKNOWN if r or R else Precision.EXACT
+    precision = (Precision.UNKNOWN
+                 if _walks_a_subtree(spec, flags) else Precision.EXACT)
     return ProvisionResult(
         command=command,
         network_read_low=0,

@@ -22,13 +22,14 @@ from mirage.commands.builtin.generic.crossmount.relay.join import run_join
 from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
 from mirage.commands.builtin.generic.crossmount.relay.paste import run_paste
 from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
+from mirage.commands.spec.types import FlagValue
 from mirage.types import PathSpec
 
 
 async def run_relay(
         cmd_name: str,
         scopes: list[PathSpec],
-        flag_kwargs: dict[str, object],
+        flag_kwargs: dict[str, FlagValue],
         dispatch: Callable[..., Any],
         storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Run a command whose data must colocate across mounts.

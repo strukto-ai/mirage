@@ -3,6 +3,7 @@ from mirage.commands.builtin.chroma.io import resolve_glob
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.chroma import search as search_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -23,7 +24,7 @@ async def search(
     top_k: str | int = 10,
     index: IndexCacheStore,
     cwd: PathSpec | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("search: query is required")

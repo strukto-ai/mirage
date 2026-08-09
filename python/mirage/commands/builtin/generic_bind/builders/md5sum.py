@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,14 +31,9 @@ async def md5sum(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    c: bool = False,
-    b: bool = False,
-    t: bool = False,
-    w: bool = False,
-    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["md5sum"])
     paths, err = await resolve_readable(ops, accessor, paths, index, "md5sum")
@@ -50,15 +45,15 @@ async def md5sum(
                        read_bytes=bound_op(ops.read_bytes, accessor, index),
                        read_stream=bound_op(ops.read_stream, accessor, index),
                        stdin=stdin,
-                       check=c or fl.as_bool("check"),
-                       binary=b or fl.as_bool("binary"),
+                       check=fl.as_bool("check"),
+                       binary=fl.as_bool("binary"),
                        tag=fl.as_bool("tag"),
-                       zero=z or fl.as_bool("zero"),
+                       zero=fl.as_bool("zero"),
                        strict=fl.as_bool("strict"),
                        ignore_missing=fl.as_bool("ignore_missing"),
                        status=fl.as_bool("status"),
                        quiet=fl.as_bool("quiet"),
-                       warn=w or fl.as_bool("warn"),
+                       warn=fl.as_bool("warn"),
                        cwd=cwd), err)
 
 

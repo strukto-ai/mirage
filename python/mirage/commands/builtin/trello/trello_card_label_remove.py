@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, Option
+from mirage.commands.spec.types import CommandSpec, FlagValue, Option
 from mirage.core.trello._client import card_remove_label
 from mirage.core.trello.normalize import normalize_card
 from mirage.io.stream import yield_bytes
@@ -34,7 +34,7 @@ async def trello_card_label_remove(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     config = accessor.config
     card_id = _extra.get("card_id")

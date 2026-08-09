@@ -27,6 +27,7 @@ from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
+from mirage.types import JsonValue
 from mirage.workspace.session.session import Session
 
 
@@ -60,7 +61,7 @@ def _run_fuse(fs: MirageFS,
     # and rename never reaches userspace. No-op off macOS.
     install_macfuse_extensions()
     win_opts = {"uid": -1, "gid": -1} if sys.platform == "win32" else {}
-    opts: dict[str, object] = {"attr_timeout": 0}
+    opts: dict[str, JsonValue] = {"attr_timeout": 0}
     if backend is MountBackend.FSKIT:
         # The recipe verified on a real macFUSE 5.x FSKit mount (issue #82):
         # backend=fskit plus a volname, and NO direct_io. Do not "restore"

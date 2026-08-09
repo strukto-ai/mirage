@@ -22,6 +22,7 @@ from mirage.core.jq.eval import args_object, jq_eval, references_args
 from mirage.core.jq.format import format_one
 from mirage.core.jq.types import RS, JqOptions
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.types import JsonValue
 
 
 def parse_jsonl(raw: bytes) -> list[Any]:
@@ -72,7 +73,7 @@ def parse_json_docs(raw: bytes) -> list[Any]:
     return docs
 
 
-def parse_json_auto(raw: bytes) -> object:
+def parse_json_auto(raw: bytes) -> JsonValue:
     docs = parse_json_docs(raw)
     if not docs:
         raise ValueError("jq: empty input")
@@ -113,7 +114,7 @@ def split_raw_lines(raw: bytes) -> list[str]:
     return lines
 
 
-def parse_json_path(raw: bytes, path: str) -> object:
+def parse_json_path(raw: bytes, path: str) -> JsonValue:
     if path.endswith(".jsonl") or path.endswith(".ndjson"):
         return parse_jsonl(raw)
     return orjson.loads(raw)

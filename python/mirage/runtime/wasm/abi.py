@@ -15,6 +15,8 @@
 import errno as host_errno
 import struct
 
+from mirage.runtime.errors import CrossMountError
+
 # WASI preview1 wire constants. These are NOT the host's POSIX values:
 # preview1 numbers its errnos and open flags independently (ENOENT is 44
 # on the wire, 2 in Python's errno module), so nothing here can be
@@ -62,8 +64,13 @@ def errno_for(exc: BaseException) -> int:
     """Map a host/dispatch exception to its preview1 errno.
 
     Args:
-        exc (BaseException): exception raised by a GuestFs operation.
+        exc (BaseException): exception raised by a WasmVFS operation.
     """
+    if isinstance(exc, CrossMountError):
+        # Each mount is its own preopen to a WASI guest, so a rename
+        # between two of them reads as a destination that is not there.
+        # pathlib's answer (EXDEV) is the other tier's; see CrossMountError.
+        return ENOENT
     if isinstance(exc, FileNotFoundError):
         return ENOENT
     if isinstance(exc, FileExistsError):

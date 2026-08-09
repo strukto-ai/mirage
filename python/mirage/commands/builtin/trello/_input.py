@@ -20,6 +20,16 @@ from mirage.io.types import ByteSource
 from mirage.resource.trello.config import TrelloConfig
 
 
+async def _read_file(config: TrelloConfig, path: str) -> bytes:
+    """Read one operand path with the shared (config, path) reader shape.
+
+    The core reader also takes the virtual path, which it uses only to
+    quote in an ENOENT; a ``--*-file`` operand is already virtual, so it
+    is both arguments.
+    """
+    return await read_bytes(config, path, path)
+
+
 async def resolve_text_input(
     config: TrelloConfig,
     *,
@@ -28,7 +38,7 @@ async def resolve_text_input(
     stdin: ByteSource | None,
     error_message: str,
 ) -> str:
-    return await _resolve_text_input(read_bytes,
+    return await _resolve_text_input(_read_file,
                                      config,
                                      inline_text=inline_text,
                                      file_path=file_path,

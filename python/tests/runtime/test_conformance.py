@@ -92,8 +92,8 @@ class CountingDispatch:
 
     The seam for the append row: every runtime takes the dispatch as an
     injected callable, so byte accounting needs no new hook. Supports
-    the full op vocabulary the runtimes emit (monty's OS callbacks and
-    GuestFs's bridge calls).
+    the full op vocabulary the runtimes emit, which both tiers now
+    reach through RuntimeVFS.
 
     Args:
         files (dict[str, bytes]): initial virtual file contents.
@@ -477,14 +477,8 @@ APPEND_LOOP_JS = ("for (let i = 0; i < 8; i++) { "
     "runtime",
     [
         pytest.param("monty"),
-        pytest.param("wasi",
-                     marks=(wasi_live,
-                            pytest.mark.xfail(strict=True,
-                                              reason=APPEND_AMPLIFIED))),
-        pytest.param("quickjs",
-                     marks=(quickjs_live,
-                            pytest.mark.xfail(strict=True,
-                                              reason=APPEND_AMPLIFIED))),
+        pytest.param("wasi", marks=wasi_live),
+        pytest.param("quickjs", marks=quickjs_live),
     ],
 )
 async def test_append_ships_only_the_deltas(runtime: str):

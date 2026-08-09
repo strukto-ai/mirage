@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,20 +33,13 @@ async def csplit(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    f: str | PathSpec | None = None,
-    n: str | None = None,
-    b: str | None = None,
-    k: bool = False,
-    s: bool = False,
-    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["csplit"])
     paths = await resolve_or_empty(ops, accessor, paths, index)
     prefix_flag = fl.raw("prefix")
-    prefix = prefix_flag if isinstance(prefix_flag,
-                                       (str, PathSpec)) else f or "xx"
+    prefix = prefix_flag if isinstance(prefix_flag, (str, PathSpec)) else "xx"
     return await generic_csplit(
         paths,
         texts,
@@ -54,12 +47,12 @@ async def csplit(
         write_bytes=partial(ops.require(Operation.WRITE), accessor),
         stdin=stdin,
         prefix=prefix,
-        digits=int(n or fl.as_str("digits") or "2"),
-        suffix_format=b or fl.as_str("suffix_format"),
-        keep_on_error=k or fl.as_bool("keep_files"),
-        silent=s or fl.as_bool("quiet") or fl.as_bool("silent"),
+        digits=int(fl.as_str("digits") or "2"),
+        suffix_format=fl.as_str("suffix_format"),
+        keep_on_error=fl.as_bool("keep_files"),
+        silent=fl.as_bool("quiet") or fl.as_bool("silent"),
         suppress_matched=fl.as_bool("suppress_matched"),
-        elide_empty=z or fl.as_bool("elide_empty_files"))
+        elide_empty=fl.as_bool("elide_empty_files"))
 
 
 BUILDER = Builder('csplit',

@@ -5,7 +5,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify._client import get_document_detail
 from mirage.core.dify.path import resolve_path
 from mirage.core.dify.tree import extract_document_size
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, JsonValue, PathSpec
 
 
 async def stat_light(accessor: DifyAccessor,
@@ -73,7 +73,7 @@ async def stat(accessor: DifyAccessor,
     )
 
 
-def timestamp_to_zulu(value: object) -> str | None:
+def timestamp_to_zulu(value: JsonValue) -> str | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):

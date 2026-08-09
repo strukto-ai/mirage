@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic.find import (is_link, parse_find_args,
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.email._client import fetch_headers
 from mirage.core.email.readdir import _date_bucket, _sanitize
 from mirage.core.email.readdir import readdir as _readdir
@@ -49,7 +50,7 @@ async def find_provision(
     accessor: EmailAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("find " + " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
@@ -78,7 +79,7 @@ async def find(
     L: bool = False,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
     # A pure -name search at folder level pushes the subject query down to

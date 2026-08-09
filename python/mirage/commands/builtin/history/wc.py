@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.provision import \
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
 from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
@@ -40,7 +41,7 @@ async def wc(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

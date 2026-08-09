@@ -21,6 +21,7 @@ from mirage.commands.builtin.utils.http import (HttpConnectError,
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import (WALK_ERRORS, OperationNotSupportedError,
@@ -69,7 +70,7 @@ async def curl(
     S: bool = False,
     dispatch: Callable[..., Any] | None = None,
     cwd: PathSpec | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     headers: dict[str, str] = {}
     if H:

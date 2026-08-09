@@ -20,7 +20,7 @@ from typing import Any, Callable, Generic, Literal, TypeVar
 from pydantic import BaseModel
 
 from mirage.commands.cli.compile import validate_cli
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import CommandSpec, FlagValue, ParsedFlagValue
 from mirage.io.types import ByteSource
 from mirage.ops.types import MountRoot, StatPath
 from mirage.runtime.types import ScriptSource
@@ -50,7 +50,7 @@ class UsageStyle(Enum):
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
-FlagBag = dict[str, str | bool | int | list[str]]
+FlagBag = dict[str, ParsedFlagValue]
 
 ConfigT = TypeVar("ConfigT")
 
@@ -107,7 +107,7 @@ class CLIInvocation(Generic[ConfigT]):
         paths (tuple[PathSpec, ...]): path-typed operands of the leaf,
             cwd-resolved.
         texts (tuple[str, ...]): text-typed operands of the leaf.
-        flags (Mapping[str, object]): merged group and leaf flags keyed
+        flags (Mapping[str, FlagValue]): merged group and leaf flags keyed
             by kwarg name (``flag_kwarg_name`` spelling), read through
             FlagView. PATH-typed flag values arrive as PathSpec.
         stdin (ByteSource | None): piped input, None when the line has
@@ -121,7 +121,7 @@ class CLIInvocation(Generic[ConfigT]):
     argv: tuple[str, ...] = ()
     paths: tuple[PathSpec, ...] = ()
     texts: tuple[str, ...] = ()
-    flags: Mapping[str, object] = field(default_factory=dict)
+    flags: Mapping[str, FlagValue] = field(default_factory=dict)
     stdin: ByteSource | None = None
     env: Mapping[str, str] = field(default_factory=dict)
     ops: CLIVerbOpts | None = None

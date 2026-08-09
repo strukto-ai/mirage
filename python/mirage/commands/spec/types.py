@@ -15,7 +15,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.types import PathSpec
@@ -56,6 +56,20 @@ class CommandName(StrEnum):
 # == "bool" (or their negations) only, so new validator types never
 # touch classification sites.
 ValueType = Literal["bool", "str", "int", "float", "path"]
+
+# What the parser itself can put in the bag: it works on argv, so every
+# value is still text, or the bool/int a flag's own shape implies.
+ParsedFlagValue: TypeAlias = str | bool | int | list[str]
+# What a command receives. The executor rewrites PATH-typed values into
+# PathSpec on the way through (``mount.execute_cmd``), which is the one
+# member the TypeScript twin does not carry -- its bag keeps resolved
+# virtual-path strings instead. A command takes the bag as
+# ``**flags: FlagValue`` and reads it through FlagView, never by
+# unpacking these members. The mixed list is the ``pair`` shape: a pair
+# option accumulates (name, value) flattened, so a PATH-typed pair like
+# jq's ``--rawfile name file`` alternates text and PathSpec.
+FlagValue: TypeAlias = (ParsedFlagValue | PathSpec | list[PathSpec]
+                        | list[str | PathSpec])
 
 
 @dataclass(frozen=True)
@@ -180,7 +194,7 @@ class FlagView:
     `flags.get(...) is True` and isinstance chains.
 
     Args:
-        flags (Mapping[str, object] | None): raw flag kwargs.
+        flags (Mapping[str, FlagValue] | None): raw flag kwargs.
         spec (CommandSpec | None): when given, reads of names the spec does
             not declare raise KeyError. A missing key is otherwise
             indistinguishable from "flag not passed", so a typo in the name
@@ -188,7 +202,7 @@ class FlagView:
     """
 
     def __init__(self,
-                 flags: Mapping[str, object] | None,
+                 flags: Mapping[str, FlagValue] | None,
                  spec: CommandSpec | None = None) -> None:
         self._flags = flags if flags is not None else {}
         self._allowed = spec_flag_names(spec) if spec is not None else None
@@ -257,7 +271,7 @@ class FlagView:
             return [value]
         return []
 
-    def raw(self, name: str) -> object:
+    def raw(self, name: str) -> FlagValue | None:
         return self._flags.get(self._key(name))
 
 
@@ -283,7 +297,7 @@ def spec_flag_names(spec: CommandSpec) -> frozenset[str]:
 
 @dataclass
 class ParsedArgs:
-    flags: dict[str, str | bool | int | list[str]]
+    flags: dict[str, ParsedFlagValue]
     args: list[tuple[str, ValueType]]
     cache_paths: list[str] = field(default_factory=list)
     path_flag_values: list[str] = field(default_factory=list)

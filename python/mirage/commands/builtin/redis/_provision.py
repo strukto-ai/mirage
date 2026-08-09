@@ -14,6 +14,7 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.spec.types import FlagValue
 from mirage.core.redis.stat import stat as redis_stat
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -51,10 +52,10 @@ async def _resolve_sizes(
 async def file_read_provision(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    *_args: object,
+    *_args: str,
     command: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     """Cost estimate for full file reads (cat, wc, grep) backed by Redis.
 
@@ -79,12 +80,12 @@ async def file_read_provision(
 async def head_tail_provision(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    *_args: object,
+    *_args: str,
     command: str = "",
     n: str | int | None = None,
     c: str | int | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     """Cost estimate for partial reads (head, tail) backed by Redis.
 
@@ -110,10 +111,10 @@ async def head_tail_provision(
 async def metadata_provision(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    *_args: object,
+    *_args: str,
     command: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find) backed by Redis."""
     n = max(1, len(paths) if paths else 1)

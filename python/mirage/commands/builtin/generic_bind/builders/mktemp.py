@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic.mktemp import mktemp as generic_mktemp
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,12 +30,9 @@ async def mktemp(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    d: bool = False,
     p: PathSpec | None = None,
     t: bool = False,
-    u: bool = False,
-    q: bool = False,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["mktemp"])
     tmpdir_flag = fl.raw("tmpdir")
@@ -50,12 +47,12 @@ async def mktemp(
         *texts,
         mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
         write_bytes_fn=partial(ops.require(Operation.WRITE), accessor),
-        d=d or fl.as_bool("directory"),
+        d=fl.as_bool("directory"),
         p=tmpdir,
         t=t,
-        dry_run=u or fl.as_bool("dry_run"),
+        dry_run=fl.as_bool("dry_run"),
         suffix=fl.as_str("suffix") or "",
-        quiet=q or fl.as_bool("quiet"),
+        quiet=fl.as_bool("quiet"),
     )
 
 

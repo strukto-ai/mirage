@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.sed import sed as generic_sed
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.provision import make_sed_provision
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -84,23 +85,24 @@ async def sed(
     *texts: str,
     stdin: ByteSource | None = None,
     i: bool = False,
-    e: object = None,
-    f: object = None,
+    e: FlagValue | None = None,
+    f: FlagValue | None = None,
     n: bool = False,
     E: bool = False,
     r: bool = False,
     cwd: PathSpec | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     # The script comes from -e expressions and -f script files (joined
     # with newlines, -e then -f as grep does) when any were given,
     # otherwise from the first positional operand.
-    e_list = e if isinstance(e, list) else ([e] if isinstance(e, str) else [])
-    f_files = f if isinstance(
-        f, list) else ([f] if isinstance(f, PathSpec) else [])
-    script_parts = list(e_list) + await _scripts_from_files(
-        ops, accessor, index, f_files)
+    e_raw = e if isinstance(e, list) else [e]
+    e_list = [item for item in e_raw if isinstance(item, str)]
+    f_raw = f if isinstance(f, list) else [f]
+    f_files = [item for item in f_raw if isinstance(item, PathSpec)]
+    script_parts = e_list + await _scripts_from_files(ops, accessor, index,
+                                                      f_files)
     flag_script = bool(e_list or f_files)
     if not flag_script and texts:
         script_parts.append(texts[0])

@@ -108,4 +108,4 @@ async def test_shuf_output_flag_names_the_missing_write_op():
     with pytest.raises(ValueError, match="backend provides no write op"):
         await shuf_builder(_ops(),
                            object(), [_spec("/g/a.txt")],
-                           o=_spec("/g/out.txt"))
+                           output=_spec("/g/out.txt"))

@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
@@ -43,7 +44,7 @@ async def tree(
     P: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
     stat_path: StatPath | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_tree(
         paths[0],

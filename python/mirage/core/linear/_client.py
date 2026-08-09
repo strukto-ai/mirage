@@ -18,6 +18,7 @@ import aiohttp
 
 from mirage.core.linear.config import LinearConfig
 from mirage.resource.secrets import reveal_secret
+from mirage.types import JsonValue
 
 from mirage.core.linear.queries import (  # isort: skip
     COMMENT_CREATE_MUTATION, COMMENT_UPDATE_MUTATION, ISSUE_COMMENTS_QUERY,
@@ -249,7 +250,7 @@ async def issue_create(
     title: str,
     description: str | None,
 ) -> dict[str, Any]:
-    input_payload: dict[str, object] = {"title": title, "teamId": team_id}
+    input_payload: dict[str, JsonValue] = {"title": title, "teamId": team_id}
     if description:
         input_payload["description"] = description
     data = await graphql_request(
@@ -273,7 +274,7 @@ async def issue_update(
     project_id: str | None = None,
     label_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, object] = {}
+    payload: dict[str, JsonValue] = {}
     if title is not None:
         payload["title"] = title
     if description is not None:
@@ -287,7 +288,7 @@ async def issue_update(
     if project_id is not None:
         payload["projectId"] = project_id
     if label_ids is not None:
-        payload["labelIds"] = label_ids
+        payload["labelIds"] = list(label_ids)
     if not payload:
         raise ValueError("no updates provided")
     await graphql_request(

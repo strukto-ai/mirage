@@ -61,24 +61,24 @@ MISS_ERRORS: tuple[type[Exception],
                            IsADirectoryError, ValueError)
 
 
-def _virtual_of(path: object) -> str:
+def _virtual_of(path: str | PathSpec) -> str:
     original = getattr(path, "virtual", None)
     return original if original is not None else str(path)
 
 
-def enoent(path: object) -> FileNotFoundError:
+def enoent(path: str | PathSpec) -> FileNotFoundError:
     return FileNotFoundError(_virtual_of(path))
 
 
-def enotdir(path: object) -> NotADirectoryError:
+def enotdir(path: str | PathSpec) -> NotADirectoryError:
     return NotADirectoryError(_virtual_of(path))
 
 
-def eexist(path: object) -> FileExistsError:
+def eexist(path: str | PathSpec) -> FileExistsError:
     return FileExistsError(_virtual_of(path))
 
 
-def eisdir(path: object) -> IsADirectoryError:
+def eisdir(path: str | PathSpec) -> IsADirectoryError:
     return IsADirectoryError(_virtual_of(path))
 
 
@@ -120,7 +120,7 @@ async def readdir_error(path: str | PathSpec, key: str,
 
 
 def enotsup(resource: str, op_name: str,
-            path: object) -> OperationNotSupportedError:
+            path: str | PathSpec) -> OperationNotSupportedError:
     """Missing-capability error for an op a backend does not register.
 
     ``filename`` carries the virtual path so ``format_fs_error`` reports
@@ -198,7 +198,8 @@ def _segments(path: str) -> list[str]:
     return [part for part in path.split("/") if part]
 
 
-def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
+def fs_error_line(cmd_name: str, path: str | PathSpec,
+                  exc: BaseException) -> str:
     """GNU coreutils stderr line for one failed path operand.
 
     Produces ``<cmd>: <path>: <strerror>``, byte-identical with the

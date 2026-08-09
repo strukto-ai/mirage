@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.find import find as find_core
 from mirage.core.history.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
@@ -49,7 +50,7 @@ async def find(
     L: bool = False,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_find(
         list(paths),

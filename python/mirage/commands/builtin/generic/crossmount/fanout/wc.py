@@ -15,6 +15,7 @@
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 parse_flags)
+from mirage.commands.spec.types import FlagValue
 
 
 def _parse_wc_row(line: str, columns: int) -> tuple[list[int], str]:
@@ -39,8 +40,8 @@ def _wc_counts(values: list[int], *, lines: bool, words: bool, bytes_: bool,
     return WCCounts(lines=values[0], words=values[1], bytes_=values[2])
 
 
-def combine_wc(results: list[OperandRun], flag_kwargs: dict[str,
-                                                            object]) -> bytes:
+def combine_wc(results: list[OperandRun],
+               flag_kwargs: dict[str, FlagValue]) -> bytes:
     """Re-total per-operand wc rows with one shared column width.
 
     Each native run right-aligns its own rows against its own widest count,
