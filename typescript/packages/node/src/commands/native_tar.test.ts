@@ -58,6 +58,22 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
     }
   })
 
+  it('tar xJ round-trips file bodies through the xz codec', async () => {
+    // Listing only proves the headers survived; extracting proves the
+    // decompressed bodies are byte-exact.
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('aaa\n'))
+      env.createFile('b.txt', ENC.encode('bbb\n'))
+      await env.mirage('tar -c -J -f /data/out.tar.xz /data/a.txt /data/b.txt')
+      await env.mirage('tar -x -J -f /data/out.tar.xz -C /data/ex')
+      expect(await env.mirage('cat /data/ex/data/a.txt')).toBe('aaa\n')
+      expect(await env.mirage('cat /data/ex/data/b.txt')).toBe('bbb\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
   it('tar xj extracts an archive another tar wrote (bzip2)', async () => {
     const env = makeEnv(kind)
     try {

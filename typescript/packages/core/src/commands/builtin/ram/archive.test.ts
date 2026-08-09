@@ -20,6 +20,7 @@ import { RAMResource } from '../../../resource/ram/ram.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
+import { readTar } from '../tar_helper.ts'
 const RAM_TAR = RAM_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
 const RAM_ZIP = RAM_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
 const RAM_UNZIP = RAM_COMMANDS.filter((c) => c.name === 'unzip' && c.filetype == null)
@@ -730,6 +731,70 @@ describe('archive planner regressions', () => {
     expect(DEC.decode(out).trim()).toBe('link')
     const { out: listed } = await runCmd(RAM_TAR, resource, [], { t: true, f: '/out.tar' })
     expect(DEC.decode(listed).trim()).toBe('link')
+  })
+
+  it('stores a symlink operand with its target and no bytes', async () => {
+    // The name alone cannot tell the two apart, so read the archive back:
+    // a link member carries linkname and no content.
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    resource.store.files.set('/d/a.txt', ENC.encode('alpha'))
+    const links = linkView({ '/link': '/d/a.txt' })
+    const { writes } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/link', 'link')],
+      { c: true, f: '/out.tar' },
+      [],
+      '',
+      links,
+    )
+    const entries = await readTar(writes['/out.tar'] ?? new Uint8Array(0))
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.name).toBe('link')
+    expect(entries[0]?.linkname).toBe('/d/a.txt')
+    expect(entries[0]?.isFile).toBe(false)
+    expect(entries[0]?.data.byteLength).toBe(0)
+  })
+
+  it('-h stores the target bytes under the link name', async () => {
+    // GNU tar -h follows the link, so the member keeps the link's name but
+    // becomes a regular file holding what the target holds.
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    resource.store.files.set('/d/a.txt', ENC.encode('alpha'))
+    const links = linkView({ '/link': '/d/a.txt' })
+    const { writes } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/link', 'link')],
+      { c: true, h: true, f: '/out.tar' },
+      [],
+      '',
+      links,
+    )
+    const entries = await readTar(writes['/out.tar'] ?? new Uint8Array(0))
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.name).toBe('link')
+    expect(entries[0]?.isFile).toBe(true)
+    expect(entries[0]?.linkname).toBe('')
+    expect(DEC.decode(entries[0]?.data)).toBe('alpha')
+  })
+
+  it('-h on a link whose target is gone reports it and writes no member', async () => {
+    const resource = new RAMResource()
+    const links = linkView({ '/link': '/d/missing.txt' })
+    const { exitCode, stderr } = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/link', 'link')],
+      { c: true, h: true, f: '/out.tar' },
+      [],
+      '',
+      links,
+    )
+    expect(exitCode).toBe(2)
+    expect(DEC.decode(stderr)).toContain('No such file or directory')
   })
 
   it('fails at the first unenterable -C, not the last', async () => {
