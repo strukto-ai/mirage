@@ -17,6 +17,7 @@
   "description": "Transfer data from or to a server.",
   "epilog": null,
   "ignore_tokens": [],
+  "old_option_style": false,
   "options": [
     {
       "choices": [],

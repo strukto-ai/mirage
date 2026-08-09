@@ -19,6 +19,7 @@
   "description": "Show command history for the session.",
   "epilog": null,
   "ignore_tokens": [],
+  "old_option_style": false,
   "options": [
     {
       "choices": [],

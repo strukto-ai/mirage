@@ -17,6 +17,7 @@
   "description": "Print or set the system date and time.",
   "epilog": null,
   "ignore_tokens": [],
+  "old_option_style": false,
   "options": [
     {
       "choices": [],

@@ -278,6 +278,7 @@
   "description": null,
   "epilog": null,
   "ignore_tokens": [],
+  "old_option_style": false,
   "options": [],
   "positional": [],
   "rest": {

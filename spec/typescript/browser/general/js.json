@@ -17,6 +17,7 @@
   "description": "Run JavaScript on a sandboxed quickjs engine.",
   "epilog": null,
   "ignore_tokens": [],
+  "old_option_style": false,
   "options": [
     {
       "choices": [],

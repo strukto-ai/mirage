@@ -171,6 +171,7 @@ function serializeSpec(spec: CommandSpec, rcs: RegisteredCommand[]): Record<stri
     description: spec.description,
     epilog: spec.epilog,
     ignore_tokens: [...spec.ignoreTokens].sort(),
+    old_option_style: spec.oldOptionStyle,
     options: spec.options.map(serializeOption),
     positional: spec.positional.map(serializeOperand),
     rest: spec.rest === null ? null : serializeOperand(spec.rest),

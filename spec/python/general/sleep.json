@@ -10,6 +10,7 @@
   "description": "Delay for a specified amount of time.",
   "epilog": null,
   "ignore_tokens": [],
+  "old_option_style": false,
   "options": [],
   "positional": [],
   "rest": {
