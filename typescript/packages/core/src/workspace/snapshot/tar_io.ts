@@ -34,7 +34,7 @@ export async function writeSnapshotTar(
   for (const [path, data] of Object.entries(blobs)) {
     entries.push({ name: path, data, isFile: true })
   }
-  const tarBytes = writeTar(entries)
+  const tarBytes = await writeTar(entries)
   if (compress === 'gz') return gzip(tarBytes)
   return tarBytes
 }
@@ -44,7 +44,7 @@ export async function readSnapshotTar(
   compress: CompressMode = null,
 ): Promise<unknown> {
   const tarBytes = compress === 'gz' ? await gunzip(data) : data
-  const entries = readTar(tarBytes)
+  const entries = await readTar(tarBytes)
   const byName = new Map<string, Uint8Array>()
   for (const e of entries) byName.set(e.name, e.data)
   const manifestRaw = byName.get(MANIFEST_NAME)

@@ -429,6 +429,28 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   `-x a -x b` says the same thing), and the `adding:` line carries no
   `(deflated N%)` suffix, since the ratio depends on the compressor and
   would differ between the two languages.
+- **Tar formats come from a library, not from hand-rolled block code, and
+  bzip2 is read-only in TypeScript.** Python builds archives with stdlib
+  `tarfile`; TypeScript uses `modern-tar` behind `tar_helper.ts`, which
+  keeps the `TarEntry` shape (`name`/`data`/`isFile`/`isDir`/`linkname`)
+  the two call sites already speak and is the only place the dependency
+  is named. Do not go back to writing ustar blocks by hand: the version
+  that did truncated any name past 100 bytes instead of using the ustar
+  `prefix` field or a PAX header (so a deep member extracted to the wrong
+  path), and read a PAX/GNU extension block as if it were a member (so
+  `tar -t` on any archive GNU or Python wrote listed a phantom
+  `././@PaxHeader` row). `writeTar`/`readTar` are async for this reason.
+  Compression is a registry (`registerCompressionCodec`): gzip is built
+  in via `CompressionStream`, and a codec may be **decompress-only**,
+  which is the one deliberate py/ts divergence here. Python reads and
+  writes `.tar.bz2` because `bz2` is stdlib; TypeScript only reads one,
+  because every JavaScript bzip2 *compressor* is GPL (`compressjs`,
+  `archive-wasm`) and an Apache-2.0 package cannot ship that, while
+  `seek-bzip` (MIT) decodes. `tar -cj` therefore exits 1 with
+  `tar: bzip2 not supported`, the same answer browser core already gives
+  for an unregistered codec. If a permissively licensed bzip2 compressor
+  appears, adding `compress` to that one codec closes the gap with no
+  other change.
 - **The TypeScript `walkFind` answers in mount-relative keys; the Python
   `walk_find` answers in virtual paths.** TS's stands in for a backend's
   native find op, so a caller that needs virtual paths (tar does, to

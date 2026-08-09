@@ -8,8 +8,8 @@
     "packages/node": {
       "ignoreDependencies": [
         "@napi-rs/lzma",
-        "compressjs",
         "fs-monkey",
+        "seek-bzip",
         "tree-sitter-bash",
         "web-tree-sitter"
       ]

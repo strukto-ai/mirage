@@ -16,6 +16,18 @@ import { describe, expect, it } from 'vitest'
 import { makeEnv, NATIVE_BACKENDS } from './native_fixture.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
+// A .tar.bz2 holding a.txt and b.txt, written by GNU-compatible tar rather
+// than by mirage: bzip2 is decompress-only here, so the read path has no
+// writer of its own to round-trip against.
+const BZIP2_FIXTURE = Uint8Array.from(
+  atob(
+    'QlpoOTFBWSZTWb5cDKYAAIl7gMmQABBAAXWAAAhwAB5ACCggAHQShE0aA0eoNqBVJAAAaA+6YFC2QJVR' +
+      'EIU4zaLiTBWsQhIczkjNuTLKIYCgg4wgxJypYcoUGGDPpbubQsplyCC5BU0EQPxdyRThQkL5cDKY',
+  ),
+  (c) => c.charCodeAt(0),
+)
 
 describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
   it('tar cz tf', async () => {
@@ -33,16 +45,39 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
     }
   })
 
-  it('tar j create list (bzip2)', async () => {
+  it('tar j lists an archive another tar wrote (bzip2)', async () => {
     const env = makeEnv(kind)
     try {
-      env.createFile('a.txt', ENC.encode('aaa\n'))
-      env.createFile('b.txt', ENC.encode('bbb\n'))
-      await env.mirage('tar -c -j -f /data/out.tar.bz2 /data/a.txt /data/b.txt')
+      env.createFile('out.tar.bz2', BZIP2_FIXTURE)
       const listing = await env.mirage('tar -t -f /data/out.tar.bz2')
       const names = listing.trim().split('\n')
       expect(names.join(' ')).toContain('a.txt')
       expect(names.join(' ')).toContain('b.txt')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('tar xj extracts an archive another tar wrote (bzip2)', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('out.tar.bz2', BZIP2_FIXTURE)
+      await env.mirage('tar -x -j -f /data/out.tar.bz2 -C /data/ex')
+      expect(await env.mirage('cat /data/ex/a.txt')).toBe('aaa\n')
+      expect(await env.mirage('cat /data/ex/b.txt')).toBe('bbb\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('tar cj refuses to create, since bzip2 is decompress-only', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('aaa\n'))
+      env.ws.cwd = '/data'
+      const io = await env.ws.execute('tar -c -j -f /data/out.tar.bz2 /data/a.txt')
+      expect(io.exitCode).toBe(1)
+      expect(DEC.decode(io.stderr)).toBe('tar: bzip2 not supported\n')
     } finally {
       await env.cleanup()
     }

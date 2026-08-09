@@ -74,8 +74,19 @@ async function compress(raw: Uint8Array, kind: Compression): Promise<Uint8Array>
   if (kind === null) return raw
   if (kind === 'gzip') return gzip(raw)
   const codec = getCompressionCodec(kind)
-  if (codec === undefined) throw new Error(`tar: ${kind} not supported`)
+  if (codec?.compress === undefined) throw new Error(`tar: ${kind} not supported`)
   return codec.compress(raw)
+}
+
+// gzip is built in; bzip2 (-j) / xz (-J) need a codec registered by the
+// runtime package, and a codec may be decompress-only (bzip2 is), which only
+// rules out creating an archive. Answers the kind that cannot be served, so
+// the caller names it.
+function unsupportedKind(compression: Compression, create: boolean): CompressionKind | null {
+  if (compression !== 'bzip2' && compression !== 'xz') return null
+  const codec = getCompressionCodec(compression)
+  if (codec === undefined) return compression
+  return create && codec.compress === undefined ? compression : null
 }
 
 async function decompress(data: Uint8Array, kind: Compression): Promise<Uint8Array> {
@@ -113,7 +124,7 @@ async function writeArchive(
     })
     names.push(member.name)
   }
-  const raw = writeTar(entries)
+  const raw = await writeTar(entries)
   const archive = await compress(raw, compression)
   await deps.write(makePathSpec(archivePath, mountPrefix), archive)
   const stderr = stderrOf(plan.notices)
@@ -139,15 +150,11 @@ export async function tarGeneric(
   const list = fl.asBool('t')
   const compression = compressionOf(opts)
   const verbose = fl.asBool('v')
-  // gzip is built in; bzip2 (-j) / xz (-J) need a codec registered by the
-  // runtime package. Unregistered (e.g. browser core) -> not supported.
-  if (
-    (compression === 'bzip2' || compression === 'xz') &&
-    getCompressionCodec(compression) === undefined
-  ) {
+  const missing = unsupportedKind(compression, create)
+  if (missing !== null) {
     return [
       null,
-      new IOResult({ exitCode: 1, stderr: ENC.encode('tar: bzip2/xz not supported\n') }),
+      new IOResult({ exitCode: 1, stderr: ENC.encode(`tar: ${missing} not supported\n`) }),
     ]
   }
   const fFlag = fl.asStr('f') ?? null
@@ -195,7 +202,7 @@ export async function tarGeneric(
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
     const data = await decompress(raw, compression)
-    const entries = readTar(data)
+    const entries = await readTar(data)
     const out: ByteSource = ENC.encode(
       entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name)).join('\n') + '\n',
     )
@@ -209,7 +216,7 @@ export async function tarGeneric(
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
     const data = await decompress(raw, compression)
     const writes: Record<string, Uint8Array> = {}
-    for (const entry of readTar(data)) {
+    for (const entry of await readTar(data)) {
       // A symlink member has no bytes to write and no namespace to write
       // into from here (links are workspace state, not the backend's),
       // so extraction skips it rather than dropping an empty file where
