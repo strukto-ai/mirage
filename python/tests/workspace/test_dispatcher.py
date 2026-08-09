@@ -120,7 +120,7 @@ def _structure_only(dispatcher) -> None:
     deep = MagicMock()
     deep.prefix = "/data/locked/inner/deep/"
     namespace.registry.mounts = MagicMock(return_value=[deep])
-    namespace.links_under = MagicMock(return_value={})
+    namespace.symlink_targets = MagicMock(return_value={})
 
 
 @pytest.mark.asyncio

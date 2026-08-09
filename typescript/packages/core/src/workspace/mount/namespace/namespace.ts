@@ -389,22 +389,6 @@ export class Namespace {
     return out
   }
 
-  // Links living directly under a directory: basename -> target.
-  linksUnder(directory: string): Map<string, string> {
-    const base = rstripSlash(directory) + '/'
-    const out = new Map<string, string>()
-    for (const [path, meta] of this.nodeTable) {
-      if (
-        meta.target !== undefined &&
-        path.startsWith(base) &&
-        !path.slice(base.length).includes('/')
-      ) {
-        out.set(path.slice(base.length), meta.target)
-      }
-    }
-    return out
-  }
-
   // Drop every node entry under a directory (`rm -r` semantics).
   async purgeUnder(directory: string): Promise<number> {
     const base = rstripSlash(directory) + '/'

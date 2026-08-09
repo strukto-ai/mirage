@@ -404,24 +404,6 @@ class Namespace:
             return path
         return resolve_symlinks(path, targets)
 
-    def links_under(self, directory: str) -> dict[str, str]:
-        """Links living directly under a directory.
-
-        Args:
-            directory (str): absolute virtual directory path.
-
-        Returns:
-            dict[str, str]: link basename to target, for entries whose
-            parent is exactly ``directory``.
-        """
-        base = directory.rstrip("/") + "/"
-        out: dict[str, str] = {}
-        for path, meta in self._nodes.items():
-            if (meta.target is not None and path.startswith(base)
-                    and "/" not in path[len(base):]):
-                out[path[len(base):]] = meta.target
-        return out
-
     def link_stat_at(self, path: str) -> FileStat | None:
         """lstat a path: the link's own stat, or None when not a link.
 

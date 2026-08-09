@@ -63,12 +63,8 @@ class NamespaceLinks(Protocol):
         """
         ...
 
-    def links_under(self, directory: str) -> dict[str, str]:
-        """Link basename to target for entries directly under a directory.
-
-        Args:
-            directory (str): absolute virtual directory path.
-        """
+    def symlink_targets(self) -> dict[str, str]:
+        """Every link path to its stored target, the whole table."""
         ...
 
     def link_stat_at(self, path: str) -> FileStat | None:

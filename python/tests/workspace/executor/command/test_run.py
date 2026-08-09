@@ -40,11 +40,30 @@ class _FakeRegistry:
         return [_FakeMount(p) for p in self._prefixes]
 
 
+class _FakeLinks:
+
+    def __init__(self, targets: dict[str, str]) -> None:
+        self._targets = targets
+
+    def symlink_targets(self) -> dict[str, str]:
+        return self._targets
+
+
 def test_registry_child_mounts_derives_from_the_mount_table():
     reg = _FakeRegistry(["/base/", "/base/inner/", "/dev/"])
-    assert registry_child_mounts(reg, "/base") == ["inner"]
-    assert registry_child_mounts(reg, "/") == ["base", "dev"]
-    assert registry_child_mounts(reg, "/dev") == []
+    assert registry_child_mounts(reg, None, "/base") == ["inner"]
+    assert registry_child_mounts(reg, None, "/") == ["base", "dev"]
+    assert registry_child_mounts(reg, None, "/dev") == []
+
+
+def test_registry_child_mounts_includes_link_ancestors():
+    # A link below a directory chain no backend serves synthesizes its
+    # ancestors, exactly as a nested mount prefix does, so `ls /` shows
+    # the way to it.
+    reg = _FakeRegistry(["/base/"])
+    links = _FakeLinks({"/ghost/deep/lnk": "/base"})
+    assert registry_child_mounts(reg, links, "/") == ["base", "ghost"]
+    assert registry_child_mounts(reg, links, "/ghost") == ["deep"]
 
 
 class _FakeNamespace:

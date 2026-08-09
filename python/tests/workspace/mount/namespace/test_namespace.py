@@ -114,15 +114,6 @@ def test_follow_identity_without_links(namespace):
 
 
 @pytest.mark.asyncio
-async def test_links_under_returns_direct_children_only(namespace):
-    await namespace.symlink("/data/a", "/t1", 1.0)
-    await namespace.symlink("/data/sub/b", "/t2", 1.0)
-    await namespace.symlink("/other/c", "/t3", 1.0)
-    assert namespace.links_under("/data") == {"a": "/t1"}
-    assert namespace.links_under("/data/sub") == {"b": "/t2"}
-
-
-@pytest.mark.asyncio
 async def test_purge_under_drops_nested_entries(namespace):
     await namespace.symlink("/data/sub/a", "/t1", 1.0)
     await namespace.symlink("/data/sub/deep/b", "/t2", 1.0)
@@ -167,7 +158,6 @@ async def test_overlay_nodes_are_not_links(namespace):
     await namespace.set_attrs("/data/f.txt", mode=0o600)
     assert namespace.symlink_targets() == {}
     assert namespace.has_links() is False
-    assert namespace.links_under("/data") == {}
 
 
 @pytest.mark.asyncio

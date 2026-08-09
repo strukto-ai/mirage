@@ -21,7 +21,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
-from mirage.ops.structure import child_mount_names
+from mirage.ops.config import NamespaceLinks
+from mirage.ops.structure import structure_names
 from mirage.ops.types import LinkView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
@@ -115,19 +116,23 @@ def scalar_find_flags(
     }
 
 
-def registry_child_mounts(registry: MountRegistry, parent: str) -> list[str]:
-    """Session-filtered child-mount names under ``parent``.
+def registry_child_mounts(registry: MountRegistry,
+                          links: NamespaceLinks | None,
+                          parent: str) -> list[str]:
+    """Child names the namespace owes ``parent``: mounts and links.
 
     The ``child_mounts`` fact offered to listing commands: the same
     names the door merges into its own readdir, derived from the same
-    prefixes, so the shell and the ops surface cannot disagree about
-    which mounts a directory holds.
+    tables (mount names session-filtered), so the shell and the ops
+    surface cannot disagree about what a directory holds.
 
     Args:
         registry (MountRegistry): registry holding the mount table.
-        parent (str): directory whose child mounts to enumerate.
+        links (NamespaceLinks | None): the namespace symlink table.
+        parent (str): directory whose child segments to enumerate.
     """
-    return child_mount_names([m.prefix for m in registry.mounts()], parent)
+    return structure_names([m.prefix for m in registry.mounts()], links,
+                           parent)
 
 
 def link_view(namespace: Namespace | None,
@@ -313,7 +318,8 @@ async def run_on_mount(
     links = link_view(namespace, dispatch)
     stat_path = (functools.partial(path_stat, dispatch)
                  if dispatch is not None else None)
-    child_mounts = functools.partial(registry_child_mounts, registry)
+    child_mounts = functools.partial(registry_child_mounts, registry,
+                                     namespace)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)

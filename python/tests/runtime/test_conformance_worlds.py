@@ -302,6 +302,32 @@ async def test_door_stats_structure_only_directory():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_link_ancestors_synthesize_on_every_surface():
+    """A link below an absent directory chain is reachable from above.
+
+    ``ln`` permits ``/ghost/deep/lnk`` with no backend serving
+    ``/ghost``; its ancestors synthesize exactly as nested mount
+    prefixes do, so ``ls /`` shows the way in and a guest walk from
+    the root reaches the link.
+    """
+    ws = structure_world("monty")
+    try:
+        assert (await _sh(ws, "ln -s /base/a.txt /ghost/deep/lnk"))[0] == 0
+        st = await ws.ops.stat("/ghost")
+        assert st.type.value == "directory"
+        code, out, _ = await _sh(ws, "ls /")
+        assert code == 0
+        assert "ghost" in out
+        code, out, err = await _sh(
+            ws, "python3 -c \"from pathlib import Path; "
+            "print(sorted(str(p) for p in Path('/ghost').iterdir()))\"")
+        assert code == 0, err
+        assert "/ghost/deep" in out
+    finally:
+        await ws.close()
+
+
 # ── Group 3: a scoped session confines every surface ──
 #
 # Explicit operands and the headless FUSE core are confined today. The

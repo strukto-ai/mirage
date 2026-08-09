@@ -24,13 +24,13 @@ PREFIXES = ["/base/", "/base/inner/", "/base/inner/deep/", "/other/", "/"]
 
 
 class _Links:
-    """A NamespaceLinks double answering a fixed links_under table."""
+    """A NamespaceLinks double answering a fixed link table."""
 
-    def __init__(self, under: dict[str, dict[str, str]]) -> None:
-        self._under = under
+    def __init__(self, targets: dict[str, str]) -> None:
+        self._targets = targets
 
-    def links_under(self, directory: str) -> dict[str, str]:
-        return self._under.get(directory, {})
+    def symlink_targets(self) -> dict[str, str]:
+        return self._targets
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_child_mount_names_filters_by_session(scoped_session):
 
 
 def test_merge_readdir_appends_mounts_and_links_as_paths():
-    links = _Links({"/base": {"lnk": "/base/inner"}})
+    links = _Links({"/base/lnk": "/base/inner"})
     merged = merge_readdir(["/base/a.txt"], PREFIXES, links, "/base")
     assert merged == ["/base/a.txt", "/base/inner", "/base/lnk"]
 
@@ -85,9 +85,23 @@ def test_merge_readdir_without_links_or_mounts_is_identity():
 def test_structure_listing_answers_only_when_something_is_below():
     assert structure_listing(PREFIXES, None, "/base/ghost") is None
     assert structure_listing(PREFIXES, None, "/base") == ["/base/inner"]
-    links = _Links({"/base/ghost": {"lnk": "/base"}})
+    links = _Links({"/base/ghost/lnk": "/base"})
     assert structure_listing(PREFIXES, links,
                              "/base/ghost") == ["/base/ghost/lnk"]
+
+
+def test_link_ancestors_synthesize_like_mount_prefixes():
+    # ln permits a link below a directory chain no backend serves; every
+    # ancestor of the link must list and stat, or the link is reachable
+    # by exact path yet invisible to any walk from above.
+    links = _Links({"/ghost/deep/lnk": "/base"})
+    assert structure_listing([], links, "/") == ["/ghost"]
+    assert structure_listing([], links, "/ghost") == ["/ghost/deep"]
+    assert structure_listing([], links, "/ghost/deep") == ["/ghost/deep/lnk"]
+    st = structure_stat([], links, "/ghost")
+    assert st is not None and st.type is FileType.DIRECTORY
+    # The link itself is not structure: its stat is the lstat surface's.
+    assert structure_stat([], links, "/ghost/deep/lnk") is None
 
 
 def test_structure_stat_agrees_with_the_listing():

@@ -31,7 +31,7 @@ function normDir(path: string): string {
  * names (leading dot) are included; presentation filtering is the
  * consumer's job, exactly as for backend entries.
  */
-export function childMountNames(prefixes: readonly string[], parent: string): string[] {
+function childMountNames(prefixes: readonly string[], parent: string): string[] {
   const norm = normDir(parent)
   const out = new Set<string>()
   for (const prefix of prefixes) {
@@ -44,9 +44,40 @@ export function childMountNames(prefixes: readonly string[], parent: string): st
   return [...out].sort()
 }
 
+/**
+ * Immediate child segments owed to links at or below `parent`.
+ *
+ * Derived from every link path, not just direct children, exactly as
+ * mount prefixes are: `ln` allows a link below a directory chain no
+ * backend serves, and without its ancestors synthesized the link lists
+ * at its own parent yet is unreachable from a walk above it.
+ */
 function linkNames(links: NamespaceLinks | null, parent: string): string[] {
   if (links === null) return []
-  return [...links.linksUnder(parent).keys()].filter((name) => name !== '')
+  const norm = normDir(parent)
+  const out = new Set<string>()
+  for (const link of links.symlinkTargets().keys()) {
+    if (!link.startsWith(norm)) continue
+    const name = link.slice(norm.length).split('/', 1)[0] ?? ''
+    if (name !== '') out.add(name)
+  }
+  return [...out].sort()
+}
+
+/**
+ * Every child segment the namespace owes `parent`: mounts + links.
+ *
+ * The one union both consumers derive from: the door merges these
+ * names into its readdir and the `childMounts` fact offers them to
+ * listing commands, so the shell and the ops surface cannot disagree
+ * about what a directory holds.
+ */
+export function structureNames(
+  prefixes: readonly string[],
+  links: NamespaceLinks | null,
+  parent: string,
+): string[] {
+  return [...new Set([...childMountNames(prefixes, parent), ...linkNames(links, parent)])].sort()
 }
 
 /**
@@ -68,7 +99,7 @@ export function mergeReaddir(
   const present = new Set(entries.map((e) => stripEntry(e)))
   const base = rstripSlash(parent)
   const merged = [...entries]
-  for (const name of [...childMountNames(prefixes, parent), ...linkNames(links, parent)]) {
+  for (const name of structureNames(prefixes, links, parent)) {
     if (present.has(name)) continue
     present.add(name)
     merged.push(`${base}/${name}`)
@@ -95,7 +126,7 @@ export function structureListing(
   links: NamespaceLinks | null,
   parent: string,
 ): string[] | null {
-  if (childMountNames(prefixes, parent).length === 0 && linkNames(links, parent).length === 0) {
+  if (structureNames(prefixes, links, parent).length === 0) {
     return null
   }
   return mergeReaddir([], prefixes, links, parent)

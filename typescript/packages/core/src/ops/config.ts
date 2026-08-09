@@ -39,8 +39,8 @@ export interface NamespaceLinks {
   isLink(path: string): boolean
   // The stored target for a link path, null when not a link.
   readlink(path: string): string | null
-  // Link basename to target for entries directly under a directory.
-  linksUnder(directory: string): Map<string, string>
+  // Every link path to its stored target, the whole table.
+  symlinkTargets(): Map<string, string>
   // Create or overwrite a symlink entry; target is kept verbatim.
   symlink(link: string, target: string, mtime: number): Promise<void>
   // Drop a node entry; true when one existed.

@@ -51,9 +51,47 @@ def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
 
 
 def _link_names(links: NamespaceLinks | None, parent: str) -> list[str]:
+    """Immediate child segments owed to links at or below ``parent``.
+
+    Derived from every link path, not just direct children, exactly as
+    mount prefixes are: ``ln`` allows a link below a directory chain no
+    backend serves, and without its ancestors synthesized the link
+    lists at its own parent yet is unreachable from a walk above it.
+
+    Args:
+        links (NamespaceLinks | None): the namespace symlink table.
+        parent (str): directory whose child segments to enumerate.
+    """
     if links is None:
         return []
-    return [name for name in links.links_under(parent) if name]
+    norm = _norm_dir(parent)
+    out: set[str] = set()
+    for link in links.symlink_targets():
+        if not link.startswith(norm):
+            continue
+        name = link[len(norm):].split("/", 1)[0]
+        if name:
+            out.add(name)
+    return sorted(out)
+
+
+def structure_names(prefixes: Iterable[str], links: NamespaceLinks | None,
+                    parent: str) -> list[str]:
+    """Every child segment the namespace owes ``parent``: mounts + links.
+
+    The one union both consumers derive from: the door merges these
+    names into its readdir and the ``child_mounts`` fact offers them to
+    listing commands, so the shell and the ops surface cannot disagree
+    about what a directory holds.
+
+    Args:
+        prefixes (Iterable[str]): the mount prefixes to derive from.
+        links (NamespaceLinks | None): the namespace symlink table.
+        parent (str): directory whose child segments to enumerate.
+    """
+    return sorted(
+        set(child_mount_names(prefixes, parent))
+        | set(_link_names(links, parent)))
 
 
 def merge_readdir(entries: list[str], prefixes: Iterable[str],
@@ -76,8 +114,7 @@ def merge_readdir(entries: list[str], prefixes: Iterable[str],
     present = {e.rstrip("/").rsplit("/", 1)[-1] for e in entries}
     base = parent.rstrip("/")
     merged = list(entries)
-    for name in child_mount_names(prefixes, parent) + _link_names(
-            links, parent):
+    for name in structure_names(prefixes, links, parent):
         if name in present:
             continue
         present.add(name)
@@ -99,8 +136,7 @@ def structure_listing(prefixes: Iterable[str], links: NamespaceLinks | None,
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): the directory that was listed, as a virtual path.
     """
-    if not child_mount_names(prefixes, parent) and not _link_names(
-            links, parent):
+    if not structure_names(prefixes, links, parent):
         return None
     return merge_readdir([], prefixes, links, parent)
 

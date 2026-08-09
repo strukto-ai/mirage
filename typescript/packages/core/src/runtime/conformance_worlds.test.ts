@@ -152,6 +152,28 @@ describe('structure world', () => {
     }
   })
 
+  it('link ancestors synthesize on every surface', async () => {
+    // ln permits /ghost/deep/lnk with no backend serving /ghost; its
+    // ancestors synthesize exactly as nested mount prefixes do, so
+    // `ls /` shows the way in and a guest walk from the root reaches
+    // the link.
+    const ws = await structureWorld()
+    try {
+      expect((await run(ws, 'ln -s /base/a.txt /ghost/deep/lnk'))[0]).toBe(0)
+      const stat = await ws.stat('/ghost')
+      expect((stat as { type: FileType | null }).type).toBe(FileType.DIRECTORY)
+      const [code, out] = await run(ws, 'ls /')
+      expect(code).toBe(0)
+      expect(out).toContain('ghost')
+      // No guest probe here: a ts guest serves only paths under a
+      // visible mount, and /ghost (like / itself) is not one — the
+      // documented root-anchor divergence from python, whose guests
+      // fall through to dispatch and do walk the synthesized chain.
+    } finally {
+      await ws.close()
+    }
+  })
+
   // ── Group 2: a structure-only directory stats as a directory ──
 
   it('the door stats a structure-only directory', async () => {
