@@ -22,6 +22,7 @@ from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb._client import count_documents
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import MongoDBDocumentsScope, detect_scope
@@ -39,7 +40,7 @@ async def wc(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

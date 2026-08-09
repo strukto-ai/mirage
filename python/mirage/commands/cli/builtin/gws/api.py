@@ -15,6 +15,7 @@
 import functools
 import json as json_lib
 from collections.abc import Awaitable, Callable
+from enum import Enum, auto
 from typing import Any
 
 from mirage.cache.context import invalidate_after_write
@@ -23,7 +24,7 @@ from mirage.commands.cli.builtin.gws.methods import (GWS_METHODS,
                                                      gws_method_description)
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.types import FlagView, Option
+from mirage.commands.spec.types import FlagValue, FlagView, Option
 from mirage.core.google._client import (TokenManager, drive_base,
                                         google_delete, google_get,
                                         google_get_bytes, google_patch,
@@ -31,7 +32,7 @@ from mirage.core.google._client import (TokenManager, drive_base,
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
 _PARAMS_HELP = ("JSON object of path and query parameters, e.g. "
                 "'{\"fileId\":\"abc\"}'")
@@ -59,7 +60,7 @@ async def invalidate_mount_listing() -> None:
     await invalidate_after_write(PathSpec.from_str_path("/.gws-write"))
 
 
-def _parse_json_flag(value: object, flag: str) -> dict[str, Any]:
+def _parse_json_flag(value: FlagValue | None, flag: str) -> dict[str, Any]:
     if not value:
         return {}
     if not isinstance(value, str):
@@ -108,30 +109,36 @@ def _query_str(query: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+class _NoContent(Enum):
+    """A 204 body: distinct from a JSON null, which is a value."""
+    TOKEN = auto()
+
+
+_NO_CONTENT = _NoContent.TOKEN
+
+
 async def _call_get(tm: TokenManager, url: str, body: dict[str, Any],
-                    query: dict[str, str]) -> object:
+                    query: dict[str, str]) -> JsonValue:
     return await google_get(tm, url, params=query)
 
 
 async def _call_post(tm: TokenManager, url: str, body: dict[str, Any],
-                     query: dict[str, str]) -> object:
+                     query: dict[str, str]) -> JsonValue:
     return await google_post(tm, _with_query(url, query), body)
 
 
 async def _call_patch(tm: TokenManager, url: str, body: dict[str, Any],
-                      query: dict[str, str]) -> object:
+                      query: dict[str, str]) -> JsonValue:
     return await google_patch(tm, url, body, params=query)
 
 
 async def _call_delete(tm: TokenManager, url: str, body: dict[str, Any],
-                       query: dict[str, str]) -> object:
+                       query: dict[str, str]) -> _NoContent:
     await google_delete(tm, _with_query(url, query))
     return _NO_CONTENT
 
 
-_NO_CONTENT = object()
-
-_CALLERS: dict[str, Callable[..., Awaitable[object]]] = {
+_CALLERS: dict[str, Callable[..., Awaitable["JsonValue | _NoContent"]]] = {
     "GET": _call_get,
     "POST": _call_post,
     "PATCH": _call_patch,

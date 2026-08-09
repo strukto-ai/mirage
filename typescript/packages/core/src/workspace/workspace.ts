@@ -54,9 +54,9 @@ import type { ProvisionResult } from '../provision/types.ts'
 import { WorkspaceFS } from './fs.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
-import type { MirageEntry } from '../runtime/python/mirage_bridge.ts'
+import type { VFSEntry } from '../runtime/vfs.ts'
 import type { BridgeDispatchFn } from '../runtime/types.ts'
-import { MontyUnavailableError } from '../runtime/python/monty.ts'
+import { MontyUnavailableError } from '../runtime/python/monty/index.ts'
 import { scriptStringError, type Runtime, type RuntimeEntry } from '../runtime/base.ts'
 import { isEvaluator } from '../runtime/mixin.ts'
 import type { EvalResult } from '../runtime/types.ts'
@@ -322,7 +322,7 @@ export class Workspace {
   // takes the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
   // by the current session all come from the Dispatcher. Reads are raw
-  // bytes (no filetype rendering), matching the Python GuestFs.
+  // bytes (no filetype rendering), matching the Python WasmVFS.
   private buildWorkspaceBridge(): BridgeDispatchFn {
     return async (op, path, bytes, dst) => {
       switch (op) {
@@ -333,6 +333,13 @@ export class Workspace {
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
           await this.dispatch('write', path, [buf])
+          return undefined
+        }
+        case 'APPEND': {
+          if (bytes === undefined) throw new Error('APPEND op requires bytes')
+          const buf =
+            bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
+          await this.dispatch('append', path, [buf])
           return undefined
         }
         case 'STAT': {
@@ -362,7 +369,7 @@ export class Workspace {
         case 'LIST': {
           const entries = ((await this.dispatch('readdir', path)) as string[] | null) ?? []
           return await Promise.all(
-            entries.map(async (entry): Promise<MirageEntry> => {
+            entries.map(async (entry): Promise<VFSEntry> => {
               // Backends that mark directories with a trailing slash
               // skip the stat; unmarked entries (e.g. RAM) need one to
               // learn dir-ness.

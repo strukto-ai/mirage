@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (CopyStrategy, FileType, NativeCopy, NativeMove,
@@ -139,7 +139,7 @@ def target_flags(cmd_name: str,
         cmd_name (str): Command name for the conflict error.
         fl (FlagView): Parsed flag view.
     """
-    target_dir: object = fl.raw("target_directory")
+    target_dir: FlagValue | None = fl.raw("target_directory")
     if not isinstance(target_dir, (PathSpec, str)):
         target_dir = None
     no_target = fl.as_bool("no_target_directory")

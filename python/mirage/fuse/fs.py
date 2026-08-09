@@ -25,6 +25,7 @@ from mirage.fuse.core import MountCore
 from mirage.fuse.darwin import rename_flags_check
 from mirage.fuse.errors import classify_error
 from mirage.ops import Ops
+from mirage.types import JsonValue
 from mirage.workspace.session.session import Session
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,7 @@ class MirageFS(_FUSE_OPERATIONS):
         self._call(self.core.rename, old, new)
         return 0
 
-    def setattr_x(self, path: str, changes: dict[str, object]) -> int:
+    def setattr_x(self, path: str, changes: dict[str, JsonValue]) -> int:
         # macFUSE prefers this single entry point over chmod/chown/
         # truncate/utimens whenever it is implemented, and the FSKit shim
         # depends on it: createItem/createDirectory finalize the new item
@@ -155,7 +156,7 @@ class MirageFS(_FUSE_OPERATIONS):
 
     def fsetattr_x(self,
                    path: str,
-                   changes: dict[str, object],
+                   changes: dict[str, JsonValue],
                    fh: int | None = None) -> int:
         return self.setattr_x(path, changes)
 

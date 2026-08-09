@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     dir_refusing_read
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,7 +36,7 @@ async def wc(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

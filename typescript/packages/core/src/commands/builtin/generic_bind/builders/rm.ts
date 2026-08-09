@@ -17,6 +17,8 @@ import { FileType } from '../../../../types.ts'
 import { cpWalk } from '../../generic/cp.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { removalLines } from '../../utils/verbose.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const RM_BUILDER: Builder = {
@@ -32,10 +34,11 @@ export const RM_BUILDER: Builder = {
     }
     const idx = opts.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    const recursive = opts.flags.r === true || opts.flags.R === true
-    const dirFlag = opts.flags.d === true
-    const force = opts.flags.f === true
-    const verbose = opts.flags.v === true
+    const fl = new FlagView(opts.flags, specOf('rm'))
+    const recursive = fl.asBool('r') || fl.asBool('R')
+    const dirFlag = fl.asBool('d')
+    const force = fl.asBool('f')
+    const verbose = fl.asBool('v')
     const { rmR, rmdir, unlink } = ops
     if (unlink === undefined) {
       throw new Error('rm: backend provides no remove op')

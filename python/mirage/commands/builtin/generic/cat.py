@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.utils.stream import ensure_stream
 
 
@@ -16,7 +16,7 @@ class CatFlags:
     show_nonprinting: bool = False
 
 
-def parse_flags(flags: Mapping[str, object]) -> CatFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> CatFlags:
     fl = FlagView(flags, spec=SPECS["cat"])
     show_all = fl.as_bool("show_all")
     return CatFlags(
@@ -30,7 +30,7 @@ def parse_flags(flags: Mapping[str, object]) -> CatFlags:
     )
 
 
-def needs_display(flags: Mapping[str, object]) -> bool:
+def needs_display(flags: Mapping[str, FlagValue]) -> bool:
     parsed = parse_flags(flags)
     return any(
         (parsed.number_lines, parsed.number_nonblank, parsed.show_ends,
@@ -77,7 +77,7 @@ def _visible(line: bytes, show_tabs: bool, show_nonprinting: bool) -> bytes:
 async def cat(
     src: bytes | AsyncIterator[bytes],
     *,
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     number_lines: bool = False,
     number_nonblank: bool = False,
     show_ends: bool = False,

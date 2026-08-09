@@ -29,7 +29,7 @@ from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import Operand
+from mirage.commands.spec.types import FlagValue, Operand
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -250,7 +250,7 @@ async def handle_cli(
     # Group flags merge into the one bag: ancestor/descendant collisions
     # are a build-time CLISpec error, so a group flag can never shadow a
     # leaf flag.
-    kw: dict[str, object] = {
+    kw: dict[str, FlagValue] = {
         flag_kwarg_name(spelling): value
         for spelling, value in result.group_flags.items()
     }

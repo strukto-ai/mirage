@@ -129,10 +129,17 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
 def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
     """GNU tar refusal for an old-style cluster letter with no argument.
 
-    Shape and exit pinned against GNU tar 1.35 (``tar xzf`` with nothing
-    after it, and ``tar cfC a.tar``, which names C). tar's own wording,
-    capital and full stop included, because it counts the cluster's
-    argument needs before argp sees the line at all.
+    First line and exit pinned against GNU tar 1.35 (``tar xzf`` with
+    nothing after it, and ``tar cfC a.tar``, which names C). tar's own
+    wording, capital and full stop included, because it counts the
+    cluster's argument needs before argp sees the line at all.
+
+    The hint line is deliberately mirage's, not GNU's: GNU offers
+    ``Try 'tar --help' or 'tar --usage' for more information.`` because
+    argp gives every argp program a ``--usage``, and mirage's tar serves
+    only ``--help``. Naming a flag that does not exist would be worse
+    than the shorter hint, and every other refusal here words it this
+    way, so tar's two refusals stay consistent with each other.
 
     Args:
         cmd_name (str): command name for the message.

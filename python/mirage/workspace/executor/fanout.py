@@ -15,6 +15,7 @@
 from mirage.commands.builtin.find_eval import FindEntry, keep
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.errors import FindParseError
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -31,7 +32,7 @@ def _path_segments(path: str) -> list[str]:
     return [s for s in path.strip("/").split("/") if s]
 
 
-def _depth_flag_value(raw: object) -> int | None:
+def _depth_flag_value(raw: FlagValue | None) -> int | None:
     if isinstance(raw, list):
         raw = raw[0] if raw else None
     if isinstance(raw, bool) or not isinstance(raw, (str, int)):
@@ -45,7 +46,7 @@ def _depth_flag_value(raw: object) -> int | None:
 def _should_fan_out(
     cmd_name: str,
     paths: list[PathSpec],
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     registry: MountRegistry,
 ) -> bool:
     """Whether `cmd` on this path should run across multiple mounts.
@@ -74,10 +75,10 @@ def _should_fan_out(
 
 
 def _adjust_depth_flags(
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     parent_path: str,
     mount_prefix: str,
-) -> dict[str, object] | None:
+) -> dict[str, FlagValue] | None:
     """Adjust find's -maxdepth/-mindepth for a fan-out into a child mount.
 
     Returns the new kwargs dict, or None if the child mount falls
@@ -248,7 +249,7 @@ async def _fan_out_traversal(
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     registry: MountRegistry,
     primary_mount: MountEntry,
     cwd: str,

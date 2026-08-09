@@ -21,6 +21,7 @@ from typing import Mapping
 from mirage.server.auth import storage as _storage
 from mirage.server.daemon_config import read_daemon_table
 from mirage.server.paths import mirage_home
+from mirage.types import JsonValue
 
 ENV_AUTH_MODE = "MIRAGE_AUTH_MODE"
 ENV_AUTH_TOKEN = "MIRAGE_AUTH_TOKEN"
@@ -110,7 +111,7 @@ _CONFIG_ENV_KEYS = {
 
 
 def _merge_config_table(env: Mapping[str, str],
-                        table: Mapping[str, object]) -> dict[str, str]:
+                        table: Mapping[str, JsonValue]) -> dict[str, str]:
     """Fold config.toml auth keys under their env names, env winning.
 
     Only non-secret keys have config counterparts: the raw
@@ -119,7 +120,7 @@ def _merge_config_table(env: Mapping[str, str],
 
     Args:
         env (Mapping[str, str]): the process environment view.
-        table (Mapping[str, object]): the ``[daemon]`` config table.
+        table (Mapping[str, JsonValue]): the ``[daemon]`` config table.
 
     Returns:
         dict[str, str]: env copy with config fallbacks applied.
@@ -137,7 +138,7 @@ def _merge_config_table(env: Mapping[str, str],
 def resolve_auth_config(
     env: Mapping[str, str] | None = None,
     token_file: Path | None = None,
-    table: Mapping[str, object] | None = None,
+    table: Mapping[str, JsonValue] | None = None,
 ) -> AuthConfig:
     """Resolve daemon auth configuration from environment and config.
 
@@ -149,7 +150,7 @@ def resolve_auth_config(
             Defaults to ``os.environ``.
         token_file (Path | None): override the local-mode token file
             location. Defaults to ``default_token_file()``.
-        table (Mapping[str, object] | None): the ``[daemon]`` config
+        table (Mapping[str, JsonValue] | None): the ``[daemon]`` config
             table. Defaults to reading ``$MIRAGE_HOME/config.toml``
             when ``env`` is also defaulted; an explicit ``env`` with no
             ``table`` stays hermetic and reads no file.

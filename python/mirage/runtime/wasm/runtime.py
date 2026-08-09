@@ -18,8 +18,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from mirage.runtime.wasm.fs import GuestFs
 from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
+from mirage.runtime.wasm.vfs import WasmVFS
 
 wasmtime: Any
 try:
@@ -50,7 +50,7 @@ class WasmRuntime:
     epoch bump from reaching concurrent runs.
 
     Filesystem imports are intercepted: every fd_*/path_* call the guest
-    makes lands in WasiFs host functions backed by the caller's GuestFs
+    makes lands in WasiFs host functions backed by the caller's WasmVFS
     router, so the run sees exactly what the router serves (interpreter
     build read-only, workspace mounts through dispatch) — no host
     filesystem, no network, only the passed environment.
@@ -105,7 +105,7 @@ class WasmRuntime:
         argv: list[str],
         stdin: bytes | None,
         env: list[tuple[str, str]],
-        fs: GuestFs,
+        fs: WasmVFS,
     ) -> tuple[bytes, bytes | None, int]:
         """Run the module once and return (stdout, stderr, exit_code).
 
@@ -113,7 +113,7 @@ class WasmRuntime:
             argv (list[str]): full argv, including the program name.
             stdin (bytes | None): bytes fed to the run's stdin.
             env (list[tuple[str, str]]): environment as (name, value) pairs.
-            fs (GuestFs): path router serving the run's filesystem.
+            fs (WasmVFS): path router serving the run's filesystem.
         """
         serialized = await asyncio.to_thread(self._ensure_serialized)
         engine = epoch_engine()
@@ -134,7 +134,7 @@ class WasmRuntime:
         argv: list[str],
         stdin: bytes | None,
         env: list[tuple[str, str]],
-        fs: GuestFs,
+        fs: WasmVFS,
     ) -> tuple[bytes, bytes | None, int]:
         module = wasmtime.Module.deserialize(engine, serialized)
         linker = wasmtime.Linker(engine)

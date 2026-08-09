@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.du import (ComputeEntries, ComputeSize,
                                                 DuEntries, run_du)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn)
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import FileType, PathSpec
@@ -146,13 +147,12 @@ async def du(
     s: bool = False,
     a: bool = False,
     max_depth: str | None = None,
-    d: str | None = None,
     c: bool = False,
     L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
     links: LinkView | None = None,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no resource")
@@ -179,7 +179,6 @@ async def du(
         h=h,
         c=c,
         max_depth=max_depth,
-        d=d,
         truncated=lambda: budget.hit,
         # -L dereferences: the operand was already rewritten at
         # dispatch, and withholding the link table stops the links below

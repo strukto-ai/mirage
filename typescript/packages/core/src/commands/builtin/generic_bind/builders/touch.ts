@@ -14,6 +14,8 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 const ENC = new TextEncoder()
@@ -32,7 +34,7 @@ export const TOUCH_BUILDER: Builder = {
       throw new Error('touch: backend provides no write op')
     }
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    const createOnly = opts.flags.c === true
+    const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('c')
     const writes: Record<string, Uint8Array> = {}
     const errors: string[] = []
     for (const p of resolved) {

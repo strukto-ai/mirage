@@ -19,6 +19,7 @@ from typing import Any
 import jq as _libjq
 
 from mirage.core.jq.types import ARGS_VAR, INPUTS_VAR, JqOptions
+from mirage.types import JsonValue
 
 INPUTS_REF = re.compile(r"(?<![\w$.:])inputs(?![\w:])")
 ARGS_REF = re.compile(r"\$ARGS(?![\w:])")
@@ -119,7 +120,7 @@ def args_object(opts: JqOptions) -> dict[str, Any]:
     }
 
 
-def stream_events(doc: object) -> list[object]:
+def stream_events(doc: JsonValue) -> list[JsonValue]:
     """The `[path, leaf]` events `--stream` reads a document as.
 
     jq's own `tostream` emits exactly the events `--stream` produces for
@@ -150,12 +151,12 @@ def references_inputs(expr: str) -> bool:
 
 
 def jq_eval(
-    obj: object,
+    obj: JsonValue,
     expr: str,
     named_args: Mapping[str, Any] | None = None,
-    inputs: Sequence[object] | None = None,
+    inputs: Sequence[JsonValue] | None = None,
     args_value: Mapping[str, Any] | None = None,
-) -> list[object]:
+) -> list[JsonValue]:
     """Evaluate a jq expression against obj using libjq.
 
     A jq program is a stream transformer: it emits zero, one or many
@@ -169,7 +170,7 @@ def jq_eval(
         expr (str): jq program text.
         named_args (Mapping[str, Any] | None): $name bindings from
             --arg / --argjson.
-        inputs (Sequence[object] | None): documents the `inputs`
+        inputs (Sequence[JsonValue] | None): documents the `inputs`
             builtin should yield, i.e. the ones still unread at this
             point in the stream. libjq's Python binding owns no input
             stream, so `inputs` is bound as a definition over a named
@@ -180,7 +181,7 @@ def jq_eval(
             (libjq's binding defines no `$ARGS` of its own).
 
     Returns:
-        list[object]: every output value, in order. Empty when the
+        list[JsonValue]: every output value, in order. Empty when the
             program produces no output at all, which real jq reports as
             exit 0 with empty stdout.
     """

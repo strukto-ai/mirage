@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,18 +31,11 @@ async def fmt(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    w: str | None = None,
-    g: str | None = None,
-    c: bool = False,
-    p: str | None = None,
-    s: bool = False,
-    t: bool = False,
-    u: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["fmt"])
-    goal_value = g or fl.as_str("goal")
+    goal_value = fl.as_str("goal")
     paths, err = await resolve_readable(ops, accessor, paths, index, "fmt")
     if err and not paths:
         return None, IOResult(exit_code=1, stderr=err)
@@ -51,13 +44,13 @@ async def fmt(
         generic_fmt(paths,
                     read_bytes=bound_op(ops.read_bytes, accessor, index),
                     stdin=stdin,
-                    width=int(w or fl.as_str("width") or "75"),
+                    width=int(fl.as_str("width") or "75"),
                     goal=int(goal_value) if goal_value is not None else None,
-                    prefix=p or fl.as_str("prefix"),
-                    split_only=s or fl.as_bool("split_only"),
-                    tagged=t or fl.as_bool("tagged_paragraph"),
-                    crown=c or fl.as_bool("crown_margin"),
-                    uniform=u or fl.as_bool("uniform_spacing")), err)
+                    prefix=fl.as_str("prefix"),
+                    split_only=fl.as_bool("split_only"),
+                    tagged=fl.as_bool("tagged_paragraph"),
+                    crown=fl.as_bool("crown_margin"),
+                    uniform=fl.as_bool("uniform_spacing")), err)
 
 
 BUILDER = Builder('fmt', fmt, None, False, None, read=True)

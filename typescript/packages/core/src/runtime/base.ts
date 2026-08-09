@@ -12,30 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { coerceRuntimeConfig, type RuntimeConfig } from './config.ts'
 import { ScriptSource, type PolicyScript } from './policy/types.ts'
 import type { RuntimeOptions } from './types.ts'
-
-/**
- * A constructor's config option as the runtime's own config, mirroring
- * Python's RuntimeConfig.coerce: keys outside the runtime's list fail
- * loud (Python gets this from the dataclass raising TypeError; a TS
- * object spread would silently swallow a typo key without it).
- */
-function coerceRuntimeConfig<C extends object>(
-  value: C | undefined,
-  keys: readonly string[],
-  label = 'runtime',
-): C {
-  const config = value ?? ({} as C)
-  for (const key of Object.keys(config)) {
-    if (!keys.includes(key)) {
-      const known =
-        keys.length > 0 ? `expected: ${keys.map((k) => `'${k}'`).join(', ')}` : 'none allowed'
-      throw new Error(`unknown ${label} config key '${key}' (${known})`)
-    }
-  }
-  return { ...config }
-}
 
 /**
  * An engine the workspace can route commands or whole lines to.
@@ -63,11 +42,11 @@ export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
   /** The runtime's coerced implementation knobs. */
-  config: object
+  config: RuntimeConfig
   script?: PolicyScript
 
   constructor(
-    options: RuntimeOptions<object> = {},
+    options: RuntimeOptions<RuntimeConfig> = {},
     defaultCaptures: readonly string[] = [],
     configKeys: readonly string[] = [],
   ) {

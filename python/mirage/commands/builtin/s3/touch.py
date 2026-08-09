@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic_bind.provision import \
 from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.s3.exists import exists
 from mirage.core.s3.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -39,7 +40,7 @@ async def touch(
     r: str | None = None,
     d: str | None = None,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("touch: missing operand")

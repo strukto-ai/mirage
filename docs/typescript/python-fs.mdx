@@ -1,10 +1,10 @@
 ---
-title: Python FS shim
+title: Python filesystem
 icon: file-binary
 description: Use Python's open(), os.listdir, pathlib, PIL, pandas, directly against any Mirage mount.
 ---
 
-Python code inside `ws.execute('python3 ...')` can `open()`, `os.listdir()`, `pathlib.Path()` etc. against any registered Mirage mount. The shim routes those calls through Mirage's mount layer (RAM, S3, Linear, GDocs, Slack, anything you've registered).
+Python code inside `ws.execute('python3 ...')` can `open()`, `os.listdir()`, `pathlib.Path()` etc. against any registered Mirage mount. Mirage mounts a filesystem of its own inside the interpreter, below the syscall boundary, so those calls reach Mirage's mount layer (RAM, S3, Linear, GDocs, Slack, anything you've registered).
 
 ```python
 # inside python3
@@ -22,14 +22,14 @@ open('/ram/notes.txt', 'w').write('hello')              # writes flush back to R
     open('/linear/teams/eng/team.json').read()
     open('/gdocs/owned/MyDoc.gdoc.json').read()
     ```
-    The first read fetches via the resource and caches in MEMFS. Subsequent reads are sync.
+    Every mounted prefix is collected before the run, so reads are sync and cost no round trip.
   </Tab>
   <Tab title="Write a file">
     ```python
     open('/ram/out.txt', 'w').write('hello')
     open('/s3/icon.png', 'wb').write(png_bytes)
     ```
-    `close()` marks the path dirty; when the script finishes, the final bytes flush back through the resource's `write` op (one write per path, however many times the script reopened it).
+    `close()` records the write; when the script finishes, the bytes go back through the resource's `write` op, or its `append` op when the handle only extended the file.
   </Tab>
   <Tab title="List a directory">
     ```python
@@ -41,7 +41,7 @@ open('/ram/notes.txt', 'w').write('hello')              # writes flush back to R
     for msg_dir in os.listdir('/gmail/INBOX/2026-05-03/'):
         print(msg_dir)
     ```
-    The first `listdir` of a synthesized path triggers a one-time bridge fetch.
+    A synthesized path is materialized when the prefix is collected, before the run.
   </Tab>
   <Tab title="pathlib & glob">
     ```python
@@ -85,32 +85,34 @@ open('/ram/notes.txt', 'w').write('hello')              # writes flush back to R
 
 | Case | Why | Workaround |
 |---|---|---|
-| **C extensions calling `fopen` directly**, `sqlite3.connect('/ram/db.sqlite')`, `h5py.File('/ram/x.h5')` | They bypass Python's `open()` and the shim never sees them | Use a local copy, or stream bytes via stdin |
-| **External edits show up live**, someone else edits the GDoc while you're reading | Once a path is in MEMFS the shim doesn't re-fetch it | Currently no API; must `unmount` + `addMount` |
-| **Huge mounts**, preloading a 100GB S3 bucket | Every byte lives in MEMFS until close | Mount a narrower prefix |
+| **External edits show up mid-run**, someone else edits the GDoc while your script runs | The tree is collected before the run and served synchronously after that | Each run re-collects, so the next one sees the edit |
+| **Huge mounts**, collecting a 100GB S3 bucket | Every byte is held in memory for the run | Mount a narrower prefix |
+| **Symlinks**, `os.symlink` inside the guest | Links are namespace state in Mirage, so no mount op can carry one | Refused with `EPERM` rather than silently lost at the end of the run |
 | **Concurrent writers**, two Python processes write the same path | Last `close()` wins, no conflict detection | Out of scope for v1 |
 | **Browser-only resources from Node**, OPFS | OPFS isn't a thing in Node | Run in a browser-side Mirage |
 
 ## How it works (one paragraph)
 
-Pyodide's in-memory FS (MEMFS) is the sync facade. Before each run, Mirage walks any newly mounted prefix and copies files into MEMFS. Python reads hit MEMFS directly, fast, no network. On a **miss** (path not yet in MEMFS but the prefix is registered), the shim catches the error, calls back through the bridge via JSPI to fetch it, populates MEMFS, and retries. Writes are intercepted on `close()`, which marks the path dirty in MEMFS; after the script returns, Mirage flushes each dirty path's final bytes back through Mirage's `write` op (no JSPI involved, and a flush failure lands on stderr with a nonzero exit).
+Mirage registers its own Emscripten filesystem at each mount prefix, so every spelling of an operation (`open`, `os.open`, `pathlib`, a C extension's `fopen`, `shutil`'s fd-relative walk) arrives as the same callback. Emscripten's callbacks are synchronous, so nothing reaches the mount inline: before each run Mirage collects every mounted prefix into the filesystem's node table, and reads are served from there. Writes are recorded on a journal in the order the guest performed them, and replayed against the mounts after the script returns, where awaiting is free. A handle that only extended a file replays as an `append`, so an append loop ships its tail rather than the whole file each time. A failed replay lands on stderr with a nonzero exit, and stops the rest of the journal rather than applying entries whose prerequisite never landed.
 
 ```
-Python open() / listdir()
+Python open() / os.open() / C fopen()
         │
         ▼
-   Pyodide MEMFS  ──hit──►  bytes
-        │
-       miss
-        │
-        ▼
-   run_sync(_mirage_bridge.list/fetch)   ← the one JSPI-dependent hop
-        │
-        ▼
-   populate MEMFS, retry
-
-Python close()  ──►  mark dirty  ──►  script ends  ──►  flush to mount
+   Mirage filesystem callbacks (sync)
+        │                    │
+      reads                writes
+        │                    │
+        ▼                    ▼
+   node table          mutation journal
+   (collected               │
+    before the run)    script ends
+                            │
+                            ▼
+                    replay against mounts
 ```
+
+Nothing is patched inside the interpreter, and none of it needs JSPI.
 
 ## Quick start (TypeScript)
 
@@ -150,35 +152,28 @@ new Workspace({}, { python: { autoLoadFromImports: false } })
 | S3, R2, GCS, OCI, Supabase | ✅ (narrow the prefix to keep the working set small) |
 | Linear, GDocs, GSheets, GSlides, GDrive | ✅ |
 | GitHub, Redis | ✅ |
-| Gmail (including synthesized date dirs) | ✅ (lazy-fetched on first access) |
+| Gmail (including synthesized date dirs) | ✅ (materialized when the prefix is collected) |
 | Slack | ⚠️ preloads channel histories; large workspaces may be slow |
 
 ## Runtime requirements
 
-None: preloaded reads, mounts added between runs, and writes all work on any engine. [JSPI](https://github.com/WebAssembly/js-promise-integration) only powers the shim's **lazy backfill**, the mid-run fetch of a path that appeared on the mount after its prefix was preloaded. With JSPI available that miss is filled in place; without it the miss stays a `FileNotFoundError` (a `console.warn: mirage lazy: ...` names the real reason).
+None. Reads, mounts added between runs, and writes all work on any engine, with no V8 flag and no [JSPI](https://github.com/WebAssembly/js-promise-integration). That is the point of collecting the tree before the run and replaying writes after it: a filesystem callback never has to suspend, so nothing depends on stack switching, which no shipping Node enables by default and Safari does not implement.
 
-Where JSPI is available:
-
-- **Chrome / Edge 137+** (May 2025): out of the box
-- **Firefox**: behind `javascript.options.wasm_js_promise_integration`
-- **Node**: pass `--experimental-wasm-jspi` (vitest config already does this; V8 flags cannot ride `NODE_OPTIONS`)
-- **Cloudflare Workers**: Python Workers with JSPI runtime
-
-To run examples with the lazy backfill enabled:
+To run the example:
 
 ```bash
-node --experimental-wasm-jspi --import tsx/esm examples/typescript/pyodide/vfs.ts
+node --import tsx/esm examples/typescript/pyodide/vfs.ts
 ```
 
 ## Errors you might see
 
 | Symptom | What it means |
 |---|---|
-| `FileNotFoundError [Errno 44]` | Path isn't in MEMFS and lazy fetch failed too. Check the preceding `console.warn: mirage lazy: ...` for the real reason (auth, network, bad path). |
-| `console.warn: mirage lazy: list <path> failed` | The lazy backfill called `_mirage_bridge.list` and got rejected. Followed by `FileNotFoundError`. |
-| `python3: failed to flush <path> to mount: ...` on stderr, exit 1 | The script finished but a dirty file could not be written back to its mount (auth, read-only mount, network). MEMFS still holds the bytes. |
-| `RuntimeError: WebAssembly stack switching not supported` in a lazy warn | JSPI not enabled, so a mid-run backfill could not suspend. Reads of preloaded content and all writes are unaffected. |
-| `console.warn: mirage preload: skipping <path>` | A single entry failed during initial preload, others continued. Usually harmless (synthetic listing entries). |
+| `FileNotFoundError [Errno 44]` | The path was not in the tree collected before the run. A callback cannot go looking for more, so this is a genuine absence at collection time. |
+| `python3: failed to <op> <path> on mount: ...` on stderr, exit 1 | The script finished but a recorded mutation could not be applied (auth, read-only mount, network). |
+| `python3: skipped N later mutation(s) after that failure` | The journal is a sequence, not a set, so the replay stops at the first failure rather than applying entries whose prerequisite never landed. |
+| `OSError [Errno 5]` on opening a file you can see | The mount listed the file but would not serve its bytes, so its real content is unknown and any handle is refused rather than guessing. |
+| `console.warn: mirage preload: cannot read <path>` | One entry failed while the prefix was collected, others continued. The file is marked unreadable rather than left looking absent. |
 
 ## See also
 

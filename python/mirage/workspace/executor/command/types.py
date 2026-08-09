@@ -17,6 +17,7 @@ from typing import NamedTuple, Protocol
 
 import tree_sitter
 
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
@@ -43,7 +44,7 @@ class ExecuteNodeFn(Protocol):
 class ParsedCommand(NamedTuple):
     paths: list[PathSpec]
     texts: list[str]
-    flag_kwargs: dict[str, object]
+    flag_kwargs: dict[str, FlagValue]
     warnings: list[str]
     invalid_options: list[str]
     ambiguous_options: list[tuple[str, tuple[str, ...]]]

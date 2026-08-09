@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.provision import (
     make_search_provision, make_transform_provision, metadata_provision,
     pure_provision, write_metadata_provision)
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
+from mirage.commands.spec import SPECS
 from mirage.provision import Precision
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -181,8 +182,24 @@ async def test_write_metadata_zero_bytes_recursive_floors():
     recursive = await write_metadata_provision(None,
                                                [_spec("/data/known.txt")],
                                                command="rm",
+                                               spec=SPECS["rm"],
                                                r=True)
     assert recursive.precision == Precision.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_write_metadata_reference_flag_is_not_recursion():
+    """`touch -r REF` shares rm's spelling but walks nothing.
+
+    The shared estimator resolves -r through the invoked command's spec,
+    so a value-typed option under the same letter never degrades the
+    estimate to a floor.
+    """
+    result = await write_metadata_provision(None, [_spec("/data/known.txt")],
+                                            command="touch -r /data/ref",
+                                            spec=SPECS["touch"],
+                                            r=_spec("/data/ref"))
+    assert result.precision == Precision.EXACT
 
 
 @pytest.mark.asyncio
@@ -224,6 +241,7 @@ async def test_search_recursive_walks_tree_exact():
     result = await provision(None, [_spec("/data/tree")],
                              "x",
                              command="grep",
+                             spec=SPECS["grep"],
                              r=True)
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 18

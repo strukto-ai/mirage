@@ -21,7 +21,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { ExecutionNode } from '../../types.ts'
-import { MontyUnavailableError } from '../../../runtime/python/monty.ts'
+import { MontyUnavailableError } from '../../../runtime/python/monty/index.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]

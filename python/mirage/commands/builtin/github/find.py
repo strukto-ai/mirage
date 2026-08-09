@@ -21,6 +21,7 @@ from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.github.find import find as find_core
 from mirage.core.github.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
@@ -34,7 +35,7 @@ async def find_provision(
     paths: list[PathSpec],
     *texts: str,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     path_strs = [
         p.virtual if isinstance(p, PathSpec) else str(p) for p in paths
@@ -63,7 +64,7 @@ async def find(
     L: bool = False,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
     return await generic_find(paths,

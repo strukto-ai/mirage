@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RuntimeConfig } from './config.ts'
 import type { PolicyScript } from './policy/types.ts'
 
 /**
@@ -28,7 +29,7 @@ export type RuntimeLanguage = 'python' | 'js'
  * imports no workspace module (Python's DispatchFn in runtime/types).
  */
 export type BridgeDispatchFn = (
-  op: 'READ' | 'WRITE' | 'LIST' | 'STAT' | 'UNLINK' | 'MKDIR' | 'RMDIR' | 'RENAME',
+  op: 'READ' | 'WRITE' | 'APPEND' | 'LIST' | 'STAT' | 'UNLINK' | 'MKDIR' | 'RMDIR' | 'RENAME',
   path: string,
   bytes?: Uint8Array,
   dst?: string,
@@ -132,7 +133,7 @@ export interface EvalResult {
 }
 
 /** Constructor options every runtime accepts (a yaml entry's keys). */
-export interface RuntimeOptions<C extends object = Record<string, unknown>> {
+export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
   /**
    * Commands this runtime claims, overriding the class default; ["*"]
    * claims every line for a line-executing runtime.

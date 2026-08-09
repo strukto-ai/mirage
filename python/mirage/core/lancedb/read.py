@@ -20,7 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.lancedb.query import row_record
 from mirage.core.lancedb.render import render_card
 from mirage.core.lancedb.scope import LanceDBRowScope, detect_scope
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.errors import enoent
 
 
@@ -33,7 +33,7 @@ async def _resolve_row(accessor: LanceDBAccessor, scope, config,
     return row
 
 
-def _blob_bytes(value: object) -> bytes:
+def _blob_bytes(value: JsonValue) -> bytes:
     if isinstance(value, bytes):
         return value
     if isinstance(value, str):

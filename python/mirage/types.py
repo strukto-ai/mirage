@@ -30,10 +30,11 @@ class Aggr:
     field's aggregation behavior lives next to the field.
 
     Args:
-        reduce (Callable[[list[Any]], object]): the per-field aggregation rule.
+        reduce (Callable[[list[Any]], Any]): the per-field
+            aggregation rule.
     """
 
-    def __init__(self, reduce: Callable[[list[Any]], object]) -> None:
+    def __init__(self, reduce: Callable[[list[Any]], Any]) -> None:
         self.reduce = reduce
 
 
@@ -91,6 +92,16 @@ class FileStat(BaseModel):
     atime: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
+
+# Any value that survives a JSON round trip: what a decoded payload
+# holds, what jq evaluates over, what an API field hands back. Recursive
+# on purpose -- the alternative, `object`, also admits bytes and every
+# other non-JSON value, so each use site has to isinstance its way back
+# to the same set. Spelled as a string because a recursive alias needs
+# a forward reference until the floor is 3.12 (PEP 695 `type`), so a
+# union with it has to be quoted too: `Awaitable["JsonValue | X"]`.
+JsonValue: TypeAlias = ("None | bool | int | float | str | list[JsonValue]"
+                        " | dict[str, JsonValue]")
 
 ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
 ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]

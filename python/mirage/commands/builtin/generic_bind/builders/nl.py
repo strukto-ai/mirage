@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import (
     merge_split_errors, resolve_readable)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,19 +31,8 @@ async def nl(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    b: str | None = None,
-    v: str | None = None,
-    i: str | None = None,
-    w: str | None = None,
-    s: str | None = None,
-    f: str | None = None,
-    h: str | None = None,
-    args_l: str | None = None,
-    n: str | None = None,
-    p: bool = False,
-    d: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["nl"])
     paths, err = await resolve_readable(ops, accessor, paths, index, "nl")
@@ -54,17 +43,17 @@ async def nl(
             paths,
             read_stream=bound_op(ops.read_stream, accessor, index),
             stdin=stdin,
-            body_numbering_raw=b or fl.as_str("body_numbering"),
-            start_raw=v or fl.as_str("starting_line_number"),
-            increment_raw=i or fl.as_str("line_increment"),
-            width_raw=w or fl.as_str("number_width"),
-            separator=s or fl.as_str("number_separator"),
-            footer_numbering_raw=f or fl.as_str("footer_numbering"),
-            header_numbering_raw=h or fl.as_str("header_numbering"),
-            join_blank_lines_raw=args_l or fl.as_str("join_blank_lines"),
-            number_format=n or fl.as_str("number_format") or "rn",
-            delimiter=d or fl.as_str("section_delimiter") or "\\:",
-            no_renumber=p or fl.as_bool("no_renumber"),
+            body_numbering_raw=fl.as_str("body_numbering"),
+            start_raw=fl.as_str("starting_line_number"),
+            increment_raw=fl.as_str("line_increment"),
+            width_raw=fl.as_str("number_width"),
+            separator=fl.as_str("number_separator"),
+            footer_numbering_raw=fl.as_str("footer_numbering"),
+            header_numbering_raw=fl.as_str("header_numbering"),
+            join_blank_lines_raw=fl.as_str("join_blank_lines"),
+            number_format=fl.as_str("number_format") or "rn",
+            delimiter=fl.as_str("section_delimiter") or "\\:",
+            no_renumber=fl.as_bool("no_renumber"),
         ), err)
 
 

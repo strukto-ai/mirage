@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec import SPECS
+from mirage.types import JsonValue
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.names import (JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS,
                                     SHELL_NAMES)
@@ -49,7 +50,7 @@ class CLIRegistry:
     def install(self,
                 name: str,
                 spec: CLISpec,
-                config: dict[str, object] | None = None) -> CLIInstall:
+                config: dict[str, JsonValue] | None = None) -> CLIInstall:
         """Install a CLI under a head word.
 
         Args:
@@ -58,7 +59,7 @@ class CLIRegistry:
                 shell builtin, or a general command (a runtime capture
                 of the same name is fine: the policy steers per line).
             spec (CLISpec): the program tree.
-            config (dict[str, object] | None): installation config,
+            config (dict[str, JsonValue] | None): installation config,
                 validated through the spec's ``config_model``.
         """
         if not name or any(ch.isspace() for ch in name):
@@ -81,14 +82,14 @@ class CLIRegistry:
         return install
 
     def _validate_config(
-        self, name: str, spec: CLISpec, config: dict[str, object] | None
-    ) -> BaseModel | dict[str, object] | None:
+        self, name: str, spec: CLISpec, config: dict[str, JsonValue] | None
+    ) -> BaseModel | dict[str, JsonValue] | None:
         """Validate an installation config against the spec's model.
 
         Args:
             name (str): installed head word, for error attribution.
             spec (CLISpec): the program tree carrying ``config_model``.
-            config (dict[str, object] | None): raw config mapping.
+            config (dict[str, JsonValue] | None): raw config mapping.
         """
         if spec.script is not None:
             # A script spec has no config_model: the mapping passes

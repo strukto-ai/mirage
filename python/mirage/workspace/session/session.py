@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.types import ByteSource
 from mirage.shell.array import ShellArray
 from mirage.shell.types import FunctionBody
 from mirage.types import MountMode
@@ -46,7 +47,7 @@ class Session:
     # program loop absorbs its signal only while a file is being sourced.
     source_depth: int = field(default=0, repr=False)
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
-    _stdin_source: object = field(default=None, repr=False)
+    _stdin_source: ByteSource | None = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
     # Arrays shadowed by `local -a` / `declare -a` in the running
     # function; None means the caller had no array of that name.

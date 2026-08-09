@@ -1,14 +1,12 @@
 import posixpath
-from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.utils.wrap import to_pathspec
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, StatFn
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-async def _exists(stat_fn: Callable[..., Awaitable[object]],
-                  path: PathSpec) -> bool:
+async def _exists(stat_fn: StatFn, path: PathSpec) -> bool:
     try:
         await stat_fn(path)
         return True
@@ -19,7 +17,7 @@ async def _exists(stat_fn: Callable[..., Awaitable[object]],
 async def realpath(
     paths: list[PathSpec],
     *,
-    stat_fn: Callable[..., Awaitable[object]],
+    stat_fn: StatFn,
     e: bool = False,
     m: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

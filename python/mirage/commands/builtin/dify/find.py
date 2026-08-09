@@ -7,6 +7,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.dify.find import find as find_core
 from mirage.core.dify.stat import stat as stat_core
 from mirage.core.dify.stat import stat_light
@@ -67,7 +68,7 @@ async def find(
     L: bool = False,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = default_paths(paths, cwd)
     paths = await resolve_glob(accessor, paths, index)

@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.types import (OperandRun,
                                                               RunSingle)
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
@@ -36,7 +37,7 @@ async def run_operands(run_single: RunSingle,
                        cmd_name: str,
                        scopes: list[PathSpec],
                        texts: list[str],
-                       flag_kwargs: dict[str, object],
+                       flag_kwargs: dict[str, FlagValue],
                        stdin_bytes: bytes | None = None) -> list[OperandRun]:
     """Run one native single-mount command per operand, in operand order.
 

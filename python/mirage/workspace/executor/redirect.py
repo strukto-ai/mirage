@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from enum import Enum, auto
 
 import tree_sitter
 
@@ -31,8 +32,20 @@ from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
-_TO_STDOUT = object()
-_TO_STDERR = object()
+
+class _Fd(Enum):
+    """Where a descriptor points when no file redirect has claimed it.
+
+    An enum, not a sentinel object: the same variable also holds a
+    virtual path string once a redirect lands, and a member can never
+    collide with one.
+    """
+    TO_STDOUT = auto()
+    TO_STDERR = auto()
+
+
+_TO_STDOUT = _Fd.TO_STDOUT
+_TO_STDERR = _Fd.TO_STDERR
 
 
 async def handle_redirect(
@@ -115,8 +128,8 @@ async def handle_redirect(
         stdout_data = await materialize(barriered) or b""
         stderr_data = await materialize(io.stderr) or b""
 
-    fd1: object = _TO_STDOUT
-    fd2: object = _TO_STDERR
+    fd1: _Fd | str = _TO_STDOUT
+    fd2: _Fd | str = _TO_STDERR
     file_bufs: dict[str, bytearray] = {}
     file_scopes: dict[str, PathSpec] = {}
 

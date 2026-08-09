@@ -14,6 +14,7 @@
 
 from mirage.commands.spec import (CommandSpec, flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
+from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, invalid_argument_error, invalid_float_error,
     invalid_int_error, missing_required_error, missing_value_error,
@@ -88,7 +89,9 @@ def parse_flags(
 
     if spec is not None:
         parsed = parse_command(spec, argv, cwd=cwd)
-        flag_kwargs = parse_to_kwargs(parsed)
+        # Widens from ParsedFlagValue to FlagValue: PATH values
+        # become PathSpec just below.
+        flag_kwargs: dict[str, FlagValue] = dict(parse_to_kwargs(parsed))
 
         # Recover PathSpec for PATH flag values; multiple PATH flags
         # arrive as a list of resolved paths and become list[PathSpec].
@@ -115,16 +118,22 @@ def parse_flags(
         }
         if not str_flag_paths:
             for key, value in flag_kwargs.items():
+                # Only the parser's own list[str] values reach here; a
+                # PathSpec list is already promoted.
+                texts_in: list[str] = ([
+                    item for item in value if isinstance(item, str)
+                ] if isinstance(value, list) else [])
                 if key in pair_path_keys and isinstance(value, list):
+                    # A pair is (name, value): only the odd slots are paths.
                     flag_kwargs[key] = [
                         scope_map.get(part, synthesize_path_spec(part))
                         if index % 2 else part
-                        for index, part in enumerate(value)
+                        for index, part in enumerate(texts_in)
                     ]
                 elif key in repeat_path_keys and isinstance(value, list):
                     flag_kwargs[key] = [
                         scope_map.get(part, synthesize_path_spec(part))
-                        for part in value
+                        for part in texts_in
                     ]
                 elif key in single_path_keys and isinstance(value, str):
                     flag_kwargs[key] = scope_map.get(

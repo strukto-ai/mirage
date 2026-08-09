@@ -24,6 +24,7 @@ from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.postgres.read import read as postgres_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -39,7 +40,7 @@ async def head(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

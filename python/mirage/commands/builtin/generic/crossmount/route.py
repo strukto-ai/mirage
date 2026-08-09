@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.crossmount.stream import run_stream
 from mirage.commands.builtin.generic.crossmount.types import (CrossResult,
                                                               RunSingle,
                                                               Strategy)
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
@@ -31,7 +32,7 @@ async def handle_cross_mount(
     cmd_name: str,
     scopes: list[PathSpec],
     text_args: list[str],
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     dispatch: Callable[..., Any],
     run_single: RunSingle,
     stdin: ByteSource | None = None,

@@ -32,6 +32,15 @@ function makeBridge(): {
       files.set(path, normalizedBytes ?? new Uint8Array())
       return Promise.resolve(undefined)
     }
+    if (op === 'APPEND') {
+      const base = files.get(path) ?? new Uint8Array()
+      const tail = normalizedBytes ?? new Uint8Array()
+      const next = new Uint8Array(base.length + tail.length)
+      next.set(base)
+      next.set(tail, base.length)
+      files.set(path, next)
+      return Promise.resolve(undefined)
+    }
     if (op === 'READ') return Promise.resolve(files.get(path) ?? new Uint8Array())
     const prefix = path
     const entries: { path: string; size: number; isDir: boolean }[] = []
@@ -130,6 +139,55 @@ describe('PyodideRuntime mount visibility', () => {
     await rt.close()
   }, 60_000)
 
+  it('a root mount is refused rather than mounted at nothing', async () => {
+    // `/` is already MEMFS's mount root, so Emscripten answers EBUSY;
+    // the empty mountpoint it used to compute mounts a detached
+    // filesystem, and the guest then reads and writes MEMFS while a
+    // write reports success the resource never sees.
+    const { dispatch, calls } = makeBridge()
+    const warnings: string[] = []
+    const warn = console.warn
+    console.warn = (msg: unknown) => warnings.push(String(msg))
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/'])
+    try {
+      const result = await rt.run({
+        code: `open('/out.txt', 'wb').write(b'data')`,
+        args: [],
+        env: {},
+        stdin: new Uint8Array(),
+      })
+      expect(result.exitCode).toBe(0)
+      expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
+      expect(warnings.some((w) => w.includes("cannot serve a mount at '/'"))).toBe(true)
+      // Reported once, not once per run.
+      await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
+      expect(warnings.filter((w) => w.includes('cannot serve a mount'))).toHaveLength(1)
+    } finally {
+      console.warn = warn
+      await rt.close()
+    }
+  }, 60_000)
+
+  it('a nested prefix stays reachable under its parent mount', async () => {
+    // prefixes() is longest-first; mounting in that order puts /data
+    // over the /data/inner mounted a moment earlier and orphans it.
+    const { dispatch, files } = makeBridge()
+    files.set('/data/outer.txt', new TextEncoder().encode('OUTER'))
+    files.set('/data/inner/deep.txt', new TextEncoder().encode('DEEP'))
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/data/', '/data/inner/'])
+    const result = await rt.run({
+      code: "print(open('/data/outer.txt').read(), open('/data/inner/deep.txt').read())",
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    expect(result.exitCode).toBe(0)
+    expect(new TextDecoder().decode(result.stdout)).toContain('OUTER DEEP')
+    await rt.close()
+  }, 60_000)
+
   it('a failed flush surfaces on stderr and flips a clean exit to 1', async () => {
     const dispatch: BridgeDispatchFn = (op) => {
       if (op === 'WRITE') return Promise.reject(new Error('mount is read-only'))
@@ -195,14 +253,19 @@ describe('PyodideRuntime mount visibility', () => {
     await rt.close()
   }, 60_000)
 
-  it('an unreadable base fails the append rather than replacing the file', async () => {
+  it('an unreadable base refuses the open rather than replacing the file', async () => {
     const writes: Uint8Array[] = []
+    // The mount lists the file, so it exists, but will not hand over its
+    // content. Leaving it out of the guest's tree would read as absence,
+    // and the append would then ship its tail as the whole file.
     const dispatch: BridgeDispatchFn = (op, path, bytes) => {
       if (op === 'READ' && path === '/ram/log.txt') {
         return Promise.reject(new Error('backend unavailable'))
       }
       if (op === 'READ') return Promise.resolve(new Uint8Array())
-      if (op === 'LIST') return Promise.resolve([])
+      if (op === 'LIST') {
+        return Promise.resolve([{ path: '/ram/log.txt', size: 4, isDir: false }])
+      }
       if (op === 'WRITE' && bytes !== undefined) writes.push(new Uint8Array(bytes))
       return Promise.resolve(undefined)
     }
@@ -214,12 +277,11 @@ describe('PyodideRuntime mount visibility', () => {
       env: {},
       stdin: new Uint8Array(),
     })
-    // An error that is not a confirmed absence must not be read as an
-    // empty base, or the tail alone would overwrite the file.
     expect(writes).toHaveLength(0)
-    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toContain(
-      'failed to append /ram/log.txt',
-    )
+    // The refusal reaches the guest at the call site now, rather than
+    // surfacing after the run as a failed replay.
+    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
+    expect(stderr).toContain('OSError')
     expect(result.exitCode).toBe(1)
     await rt.close()
   }, 60_000)

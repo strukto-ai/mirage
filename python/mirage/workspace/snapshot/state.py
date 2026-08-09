@@ -27,8 +27,8 @@ from mirage.resource.secrets import (has_redacted_secret, redacted_config_dump,
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, CLIKey, ConsistencyPolicy, JobKey,
-                          MountKey, MountMode, ResourceName, ResourceStateKey,
-                          ScriptKey, SessionKey, StateKey)
+                          JsonValue, MountKey, MountMode, ResourceName,
+                          ResourceStateKey, ScriptKey, SessionKey, StateKey)
 from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
 from mirage.workspace.session.session import Session
@@ -45,7 +45,7 @@ CLIOverrides = dict[str, dict[str, Any]
                     | tuple[str | CLISpec, dict[str, Any] | None]]
 
 
-def cli_config_dump(config: BaseModel | dict[str, object] | None,
+def cli_config_dump(config: BaseModel | dict[str, JsonValue] | None,
                     reveal: bool = False) -> dict[str, Any] | None:
     """Serialize an installation's config for a snapshot.
 
@@ -57,7 +57,7 @@ def cli_config_dump(config: BaseModel | dict[str, object] | None,
     environment.
 
     Args:
-        config (BaseModel | dict[str, object] | None): the validated
+        config (BaseModel | dict[str, JsonValue] | None): the validated
             install config.
         reveal (bool): reveal secrets instead of redacting them, which
             only a same-process copy does.

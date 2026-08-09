@@ -1,5 +1,7 @@
 import { odGeneric, parseCount } from '../../generic/od.ts'
 import { resolveSource } from '../../utils/stream.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 async function* concatSources(sources: AsyncIterable<Uint8Array>[]): AsyncIterable<Uint8Array> {
@@ -20,21 +22,17 @@ export const OD_BUILDER: Builder = {
       resolved.length === 0
         ? resolveSource(opts.stdin)
         : concatSources(resolved.map((p) => ops.readStream(accessor, p, index)))
-    const addressValue = opts.flags.address_radix
-    const skipValue = opts.flags.skip_bytes
-    const limitValue = opts.flags.read_bytes
-    const formatValue = opts.flags.format
-    const formats = Array.isArray(formatValue)
-      ? formatValue
-      : typeof formatValue === 'string'
-        ? [formatValue]
-        : []
+    const fl = new FlagView(opts.flags, specOf('od'))
+    // asStr, not a truthiness test: an explicitly empty value is an
+    // invalid argument to GNU, not an absent flag.
+    const skipValue = fl.asStr('skip_bytes')
+    const limitValue = fl.asStr('read_bytes')
     return odGeneric(
       source,
-      typeof addressValue === 'string' ? addressValue : 'o',
-      typeof skipValue === 'string' ? parseCount(skipValue, '-j') : 0,
-      typeof limitValue === 'string' ? parseCount(limitValue, '-N') : null,
-      formats,
+      fl.asStr('address_radix') ?? 'o',
+      skipValue !== undefined ? parseCount(skipValue, '-j') : 0,
+      limitValue !== undefined ? parseCount(limitValue, '-N') : null,
+      fl.asList('format'),
     )
   },
 }

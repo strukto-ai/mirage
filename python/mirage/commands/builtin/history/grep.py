@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic_bind.provision import \
     make_search_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
 from mirage.core.history.readdir import readdir as _readdir
 from mirage.core.history.stat import stat as _stat
@@ -40,7 +41,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_grep(
         list(paths),

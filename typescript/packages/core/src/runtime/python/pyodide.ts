@@ -26,14 +26,12 @@ import type {
 } from '../types.ts'
 import { createPyodideInterrupter, type PyodideInterrupter } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import {
-  applyMutation,
-  createMirageBridge,
-  preloadInto,
-  type MirageBridge,
-} from './mirage_bridge.ts'
 import type { BridgeDispatchFn } from '../types.ts'
-import { MIRAGE_FS_SHIM_PY } from './mirage_fs_shim.ts'
+import { RuntimeVFS } from '../vfs.ts'
+import { applyMutation, createJournal, type MutationJournal } from './vfs/journal.ts'
+import { preloadInto } from './vfs/preload.ts'
+import { MirageFs } from './vfs/vfs.ts'
+import { MirageFsSeed } from './vfs/seed.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
 import { PYODIDE_RUNTIME } from './interface.ts'
 
@@ -70,6 +68,32 @@ function reviveEvalValue(_key: string, value: unknown): unknown {
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
+}
+
+// Mount prefixes are normalized with a trailing slash; an Emscripten
+// mountpoint is a directory path, so it carries none. The root prefix
+// is the one that strips to nothing, and nothing is what makes it
+// unmountable here: see `servable`.
+function mountpointOf(prefix: string): string {
+  return prefix.endsWith('/') ? prefix.slice(0, -1) : prefix
+}
+
+/**
+ * Whether this runtime can mount `prefix` at all.
+ *
+ * Everything but the workspace root can. `/` cannot: it is already
+ * MEMFS's own mount root, holding the interpreter's stdlib, and
+ * Emscripten answers EBUSY to a second mount there. Left to itself
+ * `mountpointOf` hands back the empty string, which mounts a detached
+ * pseudo-filesystem no path reaches, so the guest keeps reading and
+ * writing MEMFS and a write reports success while the resource never
+ * sees it.
+ *
+ * Args:
+ *   prefix: a slash-terminated mount prefix.
+ */
+function servable(prefix: string): boolean {
+  return mountpointOf(prefix) !== ''
 }
 
 function runtimeEnv(): Record<string, string> {
@@ -143,8 +167,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly denyPackages: ReadonlySet<string>
   private listMounts: () => string[] = () => []
   private readonly home: string | null
-  private bridge: MirageBridge | null = null
-  private readonly preloadedPrefixes = new Set<string>()
+  private vfs: RuntimeVFS | null = null
+  private readonly journal: MutationJournal = createJournal()
+  private readonly mounted = new Set<string>()
+  // Prefixes this runtime cannot mount, remembered so the refusal is
+  // reported once rather than on every run.
+  private readonly refused = new Set<string>()
   // The guest executes on this event loop, so only the watchdog-backed
   // interrupt buffer can stop a busy loop (see interrupt.ts); null
   // where SharedArrayBuffer/workers are unavailable (runs unbounded).
@@ -271,8 +299,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
     this.pyodide = null
     this.initPromise = null
-    this.bridge = null
-    this.preloadedPrefixes.clear()
+    this.vfs = null
+    this.mounted.clear()
     this.interrupter?.close()
     this.interrupter = null
     this.interrupterTried = false
@@ -288,8 +316,8 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private async ensureLoaded(): Promise<PyodideInterface> {
     if (this.pyodide !== null) {
       if (this.bootstrapPromise !== null) await this.bootstrapPromise
-      await this.wireBridgeIfNeeded(this.pyodide)
-      await this.preloadNewPrefixes(this.pyodide)
+      this.wireBridgeIfNeeded()
+      await this.syncMounts(this.pyodide)
       await this.wireInterruptIfNeeded(this.pyodide)
       return this.pyodide
     }
@@ -310,38 +338,76 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       })()
       await this.bootstrapPromise
     }
-    await this.wireBridgeIfNeeded(this.pyodide)
-    await this.preloadNewPrefixes(this.pyodide)
+    this.wireBridgeIfNeeded()
+    await this.syncMounts(this.pyodide)
     await this.wireInterruptIfNeeded(this.pyodide)
     return this.pyodide
   }
 
-  private async wireBridgeIfNeeded(pyodide: PyodideInterface): Promise<void> {
-    if (this.workspaceBridge === null || this.bridge !== null) return
-    const bridge = createMirageBridge(this.workspaceBridge, this.listMounts)
-    pyodide.registerJsModule('_mirage_bridge', bridge)
-    await pyodide.runPythonAsync(MIRAGE_FS_SHIM_PY)
-    this.bridge = bridge
+  private wireBridgeIfNeeded(): void {
+    if (this.workspaceBridge === null || this.vfs !== null) return
+    this.vfs = new RuntimeVFS(this.workspaceBridge, this.listMounts)
   }
 
   /**
-   * Hydrate MEMFS for mount prefixes not yet preloaded, before every run.
-   * This is the host-side half of read visibility: a mount added after
-   * boot gets its tree here, where awaiting the bridge is free, instead
-   * of relying on the shim's lazy backfill, whose run_sync needs JSPI.
-   * Content changes under an already-preloaded prefix still ride the
-   * lazy path (a full re-list per run would be one API sweep per mount).
+   * Rebuild the guest's mount table from the workspace's, before every
+   * run.
+   *
+   * Every prefix is re-seeded, not just a newly added one, because the
+   * filesystem's callbacks are synchronous and so this is the only place
+   * that can await the bridge at all. A stale snapshot is not merely a
+   * missed read: a file the snapshot lacks looks like a new file, so
+   * `open(path, 'a')` would start from an empty buffer and the flush
+   * would replace content the guest never saw. Re-seeding is what keeps
+   * that impossible without JSPI, which no shipping Node has and Safari
+   * does not implement.
+   *
+   * The cost is one LIST plus one READ per file per run. Narrowing that
+   * to what actually changed needs a per-entry change stamp the bridge
+   * does not carry yet; until it does, correctness is the side to err on.
+   *
+   * A prefix the workspace has dropped is unmounted, so a removed mount
+   * stops being visible instead of lingering for the interpreter's life.
    */
-  private async preloadNewPrefixes(pyodide: PyodideInterface): Promise<void> {
-    if (this.bridge === null) return
-    for (const prefix of this.bridge.prefixes()) {
-      if (this.preloadedPrefixes.has(prefix)) continue
-      // Record only after success: preloadInto's one throw path is the
-      // top-level LIST (per-entry failures warn and continue), so a
-      // transient failure surfaces loudly and retries on the next run
-      // instead of poisoning the prefix for the runtime's lifetime.
-      await preloadInto(pyodide.FS, this.bridge, prefix)
-      this.preloadedPrefixes.add(prefix)
+  private async syncMounts(pyodide: PyodideInterface): Promise<void> {
+    const vfs = this.vfs
+    if (vfs === null) return
+    const all = vfs.prefixes()
+    for (const prefix of all) {
+      if (servable(prefix) || this.refused.has(prefix)) continue
+      this.refused.add(prefix)
+      console.warn(
+        `mirage: the ${PYODIDE_RUNTIME} runtime cannot serve a mount at ` +
+          `'${prefix}', because that is the interpreter's own filesystem ` +
+          `root; python will not see it`,
+      )
+    }
+    // `prefixes()` is longest-first, which is the order routing wants
+    // and the reverse of the order the mount table wants: mounting
+    // /data over an existing /data/inner orphans the child. So unmount
+    // deepest-first and mount shallowest-first.
+    const wanted = new Set(all.filter(servable))
+    for (const prefix of [...this.mounted].sort((a, b) => b.length - a.length)) {
+      if (wanted.has(prefix)) continue
+      pyodide.FS.unmount(mountpointOf(prefix))
+      this.mounted.delete(prefix)
+    }
+    for (const prefix of [...wanted].sort((a, b) => a.length - b.length)) {
+      // Collect before touching the mount table: a failed LIST then
+      // leaves the previous snapshot serving rather than an empty mount,
+      // and the prefix retries on the next run.
+      const seed = new MirageFsSeed()
+      await preloadInto(seed, vfs, prefix)
+      const mountpoint = mountpointOf(prefix)
+      if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
+      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, this.journal, mountpoint)
+      pyodide.FS.mkdirTree(mountpoint)
+      pyodide.FS.mount(fs.type, {}, mountpoint)
+      // After the mount, never inside it: Emscripten assigns the root's
+      // `mount` only once `type.mount()` has returned, and a node built
+      // before that inherits an undefined one.
+      fs.seed(seed)
+      this.mounted.add(prefix)
     }
   }
 
@@ -353,15 +419,15 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * way it ran. Returns one message per failure for the caller's stderr.
    */
   private async drainMutations(): Promise<string[]> {
-    const bridge = this.bridge
-    if (bridge === null) return []
+    const vfs = this.vfs
+    if (vfs === null) return []
     const failures: string[] = []
-    const pending = bridge.takeMutations()
+    const pending = this.journal.takeMutations()
     for (let i = 0; i < pending.length; i++) {
       const mutation = pending[i]
       if (mutation === undefined) continue
       try {
-        await applyMutation(bridge, mutation)
+        await applyMutation(vfs, mutation)
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
         failures.push(`python3: failed to ${mutation.kind} ${mutation.path} on mount: ${detail}`)

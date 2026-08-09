@@ -17,12 +17,13 @@ from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
 from mirage.commands.spec.constants import (FLOAT_VALUE, INT_VALUE,
                                             NUMERIC_SHORT, flag_kwarg_name)
 from mirage.commands.spec.oldstyle import expand_old_style
-from mirage.commands.spec.types import CommandSpec, ParsedArgs, ValueType
+from mirage.commands.spec.types import (CommandSpec, ParsedArgs,
+                                        ParsedFlagValue, ValueType)
 from mirage.utils.path import resolve_path
 
 
 def _set_value_flag(
-    flags: dict[str, str | bool | int | list[str]],
+    flags: dict[str, ParsedFlagValue],
     cs: CompiledSpec,
     spelling: str,
     value: str,
@@ -52,7 +53,7 @@ def _set_value_flag(
 
 
 def _set_bool_flag(
-    flags: dict[str, str | bool | int | list[str]],
+    flags: dict[str, ParsedFlagValue],
     cs: CompiledSpec,
     spelling: str,
 ) -> None:
@@ -136,7 +137,7 @@ def parse_command(
             orig_indices.append(scan_origins[i])
             i += 1
 
-    flags: dict[str, str | bool | int | list[str]] = {}
+    flags: dict[str, ParsedFlagValue] = {}
     raw_args: list[str] = []
     # raw_indices[k] = argv position of raw_args[k]
     raw_indices: list[int] = []
@@ -480,8 +481,8 @@ def parse_command(
     )
 
 
-def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, object]:
-    result: dict[str, object] = {}
+def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, ParsedFlagValue]:
+    result: dict[str, ParsedFlagValue] = {}
     for key, value in parsed.flags.items():
         result[flag_kwarg_name(key)] = value
     return result

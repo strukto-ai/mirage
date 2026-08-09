@@ -25,7 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op,
                                                           overlaid_stat)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatOverlay
 from mirage.types import NativeCopy, PathSpec
@@ -85,7 +85,7 @@ async def cp(
     stdin: bytes | None = None,
     index: IndexCacheStore = NULL_INDEX,
     stat_overlay: StatOverlay | None = None,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("cp: no resource")

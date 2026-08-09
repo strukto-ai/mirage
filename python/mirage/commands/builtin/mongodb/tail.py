@@ -23,6 +23,7 @@ from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream
@@ -46,7 +47,7 @@ async def tail(
     v: bool = False,
     follow: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None
     from_line: int | None = None
