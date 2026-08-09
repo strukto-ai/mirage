@@ -259,7 +259,7 @@ describe('ntn verbs', () => {
     // the engine's own parse message nor a generic usage error.
     const [, io] = unwrap(await api(makeInv({ data: '{' }, ['v1/search'])))
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr)).toBe('error: Invalid JSON from --data\n')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('error: Invalid JSON from --data\n')
   })
 
   it('api builds nested bodies from bracket paths and typed assignments', async () => {

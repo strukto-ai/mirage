@@ -25,9 +25,11 @@ from mirage.types import JsonValue
 
 CONFIG = NotionConfig(api_key="secret")
 
+# The three accumulators classify() sorts one input token into.
+Sorted = tuple[dict[str, JsonValue], dict[str, str], dict[str, str]]
 
-def sorted_inputs(*tokens: str) -> tuple[dict[str, JsonValue], dict[str, str],
-                                         dict[str, str]]:
+
+def sorted_inputs(*tokens: str) -> Sorted:
     """Run tokens through classify and return the three accumulators.
 
     Args:
@@ -69,11 +71,11 @@ async def test_inline_headers_reach_the_request(monkeypatch):
     # dropping the value is the failure this pins.
     seen: dict[str, Any] = {}
 
-    async def fake_get(config: NotionConfig,
-                       path: str,
-                       params: dict[str, Any] | None = None,
-                       extra_headers: dict[str, str] | None = None
-                       ) -> dict[str, Any]:
+    async def fake_get(
+            config: NotionConfig,
+            path: str,
+            params: dict[str, Any] | None = None,
+            extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
         seen["headers"] = extra_headers
         return {"ok": True}
 
@@ -87,11 +89,11 @@ async def test_inline_headers_reach_the_request(monkeypatch):
 async def test_no_inline_header_sends_none(monkeypatch):
     seen: dict[str, Any] = {}
 
-    async def fake_get(config: NotionConfig,
-                       path: str,
-                       params: dict[str, Any] | None = None,
-                       extra_headers: dict[str, str] | None = None
-                       ) -> dict[str, Any]:
+    async def fake_get(
+            config: NotionConfig,
+            path: str,
+            params: dict[str, Any] | None = None,
+            extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
         seen["headers"] = extra_headers
         return {"ok": True}
 
@@ -133,11 +135,11 @@ async def test_data_and_inline_body_conflict():
 async def test_body_infers_post_and_output_is_compact(monkeypatch):
     seen: dict[str, Any] = {}
 
-    async def fake_post(config: NotionConfig,
-                        path: str,
-                        body: dict[str, Any] | None = None,
-                        extra_headers: dict[str, str] | None = None
-                        ) -> dict[str, Any]:
+    async def fake_post(
+            config: NotionConfig,
+            path: str,
+            body: dict[str, Any] | None = None,
+            extra_headers: dict[str, str] | None = None) -> dict[str, Any]:
         seen["path"] = path
         seen["body"] = body
         return {"b": 1, "a": 2}
@@ -146,8 +148,7 @@ async def test_body_infers_post_and_output_is_compact(monkeypatch):
     # real function at import, so patching the module global alone would
     # not be seen.
     monkeypatch.setitem(METHODS, "POST", fake_post)
-    out, _io = await api(
-        CLIInvocation(CONFIG, texts=("v1/search", "query=x")))
+    out, _io = await api(CLIInvocation(CONFIG, texts=("v1/search", "query=x")))
     assert seen["path"] == "/search"
     assert seen["body"] == {"query": "x"}
     # Compact and key-sorted, the upstream serializer for `ntn api`,
