@@ -265,10 +265,18 @@ export class Workspace {
   }
 
   /**
-   * Mount prefixes the sandboxed runtimes (python3 and node/js) may see.
-   * Excludes the history view and a synthetic `/` anchor: Pyodide's own
-   * `/` filesystem holds the Python stdlib and must not be hijacked by an
-   * internal anchor.
+   * Mount prefixes the sandboxed runtimes (python3 and node/js) may see:
+   * the mounts the embedder actually made.
+   *
+   * Two are withheld, and neither is withheld for being `/`. An explicit
+   * root mount is forwarded like any other prefix, and a runtime that
+   * cannot serve it refuses on its own (Pyodide does, because Emscripten
+   * already owns `/`). What is withheld is the history view, which is a
+   * shell surface rather than a place to put files, and the synthetic
+   * root anchor, which nobody mounted: the workspace adds it so arg-less
+   * commands and root listing have somewhere to resolve, so announcing
+   * it as a mount would make every runtime report a claim on a resource
+   * the embedder never asked for.
    */
   private sandboxVisibleMounts(): string[] {
     const prefixes: string[] = []

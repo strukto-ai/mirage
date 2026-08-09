@@ -75,9 +75,22 @@ class WasmVFS:
         self._core = core
 
     def _prefixes(self) -> list[str]:
+        """Mount prefixes that claim a path away from the build directory.
+
+        A mount at `/` is left out, and this is the only place in the
+        stack that treats it differently. Both readers here assume a
+        prefix names a directory level: `_claimed_by_mount` takes a
+        claim as exclusive, which for `/` would mean the interpreter's
+        own build tree resolves through the workspace rather than off
+        disk, and `_readdir_root` lists each prefix's first segment,
+        which for `/` is the empty string. Leaving it out costs nothing:
+        `_serving_build` already falls through to the core for every
+        path the build does not hold, which is how a root mount is
+        served here.
+        """
         if self._core is None:
             return []
-        return self._core.prefixes()
+        return [p for p in self._core.prefixes() if p != "/"]
 
     def _claimed_by_mount(self, path: str) -> bool:
         for prefix in self._prefixes():

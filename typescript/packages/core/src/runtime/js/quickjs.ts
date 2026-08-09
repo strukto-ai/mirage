@@ -20,7 +20,6 @@ import { EVALUATOR, type Evaluator } from '../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../types.ts'
 import { RuntimeVFS } from '../vfs.ts'
 import type { BridgeDispatchFn } from '../types.ts'
-import { QUICKJS_RUNTIME } from './interface.ts'
 import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './vfs.ts'
 import { QuickJsUnavailableError } from './types.ts'
 import type {
@@ -160,7 +159,7 @@ globalThis.std = {
 // the guest while a workspace-mount read or write awaits the dispatch,
 // matching the Python runtime's live file I/O.
 export class QuickJsRuntime extends JsRuntime implements Evaluator {
-  readonly name = QUICKJS_RUNTIME
+  readonly name = 'quickjs'
   readonly [EVALUATOR] = true as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null

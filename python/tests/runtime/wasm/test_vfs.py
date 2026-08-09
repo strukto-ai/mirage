@@ -162,6 +162,29 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     ]
 
 
+def test_a_root_mount_does_not_shadow_the_build_directory(tmp_path):
+    """`/` is the one prefix that must not become a claim here.
+
+    A claim is exclusive, so a root claim would cover the interpreter's
+    own build tree and `import os` would resolve through the workspace
+    instead of off disk. The build keeps what it holds and the root
+    mount takes the rest, which is the same fallthrough any unclaimed
+    path already uses.
+    """
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "os.py").write_text("stdlib")
+    bridge = FakeVFS(files={
+        "/lib/os.py": b"mount-side",
+        "/mine.txt": b"root-side"
+    },
+                     prefixes=["/"])
+    fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
+    assert fs.read("/lib/os.py") == b"stdlib"
+    assert fs.read("/mine.txt") == b"root-side"
+    # An empty name would be the root prefix mistaken for a directory.
+    assert all(name for name, _ in fs.readdir("/"))
+
+
 def test_rename_within_bridge_and_across_routes(tmp_path):
     (tmp_path / "host.txt").write_text("x")
     bridge = FakeVFS(files={"/data/a.txt": b"move-me"}, prefixes=["/data/"])

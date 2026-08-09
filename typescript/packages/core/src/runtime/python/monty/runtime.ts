@@ -19,7 +19,6 @@ import { EVALUATOR, type Evaluator } from '../../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
 import type { BridgeDispatchFn, PrefixSource } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
-import { MONTY_RUNTIME } from '../interface.ts'
 import {
   loadMontyModule,
   type MontyModuleLike,
@@ -93,7 +92,7 @@ function toEvalValue(value: unknown): EvalValue {
  * `os` callback) — use `pathlib` for file I/O, or the pyodide runtime.
  */
 export class MontyRuntime extends PythonRuntime implements Evaluator {
-  readonly name = MONTY_RUNTIME
+  readonly name = 'monty'
   readonly [EVALUATOR] = true as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private listMounts: PrefixSource = () => []

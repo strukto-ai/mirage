@@ -287,8 +287,9 @@ class MirageOSAccess(OSAccess):
         b.txt and removing b.txt raises `KeyError: 'a.txt'`, which is
         not an OSError and so cannot be caught by guest code. On a
         mount the rename has already landed by then, leaving the
-        backend ahead of the tree. Reported upstream; drop this once a
-        release carries the fix.
+        backend ahead of the tree. Reproduces on a bare `OSAccess` with
+        no mirage in the picture, so it belongs upstream; drop this once
+        a release carries the fix.
 
         Args:
             target (PurePosixPath): the path the file now has.

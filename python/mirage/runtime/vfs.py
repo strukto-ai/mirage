@@ -101,14 +101,20 @@ class RuntimeVFS:
             raise NotImplementedError(str(exc)) from exc
 
     def prefixes(self) -> list[str]:
-        """The workspace mount prefixes, longest first, slash-normalized."""
+        """The workspace mount prefixes, longest first, slash-normalized.
+
+        A mount at `/` is reported like any other. It is not the core's
+        business that one prefix happens to claim every path: a runtime
+        that cannot serve `/` says so itself (pyodide refuses it,
+        because Emscripten already owns that mountpoint) and a runtime
+        with a build tree of its own keeps `/` out of its own claim
+        table (`WasmVFS._prefixes`). Deciding it here instead made
+        `mount_of` answer None for a workspace whose only mount was the
+        root one, so the routing table disagreed with the world.
+        """
         if self._mount_prefixes is None:
             return []
-        out = []
-        for prefix in self._mount_prefixes():
-            normed = "/" + prefix.strip("/")
-            if normed != "/":
-                out.append(normed)
+        out = ["/" + prefix.strip("/") for prefix in self._mount_prefixes()]
         return sorted(out, key=len, reverse=True)
 
     def mount_of(self, path: str) -> str | None:
@@ -118,7 +124,8 @@ class RuntimeVFS:
             path (str): guest-absolute virtual path.
         """
         for prefix in self.prefixes():
-            if path == prefix or path.startswith(prefix + "/"):
+            boundary = prefix if prefix.endswith("/") else prefix + "/"
+            if path == prefix or path.startswith(boundary):
                 return prefix
         return None
 
