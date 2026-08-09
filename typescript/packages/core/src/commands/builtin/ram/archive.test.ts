@@ -18,7 +18,7 @@ import type { RegisteredCommand } from '../../config.ts'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import type { LinkView } from '../../../ops/types.ts'
-import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
+import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 const RAM_TAR = RAM_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
 const RAM_ZIP = RAM_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
@@ -42,12 +42,12 @@ function dirSpec(virtual: string, raw: string): PathSpec {
 // The namespace's symlink facts, as the dispatcher would offer them.
 function linkView(entries: Record<string, string>, cycles = false): LinkView {
   const statOf = (path: string): FileStat =>
-    ({
+    new FileStat({
       name: path,
       type: FileType.SYMLINK,
       size: (entries[path] ?? '').length,
       extra: { [LINK_TARGET_KEY]: entries[path] ?? '' },
-    }) as FileStat
+    })
   return {
     statAt: (p) => (p in entries ? statOf(p) : null),
     children: () => [],
