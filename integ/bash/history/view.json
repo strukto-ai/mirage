@@ -61,7 +61,7 @@
       "command": "ls /",
       "expect": {
         "exit": 0,
-        "stdout": "data\ndev",
+        "stdout": "data\ndev\n",
         "stderr": ""
       }
     },
@@ -74,7 +74,7 @@
       "command": "ls -a /",
       "expect": {
         "exit": 0,
-        "stdout": ".bash_history\ndata\ndev",
+        "stdout": ".bash_history\ndata\ndev\n",
         "stderr": ""
       }
     }
