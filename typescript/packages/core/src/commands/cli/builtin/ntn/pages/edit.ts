@@ -17,7 +17,7 @@ import { replacePageMarkdown } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
-import { contentOrStdin, firstText, notionTransport, usageError } from '../util.ts'
+import { contentOrStdin, firstText, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
@@ -31,6 +31,10 @@ export async function edit(inv: CLIInvocation): Promise<CommandFnResult> {
   } catch (err) {
     return usageError(err)
   }
-  await replacePageMarkdown(notionTransport(inv.config, inv.flags), pageId, markdown)
+  // The PATCH answers with the page's new markdown, which is what `--json` is
+  // for; printing the id under it would throw the response away on the one
+  // flag that asks for it.
+  const edited = await replacePageMarkdown(notionTransport(inv.config, inv.flags), pageId, markdown)
+  if (fl.asBool('json')) return [prettyJson(edited), new IOResult()]
   return [ENC.encode(`${pageId}\n`), new IOResult()]
 }

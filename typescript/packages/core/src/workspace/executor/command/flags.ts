@@ -57,6 +57,11 @@ export function parseFlags(
   spec: CommandSpec | null,
   cmdName: string,
   cwd: string,
+  // The session environment, so an option declaring one gets its value
+  // from there. Filled inside the parse rather than after it, or an
+  // env-supplied int would go unchecked and an env-supplied path would
+  // stay a bare string.
+  env?: Readonly<Record<string, string>>,
 ): [
   PathSpec[],
   string[],
@@ -85,7 +90,7 @@ export function parseFlags(
   }
 
   if (spec !== null) {
-    const parsed = parseCommand(spec, argv, cwd)
+    const parsed = parseCommand(spec, argv, cwd, env)
     const flagKwargs = parseToKwargs(parsed)
 
     for (const [key, value] of Object.entries(flagKwargs)) {

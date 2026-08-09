@@ -142,3 +142,25 @@ export function renderHelp(
 
   return lines.join('\n') + '\n'
 }
+
+// clap's wording for a token it has no option for. One wording for long and
+// short alike, unlike git's option/switch split, and it names the token as
+// typed. Probed against ntn 0.21.9.
+export function clapUnexpectedArgument(token: string): string {
+  return `error: unexpected argument '${token}' found`
+}
+
+// A group-level refusal in clap's shape: message, usage line, footer. clap
+// answers with the one usage line, not the whole help page git prints, and it
+// does so at every level of the tree. This lives beside the renderer rather
+// than beside the leaf refusals because the walk calls it, and the walk cannot
+// reach a module that imports the workspace.
+export function clapGroupRefusal(
+  name: string,
+  spec: CommandSpec,
+  subcommands: readonly [string, string][],
+  message: string,
+): string {
+  const usage = usageLine(name, spec, subcommands, UsageStyle.CLAP)
+  return `${message}\n\n${usage}\n\nFor more information, try '--help'.\n`
+}

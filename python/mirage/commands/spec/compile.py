@@ -103,6 +103,7 @@ class CompiledSpec:
     choices_by_dest: dict[str, tuple[str, ...]] = field(default_factory=dict)
     required_dests: tuple[str, ...] = ()
     defaults: dict[str, str] = field(default_factory=dict)
+    env_by_dest: dict[str, str] = field(default_factory=dict)
     numeric_dest: str | None = None
     rest_kind: ValueType | None = None
     base_dest: str | None = None
@@ -174,6 +175,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     choices_by_dest: dict[str, tuple[str, ...]] = {}
     required_dests: list[str] = []
     defaults: dict[str, str] = {}
+    env_by_dest: dict[str, str] = {}
     numeric_dest: str | None = None
 
     for opt in spec.options:
@@ -230,6 +232,8 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             required_dests.append(canonical)
         if opt.default is not None:
             defaults[canonical] = opt.default
+        if opt.env is not None:
+            env_by_dest[canonical] = opt.env
 
         if opt.short:
             if opt.type == "bool":
@@ -301,6 +305,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         choices_by_dest=choices_by_dest,
         required_dests=tuple(required_dests),
         defaults=defaults,
+        env_by_dest=env_by_dest,
         numeric_dest=numeric_dest,
         rest_kind=spec.rest.type if spec.rest is not None else None,
         base_dest=base_dest,

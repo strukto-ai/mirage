@@ -16,6 +16,12 @@
 # keep the GNU exit-2 machinery they already ride.
 USAGE_EXIT = 129
 
+# clap exits 2 for a usage error at every level of its tree, agreeing
+# with argparse by coincidence rather than by lineage. It lives here
+# rather than beside the refusal renderers because the walk reads it
+# too, and the walk cannot import a module that reaches the workspace.
+CLAP_EXIT = 2
+
 # The environment variable carrying an install's config to a script CLI
 # (JSON). Deliberately not MIRAGE_CONFIG: that one already names the
 # workspace config file for the server and mcp entry points, and a

@@ -558,6 +558,58 @@
         "stdout": "Project Roadmap\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_root_unknown_option",
+      "seq": 566043,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn --bogus",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unexpected argument '--bogus' found\n\nUsage: ntn [OPTIONS] <COMMAND>\n\nFor more information, try '--help'.\n"
+      }
+    },
+    {
+      "id": "ntn_group_unknown_option",
+      "seq": 566044,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages --bogus",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unexpected argument '--bogus' found\n\nUsage: ntn pages [OPTIONS] <COMMAND>\n\nFor more information, try '--help'.\n"
+      }
+    },
+    {
+      "id": "ntn_root_unknown_short",
+      "seq": 566045,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn -Z",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unexpected argument '-Z' found\n\nUsage: ntn [OPTIONS] <COMMAND>\n\nFor more information, try '--help'.\n"
+      }
+    },
+    {
+      "id": "ntn_pages_edit_json",
+      "seq": 566046,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn pages edit a0000000-0000-4000-8000-000000000003 --content '# Json edit' --json | jq -r '.object, .truncated'",
+      "expect": {
+        "exit": 0,
+        "stdout": "page_markdown\nfalse\n",
+        "stderr": ""
+      }
     }
   ]
 }

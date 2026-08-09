@@ -115,7 +115,12 @@ function matchMixedCluster(tok: string, cs: CompiledSpec): MixedCluster | null {
   return null
 }
 
-export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {
+export function parseCommand(
+  spec: CommandSpec,
+  argv: string[],
+  cwd: string,
+  env?: Readonly<Record<string, string>>,
+): ParsedArgs {
   const cs = compileSpec(spec)
 
   // tar's old option style is expanded before anything else reads the
@@ -403,6 +408,20 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // carried (clap's missing-argument usage) needs the former, and key order is
   // the order they were scanned in.
   const typedDests = Object.keys(flags)
+
+  // An option's declared variable lands exactly where a default does, so it
+  // gets the same coercion, the same choices test, the same PATH resolution
+  // and the same required credit. Filling it after the parse instead would
+  // leave an int unchecked and a path a bare string. It goes in ahead of the
+  // defaults because it outranks one, it yields to anything the line typed,
+  // and it lands below the snapshot because clap's usage line distinguishes
+  // an option the line carried from one the environment supplied.
+  for (const [destName, variable] of cs.envByDest) {
+    if (destName in flags) continue
+    const supplied = env?.[variable]
+    if (supplied === undefined || supplied === '') continue
+    flags[destName] = cs.multipleDests.has(destName) ? [supplied] : supplied
+  }
 
   // Declared defaults land as if typed, before choices/required checks
   // and before PATH/TEXT flag-value collection, so a PATH default

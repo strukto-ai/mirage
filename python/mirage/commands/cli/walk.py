@@ -15,13 +15,14 @@
 from collections.abc import Sequence
 from dataclasses import replace
 
-from mirage.commands.cli.constants import USAGE_EXIT
+from mirage.commands.cli.constants import CLAP_EXIT, USAGE_EXIT
 from mirage.commands.cli.types import CLISpec, FlagBag, WalkResult
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
 from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
-from mirage.commands.spec.help import render_help
+from mirage.commands.spec.help import (clap_group_refusal,
+                                       clap_unexpected_argument, render_help)
 from mirage.commands.spec.types import UsageStyle
 from mirage.utils.path import resolve_path
 
@@ -111,34 +112,72 @@ def node_help(name: str,
             program answers in one voice at every level, the same rule
             the leaf refusal follows.
     """
-    rows = [(_verb_display(child), child.description or "")
+    return render_help(name,
+                       _listed(node),
+                       subcommands=_rows(node),
+                       style=style)
+
+
+def _rows(node: CLISpec) -> list[tuple[str, str]]:
+    """The node's child rows, as the renderer lists them.
+
+    Args:
+        node (CLISpec): the group node.
+    """
+    return [(_verb_display(child), child.description or "")
             for child in node.subcommands]
-    # --help is a registered option everywhere (argparse add_help, click
-    # add_help_option, withHelpSupport for leaves), so the listing shows
-    # it unless the node declares its own or answers the flag itself
-    # (owns_argv), where advertising it would promise a page mirage no
-    # longer renders.
+
+
+def _listed(node: CLISpec) -> CLISpec:
+    """The node as the renderer shows it, with `--help` filled in.
+
+    --help is a registered option everywhere (argparse add_help, click
+    add_help_option, withHelpSupport for leaves), so the listing shows
+    it unless the node declares its own or answers the flag itself
+    (owns_argv), where advertising it would promise a page mirage no
+    longer renders. A refusal renders the same node a help page would,
+    or its usage line would disagree with `--help`'s.
+
+    Args:
+        node (CLISpec): the group node.
+    """
     if any(option.long == "--help"
            for option in node.options) or owns_argv(node):
-        listed = node
-    else:
-        listed = replace(node, options=node.options + (HELP_OPTION, ))
-    return render_help(name, listed, subcommands=rows, style=style)
+        return node
+    return replace(node, options=node.options + (HELP_OPTION, ))
 
 
-def _usage_error(name: str, node: CLISpec, message: str,
-                 style: UsageStyle) -> WalkResult:
-    """Group-level option refusal: message plus the node's usage block.
+def _usage_error(name: str,
+                 node: CLISpec,
+                 message: str,
+                 style: UsageStyle,
+                 token: str | None = None) -> WalkResult:
+    """Group-level option refusal, in the dialect the CLI declares.
 
-    Mirrors git's shape (`unknown option: --zzz` followed by the usage
-    listing, exit 129). One wording for every level; git itself uses two.
+    git answers with the message and the whole usage listing and exits
+    129. clap answers with the message, the one usage line and a footer
+    pointing at --help, and exits 2, at every level of the tree; the
+    exit code is the group's just as much as the leaf's, so reading the
+    style here is what keeps `ntn --bogus` and `ntn pages get --bogus`
+    from disagreeing.
 
     Args:
         name (str): display path walked so far, e.g. "gws gmail".
         node (CLISpec): the group node being parsed.
-        message (str): first line of the refusal.
-        style (UsageStyle): the root's dialect, for the usage block.
+        message (str): first line of the refusal, in the default
+            dialect; clap rewords the cases it words differently.
+        style (UsageStyle): the root's dialect.
+        token (str | None): the offending token when the refusal is an
+            unrecognized option, which clap words its own way. None for
+            the refusals whose wording both dialects share.
     """
+    if style is UsageStyle.CLAP:
+        first = (clap_unexpected_argument(token)
+                 if token is not None else message)
+        return WalkResult(output=clap_group_refusal(name, _listed(node),
+                                                    _rows(node), first),
+                          stream="stderr",
+                          exit_code=CLAP_EXIT)
     text = f"{message}\n\n{node_help(name, node, style)}"
     return WalkResult(output=text.encode(),
                       stream="stderr",
@@ -442,8 +481,11 @@ def walk(head: str,
                     return WalkResult(
                         output=node_help(name, node, style).encode())
                 else:
-                    return _usage_error(name, node,
-                                        f"unknown option: {spelling}", style)
+                    return _usage_error(name,
+                                        node,
+                                        f"unknown option: {spelling}",
+                                        style,
+                                        token=spelling)
                 i += 1
                 continue
             if not options_ended and token.startswith("-") and token != "-":
@@ -461,6 +503,7 @@ def walk(head: str,
                     continue
                 j = 1
                 error = None
+                unknown = None
                 while j < len(token):
                     spelling = f"-{token[j]}"
                     if spelling in cs.bool_spellings:
@@ -479,9 +522,14 @@ def walk(head: str,
                         break
                     else:
                         error = f"unknown option: {spelling}"
+                        unknown = spelling
                         break
                 if error is not None:
-                    return _usage_error(name, node, error, style)
+                    return _usage_error(name,
+                                        node,
+                                        error,
+                                        style,
+                                        token=unknown)
                 i += 1
                 continue
             refused = _finish_node(name, node, cs, flags, cwd, style)

@@ -215,24 +215,10 @@ export async function handleCli(
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
   const style = install.spec.usageStyle
-  const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd)
-  // Before any validation: an option declaring both `env` and `required` is
-  // satisfied by a populated variable, and validation runs on the parse
-  // result, so filling afterwards would refuse a line the environment had
-  // already answered. The value deliberately does NOT join typedDests, because
-  // clap's usage line distinguishes an option the line carried from one the
-  // environment supplied.
-  for (const option of parseSpec.options) {
-    const spelling = option.long ?? option.short
-    if (option.env === null || spelling === null) continue
-    const value = session.env[option.env]
-    if (value === undefined || value === '') continue
-    const dest = flagKwargName(spelling)
-    if (parsed[2][dest] !== undefined) continue
-    parsed[2][dest] = value
-    const at = parsed[11].indexOf(spelling)
-    if (at !== -1) parsed[11].splice(at, 1)
-  }
+  // The environment goes into the parse, not on top of it: an option
+  // declaring one is coerced, choice-checked, path-resolved and credited
+  // against required exactly as a typed value is.
+  const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd, session.env)
   const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
   if (mirageHelp && flagKwargs.help === true) {
     const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))

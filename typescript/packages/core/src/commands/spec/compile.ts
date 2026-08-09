@@ -80,6 +80,7 @@ export class CompiledSpec {
   /** Value recorded per canonical spelling when the flag is absent from
    * the line. */
   readonly defaults: ReadonlyMap<string, string>
+  readonly envByDest: ReadonlyMap<string, string>
   /** Canonical spelling fed by the `-<digits>` shorthand, when one
    * option declares it. */
   readonly numericDest: string | null
@@ -109,6 +110,7 @@ export class CompiledSpec {
     choicesByDest: ReadonlyMap<string, readonly string[]>
     requiredDests: readonly string[]
     defaults: ReadonlyMap<string, string>
+    envByDest: ReadonlyMap<string, string>
     numericDest: string | null
     restKind: ValueType | null
     baseDest: string | null
@@ -132,6 +134,7 @@ export class CompiledSpec {
     this.choicesByDest = fields.choicesByDest
     this.requiredDests = fields.requiredDests
     this.defaults = fields.defaults
+    this.envByDest = fields.envByDest
     this.numericDest = fields.numericDest
     this.restKind = fields.restKind
     this.baseDest = fields.baseDest
@@ -169,6 +172,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
   const choicesByDest = new Map<string, readonly string[]>()
   const requiredDests: string[] = []
   const defaults = new Map<string, string>()
+  const envByDest = new Map<string, string>()
   let numericDest: string | null = null
 
   for (const opt of spec.options) {
@@ -218,6 +222,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     if (opt.choices.length > 0) choicesByDest.set(canonical, opt.choices)
     if (opt.required) requiredDests.push(canonical)
     if (opt.default !== null) defaults.set(canonical, opt.default)
+    if (opt.env !== null) envByDest.set(canonical, opt.env)
 
     if (opt.short !== null) {
       if (opt.type === 'bool') {
@@ -302,6 +307,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     choicesByDest,
     requiredDests,
     defaults,
+    envByDest,
     numericDest,
     restKind: spec.rest !== null ? spec.rest.type : null,
     baseDest,

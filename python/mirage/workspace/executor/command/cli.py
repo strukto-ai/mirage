@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any
 
@@ -30,8 +30,7 @@ from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import (CommandSpec, FlagValue, Operand,
-                                        UsageStyle)
+from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -45,7 +44,6 @@ from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
-from mirage.workspace.executor.command.types import ParsedCommand
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -158,47 +156,6 @@ async def _script_output(inv: CLIInvocation[Any], script: ScriptSource,
     return run_output(result)
 
 
-def apply_env(parsed: ParsedCommand, spec: CommandSpec,
-              env: Mapping[str, str]) -> ParsedCommand:
-    """Fill options their declared environment variable supplies.
-
-    Applied before the line is validated, not after: an option declaring
-    both ``env`` and ``required`` is satisfied by a populated variable,
-    and validation runs on the parse result, so filling afterwards would
-    refuse a line the environment had already answered.
-
-    The value lands in the flag bag and the option is struck from the
-    missing-required report; it deliberately does NOT join
-    ``typed_dests``, because clap's usage line distinguishes an option
-    the line carried from one the environment supplied.
-
-    Args:
-        parsed (ParsedCommand): the leaf's parse result.
-        spec (CommandSpec): the leaf's grammar, read for declared
-            variables. The looser type on purpose: this needs a grammar,
-            not a node of the CLI tree.
-        env (Mapping[str, str]): the session environment.
-    """
-    filled: dict[str, str] = {}
-    for option in spec.options:
-        spelling = option.long or option.short
-        if option.env is None or spelling is None:
-            continue
-        value = env.get(option.env)
-        if value and parsed.flag_kwargs.get(flag_kwarg_name(spelling)) is None:
-            filled[spelling] = value
-    if not filled:
-        return parsed
-    kwargs = dict(parsed.flag_kwargs)
-    for spelling, value in filled.items():
-        kwargs[flag_kwarg_name(spelling)] = value
-    remaining = [
-        dest for dest in parsed.missing_required_options if dest not in filled
-    ]
-    return parsed._replace(flag_kwargs=kwargs,
-                           missing_required_options=remaining)
-
-
 async def handle_cli(
     install: CLIInstall,
     parts: list[str | PathSpec],
@@ -277,9 +234,14 @@ async def handle_cli(
     # The dialect is the root's, not the leaf's: a program answers in
     # one voice at every level.
     style = install.spec.usage_style
-    parsed = parse_flags(list(result.argv), parse_spec, prog, session.cwd)
-    # Before any validation: a variable can satisfy a required option.
-    parsed = apply_env(parsed, parse_spec, session.env)
+    # The environment goes into the parse, not on top of it: an option
+    # declaring one is coerced, choice-checked, path-resolved and
+    # credited against required exactly as a typed value is.
+    parsed = parse_flags(list(result.argv),
+                         parse_spec,
+                         prog,
+                         session.cwd,
+                         env=session.env)
     if mirage_help and parsed.flag_kwargs.get("help") is True:
         help_text = render_help(prog, parse_spec, style=style).encode()
         return help_text, IOResult(), ExecutionNode(command=cmd_str,

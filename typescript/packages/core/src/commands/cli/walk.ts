@@ -15,13 +15,13 @@
 import { HELP_OPTION } from '../config.ts'
 import { compileSpec, type CompiledSpec, expandLong } from '../spec/compile.ts'
 import { FLOAT_VALUE, INT_VALUE } from '../spec/constants.ts'
-import { renderHelp } from '../spec/help.ts'
+import { clapGroupRefusal, clapUnexpectedArgument, renderHelp } from '../spec/help.ts'
 import { UsageStyle } from '../spec/types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { CommandSpec } from '../spec/types.ts'
 import { WalkResult, type CLISpec, type WalkFlagBag } from './types.ts'
 
-import { USAGE_EXIT } from './constants.ts'
+import { CLAP_EXIT, USAGE_EXIT } from './constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -90,29 +90,53 @@ export function nodeHelp(
   node: CLISpec,
   style: UsageStyle = UsageStyle.ARGPARSE,
 ): string {
-  const rows: [string, string][] = node.subcommands.map((child) => [
-    verbDisplay(child),
-    child.description ?? '',
-  ])
-  // --help is a registered option everywhere (argparse add_help, click
-  // add_help_option, withHelpSupport for leaves), so the listing shows it
-  // unless the node declares its own or answers the flag itself
-  // (ownsArgv), where advertising it would promise a page mirage no
-  // longer renders.
-  const listed =
-    node.options.some((option) => option.long === '--help') || ownsArgv(node)
-      ? node
-      : // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
-        new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
-  return renderHelp(name, listed, rows, style)
+  return renderHelp(name, listedNode(node), rowsOf(node), style)
+}
+
+// The node's child rows, as the renderer lists them.
+function rowsOf(node: CLISpec): [string, string][] {
+  return node.subcommands.map((child) => [verbDisplay(child), child.description ?? ''])
+}
+
+// The node as the renderer shows it, with `--help` filled in. --help is a
+// registered option everywhere (argparse add_help, click add_help_option,
+// withHelpSupport for leaves), so the listing shows it unless the node
+// declares its own or answers the flag itself (ownsArgv), where advertising it
+// would promise a page mirage no longer renders. A refusal renders the same
+// node a help page would, or its usage line would disagree with `--help`'s.
+function listedNode(node: CLISpec): CommandSpec {
+  if (node.options.some((option) => option.long === '--help') || ownsArgv(node)) return node
+  // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+  return new CommandSpec({ ...node, options: [...node.options, HELP_OPTION] })
 }
 
 /**
- * Group-level option refusal: message plus the node's usage block. Mirrors
- * git's shape (`unknown option: --zzz` followed by the usage listing, exit
- * 129). One wording for every level; git itself uses two.
+ * Group-level option refusal, in the dialect the CLI declares. git answers
+ * with the message and the whole usage listing and exits 129. clap answers
+ * with the message, the one usage line and a footer pointing at --help, and
+ * exits 2, at every level of the tree; the exit code is the group's just as
+ * much as the leaf's, so reading the style here is what keeps `ntn --bogus`
+ * and `ntn pages get --bogus` from disagreeing.
+ *
+ * `token` is the offending token when the refusal is an unrecognized option,
+ * which clap words its own way; it is absent for the refusals whose wording
+ * both dialects share.
  */
-function usageError(name: string, node: CLISpec, message: string, style: UsageStyle): WalkResult {
+function usageError(
+  name: string,
+  node: CLISpec,
+  message: string,
+  style: UsageStyle,
+  token?: string,
+): WalkResult {
+  if (style === UsageStyle.CLAP) {
+    const first = token === undefined ? message : clapUnexpectedArgument(token)
+    return new WalkResult({
+      output: ENC.encode(clapGroupRefusal(name, listedNode(node), rowsOf(node), first)),
+      stream: 'stderr',
+      exitCode: CLAP_EXIT,
+    })
+  }
   return new WalkResult({
     output: ENC.encode(`${message}\n\n${nodeHelp(name, node, style)}`),
     stream: 'stderr',
@@ -391,7 +415,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
           }
           return new WalkResult({ output: ENC.encode(nodeHelp(name, node, style)) })
         } else {
-          return usageError(name, node, `unknown option: ${spelling}`, style)
+          return usageError(name, node, `unknown option: ${spelling}`, style, spelling)
         }
         i += 1
         continue
@@ -408,6 +432,7 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
           continue
         }
         let error: string | null = null
+        let unknown: string | undefined
         let j = 1
         while (j < token.length) {
           const spelling = `-${token.charAt(j)}`
@@ -428,11 +453,12 @@ export function walk(head: string, spec: CLISpec, argv: readonly string[], cwd =
             break
           } else {
             error = `unknown option: ${spelling}`
+            unknown = spelling
             break
           }
         }
         if (error !== null) {
-          return usageError(name, node, error, style)
+          return usageError(name, node, error, style, unknown)
         }
         i += 1
         continue

@@ -181,3 +181,37 @@ def render_help(name: str,
         lines.append(spec.epilog.rstrip("\n"))
 
     return "\n".join(lines) + "\n"
+
+
+def clap_unexpected_argument(token: str) -> str:
+    """clap's wording for a token it has no option for.
+
+    One wording for long and short alike, unlike git's option/switch
+    split, and it names the token as typed. Probed against ntn 0.21.9.
+
+    Args:
+        token (str): the offending token, dashes included.
+    """
+    return f"error: unexpected argument '{token}' found"
+
+
+def clap_group_refusal(name: str, spec: CommandSpec,
+                       subcommands: SubcommandRows, message: str) -> bytes:
+    """A group-level refusal in clap's shape: message, usage, footer.
+
+    clap answers with the one usage line, not the whole help page git
+    prints, and it does so at every level of the tree. This lives beside
+    the renderer rather than beside the leaf refusals because the walk
+    calls it, and the walk cannot reach a module that imports the
+    workspace.
+
+    Args:
+        name (str): display path walked so far, e.g. "ntn pages".
+        spec (CommandSpec): the node as the renderer lists it.
+        subcommands (SubcommandRows): child rows, which decide whether
+            the usage line carries a ``<COMMAND>`` slot.
+        message (str): the first line, already worded.
+    """
+    usage = usage_line(name, spec, subcommands, UsageStyle.CLAP)
+    return (f"{message}\n\n{usage}\n\n"
+            "For more information, try '--help'.\n").encode()

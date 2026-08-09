@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
+
 from mirage.commands.spec.compile import (CompiledSpec, compile_spec,
                                           expand_long)
 from mirage.commands.spec.constants import (ARG_PLACEHOLDER, FLOAT_VALUE,
@@ -150,6 +152,7 @@ def parse_command(
     spec: CommandSpec,
     argv: list[str],
     cwd: str,
+    env: Mapping[str, str] | None = None,
 ) -> ParsedArgs:
     cs = compile_spec(spec)
 
@@ -410,6 +413,25 @@ def parse_command(
     # options a line carried (clap's missing-argument usage) needs the
     # former, and dict order is the order they were scanned in.
     typed_dests = list(flags)
+
+    # An option's declared variable lands exactly where a default does,
+    # so it gets the same coercion, the same choices test, the same PATH
+    # resolution and the same required credit. Filling it after the
+    # parse instead would leave an int unchecked and a path a bare
+    # string. It goes in ahead of the defaults because it outranks one,
+    # it yields to anything the line typed, and it lands below the
+    # snapshot because clap's usage line distinguishes an option the
+    # line carried from one the environment supplied.
+    for dest_name, variable in cs.env_by_dest.items():
+        if dest_name in flags:
+            continue
+        supplied = env.get(variable) if env else None
+        if not supplied:
+            continue
+        if dest_name in cs.multiple_dests:
+            flags[dest_name] = [supplied]
+        else:
+            flags[dest_name] = supplied
 
     # Declared defaults land as if typed, before choices/required checks
     # and before PATH/TEXT flag-value collection, so a PATH default

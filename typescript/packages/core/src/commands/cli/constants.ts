@@ -22,3 +22,9 @@ export const USAGE_EXIT = 129
 // script CLI that shells back into mirage must not find a config blob
 // where a path belongs.
 export const CLI_CONFIG_ENV = 'MIRAGE_CLI_CONFIG'
+
+// clap exits 2 for a usage error at every level of its tree, agreeing with
+// argparse by coincidence rather than by lineage. It lives here rather than
+// beside the refusal renderers because the walk reads it too, and the walk
+// cannot import a module that reaches the workspace.
+export const CLAP_EXIT = 2

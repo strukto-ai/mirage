@@ -14,13 +14,12 @@
 
 from collections.abc import Mapping, Sequence
 
-from mirage.commands.cli.constants import USAGE_EXIT
+from mirage.commands.cli.constants import CLAP_EXIT, USAGE_EXIT
 from mirage.commands.spec.help import operand_slot, option_metavar
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.workspace.executor.command.types import ParsedCommand
 
 ARGPARSE_EXIT = 2
-CLAP_EXIT = 2
 LONG_PREFIX = "--"
 
 

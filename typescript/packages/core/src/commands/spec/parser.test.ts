@@ -1044,3 +1044,70 @@ describe('operandBase (tar -C)', () => {
     expect(parsed.wordBases).toEqual([null])
   })
 })
+
+describe('options an environment variable supplies', () => {
+  const versioned = new CommandSpec({
+    options: [new Option({ long: '--version', type: 'str', env: 'X_VERSION' })],
+  })
+
+  it('fills an option the line omitted', () => {
+    expect(parseCommand(versioned, [], '/', { X_VERSION: '9' }).flags['--version']).toBe('9')
+  })
+
+  it('yields to what the line typed', () => {
+    const parsed = parseCommand(versioned, ['--version', 'typed'], '/', { X_VERSION: '9' })
+    expect(parsed.flags['--version']).toBe('typed')
+  })
+
+  it('outranks a declared default', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--version', type: 'str', default: 'fallback', env: 'X_VERSION' }),
+      ],
+    })
+    expect(parseCommand(spec, [], '/', { X_VERSION: '9' }).flags['--version']).toBe('9')
+    expect(parseCommand(spec, [], '/', {}).flags['--version']).toBe('fallback')
+  })
+
+  it('satisfies a required option before it is refused', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--version', type: 'str', env: 'X_VERSION', required: true })],
+    })
+    expect(parseCommand(spec, [], '/', { X_VERSION: '9' }).missingRequiredOptions).toEqual([])
+    expect(parseCommand(spec, [], '/', {}).missingRequiredOptions).toEqual(['--version'])
+  })
+
+  it('is coerced and choice-checked like a typed value', () => {
+    // Filling after the parse left these unchecked: an int stayed a string
+    // nobody validated and a choice was never tested.
+    const ints = new CommandSpec({
+      options: [new Option({ long: '--count', type: 'int', env: 'X_COUNT' })],
+    })
+    expect(parseCommand(ints, [], '/', { X_COUNT: 'nope' }).invalidIntOptions).toEqual([
+      ['--count', 'nope'],
+    ])
+    expect(parseCommand(ints, [], '/', { X_COUNT: '4' }).invalidIntOptions).toEqual([])
+    const picks = new CommandSpec({
+      options: [new Option({ long: '--mode', type: 'str', choices: ['a', 'b'], env: 'X_MODE' })],
+    })
+    expect(parseCommand(picks, [], '/', { X_MODE: 'zzz' }).invalidValueOptions.length).toBe(1)
+    expect(parseCommand(picks, [], '/', { X_MODE: 'a' }).invalidValueOptions).toEqual([])
+  })
+
+  it('resolves a path value against the cwd like a typed one', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--conf', type: 'path', env: 'X_CONF' })],
+    })
+    expect(parseCommand(spec, [], '/work', { X_CONF: 'rel.json' }).flags['--conf']).toBe(
+      '/work/rel.json',
+    )
+  })
+
+  it('does not count as typed', () => {
+    // clap's usage line echoes what the line carried; an env-supplied option
+    // is supplied but not typed.
+    const parsed = parseCommand(versioned, [], '/', { X_VERSION: '9' })
+    expect(parsed.flags['--version']).toBe('9')
+    expect(parsed.typedDests).toEqual([])
+  })
+})
