@@ -45,21 +45,47 @@ function childMountNames(prefixes: readonly string[], parent: string): string[] 
 }
 
 /**
+ * Whether the current session may see the link at `link`.
+ *
+ * A link is namespace state, but its path lies on some mount's turf:
+ * the longest mount prefix above it owns it, the same longest-match
+ * rule dispatch resolves the path by. A scoped session that may not
+ * touch that mount must not learn the link's name from a listing,
+ * exactly as `childMountNames` hides the mount itself. A link above
+ * every mount is bare namespace structure and stays visible.
+ */
+function linkAllowed(prefixes: readonly string[], link: string): boolean {
+  let owner = ''
+  for (const prefix of prefixes) {
+    const p = normDir(prefix)
+    if ((link + '/').startsWith(p) && p.length > owner.length) owner = p
+  }
+  return owner === '' || mountAllowed(owner)
+}
+
+/**
  * Immediate child segments owed to links at or below `parent`.
  *
  * Derived from every link path, not just direct children, exactly as
  * mount prefixes are: `ln` allows a link below a directory chain no
  * backend serves, and without its ancestors synthesized the link lists
  * at its own parent yet is unreachable from a walk above it.
+ * Session-filtered through `linkAllowed`: a link below an ungranted
+ * mount would otherwise leak that mount's name into a listing
+ * `childMountNames` had already filtered.
  */
-function linkNames(links: NamespaceLinks | null, parent: string): string[] {
+function linkNames(
+  prefixes: readonly string[],
+  links: NamespaceLinks | null,
+  parent: string,
+): string[] {
   if (links === null) return []
   const norm = normDir(parent)
   const out = new Set<string>()
   for (const link of links.symlinkTargets().keys()) {
     if (!link.startsWith(norm)) continue
     const name = link.slice(norm.length).split('/', 1)[0] ?? ''
-    if (name !== '') out.add(name)
+    if (name !== '' && linkAllowed(prefixes, link)) out.add(name)
   }
   return [...out].sort()
 }
@@ -77,7 +103,9 @@ export function structureNames(
   links: NamespaceLinks | null,
   parent: string,
 ): string[] {
-  return [...new Set([...childMountNames(prefixes, parent), ...linkNames(links, parent)])].sort()
+  return [
+    ...new Set([...childMountNames(prefixes, parent), ...linkNames(prefixes, links, parent)]),
+  ].sort()
 }
 
 /**

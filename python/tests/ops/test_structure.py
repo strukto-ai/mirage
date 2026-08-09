@@ -16,7 +16,8 @@ import pytest
 
 from mirage.context import reset_current_session, set_current_session
 from mirage.ops.structure import (child_mount_names, merge_readdir,
-                                  structure_listing, structure_stat)
+                                  structure_listing, structure_names,
+                                  structure_stat)
 from mirage.types import FileType, MountMode
 from mirage.workspace.session import Session
 
@@ -118,3 +119,23 @@ def test_structure_answers_hide_ungranted_mounts(scoped_session):
     assert structure_stat(["/top/secret/"], None, "/top") is None
     # The granted mount keeps answering through the same session.
     assert structure_stat(PREFIXES, None, "/base") is not None
+
+
+def test_link_names_filter_by_owning_mount(scoped_session):
+    # A link below an ungranted mount must not leak that mount's name
+    # into a listing child_mount_names had already filtered; a link
+    # inside the granted mount keeps answering. Ownership is
+    # longest-match, the same rule dispatch resolves the path by.
+    links = _Links({"/other/leak": "/tgt", "/base/inner/ok": "/tgt"})
+    assert structure_names(PREFIXES, links, "/") == ["base"]
+    assert structure_listing(PREFIXES, links,
+                             "/base/inner") == ["/base/inner/ok"]
+
+
+def test_link_above_every_mount_stays_visible(scoped_session):
+    # No mount owns /ghost/...: the link discloses nothing about any
+    # mount, so a scoped session still sees the chain (it may have
+    # created the link itself at a structure-only path).
+    links = _Links({"/ghost/deep/lnk": "/base/inner"})
+    assert structure_listing(["/base/inner/"], links,
+                             "/") == ["/base", "/ghost"]

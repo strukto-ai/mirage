@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { runWithSession } from '../context/session_context.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { FileType, MountMode, type FileStat } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
@@ -187,6 +188,54 @@ describe('per-session mount grants', () => {
     const sess = ws.createSession('agent', { mounts: { '/a': 'rw' } })
     expect(sess.mountModes?.get('/a')).toBe(MountMode.WRITE)
     expect(() => ws.createSession('bits', { mounts: { '/a': 'w' } })).toThrow('invalid mount mode')
+  })
+})
+
+describe('structure below an ungranted mount', () => {
+  async function makeNestedWorkspace(): Promise<Workspace> {
+    const parser = await getTestParser()
+    const base = new RAMResource()
+    base.store.files.set('/top.txt', ENC.encode('TOP\n'))
+    const inner = new RAMResource()
+    inner.store.files.set('/deep.txt', ENC.encode('needle\n'))
+    const registry = new OpsRegistry()
+    registry.registerResource(base)
+    registry.registerResource(inner)
+    const ws = new Workspace(
+      { '/base': base, '/base/inner': inner },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    open.push(ws)
+    return ws
+  }
+
+  it('a session granted only a nested mount can walk down to it', async () => {
+    // The root listing deliberately shows `base` as the traversal path
+    // to the grant, so readdir and stat on /base must answer with the
+    // granted structure; the ungranted backend's own content never
+    // appears, and a path the structure does not owe still denies.
+    const ws = await makeNestedWorkspace()
+    const sess = ws.createSession('agent', { mounts: ['/base/inner'] })
+    await runWithSession(sess, async () => {
+      expect(await ws.dispatch('readdir', '/base')).toEqual(['/base/inner'])
+      const st = (await ws.dispatch('stat', '/base')) as FileStat
+      expect(st.type).toBe(FileType.DIRECTORY)
+      expect(await ws.dispatch('readdir', '/base/inner')).toEqual(['/base/inner/deep.txt'])
+      await expect(ws.dispatch('readdir', '/base/other')).rejects.toThrow('not allowed')
+    })
+  })
+
+  it('a link below an ungranted mount stays out of a scoped listing', async () => {
+    const { ws } = await makeGrantsWorkspace()
+    const ln = await ws.execute('ln -s /b/secret.txt /b/leak')
+    expect(ln.exitCode).toBe(0)
+    const sess = ws.createSession('agent', { mounts: ['/a'] })
+    await runWithSession(sess, async () => {
+      const names = (await ws.dispatch('readdir', '/')) as string[]
+      expect(names).not.toContain('/b')
+      expect(names).toContain('/a')
+    })
+    expect((await ws.dispatch('readdir', '/')) as string[]).toContain('/b')
   })
 })
 

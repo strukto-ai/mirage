@@ -18,6 +18,7 @@ from typing import Any
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
+from mirage.context import mount_allowed
 from mirage.io import IOResult
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
@@ -86,6 +87,27 @@ class Dispatcher:
             return structure_stat(prefixes, self._namespace, virtual)
         return None
 
+    async def _gated_structure(self, op: str, path: PathSpec,
+                               fallback: "list[str] | FileStat") -> Any:
+        """Gate a namespace-served answer exactly like a backend one.
+
+        The answer has no owning prefix (the gates see ""), but
+        admission still fires: a policy that bounds readdir or stat by
+        path must cover the synthetic answer too.
+
+        Args:
+            op (str): the dispatched op name.
+            path (PathSpec): the op's path scope.
+            fallback (list[str] | FileStat): the structure answer.
+        """
+        policies = self._namespace.registry.policies
+        write = op in _POLICY_WRITE_OPS
+        await pre_ops_gate(policies, op, path, write, "")
+        bound = await post_ops_gate(policies, op, path, write, "", fallback)
+        if bound is not None:
+            return await apply_op_limit(fallback, bound)
+        return fallback
+
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
         if op not in NO_FOLLOW_OPS:
@@ -97,21 +119,24 @@ class Dispatcher:
         except ValueError:
             # No mount serves the path, but the namespace may still know
             # a directory there (a deeper mount, a link). No mount means
-            # no cache to keep straight and no owning prefix (the gates
-            # see ""), but admission still fires: a policy that bounds
-            # readdir or stat by path must cover the synthetic answer
-            # too. The merged names are session-filtered individually.
+            # no cache to keep straight. The merged names are
+            # session-filtered individually.
             fallback = self._structure_result(op, path.virtual)
             if fallback is None:
                 raise
-            policies = self._namespace.registry.policies
-            write = op in _POLICY_WRITE_OPS
-            await pre_ops_gate(policies, op, path, write, "")
-            bound = await post_ops_gate(policies, op, path, write, "",
-                                        fallback)
-            if bound is not None:
-                fallback = await apply_op_limit(fallback, bound)
-            return fallback, IOResult()
+            return await self._gated_structure(op, path, fallback), IOResult()
+        if not mount_allowed(mount.prefix):
+            # The mount is real but ungranted, and the namespace may
+            # still owe the session a directory here: a granted mount
+            # below it already put this path's name in a listing, so
+            # walking down to the grant must answer. The names are
+            # session-filtered, so nothing of the mount's own content
+            # leaks; a path the structure does not owe falls through to
+            # the canonical denial below.
+            fallback = self._structure_result(op, path.virtual)
+            if fallback is not None:
+                return await self._gated_structure(op, path,
+                                                   fallback), IOResult()
         assert_mount_allowed(mount.prefix)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly

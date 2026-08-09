@@ -50,15 +50,42 @@ def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
     return sorted(out)
 
 
-def _link_names(links: NamespaceLinks | None, parent: str) -> list[str]:
+def _link_allowed(prefixes: Iterable[str], link: str) -> bool:
+    """Whether the current session may see the link at ``link``.
+
+    A link is namespace state, but its path lies on some mount's turf:
+    the longest mount prefix above it owns it, the same longest-match
+    rule dispatch resolves the path by. A scoped session that may not
+    touch that mount must not learn the link's name from a listing,
+    exactly as ``child_mount_names`` hides the mount itself. A link
+    above every mount is bare namespace structure and stays visible.
+
+    Args:
+        prefixes (Iterable[str]): the mount prefixes to derive from.
+        link (str): the link's virtual path.
+    """
+    owner = ""
+    for prefix in prefixes:
+        p = _norm_dir(prefix)
+        if (link + "/").startswith(p) and len(p) > len(owner):
+            owner = p
+    return owner == "" or mount_allowed(owner)
+
+
+def _link_names(prefixes: Iterable[str], links: NamespaceLinks | None,
+                parent: str) -> list[str]:
     """Immediate child segments owed to links at or below ``parent``.
 
     Derived from every link path, not just direct children, exactly as
     mount prefixes are: ``ln`` allows a link below a directory chain no
     backend serves, and without its ancestors synthesized the link
     lists at its own parent yet is unreachable from a walk above it.
+    Session-filtered through ``_link_allowed``: a link below an
+    ungranted mount would otherwise leak that mount's name into a
+    listing ``child_mount_names`` had already filtered.
 
     Args:
+        prefixes (Iterable[str]): the mount prefixes to derive from.
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): directory whose child segments to enumerate.
     """
@@ -70,7 +97,7 @@ def _link_names(links: NamespaceLinks | None, parent: str) -> list[str]:
         if not link.startswith(norm):
             continue
         name = link[len(norm):].split("/", 1)[0]
-        if name:
+        if name and _link_allowed(prefixes, link):
             out.add(name)
     return sorted(out)
 
@@ -91,7 +118,7 @@ def structure_names(prefixes: Iterable[str], links: NamespaceLinks | None,
     """
     return sorted(
         set(child_mount_names(prefixes, parent))
-        | set(_link_names(links, parent)))
+        | set(_link_names(prefixes, links, parent)))
 
 
 def merge_readdir(entries: list[str], prefixes: Iterable[str],

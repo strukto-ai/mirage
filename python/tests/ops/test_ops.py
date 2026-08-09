@@ -16,6 +16,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.context import reset_current_session, set_current_session
 from mirage.ops import Ops
 from mirage.ops.config import OpsMount
 from mirage.policy import (Action, Deny, OpsContext, Policies, Policy,
@@ -23,6 +24,7 @@ from mirage.policy import (Action, Deny, OpsContext, Policies, Policy,
 from mirage.resource.ram import RAMResource
 from mirage.resource.ram.store import RAMStore
 from mirage.types import FileType, MountMode
+from mirage.workspace.session import Session
 
 from .conftest import _ram_registered_ops, make_ops, run
 
@@ -288,3 +290,57 @@ class TestStructureFallbackGates:
     def test_the_synthetic_answer_serves_when_no_policy_objects(self):
         ops = _structure_only_ops(Policies())
         assert run(ops.readdir("/data/inner")) == ["/data/inner/deep"]
+
+
+def _granted_child_ops() -> Ops:
+    """An Ops with a real mount at /data and a nested one at
+    /data/inner/deep, for sessions granted only the deep one."""
+    mounts = [
+        OpsMount(
+            prefix="/data/",
+            resource_type="ram",
+            accessor=RAMAccessor(RAMStore()),
+            index=RAMIndexCacheStore(),
+            mode=MountMode.WRITE,
+            ops=_ram_registered_ops(),
+        ),
+        OpsMount(
+            prefix="/data/inner/deep/",
+            resource_type="ram",
+            accessor=RAMAccessor(RAMStore()),
+            index=RAMIndexCacheStore(),
+            mode=MountMode.WRITE,
+            ops=_ram_registered_ops(),
+        ),
+    ]
+    return Ops(mounts, policies=Policies())
+
+
+@pytest.fixture
+def deep_scoped_session():
+    """Bind a session granted only /data/inner/deep."""
+    session = Session(session_id="agent",
+                      mount_modes={"/data/inner/deep": MountMode.EXEC})
+    token = set_current_session(session)
+    yield session
+    reset_current_session(token)
+
+
+class TestUngrantedParentStructure:
+
+    def test_walking_down_to_the_grant_answers(self, deep_scoped_session):
+        # /data is real but ungranted; the granted mount below it
+        # already put "data" in the root listing, so readdir and stat
+        # must answer with the granted structure and nothing else.
+        ops = _granted_child_ops()
+        assert run(ops.readdir("/data")) == ["/data/inner"]
+        st = run(ops.stat("/data"))
+        assert st.type is FileType.DIRECTORY
+
+    def test_paths_the_structure_does_not_owe_still_deny(
+            self, deep_scoped_session):
+        ops = _granted_child_ops()
+        with pytest.raises(PermissionError):
+            run(ops.readdir("/data/other"))
+        with pytest.raises(PermissionError):
+            run(ops.write("/data/f.txt", b"x"))

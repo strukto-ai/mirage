@@ -15,6 +15,7 @@
 import { NOOPAccessor } from '../accessor/base.ts'
 import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
 import { getExtension } from '../commands/resolve.ts'
+import { MountNotAllowedError } from '../context/session_context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
 import { mergeReaddir, structureListing, structureStat } from '../ops/structure.ts'
@@ -194,10 +195,13 @@ export class WorkspaceFS {
     try {
       resolved = await this.resolver(path)
     } catch (err) {
-      // No mount serves the path; mirror the dispatcher and fire the
-      // gates anyway (prefixOf answers '' here) so a policy that bounds
-      // readdir by path covers the synthetic answer too.
-      const fallback = isMissingPath(err) ? this.structureResult('readdir', path) : null
+      // No mount serves the path, or a real mount is ungranted; mirror
+      // the dispatcher and fire the gates anyway (prefixOf answers ''
+      // here) so a policy that bounds readdir by path covers the
+      // synthetic answer too. The merged names are session-filtered,
+      // so an ungranted mount's own content never leaks.
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.structureResult('readdir', path) : null
       if (fallback === null) throw err
       const pathSpec = PathSpec.fromStrPath(path)
       await this.firePreOps('readdir', path, pathSpec, false)
@@ -241,7 +245,8 @@ export class WorkspaceFS {
       resolved = await this.resolver(path)
     } catch (err) {
       // Same gate routing as the readdir resolver miss above.
-      const fallback = isMissingPath(err) ? this.structureResult('stat', path) : null
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.structureResult('stat', path) : null
       if (fallback === null) throw err
       const pathSpec = PathSpec.fromStrPath(path)
       await this.firePreOps('stat', path, pathSpec, false)

@@ -35,7 +35,7 @@ import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { Reconciler } from './reconcile.ts'
-import { effectiveMountMode } from '../context/session_context.ts'
+import { effectiveMountMode, MountNotAllowedError } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
@@ -110,9 +110,14 @@ export class Dispatcher {
       // directory there (a deeper mount, a link). No mount means no
       // cache to keep straight and no owning prefix (the gates see ''),
       // but admission still fires: a policy that bounds readdir or stat
-      // by path must cover the synthetic answer too. The merged names
-      // are session-filtered individually.
-      const fallback = isMissingPath(err) ? this.structureResult(opName, p.virtual) : null
+      // by path must cover the synthetic answer too. A real but
+      // ungranted mount is the same case: a granted mount below it
+      // already put this path's name in a listing, so walking down to
+      // the grant must answer, and the merged names are
+      // session-filtered individually, so nothing of the mount's own
+      // content leaks.
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.structureResult(opName, p.virtual) : null
       if (fallback === null) throw err
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
       await preOpsGate(this.policies, opName, p, fallbackWrite, '')

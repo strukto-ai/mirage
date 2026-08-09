@@ -18,8 +18,9 @@ import type { Policy } from '../policy/base.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import { Policies } from '../policy/policies.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
+import { MountNotAllowedError } from '../context/session_context.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { Limit, MountMode } from '../types.ts'
+import { FileType, Limit, MountMode } from '../types.ts'
 import { enoent, enotdir } from '../utils/errors.ts'
 import { WorkspaceFS } from './fs.ts'
 import { Workspace } from './workspace.ts'
@@ -264,5 +265,36 @@ describe('WorkspaceFS structure fallback still clears admission', () => {
   it('the synthetic answer serves when no policy objects', async () => {
     const fs = mkStructureFS(new Policies())
     expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+  })
+})
+
+describe('WorkspaceFS structure below an ungranted mount', () => {
+  function mkUngrantedFS(prefixes: string[]): WorkspaceFS {
+    return new WorkspaceFS(
+      () => Promise.reject(new MountNotAllowedError('agent', '/data')),
+      new OpsRegistry(),
+      null,
+      null,
+      null,
+      new Policies(),
+      () => '',
+      () => prefixes,
+    )
+  }
+
+  it('serves the granted structure instead of the denial', async () => {
+    // The resolver rejects because the owning mount is ungranted, but a
+    // granted mount below the path already put its name in a listing,
+    // so walking down to the grant must answer.
+    const fs = mkUngrantedFS(['/data/inner/deep/'])
+    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+    const st = await fs.stat('/data/inner')
+    expect(st.type).toBe(FileType.DIRECTORY)
+  })
+
+  it('a path the structure does not owe keeps the canonical denial', async () => {
+    const fs = mkUngrantedFS([])
+    await expect(fs.readdir('/data/inner')).rejects.toThrow(MountNotAllowedError)
+    await expect(fs.stat('/data/inner')).rejects.toThrow(MountNotAllowedError)
   })
 })

@@ -386,6 +386,75 @@ async def test_scoped_session_hides_name_from_root_listing():
 
 
 @pytest.mark.asyncio
+async def test_scoped_link_below_ungranted_mount_stays_hidden():
+    """A namespace link under an ungranted mount must not leak its name.
+
+    ``child_mount_names`` already hides ``/closed`` itself; a link at
+    ``/closed/leak`` is namespace state above the backend, but its path
+    discloses the same name, so the same grant filters it. The
+    unrestricted view keeps the link.
+    """
+    ws = scoped_world("monty")
+    try:
+        assert (await _sh(ws, "ln -s /closed/sec.txt /closed/leak"))[0] == 0
+        code, out, _ = await _sh(ws, "ls /", session_id="agent")
+        assert code == 0
+        assert "closed" not in out
+        code, out, _ = await _sh(ws, "ls /")
+        assert code == 0
+        assert "closed" in out
+    finally:
+        await ws.close()
+
+
+def granted_child_world(runtime: str) -> Workspace:
+    """An ungranted parent mount with a granted child nested inside.
+
+    ``/base`` (``a.txt``) is not granted to session ``agent``;
+    ``/base/inner`` (``deep.txt``) is. The root listing deliberately
+    shows ``base`` as the traversal path to the grant, so the walk down
+    through ``/base`` must answer with structure and nothing of the
+    parent's own content.
+
+    Args:
+        runtime (str): registry name of the guest runtime to attach.
+    """
+    ws = Workspace(
+        {
+            "/base": _seed({"/a.txt": b"top"}),
+            "/base/inner": _seed({"/deep.txt": b"needle"}),
+        },
+        mode=MountMode.EXEC,
+        runtimes=[runtime, "vfs"],
+    )
+    ws.create_session("agent", mounts=["/base/inner"])
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_scoped_walk_reaches_nested_grant():
+    """An ungranted parent with a granted child serves its structure.
+
+    Refusing ``/base`` strands the session outside its own mount, and
+    serving the backend would leak ungranted content; the answer is
+    the granted structure and nothing else.
+    """
+    ws = granted_child_world("monty")
+    try:
+        sess = ws.get_session("agent")
+        core = MountCore(ws.ops, session=sess)
+        names = core.readdir("/base")
+        assert "inner" in names
+        assert "a.txt" not in names
+        assert core.getattr("/base")["st_mode"] & 0o040000
+        assert "deep.txt" in core.readdir("/base/inner")
+        with pytest.raises(PermissionError):
+            core.getattr("/base/a.txt")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("line,needle", [
     ("grep -r SECRET /", "SECRET-xyz"),
     ("ls -R /", "sec.txt"),

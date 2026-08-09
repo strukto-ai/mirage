@@ -226,6 +226,24 @@ describe('scoped world', () => {
     }
   })
 
+  it('a link below an ungranted mount stays out of a scoped listing', async () => {
+    // The link's path discloses the same name childMountNames already
+    // filters, so the same grant filters it; the unrestricted view
+    // keeps the link.
+    const ws = await scopedWorld()
+    try {
+      expect((await run(ws, 'ln -s /closed/sec.txt /closed/leak'))[0]).toBe(0)
+      const [code, out] = await run(ws, 'ls /', 'agent')
+      expect(code).toBe(0)
+      expect(out).not.toContain('closed')
+      const [openCode, openOut] = await run(ws, 'ls /')
+      expect(openCode).toBe(0)
+      expect(openOut).toContain('closed')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each([
     ['grep -r SECRET /', 'SECRET-xyz'],
     ['ls -R /', 'sec.txt'],
