@@ -24,7 +24,9 @@
       "count": false,
       "default": null,
       "description": "Write the downloaded content to the given file.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -39,7 +41,9 @@
       "count": false,
       "default": null,
       "description": "Run quietly with no output.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -54,7 +58,9 @@
       "count": false,
       "default": null,
       "description": "Check that the URL exists without downloading it.",
+      "env": null,
       "long": "--spider",
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -67,13 +73,17 @@
   ],
   "positional": [
     {
+      "name": "",
       "provided_by": [],
+      "required": false,
       "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
+    "name": "",
     "provided_by": [],
+    "required": false,
     "text_when": [],
     "type": "path"
   }

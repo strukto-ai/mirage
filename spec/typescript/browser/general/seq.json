@@ -24,7 +24,9 @@
       "count": false,
       "default": null,
       "description": "Use the given string as separator between numbers.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -39,7 +41,9 @@
       "count": false,
       "default": null,
       "description": "Pad numbers with zeros to equal width.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -54,7 +58,9 @@
       "count": false,
       "default": null,
       "description": "Format each number with a printf-style format string.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -67,17 +73,23 @@
   ],
   "positional": [
     {
+      "name": "",
       "provided_by": [],
+      "required": false,
       "text_when": [],
       "type": "str"
     },
     {
+      "name": "",
       "provided_by": [],
+      "required": false,
       "text_when": [],
       "type": "str"
     },
     {
+      "name": "",
       "provided_by": [],
+      "required": false,
       "text_when": [],
       "type": "str"
     }

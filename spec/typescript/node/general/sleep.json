@@ -14,7 +14,9 @@
   "options": [],
   "positional": [],
   "rest": {
+    "name": "",
     "provided_by": [],
+    "required": false,
     "text_when": [],
     "type": "str"
   }

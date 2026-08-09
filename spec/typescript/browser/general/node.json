@@ -24,7 +24,9 @@
       "count": false,
       "default": null,
       "description": "Evaluate the next argument as a script.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -39,7 +41,9 @@
       "count": false,
       "default": null,
       "description": "Run as an ES module (top-level import/export/await); .mjs files select this automatically.",
+      "env": null,
       "long": "--module",
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -52,7 +56,9 @@
   ],
   "positional": [],
   "rest": {
+    "name": "",
     "provided_by": [],
+    "required": false,
     "text_when": [],
     "type": "str"
   }

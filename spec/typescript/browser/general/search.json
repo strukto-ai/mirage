@@ -47,7 +47,9 @@
       "count": false,
       "default": null,
       "description": null,
+      "env": null,
       "long": "--method",
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -62,7 +64,9 @@
       "count": false,
       "default": null,
       "description": null,
+      "env": null,
       "long": "--top-k",
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -77,7 +81,9 @@
       "count": false,
       "default": null,
       "description": null,
+      "env": null,
       "long": "--threshold",
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -90,13 +96,17 @@
   ],
   "positional": [
     {
+      "name": "",
       "provided_by": [],
+      "required": false,
       "text_when": [],
       "type": "str"
     }
   ],
   "rest": {
+    "name": "",
     "provided_by": [],
+    "required": false,
     "text_when": [],
     "type": "path"
   }

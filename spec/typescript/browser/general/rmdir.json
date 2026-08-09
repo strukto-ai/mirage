@@ -82,7 +82,9 @@
       "count": false,
       "default": null,
       "description": null,
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -95,7 +97,9 @@
   ],
   "positional": [],
   "rest": {
+    "name": "",
     "provided_by": [],
+    "required": false,
     "text_when": [],
     "type": "path"
   }

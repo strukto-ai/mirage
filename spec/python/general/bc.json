@@ -24,7 +24,9 @@
       "count": false,
       "default": null,
       "description": "Load the standard math library.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -39,7 +41,9 @@
       "count": false,
       "default": null,
       "description": "Suppress the welcome banner.",
+      "env": null,
       "long": null,
+      "metavar": null,
       "multiple": false,
       "numeric_shorthand": false,
       "pair": false,
@@ -52,7 +56,9 @@
   ],
   "positional": [],
   "rest": {
+    "name": "",
     "provided_by": [],
+    "required": false,
     "text_when": [],
     "type": "str"
   }
