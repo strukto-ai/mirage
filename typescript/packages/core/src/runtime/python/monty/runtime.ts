@@ -213,7 +213,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: new MirageOSAccess(module.NOT_HANDLED, {}, this.vfs).handle,
+      os: new MirageOSAccess(module.NOT_HANDLED, {}, this.perRunVfs()).handle,
     }
     const enc = new TextEncoder()
     // One-shot evals get the quickjs-style 10s bound (the policy layer
@@ -300,6 +300,19 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     this.poolPromise = null
   }
 
+  /**
+   * The mount view for one command, with its negative cache cleared.
+   *
+   * python builds a fresh `MirageOSAccess` per run, so its absence
+   * cache never outlives a command; this view is attached once, so it
+   * has to be told. Without the reset a path a shell command created
+   * between two monty commands would stay invisible to the second.
+   */
+  private perRunVfs(): MontyVFS | null {
+    this.vfs?.reset()
+    return this.vfs
+  }
+
   private async ensurePool(): Promise<MontyPoolLike> {
     if (this.pool !== null) return this.pool
     this.poolPromise ??= this.loadPool()
@@ -333,7 +346,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: new MirageOSAccess(module.NOT_HANDLED, args.env, this.vfs).handle,
+      os: new MirageOSAccess(module.NOT_HANDLED, args.env, this.perRunVfs()).handle,
     }
     try {
       await session.feedRun(code, options)

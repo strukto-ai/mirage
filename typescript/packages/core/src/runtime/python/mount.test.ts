@@ -139,6 +139,55 @@ describe('PyodideRuntime mount visibility', () => {
     await rt.close()
   }, 60_000)
 
+  it('a root mount is refused rather than mounted at nothing', async () => {
+    // `/` is already MEMFS's mount root, so Emscripten answers EBUSY;
+    // the empty mountpoint it used to compute mounts a detached
+    // filesystem, and the guest then reads and writes MEMFS while a
+    // write reports success the resource never sees.
+    const { dispatch, calls } = makeBridge()
+    const warnings: string[] = []
+    const warn = console.warn
+    console.warn = (msg: unknown) => warnings.push(String(msg))
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/'])
+    try {
+      const result = await rt.run({
+        code: `open('/out.txt', 'wb').write(b'data')`,
+        args: [],
+        env: {},
+        stdin: new Uint8Array(),
+      })
+      expect(result.exitCode).toBe(0)
+      expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
+      expect(warnings.some((w) => w.includes("cannot serve a mount at '/'"))).toBe(true)
+      // Reported once, not once per run.
+      await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
+      expect(warnings.filter((w) => w.includes('cannot serve a mount'))).toHaveLength(1)
+    } finally {
+      console.warn = warn
+      await rt.close()
+    }
+  }, 60_000)
+
+  it('a nested prefix stays reachable under its parent mount', async () => {
+    // prefixes() is longest-first; mounting in that order puts /data
+    // over the /data/inner mounted a moment earlier and orphans it.
+    const { dispatch, files } = makeBridge()
+    files.set('/data/outer.txt', new TextEncoder().encode('OUTER'))
+    files.set('/data/inner/deep.txt', new TextEncoder().encode('DEEP'))
+    const rt = new PyodideRuntime()
+    rt.attach(dispatch, () => ['/data/', '/data/inner/'])
+    const result = await rt.run({
+      code: "print(open('/data/outer.txt').read(), open('/data/inner/deep.txt').read())",
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    expect(result.exitCode).toBe(0)
+    expect(new TextDecoder().decode(result.stdout)).toContain('OUTER DEEP')
+    await rt.close()
+  }, 60_000)
+
   it('a failed flush surfaces on stderr and flips a clean exit to 1', async () => {
     const dispatch: BridgeDispatchFn = (op) => {
       if (op === 'WRITE') return Promise.reject(new Error('mount is read-only'))

@@ -146,6 +146,22 @@ describe('MontyVFS negative cache', () => {
     expect(await vfs.entryFor('/ram/a')).toMatchObject({ isDir: false })
   })
 
+  it('forgets across commands, so another writer between runs is seen', async () => {
+    // python builds a fresh MirageOSAccess per run; this view is
+    // attached once, so the runtime resets it at the top of each
+    // command. Without that a shell command's file stays invisible.
+    let created = false
+    const dispatch = vi.fn<BridgeDispatchFn>(() =>
+      Promise.resolve(created ? [{ path: '/ram/late.txt', size: 1, isDir: false }] : []),
+    )
+    const vfs = viewOn(dispatch)
+    expect(await vfs.entryFor('/ram/late.txt')).toBeNull()
+    created = true
+    expect(await vfs.entryFor('/ram/late.txt')).toBeNull()
+    vfs.reset()
+    expect(await vfs.entryFor('/ram/late.txt')).toMatchObject({ isDir: false })
+  })
+
   it('does not remember a transport failure as an absence', async () => {
     // "I could not reach the mount" is not "there is nothing here";
     // caching it would hide the file for the rest of the run.

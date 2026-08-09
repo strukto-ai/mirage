@@ -52,6 +52,19 @@ export class MontyVFS {
   }
 
   /**
+   * Forget every remembered absence.
+   *
+   * The cache may only span one command. This object lives as long as
+   * the runtime, but python builds its `MirageOSAccess` (and with it
+   * the `_missing` set this mirrors) once per run, so a file a shell
+   * command creates between two monty commands has to be visible to
+   * the second one. Callers reset at the top of `run` and each `eval`.
+   */
+  reset(): void {
+    this.missing.clear()
+  }
+
+  /**
    * True when `path` may be serviced by the mounts. An empty live view
    * means no scoping: every path routes to the workspace.
    */

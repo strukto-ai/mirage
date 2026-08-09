@@ -71,9 +71,29 @@ function reviveEvalValue(_key: string, value: unknown): unknown {
 }
 
 // Mount prefixes are normalized with a trailing slash; an Emscripten
-// mountpoint is a directory path, so it carries none.
+// mountpoint is a directory path, so it carries none. The root prefix
+// is the one that strips to nothing, and nothing is what makes it
+// unmountable here: see `servable`.
 function mountpointOf(prefix: string): string {
   return prefix.endsWith('/') ? prefix.slice(0, -1) : prefix
+}
+
+/**
+ * Whether this runtime can mount `prefix` at all.
+ *
+ * Everything but the workspace root can. `/` cannot: it is already
+ * MEMFS's own mount root, holding the interpreter's stdlib, and
+ * Emscripten answers EBUSY to a second mount there. Left to itself
+ * `mountpointOf` hands back the empty string, which mounts a detached
+ * pseudo-filesystem no path reaches, so the guest keeps reading and
+ * writing MEMFS and a write reports success while the resource never
+ * sees it.
+ *
+ * Args:
+ *   prefix: a slash-terminated mount prefix.
+ */
+function servable(prefix: string): boolean {
+  return mountpointOf(prefix) !== ''
 }
 
 function runtimeEnv(): Record<string, string> {
@@ -150,6 +170,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private vfs: RuntimeVFS | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
+  // Prefixes this runtime cannot mount, remembered so the refusal is
+  // reported once rather than on every run.
+  private readonly refused = new Set<string>()
   // The guest executes on this event loop, so only the watchdog-backed
   // interrupt buffer can stop a busy loop (see interrupt.ts); null
   // where SharedArrayBuffer/workers are unavailable (runs unbounded).
@@ -349,13 +372,27 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private async syncMounts(pyodide: PyodideInterface): Promise<void> {
     const vfs = this.vfs
     if (vfs === null) return
-    const wanted = new Set(vfs.prefixes())
-    for (const prefix of [...this.mounted]) {
+    const all = vfs.prefixes()
+    for (const prefix of all) {
+      if (servable(prefix) || this.refused.has(prefix)) continue
+      this.refused.add(prefix)
+      console.warn(
+        `mirage: the ${PYODIDE_RUNTIME} runtime cannot serve a mount at ` +
+          `'${prefix}', because that is the interpreter's own filesystem ` +
+          `root; python will not see it`,
+      )
+    }
+    // `prefixes()` is longest-first, which is the order routing wants
+    // and the reverse of the order the mount table wants: mounting
+    // /data over an existing /data/inner orphans the child. So unmount
+    // deepest-first and mount shallowest-first.
+    const wanted = new Set(all.filter(servable))
+    for (const prefix of [...this.mounted].sort((a, b) => b.length - a.length)) {
       if (wanted.has(prefix)) continue
       pyodide.FS.unmount(mountpointOf(prefix))
       this.mounted.delete(prefix)
     }
-    for (const prefix of wanted) {
+    for (const prefix of [...wanted].sort((a, b) => a.length - b.length)) {
       // Collect before touching the mount table: a failed LIST then
       // leaves the previous snapshot serving rather than an empty mount,
       // and the prefix retries on the next run.
