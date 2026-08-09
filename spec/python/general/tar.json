@@ -111,6 +111,7 @@
   "epilog": null,
   "ignore_tokens": [],
   "old_option_style": true,
+  "operand_base": "-C",
   "options": [
     {
       "choices": [],
@@ -213,6 +214,21 @@
       "pair": false,
       "required": false,
       "short": "-v",
+      "short_value": true,
+      "type": "bool",
+      "value_optional": false
+    },
+    {
+      "choices": [],
+      "count": false,
+      "default": null,
+      "description": null,
+      "long": null,
+      "multiple": false,
+      "numeric_shorthand": false,
+      "pair": false,
+      "required": false,
+      "short": "-h",
       "short_value": true,
       "type": "bool",
       "value_optional": false

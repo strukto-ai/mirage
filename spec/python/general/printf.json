@@ -11,6 +11,7 @@
   "epilog": null,
   "ignore_tokens": [],
   "old_option_style": false,
+  "operand_base": null,
   "options": [],
   "positional": [
     {

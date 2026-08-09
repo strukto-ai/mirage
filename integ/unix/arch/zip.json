@@ -33,6 +33,228 @@
         "stdout": "gz-data\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arch_zip_recurses_a_directory",
+      "seq": 910073,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zdir/sub && echo one > /data/zdir/a.txt && echo two > /data/zdir/sub/b.txt && zip -r /data/zr.zip /data/zdir && unzip -l /data/zr.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: data/zdir/\n  adding: data/zdir/a.txt\n  adding: data/zdir/sub/\n  adding: data/zdir/sub/b.txt\n  Length      Name\n---------  ----\n        0  data/zdir/\n        4  data/zdir/a.txt\n        0  data/zdir/sub/\n        4  data/zdir/sub/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_without_r_stores_only_the_directory",
+      "seq": 910074,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/znor && echo one > /data/znor/a.txt && zip /data/znor.zip /data/znor && unzip -l /data/znor.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: data/znor/\n  Length      Name\n---------  ----\n        0  data/znor/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_zip_keeps_an_empty_directory",
+      "seq": 910075,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zempty/hollow && echo one > /data/zempty/a.txt && zip -q -r /data/ze.zip /data/zempty && mkdir -p /data/zeout && unzip -q -d /data/zeout /data/ze.zip && find /data/zeout -type d | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/zeout\n/data/zeout/data\n/data/zeout/data/zempty\n/data/zeout/data/zempty/hollow\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_round_trips_a_tree",
+      "seq": 910076,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zrt/sub && echo alpha > /data/zrt/a.txt && echo beta > /data/zrt/sub/b.txt && zip -q -r /data/zrt.zip /data/zrt && mkdir -p /data/zrtout && unzip -q -d /data/zrtout /data/zrt.zip && cat /data/zrtout/data/zrt/a.txt /data/zrtout/data/zrt/sub/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\nbeta\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_junks_paths_and_drops_directories",
+      "seq": 910077,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zjunk/sub && echo one > /data/zjunk/a.txt && echo two > /data/zjunk/sub/b.txt && zip -r -j /data/zj.zip /data/zjunk && unzip -l /data/zj.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: a.txt\n  adding: b.txt\n  Length      Name\n---------  ----\n        4  a.txt\n        4  b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "j"
+      ]
+    },
+    {
+      "id": "arch_zip_excludes_a_subtree",
+      "seq": 910078,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zx/sub && echo one > /data/zx/a.txt && echo two > /data/zx/sub/b.txt && zip -r /data/zx.zip /data/zx -x 'data/zx/sub/*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: data/zx/\n  adding: data/zx/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "x"
+      ]
+    },
+    {
+      "id": "arch_zip_warns_on_a_name_it_cannot_match",
+      "seq": 910079,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zmiss && echo one > /data/zmiss/a.txt && zip /data/zm.zip /data/zmiss/a.txt /data/zmiss/nope.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: data/zmiss/a.txt\n",
+        "stderr": "\tzip warning: name not matched: /data/zmiss/nope.txt\n"
+      }
+    },
+    {
+      "id": "arch_zip_refuses_an_empty_archive",
+      "seq": 910080,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zip /data/znothing.zip /data/no-such-file; echo exit=$?; ls /data/znothing.zip",
+      "expect": {
+        "exit": 2,
+        "stdout": "exit=12\n",
+        "stderr": "\tzip warning: name not matched: /data/no-such-file\n\nzip error: Nothing to do! (/data/znothing.zip)\nls: cannot access '/data/znothing.zip': No such file or directory\n"
+      }
+    },
+    {
+      "id": "arch_zip_quiet_keeps_the_fatal_error",
+      "seq": 910081,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zip -q /data/zq.zip /data/no-such-file",
+      "expect": {
+        "exit": 12,
+        "stdout": "",
+        "stderr": "\nzip error: Nothing to do! (/data/zq.zip)\n"
+      },
+      "flags": [
+        "q"
+      ]
+    },
+    {
+      "id": "arch_zip_leaves_itself_out",
+      "seq": 910082,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zself && echo one > /data/zself/a.txt && zip -q -r /data/zself/self.zip /data/zself && unzip -l /data/zself/self.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "  Length      Name\n---------  ----\n        0  data/zself/\n        4  data/zself/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_follows_a_symlink_by_default",
+      "seq": 910083,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zsym && echo linked > /data/zsym/a.txt && ln -s /data/zsym/a.txt /data/zsym/l.txt && zip -q -r /data/zsym.zip /data/zsym && unzip -p /data/zsym.zip 'data/zsym/l.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "linked\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_y_stores_the_link_target_instead",
+      "seq": 910084,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zsy && echo linked > /data/zsy/a.txt && ln -s /data/zsy/a.txt /data/zsy/l.txt && zip -q -r -y /data/zsy.zip /data/zsy && unzip -p /data/zsy.zip 'data/zsy/l.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/zsy/a.txt",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "y"
+      ]
     }
   ]
 }

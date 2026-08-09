@@ -26,6 +26,7 @@ from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.expand.parts import expand_parts
 from mirage.workspace.expand.spec_hints import (spec_for_command,
+                                                spec_word_bases,
                                                 spec_word_kinds)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.route import WordPolicy, route, word_policy
@@ -105,16 +106,22 @@ async def expand_argv(
 
     policy = word_policy(route(name, session, registry))
     word_kinds: list[ValueType | None] | None = None
+    word_bases: list[str | None] | None = None
     if policy is WordPolicy.MOUNT:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
             extra: list[ValueType | None] = ["str"] * (consumed - 1)
             word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
+            bases = spec_word_bases(spec, expanded[consumed:], session.cwd)
+            if bases is not None:
+                head: list[str | None] = [None] * (consumed - 1)
+                word_bases = head + bases
 
     classified = classify_parts(expanded,
                                 registry,
                                 session.cwd,
-                                word_kinds=word_kinds)
+                                word_kinds=word_kinds,
+                                word_bases=word_bases)
     # set -f: glob words become literal paths for every consumer,
     # including backend pushdown, so `cat *.txt` looks up a file
     # literally named `*.txt` like bash with noglob.

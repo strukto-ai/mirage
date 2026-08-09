@@ -51,6 +51,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-j' }),
       new Option({ short: '-J' }),
       new Option({ short: '-v' }),
+      // -h archives what a symlink points at instead of the link.
+      new Option({ short: '-h' }),
       new Option({ short: '-f', type: 'path' }),
       new Option({ short: '-C', type: 'path' }),
       new Option({ long: '--strip-components', type: 'str' }),
@@ -59,6 +61,9 @@ export const SPECS: Record<string, CommandSpec> = {
     rest: new Operand({ type: 'path' }),
     // `tar xzf a.tgz` is the spelling everyone types.
     oldOptionStyle: true,
+    // -C is a chdir for the operands after it, not a flag the command
+    // reads once: `tar -cf a.tar -C d x` archives d/x as `x`.
+    operandBase: '-C',
   }),
   unzip: new CommandSpec({
     options: [
@@ -81,6 +86,13 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-r' }),
       new Option({ short: '-j' }),
       new Option({ short: '-q' }),
+      // -y stores a symlink as a symlink; without it zip archives what
+      // the link points at, which is tar's -h inverted.
+      new Option({ short: '-y' }),
+      // Info-ZIP reads -x as a variadic list of patterns; mirage takes
+      // one per occurrence, since its spec has no variadic option value
+      // and `-x a -x b` says the same thing.
+      new Option({ short: '-x', type: 'str', multiple: true }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

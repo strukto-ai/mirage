@@ -253,12 +253,19 @@ export async function unzipGeneric(
   const writes: Record<string, Uint8Array> = {}
   const outputLines: string[] = []
   for (const e of selected) {
-    if (e.name.endsWith('/')) continue
     const entryName = lstripSlash(e.name)
-    const outPath = rstripSlash(dest) + '/' + entryName
+    const outPath = rstripSlash(dest) + '/' + rstripSlash(entryName)
+    const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath
+    if (e.name.endsWith('/')) {
+      // A directory entry is the only record an empty directory leaves,
+      // so it has to be recreated even though nothing is written inside
+      // it.
+      await mkdir(makePathSpec(outPath), true)
+      if (!quiet) outputLines.push(`   creating: ${reportPath}/`)
+      continue
+    }
     await ensureParents(mkdir, outPath)
     await write(makePathSpec(outPath), e.data)
-    const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath
     writes[outPath] = e.data
     if (!quiet) outputLines.push(`  inflating: ${reportPath}`)
   }

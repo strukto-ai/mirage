@@ -132,6 +132,7 @@
   "epilog": null,
   "ignore_tokens": [],
   "old_option_style": false,
+  "operand_base": null,
   "options": [
     {
       "choices": [],
@@ -176,6 +177,36 @@
       "short": "-q",
       "short_value": true,
       "type": "bool",
+      "value_optional": false
+    },
+    {
+      "choices": [],
+      "count": false,
+      "default": null,
+      "description": null,
+      "long": null,
+      "multiple": false,
+      "numeric_shorthand": false,
+      "pair": false,
+      "required": false,
+      "short": "-y",
+      "short_value": true,
+      "type": "bool",
+      "value_optional": false
+    },
+    {
+      "choices": [],
+      "count": false,
+      "default": null,
+      "description": null,
+      "long": null,
+      "multiple": true,
+      "numeric_shorthand": false,
+      "pair": false,
+      "required": false,
+      "short": "-x",
+      "short_value": true,
+      "type": "str",
       "value_optional": false
     }
   ],

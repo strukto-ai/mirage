@@ -28,6 +28,12 @@ StatPath = Callable[[str], Awaitable["FileStat | None"]]
 # (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an
 # unrelated backend.
 MountRoot = Callable[[str], str]
+# The mount roots strictly under a virtual path, in prefix order,
+# without their trailing slash.
+MountDescendants = Callable[[str], list[str]]
+# Whether a virtual path IS a mount's root, rather than a directory the
+# backend holds.
+MountIsRoot = Callable[[str], bool]
 # lstat for one path: the link's own stat, None when not a link.
 LinkStat = Callable[[str], "FileStat | None"]
 # Stat rows for the links directly under a directory, for listings.
@@ -42,6 +48,35 @@ LinkResolve = Callable[[str], str]
 LinkExists = Callable[[str], Awaitable[bool]]
 # The stat of what a link points at, None when it dangles or loops.
 LinkTargetStat = Callable[[str], Awaitable["FileStat | None"]]
+
+
+@dataclass(frozen=True)
+class MountView:
+    """Where the mount boundaries are, as one injected object.
+
+    A command runs bound to one backend, and that backend cannot see a
+    mount nested inside its own tree: the child's keys live in another
+    resource entirely, so the parent's ``readdir`` never lists it. A
+    walker that must account for the whole subtree therefore has to be
+    told, the same way ``LinkView`` tells it about symlinks.
+
+    Traversal commands that render lines (find, du, grep -r) get this
+    for free from the executor's fan-out, which reruns them per mount
+    and concatenates the output. A command whose output is one binary
+    object (tar, zip) cannot be merged that way, so it reads the
+    boundaries here and says what it did with them.
+
+    A command opts in by naming a ``mounts`` parameter, which is what
+    makes the dispatcher hand it one.
+    """
+
+    # Mount roots strictly under a path (a walker: tar, zip).
+    descendants: MountDescendants
+    # Whether a path is a mount root itself.
+    is_root: MountIsRoot
+    # The mount serving a path, so a walker can tell "still mine" from
+    # "another backend" before it tries to read something it cannot.
+    root_of: MountRoot
 
 
 @dataclass(frozen=True)

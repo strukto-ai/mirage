@@ -37,7 +37,7 @@ import { expandArgv } from '../expand/argv.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
-import { pathFlagScopes } from '../executor/command/routing.ts'
+import { pathFlagScopes, positionalScopes } from '../executor/command/routing.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { resolveLimit } from '../../policy/index.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
@@ -421,6 +421,7 @@ async function runArgv(
     const deny = await registry.policies.preCommand({
       command: name,
       paths: scopes,
+      operands: positionalScopes(name, args, session.cwd, operands),
       argv: args,
       cwd: session.cwd,
       registry,

@@ -97,6 +97,63 @@ agent discovers state, the CLI is how it acts.
   `file` would promise `type -p` a path that does not exist). `which` prints the
   bare name, never a fabricated path.
 
+## Mount boundaries
+
+A mount root is not an ordinary directory, and a mount nested inside
+another mount's tree is invisible to the backend that owns the parent:
+the child's keys live in a different resource, so the parent's `readdir`
+never lists it. Two mechanisms follow from that, and they are separate.
+
+- **`MountView` is how a command sees the boundaries** (`ops/types.py`,
+  `ops/types.ts`), and it is offered the way `LinkView` is: a command
+  opts in by naming a `mounts` parameter, `execute_cmd`/`executeCmd`
+  delivers it only to handlers that do, and there is no list of
+  boundary-aware commands anywhere. It carries `descendants` (mount
+  roots strictly under a path), `is_root`, and `root_of`.
+  A traversal command that renders **lines** does not need it: the
+  executor's fan-out (`workspace/executor/fanout.py`) already reruns
+  find/du/tree/grep -r per mount and concatenates the output. A command
+  whose output is one **binary object** cannot be merged that way, which
+  is why `tar` reads the boundaries itself.
+- **Crossing into a descendant mount is refused, not attempted.** `tar`
+  and `zip` both keep the mountpoint as a directory entry and drop its
+  contents with GNU's own `--one-file-system` wording (`<name>/: file is on a different filesystem; not dumped`; Info-ZIP has no message of
+  its own for this, so zip borrows the wording under its own
+  `zip warning:` prefix). This is deliberate: descending would archive
+  by accident exactly what the mount-root refusal below forbids on
+  purpose.
+- **`MountRootPolicy` refuses a mount root in a source slot** for `tar`,
+  `zip` and `cp`, on top of the POSIX EBUSY rules it already enforces
+  for `rm`/`rmdir`/`mv`/`mkdir`/`touch`/`ln`. Real tar and cp allow it;
+  mirage does not, because the mount table is the deployment's
+  configuration and reading a whole backend into one object is neither
+  what the operand looks like it costs nor something an agent should be
+  able to do to data it was given a view of. Only **positional** operands
+  are tested, which is why `CommandContext` carries `operands` beside
+  `paths`: `tar -xf a.tar -C /mnt` extracts INTO a mount and must stay
+  legal, while `tar -cf a.tar /mnt` must not. `positional_scopes` /
+  `positionalScopes` (`executor/command/routing`) is what tells the two
+  apart, since classification turns every path-shaped word into a
+  PathSpec whether it filled an operand slot or a flag's value.
+
+## An option that chdirs: `operand_base`
+
+`tar -C` is not a flag the command reads once, it is a chdir for the path
+operands typed **after** it, and it is cumulative (`-C d1 x -C ../d2 y`
+reads `d1/x` and `d1/../d2/y`). That is a property of the line, so it is
+declared in the spec (`CommandSpec.operand_base` / `operandBase`, tar's
+only) and resolved by the one component that walks the line
+positionally: `parse_command` / `parseCommand` tracks the base as it
+scans and reports it per word as `word_bases` / `wordBases`, which
+`classify_parts` then resolves each operand against. Doing it anywhere
+later is too late: the classifier has already produced absolute
+PathSpecs, and an operand resolved against the wrong base makes the
+router see a phantom cross-mount span (which is what
+`tar -czf /work/out.tgz -C /work/check my_paper` used to fail as).
+Only path operands and the option's own value move; every other
+path-valued flag keeps resolving against the session cwd, which is what
+GNU does with `-f`.
+
 ## Symlinks
 
 Symlinks are **namespace state, not backend state**. The `Namespace` node table
@@ -301,6 +358,64 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   were reported as directories, so `find -type f` missed them). Do not
   reintroduce name-based classification in a backend; if stat misclassifies an
   entry, fix that backend's stat.
+- **An archiver walks a directory operand; it does not read it.** `tar`
+  and `zip` decide every member first (`plan_create` / `planCreate` in
+  `generic/tar/create.*`, `plan_zip` / `planZip` in
+  `generic/zip_cmd.*`) and only then write, which is what lets an
+  exclusion prune a whole subtree and keeps the ordering stable. Both
+  plans are built on **one traversal**, `scan_operand` / `scanOperand`
+  (`generic/archive/walk.*`), which merges three sources no single one
+  can see: the backend walk (reusing find's `walk_find` / `walkFind`, so
+  an archiver classifies an entry through `stat` exactly as find does,
+  never by name), the namespace's symlinks, and the mount table. It
+  reports paths, never names, because naming is exactly where the two
+  formats disagree; the two things they disagree about in the traversal
+  itself are parameters (`dereference`, `recurse`), so **a third
+  archiver adds a caller, not a second walk**. Members are named from
+  `PathSpec.raw_path`, so `tar -C d x` stores `x`, not `d/x`.
+  **A directory is its own member**, with GNU's trailing slash and no
+  content, which is the only record an empty directory leaves and the
+  reason extraction has to `mkdir` for one. **A symlink is a symlink
+  member** (`SYMTYPE`, target in `linkname`), never a file of its
+  target's bytes, unless `-h` says to follow it.
+  Two deliberate divergences from GNU, both documented in place:
+  siblings are sorted rather than emitted in readdir order (the same
+  choice `du` makes, for the same reason), and a descendant mount is
+  never crossed (see "Mount boundaries"). Everything else is pinned
+  against GNU tar 1.35 on `debian:stable-slim`: the leading-slash
+  warning, `Cowardly refusing to create an empty archive` (exit 2), a
+  per-operand `Cannot stat` plus one trailer (exit 2, and the other
+  operands still archive), a `-C` it cannot enter (exit 2, no archive
+  written), and `archive cannot contain itself; not dumped` (exit 0).
+  A backend error must never reach the user as itself: an unreadable
+  operand is reported in virtual path space with tar's wording, because
+  the raw `IsADirectoryError` leaked the host path behind a disk mount.
+- **`zip` is Info-ZIP, which inverts tar's two defaults.** A directory
+  operand contributes only its own entry unless `-r` says to descend,
+  and a symlink is *followed* unless `-y` says to store the link, where
+  tar always descends and always stores unless `-h`. Both are just the
+  `recurse` / `dereference` arguments to the shared scan. The rest is
+  pinned against Info-ZIP 3.0 on `debian:stable-slim`: a leading slash
+  is stripped **in silence** (tar warns, zip does not), `-j` junks to
+  the basename and drops directory entries entirely, `-x` is
+  **anchored** on the whole stored name (`d/sub/*` matches, `sub/*` does
+  not) where tar's `--exclude` is unanchored, an unreachable operand is
+  `\tzip warning: name not matched: <name>` and does not stop the run,
+  and a run that matched nothing prints `zip error: Nothing to do!`,
+  exits **12**, and writes no archive. `-q` silences the warnings but
+  never that error. Two deliberate divergences: `-x` takes one pattern
+  per occurrence (mirage's spec has no variadic option value, and
+  `-x a -x b` says the same thing), and the `adding:` line carries no
+  `(deflated N%)` suffix, since the ratio depends on the compressor and
+  would differ between the two languages.
+- **The TypeScript `walkFind` answers in mount-relative keys; the Python
+  `walk_find` answers in virtual paths.** TS's stands in for a backend's
+  native find op, so a caller that needs virtual paths (tar does, to
+  name members and compare against mount prefixes) lifts them with
+  `mountPrefixOf` the way `findGeneric` does. That lift lives once, in
+  `generic_bind/archive_io.*`, which is where both archivers get their
+  walk. This asymmetry is real and has bitten once: a unit test on an
+  unprefixed mount cannot see it, so cover a prefixed mount too.
 - **`du` has one backend contract: `size` and `entries`.** Each backend exposes `core/<backend>/du/size.py` (recursive byte total for one path) and `core/<backend>/du/entries.py` (per-file breakdown), wired as `du_size` / `du_entries` on the adapter. `entries` returns `(entries, total)` where entries are **leaf files only, in mount-relative path space, with no summary row**; the generic lifts them onto virtual paths (`to_virtual`, via `mount_prefix_of`) and re-spells them as the operand was typed (`respell_raw`). A backend that returns backend-key paths, or appends its own roll-up row, makes two mounts holding the same filename render identical lines. Do not reintroduce a second shape; the old flat-list `du_multi` contract is gone.
 - **`du` prints a line per directory, derived not walked.** GNU prints one line per directory with its recursive total, post-order (children before parents), plus one per file under `-a`. Backends only ever report leaf files, so the generic derives the directory rows by summing each leaf into every ancestor (`rollup`, same name both languages), then emits post-order with siblings sorted. Two deliberate divergences: GNU orders siblings by `readdir` (filesystem-dependent), mirage sorts them; and an empty directory is invisible to mirage because no leaf points at it. Sizes are bytes, not GNU's 1 KiB blocks, since an object store has no block size. `--max-depth` prunes only what is printed, never the walk, because every printed total still covers the whole subtree. Verify changes with the differential harness against `debian:stable-slim`: paths, exit codes and stderr must match GNU exactly.
 - **`du` usage errors exit 1, not 2.** `du` is absent from `USAGE_EXIT`, which is correct: GNU du exits 1 for `-s` with `-a` ("cannot both summarize and show all entries"), `-s` with `--max-depth` ("warning: summarizing conflicts with --max-depth=N"), and a bad depth ("invalid maximum depth 'x'"). All three are raised by `parse_flags` / `parseDuFlags` *before* any I/O, mirroring GNU's option-parse order: the depth is parsed as the option is read, so a bad depth wins over the conflict checks. An unreadable operand is not a usage error: GNU names it (`du: cannot access 'x': No such file or directory`), prints every other operand, and exits 1, and still prints `0 total` under `-c` when every operand failed. With no operand at all, du measures the working directory; it never says "missing operand".

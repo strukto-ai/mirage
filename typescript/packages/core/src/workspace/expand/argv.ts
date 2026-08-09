@@ -22,7 +22,7 @@ import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
 import { type ValueType } from '../../commands/spec/types.ts'
-import { specForCommand, specWordKinds } from './spec_hints.ts'
+import { specForCommand, specWordBases, specWordKinds } from './spec_hints.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
 /**
@@ -88,15 +88,20 @@ export async function expandArgv(
 
   const policy = wordPolicy(route(name, session, registry))
   let wordKinds: (ValueType | null)[] | null = null
+  let wordBases: (string | null)[] | null = null
   if (policy === WordPolicy.MOUNT) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
       wordKinds = [...extra, ...specWordKinds(spec, expanded.slice(consumed))]
+      const bases = specWordBases(spec, expanded.slice(consumed), session.cwd)
+      if (bases !== null) {
+        wordBases = [...new Array<string | null>(consumed - 1).fill(null), ...bases]
+      }
     }
   }
 
-  let classified = classifyParts(expanded, registry, session.cwd, wordKinds)
+  let classified = classifyParts(expanded, registry, session.cwd, wordKinds, wordBases)
   // set -f: glob words become literal paths for every consumer,
   // including backend pushdown, so `cat *.txt` looks up a file
   // literally named `*.txt` like bash with noglob.

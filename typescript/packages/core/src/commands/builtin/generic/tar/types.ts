@@ -12,5 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../../../../types.ts'
+import type { MemberKind } from '../archive/types.ts'
+
 export type CompressionKind = 'gzip' | 'bzip2' | 'xz'
 export type Compression = CompressionKind | null
+
+// One entry the create pass decided to put in the archive. Choosing
+// every member before writing any of them is what lets an exclusion
+// prune a whole subtree and the ordering stay stable; the writer is then
+// a straight loop with no policy left in it.
+export interface Member {
+  name: string
+  kind: MemberKind
+  path: PathSpec | null
+  target: string
+}
+
+// What one `tar -c` pass decided, before anything is written. Notices
+// each carry their own `tar: ` prefix and no trailing newline.
+export interface CreateResult {
+  members: Member[]
+  notices: string[]
+  exitCode: number
+  // Whether to write an archive at all. False for the two refusals GNU
+  // makes before reading anything (no operands, and a `-C` it cannot
+  // enter), which leave no file behind; an operand it merely failed to
+  // stat still writes the rest.
+  write: boolean
+}

@@ -207,6 +207,7 @@ export interface CommandSpecInit {
   description?: string | null
   epilog?: string | null
   oldOptionStyle?: boolean
+  operandBase?: string | null
 }
 
 export class CommandSpec {
@@ -221,6 +222,13 @@ export class CommandSpec {
   // (`tar xzf a.tgz`). Expanded by expandOldStyle before any other
   // scanning; see oldstyle.ts for the rules and why only tar has it.
   readonly oldOptionStyle: boolean
+  // The spelling of an option that changes directory for the path
+  // operands typed AFTER it (tar's -C). Positional and cumulative, the
+  // way a real chdir is: `tar -cf a.tar -C d1 x -C ../d2 y` reads d1/x
+  // and d1/../d2/y. Only path operands and the option's own value move;
+  // every other path-valued flag keeps resolving against the session
+  // cwd, which is what GNU does with -f.
+  readonly operandBase: string | null
 
   constructor(init: CommandSpecInit = {}) {
     this.options = init.options ?? []
@@ -230,6 +238,7 @@ export class CommandSpec {
     this.description = init.description ?? null
     this.epilog = init.epilog ?? null
     this.oldOptionStyle = init.oldOptionStyle ?? false
+    this.operandBase = init.operandBase ?? null
     // A subclass (CLISpec) still has its own fields to assign, so only
     // freeze here when constructed directly; subclasses freeze themselves.
     if (new.target === CommandSpec) Object.freeze(this)
@@ -245,6 +254,7 @@ export interface ParsedArgsInit {
   textFlagValues?: string[]
   warnings?: string[]
   wordKinds?: (ValueType | null)[]
+  wordBases?: (string | null)[]
   invalidOptions?: string[]
   ambiguousOptions?: [string, readonly string[]][]
   optionErrorKinds?: string[]
@@ -265,6 +275,11 @@ export class ParsedArgs {
   readonly textFlagValues: string[]
   readonly warnings: string[]
   readonly wordKinds: (ValueType | null)[]
+  // Per-position base directory, aligned with wordKinds: the absolute
+  // path a word resolves against when an operandBase option (tar's -C)
+  // moved it, and null when the session cwd still applies. Only a spec
+  // declaring operandBase ever fills this.
+  readonly wordBases: (string | null)[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
   // abbreviated longs matching several options (typed prefix, matched
@@ -303,6 +318,7 @@ export class ParsedArgs {
     this.textFlagValues = init.textFlagValues ?? []
     this.warnings = init.warnings ?? []
     this.wordKinds = init.wordKinds ?? []
+    this.wordBases = init.wordBases ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.ambiguousOptions = init.ambiguousOptions ?? []
     this.optionErrorKinds = init.optionErrorKinds ?? []

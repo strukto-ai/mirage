@@ -20,12 +20,25 @@ import { PathSpec } from '../../../types.ts'
 import { gzip, gunzip, getCompressionCodec } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readTar, writeTar, type TarEntry } from '../tar_helper.ts'
-import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { fnmatch } from '../../../utils/fnmatch.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { COMPRESSION_SIGNATURES } from './tar/constants.ts'
-import type { Compression, CompressionKind } from './tar/types.ts'
+import { planCreate, type DirProbe, type StatFn, type WalkFn } from './tar/create.ts'
+import type { Compression, CompressionKind, CreateResult } from './tar/types.ts'
 
 const ENC = new TextEncoder()
+
+// What tar needs from the mount it runs on. `stat` and `walk` are what
+// make a directory operand archivable at all; `isDir` answers on two
+// channels so a prefix-store directory (no object of its own) is not
+// mistaken for an absent one.
+export interface TarDeps {
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>
+  write: (p: PathSpec, data: Uint8Array) => Promise<void>
+  mkdir: (p: PathSpec, parents?: boolean) => Promise<void>
+  stat: StatFn
+  walk: WalkFn
+  isDir: DirProbe
+}
 
 function makePathSpec(virtual: string, prefix: string): PathSpec {
   return new PathSpec({
@@ -74,12 +87,51 @@ async function decompress(data: Uint8Array, kind: Compression): Promise<Uint8Arr
   return codec.decompress(data)
 }
 
+function stderrOf(lines: readonly string[]): Uint8Array | null {
+  return lines.length > 0 ? ENC.encode(`${lines.join('\n')}\n`) : null
+}
+
+async function writeArchive(
+  plan: CreateResult,
+  archivePath: string,
+  mountPrefix: string,
+  compression: Compression,
+  verbose: boolean,
+  deps: TarDeps,
+): Promise<CommandFnResult> {
+  const entries: TarEntry[] = []
+  const names: string[] = []
+  for (const member of plan.members) {
+    const data =
+      member.path !== null ? await materialize(deps.stream(member.path)) : new Uint8Array(0)
+    entries.push({
+      name: member.name,
+      data,
+      isFile: member.kind === 'file',
+      isDir: member.kind === 'dir',
+      linkname: member.kind === 'link' ? member.target : '',
+    })
+    names.push(member.name)
+  }
+  const raw = writeTar(entries)
+  const archive = await compress(raw, compression)
+  await deps.write(makePathSpec(archivePath, mountPrefix), archive)
+  const stderr = stderrOf(plan.notices)
+  const stdout = verbose && names.length > 0 ? ENC.encode(`${names.join('\n')}\n`) : null
+  return [
+    stdout,
+    new IOResult({
+      writes: { [archivePath]: archive },
+      exitCode: plan.exitCode,
+      ...(stderr !== null ? { stderr } : {}),
+    }),
+  ]
+}
+
 export async function tarGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
-  mkdir: (p: PathSpec) => Promise<void>,
+  deps: TarDeps,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('tar'))
   const create = fl.asBool('c')
@@ -111,35 +163,40 @@ export async function tarGeneric(
     if (archivePath === null) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
-    const filtered =
-      exclude !== null
-        ? paths.filter((p) => {
-            const name = p.virtual.split('/').pop() ?? ''
-            return !fnmatch(name, exclude)
-          })
-        : paths
-    const entries: TarEntry[] = []
-    for (const p of filtered) {
-      const data = await materialize(stream(p))
-      const name = lstripSlash(p.virtual)
-      entries.push({ name, data, isFile: true })
-      if (verbose) verboseLines.push(name)
+    const plan = await planCreate(paths, {
+      archive: makePathSpec(archivePath, mountPrefix),
+      exclude,
+      dereference: fl.asBool('h'),
+      stat: deps.stat,
+      walk: deps.walk,
+      isDir: deps.isDir,
+      directory: CFlag !== null ? makePathSpec(CFlag, mountPrefix) : null,
+      links: opts.links ?? null,
+      mounts: opts.mounts ?? null,
+    })
+    if (!plan.write) {
+      const stderr = stderrOf(plan.notices)
+      return [
+        null,
+        new IOResult({
+          exitCode: plan.exitCode,
+          ...(stderr !== null ? { stderr } : {}),
+        }),
+      ]
     }
-    const raw = writeTar(entries)
-    const archive = await compress(raw, compression)
-    await write(makePathSpec(archivePath, mountPrefix), archive)
-    const stdout = verbose ? ENC.encode(verboseLines.join('\n') + '\n') : null
-    return [stdout, new IOResult({ writes: { [archivePath]: archive } })]
+    return writeArchive(plan, archivePath, mountPrefix, compression, verbose, deps)
   }
 
   if (list) {
     if (archivePath === null) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
-    const raw = await materialize(stream(makePathSpec(archivePath, mountPrefix)))
+    const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
     const data = await decompress(raw, compression)
     const entries = readTar(data)
-    const out: ByteSource = ENC.encode(entries.map((e) => e.name).join('\n') + '\n')
+    const out: ByteSource = ENC.encode(
+      entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name)).join('\n') + '\n',
+    )
     return [out, new IOResult()]
   }
 
@@ -147,25 +204,31 @@ export async function tarGeneric(
     if (archivePath === null) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
-    const raw = await materialize(stream(makePathSpec(archivePath, mountPrefix)))
+    const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
     const data = await decompress(raw, compression)
     const writes: Record<string, Uint8Array> = {}
     for (const entry of readTar(data)) {
-      if (!entry.isFile) continue
-      const nameParts = entry.name.split('/')
+      // A symlink member has no bytes to write and no namespace to write
+      // into from here (links are workspace state, not the backend's),
+      // so extraction skips it rather than dropping an empty file where
+      // a link belongs.
+      const isDir = entry.isDir === true
+      if (!entry.isFile && !isDir) continue
+      const nameParts = rstripSlash(entry.name).split('/')
       const stripped = stripN > 0 ? nameParts.slice(stripN) : nameParts
-      if (stripped.length === 0) continue
-      const outPath = rstripSlash(destPath) + '/' + stripped.join('/')
-      const parts = stripSlash(outPath).split('/')
-      for (let pi = 1; pi < parts.length; pi++) {
-        const d = '/' + parts.slice(0, pi).join('/')
-        try {
-          await mkdir(makePathSpec(d, mountPrefix))
-        } catch {
-          // already exists
-        }
+      if (stripped.length === 0 || (stripped.length === 1 && stripped[0] === '')) continue
+      const outPath = `${rstripSlash(destPath)}/${stripped.join('/')}`
+      if (isDir) {
+        // A directory member is the only record an empty directory
+        // leaves, so it has to be recreated even though nothing is
+        // written inside it.
+        await deps.mkdir(makePathSpec(outPath, mountPrefix), true)
+        if (verbose) verboseLines.push(`${rstripSlash(entry.name)}/`)
+        continue
       }
-      await write(makePathSpec(outPath, mountPrefix), entry.data)
+      const parent = outPath.slice(0, outPath.lastIndexOf('/')) || '/'
+      if (parent !== '/') await deps.mkdir(makePathSpec(parent, mountPrefix), true)
+      await deps.write(makePathSpec(outPath, mountPrefix), entry.data)
       writes[outPath] = entry.data
       if (verbose) verboseLines.push(entry.name)
     }
