@@ -63,7 +63,7 @@ async def curl(
     X: str | None = None,
     d: str | None = None,
     F: str | None = None,
-    o: str | None = None,
+    o: PathSpec | str | None = None,
     L: bool = False,
     fail: bool = False,
     s: bool = False,

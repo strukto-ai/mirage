@@ -28,7 +28,7 @@ const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
 import { resolveLimit } from '../../policy/index.ts'
 import { CommandTimeoutError, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import type { CommandSpec } from '../../commands/spec/types.ts'
+import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -380,7 +380,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     texts: string[],
-    flags: Record<string, string | boolean | number | string[]>,
+    flags: Record<string, FlagValue>,
     opts: {
       stdin?: ByteSource | null
       cwd?: string

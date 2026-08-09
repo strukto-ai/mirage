@@ -23,7 +23,7 @@ import {
   oldOptionError,
   unknownOptionError,
 } from '../../../commands/spec/usage.ts'
-import type { CommandSpec } from '../../../commands/spec/types.ts'
+import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
@@ -60,7 +60,7 @@ export function parseFlags(
 ): [
   PathSpec[],
   string[],
-  Record<string, string | boolean | number | string[]>,
+  Record<string, FlagValue>,
   string[],
   string[],
   [string, readonly string[]][],

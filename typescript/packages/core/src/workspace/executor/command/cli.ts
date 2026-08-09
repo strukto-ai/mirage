@@ -22,7 +22,7 @@ import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle } from '../../../commands/spec/types.ts'
 import { renderHelp } from '../../../commands/spec/help.ts'
-import { Operand } from '../../../commands/spec/types.ts'
+import { Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { wordText, type PathSpec } from '../../../types.ts'
@@ -256,7 +256,7 @@ export async function handleCli(
   // Group flags merge into the one bag: ancestor/descendant collisions
   // are a build-time CLISpec error, so a group flag can never shadow a
   // leaf flag.
-  const flags: Record<string, string | boolean | number | string[]> = {}
+  const flags: Record<string, FlagValue> = {}
   for (const [spelling, value] of Object.entries(result.groupFlags)) {
     flags[flagKwargName(spelling)] = value
   }

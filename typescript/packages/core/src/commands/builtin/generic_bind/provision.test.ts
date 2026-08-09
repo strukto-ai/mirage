@@ -21,6 +21,8 @@ import { Precision } from '../../../provision/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandOpts } from '../../config.ts'
+import { BUILTIN_SPECS } from '../../spec/builtins.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { RAM_COMMANDS } from '../ram/index.ts'
 import {
   exactZeroProvision,
@@ -109,8 +111,14 @@ function pattern(virtual: string, dir: string, glob: string): PathSpec {
   })
 }
 
-function opts(command: string): CommandOpts {
-  return { command, flags: {} } as unknown as CommandOpts
+// The executor hands a provision function the invoked command's spec
+// (`workspace/provision/command.ts`), which is how a shared provision
+// resolves a spelling like -c to whatever this command calls it.
+// `command` is the whole command string there, so the spec comes from
+// its first word, and a backend command with no builtin spec has none.
+function opts(command: string, flags: Record<string, FlagValue> = {}): CommandOpts {
+  const spec = BUILTIN_SPECS[command.split(' ')[0] ?? '']
+  return { command, flags, ...(spec === undefined ? {} : { spec }) } as unknown as CommandOpts
 }
 
 function registered(name: string) {
@@ -234,9 +242,22 @@ describe('size-aware estimators', () => {
       undefined as unknown as Accessor,
       [spec('/data/known.txt')],
       [],
-      { command: 'rm', flags: { r: true } } as unknown as CommandOpts,
+      opts('rm', { r: true }),
     )
     expect(recursive.precision).toBe(Precision.UNKNOWN)
+  })
+
+  it('touch -r names a reference file, not a subtree', async () => {
+    // `touch -r REF` shares rm's spelling but walks nothing. The shared
+    // estimator resolves -r through the invoked command's spec, so a
+    // value-typed option under the same letter never floors the estimate.
+    const result = await writeMetadataProvision(
+      undefined as unknown as Accessor,
+      [spec('/data/known.txt')],
+      [],
+      opts('touch -r /data/ref', { r: '/data/ref' }),
+    )
+    expect(result.precision).toBe(Precision.EXACT)
   })
 
   it('pure commands are zero-cost exact', async () => {
@@ -275,10 +296,12 @@ describe('glob and recursive estimates', () => {
 
   it('recursive search walks the tree exactly, skipping columnar', async () => {
     const provision = makeSearchProvision(stat, resolveGlob, readdir)
-    const result = (await provision({} as Accessor, [spec('/data/tree')], ['x'], {
-      command: 'grep',
-      flags: { r: true },
-    } as unknown as CommandOpts)) as ProvisionResult
+    const result = (await provision(
+      {} as Accessor,
+      [spec('/data/tree')],
+      ['x'],
+      opts('grep', { r: true }),
+    )) as ProvisionResult
     expect(result.precision).toBe(Precision.EXACT)
     expect(result.networkReadHigh).toBe(18)
     expect(result.readOps).toBe(2)
@@ -286,10 +309,12 @@ describe('glob and recursive estimates', () => {
 
   it('recursive search without readdir keeps the floor', async () => {
     const provision = makeSearchProvision(stat, resolveGlob)
-    const result = (await provision({} as Accessor, [spec('/data/tree')], ['x'], {
-      command: 'grep',
-      flags: { r: true },
-    } as unknown as CommandOpts)) as ProvisionResult
+    const result = (await provision(
+      {} as Accessor,
+      [spec('/data/tree')],
+      ['x'],
+      opts('grep', { r: true }),
+    )) as ProvisionResult
     expect(result.precision).toBe(Precision.UNKNOWN)
   })
 

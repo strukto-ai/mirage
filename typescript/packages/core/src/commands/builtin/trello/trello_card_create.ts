@@ -18,7 +18,7 @@ import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, Option } from '../../spec/types.ts'
+import { CommandSpec, FlagView, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
@@ -38,21 +38,23 @@ async function trelloCardCreateCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const listId = opts.flags.list_id
-  if (typeof listId !== 'string' || listId === '') {
+  const fl = new FlagView(opts.flags, SPEC)
+  const listId = fl.asStr('list_id')
+  if (listId === undefined || listId === '') {
     throw new Error('--list_id is required')
   }
-  const name = opts.flags.name
-  if (typeof name !== 'string' || name === '') {
+  const name = fl.asStr('name')
+  if (name === undefined || name === '') {
     throw new Error('--name is required')
   }
-  const inlineDesc = typeof opts.flags.desc === 'string' ? opts.flags.desc : null
-  const descFile = typeof opts.flags.desc_file === 'string' ? opts.flags.desc_file : null
+  const inlineDesc = fl.asStr('desc') ?? null
+  const descFile = fl.asStr('desc_file') ?? null
   let desc: string | undefined
   if (inlineDesc !== null || descFile !== null || opts.stdin !== null) {
     desc = await resolveTextInput(accessor.transport, {
       inlineText: inlineDesc,
       filePath: descFile,
+      mountPrefix: opts.mountPrefix ?? '',
       stdin: opts.stdin,
       errorMessage: 'desc is required',
     })

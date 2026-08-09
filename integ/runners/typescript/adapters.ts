@@ -1365,6 +1365,11 @@ async function openDify(target: Target): Promise<Open> {
 async function openTrello(target: Target): Promise<Open> {
   const endpoint = process.env.TRELLO_ENDPOINT
   if (!endpoint) throw new Error('trello target requires TRELLO_ENDPOINT')
+  // The server outlives a single run here, so cards and comments the write
+  // cases create have to be rolled back to the fixture before they run
+  // again -- and before the other host's run, which shares this server.
+  const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
+  if (!reset.ok) throw new Error(`trello /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, TrelloResource | RAMResource> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {

@@ -38,6 +38,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { rgGeneric } from '../generic/rg.ts'
 import { patternArg, searchPushdownOk } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
@@ -54,7 +55,8 @@ async function rgCommand(
   // whole line; a multi -e set (#347), a real regex, or any match/output
   // shaping flag must fall through to the generic scan below.
   const first = paths[0]
-  const ci = opts.flags.i === true
+  const fl = new FlagView(opts.flags, specOf('rg'))
+  const ci = fl.asBool('i')
   if (
     first !== undefined &&
     !hasUnresolvedGlob(paths) &&

@@ -28,6 +28,7 @@ import {
   parseFindExpression,
   type FindExpr,
 } from '../../commands/builtin/findParse.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -40,7 +41,7 @@ function pathSegments(path: string): string[] {
 export function shouldFanOut(
   cmdName: string,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   registry: MountRegistry,
 ): boolean {
   if (paths.length === 0 || paths[0] === undefined) return false
@@ -58,14 +59,14 @@ export function shouldFanOut(
 }
 
 function adjustDepthFlags(
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   parentPath: string,
   mountPrefix: string,
-): Record<string, string | boolean | number | string[]> | null {
+): Record<string, FlagValue> | null {
   const parentDepth = pathSegments(parentPath).length
   const mountDepth = pathSegments(mountPrefix).length
   const delta = mountDepth - parentDepth
-  const out: Record<string, string | boolean | number | string[]> = { ...flagKwargs }
+  const out: Record<string, FlagValue> = { ...flagKwargs }
   const first = (v: string | boolean | number | string[]): string | boolean | number =>
     Array.isArray(v) ? (v[0] ?? '') : v
   if ('maxdepth' in out) {
@@ -186,7 +187,7 @@ export async function fanOutTraversal(
   cmdName: string,
   paths: readonly PathSpec[],
   texts: readonly string[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   registry: MountRegistry,
   primaryMount: MountEntry,
   cwd: string,
@@ -206,7 +207,7 @@ export async function fanOutTraversal(
   const mountsToRun: MountEntry[] = [primaryMount, ...descendants]
   for (const mount of mountsToRun) {
     let subPaths: PathSpec[]
-    let subFlags: Record<string, string | boolean | number | string[]>
+    let subFlags: Record<string, FlagValue>
     let subTexts: string[]
     if (mount === primaryMount) {
       subPaths = [...paths]

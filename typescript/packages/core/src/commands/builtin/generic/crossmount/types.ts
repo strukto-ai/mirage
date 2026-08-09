@@ -14,6 +14,7 @@
 
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import type { FlagValue } from '../../../spec/types.ts'
 
 // How a cross-mount command combines per-mount work.
 //
@@ -93,7 +94,7 @@ export type RunSingle = (
   cmdName: string,
   paths: PathSpec[],
   texts: string[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   opts?: RunSingleOpts,
 ) => Promise<CrossResult>
 

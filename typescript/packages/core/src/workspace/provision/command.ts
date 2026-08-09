@@ -27,6 +27,7 @@ import type { Accessor } from '../../accessor/base.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CommandOpts } from '../../commands/config.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
 
 async function checkCacheHits(
   cache: FileCache | null,
@@ -177,7 +178,7 @@ export async function handleCommandProvision(
 
   const argv = scopedParts.slice(1).map((p) => (p instanceof PathSpec ? p.virtual : p))
   const spec = mount.specFor(cmdName)
-  let flagKwargs: Record<string, string | boolean | number | string[]> = {}
+  let flagKwargs: Record<string, FlagValue> = {}
   let textArgs: string[]
   if (spec !== null) {
     const parsed = parseCommand(spec, argv, session.cwd)
@@ -202,6 +203,7 @@ export async function handleCommandProvision(
     mountPrefix,
     resource,
     command: cmdStr,
+    ...(spec !== null ? { spec } : {}),
     index: rawIndex,
   }
 

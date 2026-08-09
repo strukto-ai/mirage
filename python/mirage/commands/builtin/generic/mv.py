@@ -66,7 +66,9 @@ def parse_mv_flags(fl: FlagView) -> MvFlags:
         fl (FlagView): Flag view constructed with the mv spec.
     """
     update = update_mode("mv", fl)
-    suffix = fl.as_str("suffix")
+    # An empty --suffix reads as absent: GNU 9.7 `mv --backup --suffix= f g`
+    # writes the default `g~`, not a backup whose name is the original's.
+    suffix = fl.as_str("suffix") or None
     control = backup_control("mv", backup_raw(fl), suffix)
     no_clobber = fl.as_bool("no_clobber")
     exchange = fl.as_bool("exchange")

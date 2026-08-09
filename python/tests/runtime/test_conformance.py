@@ -464,6 +464,49 @@ async def test_capability_reaches_the_mount(runtime: str, row: Row):
         await ws.close()
 
 
+ROOT_WRITE_PY = ("from pathlib import Path\n"
+                 "Path('/mine.txt').write_text('R')")
+ROOT_WRITE_JS = ("const w = std.open('/mine.txt', 'w'); "
+                 "w.puts('R'); w.close()")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        pytest.param("monty"),
+        pytest.param("wasi", marks=wasi_live),
+        pytest.param("quickjs", marks=quickjs_live),
+    ],
+)
+async def test_a_root_mount_is_served_like_any_other(runtime: str):
+    """A mount at `/` reaches the guest, and the shell sees the write.
+
+    `/` is the one prefix a runtime could plausibly treat as its own,
+    so it is the one worth pinning: wasi has a build directory rooted
+    there and pyodide (TypeScript) has Emscripten's filesystem. Neither
+    may swallow a mount the embedder actually made. Verified through
+    the shell rather than the runtime, so a runtime that wrote only to
+    its own private tree fails here.
+
+    Args:
+        runtime (str): registry name of the runtime under test.
+    """
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[runtime, "vfs"])
+    try:
+        line = ROOT_WRITE_JS if runtime == "quickjs" else ROOT_WRITE_PY
+        prefix = "node -e" if runtime == "quickjs" else "python3 -c"
+        code, out = await _sh(ws, f'{prefix} "{line}"')
+        assert code == 0, f"{line}: exit {code}: {out}"
+        code, seen = await _sh(ws, "cat /mine.txt")
+        assert code == 0, f"cat failed: {seen}"
+        assert "R" in seen
+    finally:
+        await ws.close()
+
+
 APPEND_LOOP_PY = ("for i in range(8):\n"
                   "    with open('/data/log.txt', 'a') as f:\n"
                   "        f.write('xyz')")

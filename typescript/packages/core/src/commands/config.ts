@@ -22,7 +22,7 @@ import type { LinkView, StatOverlay, StatPath } from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
-import { CommandSpec, Option } from './spec/types.ts'
+import { CommandSpec, Option, type FlagValue } from './spec/types.ts'
 
 /**
  * Options bag passed to command functions. Mirrors Python's keyword arguments
@@ -43,12 +43,18 @@ export type CommandDispatch = (
 
 export interface CommandOpts {
   stdin: ByteSource | null
-  flags: Record<string, string | boolean | number | string[]>
+  flags: Record<string, FlagValue>
   filetypeFns: Record<string, CommandFn> | null
   mountPrefix?: string
   cwd: string
   resource: Resource
   command?: string
+  // The invoked command's spec, set on the provision path. A provision
+  // function is shared across commands, so it cannot name a dest the way a
+  // handler does -- `-c` is `bytes` on head and `c` on tail -- and needs
+  // the spec to resolve a spelling. Mirrors Python's `spec=` provision
+  // keyword (`workspace/provision/command.py`).
+  spec?: CommandSpec
   index?: IndexCacheStore | null
   dispatch?: CommandDispatch
   sessionId?: string

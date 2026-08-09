@@ -27,6 +27,7 @@ import {
 import { UsageError } from '../../errors.ts'
 import { gnuStrerror, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -55,16 +56,17 @@ async function curlCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const H = typeof opts.flags.H === 'string' ? opts.flags.H : null
-  const A = typeof opts.flags.A === 'string' ? opts.flags.A : null
-  const X = typeof opts.flags.X === 'string' ? opts.flags.X : null
-  const d = typeof opts.flags.d === 'string' ? opts.flags.d : null
-  const F = typeof opts.flags.F === 'string' ? opts.flags.F : null
-  const o = typeof opts.flags.o === 'string' ? opts.flags.o : null
-  const L = opts.flags.L === true
-  const failOnError = opts.flags.fail === true
+  const fl = new FlagView(opts.flags, specOf('curl'))
+  const H = fl.asStr('H') ?? null
+  const A = fl.asStr('A') ?? null
+  const X = fl.asStr('X') ?? null
+  const d = fl.asStr('d') ?? null
+  const F = fl.asStr('F') ?? null
+  const o = fl.asStr('o') ?? null
+  const L = fl.asBool('L')
+  const failOnError = fl.asBool('fail')
   // -s silences the message, -S puts it back. Neither changes the exit code.
-  const quiet = opts.flags.s === true && opts.flags.S !== true
+  const quiet = fl.asBool('s') && !fl.asBool('S')
 
   const headers: Record<string, string> = {}
   if (H !== null) {

@@ -352,11 +352,6 @@ def _load_databricks_server() -> ModuleType:
         "databricks_server.py")
 
 
-def _load_trello_server() -> ModuleType:
-    return _load_module(
-        Path(__file__).resolve().parents[2] / "server" / "trello_server.py")
-
-
 def _load_discord_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "discord_server.py")
@@ -1082,17 +1077,26 @@ class DifyService:
 
 
 class TrelloService:
+    """Points trello mounts at the shared fake Trello REST API server.
 
-    def __init__(self, state, runner, base: str) -> None:
-        self.state = state
-        self.runner = runner
+    The server (integ/server/trello.ts) is external, Prisma-backed, and
+    shared across both hosts; /reset re-seeds it to the fixture, so the
+    write cases see the same state on every run and on either host.
+
+    Args:
+        base (str): TRELLO_ENDPOINT origin.
+    """
+
+    def __init__(self, base: str) -> None:
         self.base = base
 
     @classmethod
     async def create(cls) -> "TrelloService":
-        module = _load_trello_server()
-        state, _server, runner = await module.start_fake_trello()
-        return cls(state, runner, state.base)
+        base = os.environ["TRELLO_ENDPOINT"].rstrip("/")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{base}/reset") as resp:
+                resp.raise_for_status()
+        return cls(base)
 
     def resource(self, mount: dict) -> TrelloResource:
         return TrelloResource(
@@ -1101,7 +1105,7 @@ class TrelloService:
                          base_url=self.base))
 
     async def teardown(self) -> None:
-        await self.runner.cleanup()
+        return None
 
 
 class DiscordService:

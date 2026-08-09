@@ -35,18 +35,18 @@ import {
   cpWalk,
   entryKind,
   sourceKind,
-  firstStr,
   makeBackup,
   overwriteGate,
   overwriteTypeError,
   splitOperands,
+  suffixFlag,
   targetDirError,
   targetFlags,
   updateMode,
   wrapTargetDir,
-  type Flags,
   type TransferPolicy,
 } from './cp.ts'
+import type { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -87,12 +87,12 @@ function isPrimitiveMove(strategy: MoveStrategy): strategy is PrimitiveMove {
 // no-ops (non-interactive control plane: overwrite always proceeds unless
 // -n/--update say otherwise), and --strip-trailing-slashes is a no-op
 // because PathSpec already normalizes trailing slashes.
-export function parseMvFlags(flags: Flags): MvFlags {
-  const update = updateMode('mv', flags)
-  const suffix = firstStr(flags.suffix)
-  const control = backupControl('mv', backupRaw(flags), suffix)
-  const noClobber = flags.no_clobber === true
-  const exchange = flags.exchange === true
+export function parseMvFlags(fl: FlagView): MvFlags {
+  const update = updateMode('mv', fl)
+  const suffix = suffixFlag(fl)
+  const control = backupControl('mv', backupRaw(fl), suffix)
+  const noClobber = fl.asBool('no_clobber')
+  const exchange = fl.asBool('exchange')
   if (control !== null && control !== 'none' && (exchange || noClobber || update === 'none-fail')) {
     throw new UsageError(
       'mv: cannot combine --backup with --exchange, -n, or --update=none-fail\n' +
@@ -100,17 +100,17 @@ export function parseMvFlags(flags: Flags): MvFlags {
       1,
     )
   }
-  const [targetDir, noTargetDir] = targetFlags('mv', flags)
+  const [targetDir, noTargetDir] = targetFlags('mv', fl)
   return mvFlags({
     noClobber,
-    verbose: flags.verbose === true,
+    verbose: fl.asBool('verbose'),
     update,
     backup: control,
     suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,
     targetDir,
     noTargetDir,
     exchange,
-    noCopy: flags.no_copy === true,
+    noCopy: fl.asBool('no_copy'),
   })
 }
 

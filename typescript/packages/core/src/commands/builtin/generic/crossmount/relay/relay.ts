@@ -21,6 +21,7 @@ import { runJoin } from './join.ts'
 import { runMv } from './mv.ts'
 import { runPaste } from './paste.ts'
 import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 // Run a command whose data must colocate across mounts. Pure wiring: every
 // operand is read or written through dispatch primitives on its owning
@@ -29,7 +30,7 @@ import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
 export async function runRelay(
   cmdName: Cmd,
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   // Maps an operand to its storage identity, for the transfer commands
   // that must tell a real move from one whose two prefixes address a

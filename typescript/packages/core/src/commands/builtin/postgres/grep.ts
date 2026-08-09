@@ -40,6 +40,7 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg, searchPushdownOk } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { searchProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
@@ -65,7 +66,8 @@ async function grepCommand(
   // each matching row as a whole line; it cannot honor output/match-shaping
   // flags or a real regex, so those defer to the generic scan below.
   const first = paths[0]
-  const ci = opts.flags.i === true
+  const fl = new FlagView(opts.flags, specOf('grep'))
+  const ci = fl.asBool('i')
   if (
     first !== undefined &&
     !hasUnresolvedGlob(paths) &&

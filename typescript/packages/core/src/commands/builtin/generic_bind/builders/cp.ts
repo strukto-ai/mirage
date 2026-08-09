@@ -19,6 +19,8 @@ import type { NativeCopy, PathSpec, StatFn } from '../../../../types.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseCpFlags } from '../../generic/cp.ts'
 import type { Builder, CommandIO } from '../adapter.ts'
+import { FlagView } from '../../../spec/types.ts'
+import { specOf } from '../../../spec/builtins.ts'
 
 // The backend stat, merged with the namespace attr overlay if any. cp/mv
 // freshness checks (-u) must see touch/chmod overlay state, exactly like
@@ -59,7 +61,7 @@ export const CP_BUILDER: Builder = {
               options,
               idx,
             )
-    const parsed = parseCpFlags(opts.flags)
+    const parsed = parseCpFlags(new FlagView(opts.flags, specOf('cp')))
     const strategy: NativeCopy = {
       copy: (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
       find: findFn,

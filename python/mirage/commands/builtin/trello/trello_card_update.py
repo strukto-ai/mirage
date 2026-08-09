@@ -15,7 +15,8 @@
 import json
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.commands.builtin.trello._input import resolve_text_input
+from mirage.commands.builtin.trello._input import (file_operand,
+                                                   resolve_text_input)
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec, FlagValue, FlagView, Option
 from mirage.core.trello._client import card_update
@@ -44,17 +45,17 @@ async def trello_card_update(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
-    card_id = _extra.get("card_id")
-    if not card_id or not isinstance(card_id, str):
+    card_id = fl.as_str("card_id")
+    if not card_id:
         raise ValueError("--card_id is required")
     name = fl.as_str("name")
     desc = None
-    if (_extra.get("desc") is not None or _extra.get("desc_file") is not None
-            or stdin is not None):
+    if (fl.as_str("desc") is not None
+            or file_operand(fl, "desc_file") is not None or stdin is not None):
         desc = await resolve_text_input(
             config,
             inline_text=fl.as_str("desc"),
-            file_path=fl.as_str("desc_file"),
+            file_path=file_operand(fl, "desc_file"),
             stdin=stdin,
             error_message="desc is required",
         )

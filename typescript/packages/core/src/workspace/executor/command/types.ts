@@ -14,6 +14,7 @@
 
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { ExecutionNode } from '../../types.ts'
+import type { FlagValue } from '../../../commands/spec/types.ts'
 
 export type Result = [ByteSource | null, IOResult, ExecutionNode]
-export type Flags = Record<string, string | boolean | number | string[]>
+export type Flags = Record<string, FlagValue>

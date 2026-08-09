@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FlagView,
   IOResult,
   ResourceName,
   command,
@@ -42,7 +43,8 @@ async function touchCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('touch: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const createOnly = opts.flags.c === true
+  const fl = new FlagView(opts.flags, specOf('touch'))
+  const createOnly = fl.asBool('c')
   const writes: Record<string, Uint8Array> = {}
   for (const p of resolved) {
     if (createOnly) continue

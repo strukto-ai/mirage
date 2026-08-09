@@ -20,6 +20,7 @@ import { runFanout } from './fanout/index.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
+import type { FlagValue } from '../../../spec/types.ts'
 
 // Run a command whose path operands span mounts. Every command combines
 // per-mount work under one of three strategies (see Strategy): STREAM merges
@@ -33,7 +34,7 @@ export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   runSingle: RunSingle,
   stdin: ByteSource | null = null,

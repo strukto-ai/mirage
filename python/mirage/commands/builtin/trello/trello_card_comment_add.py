@@ -15,7 +15,8 @@
 import json
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.commands.builtin.trello._input import resolve_text_input
+from mirage.commands.builtin.trello._input import (file_operand,
+                                                   resolve_text_input)
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec, FlagValue, FlagView, Option
 from mirage.core.trello._client import comment_create
@@ -41,13 +42,13 @@ async def trello_card_comment_add(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
-    card_id = _extra.get("card_id")
-    if not card_id or not isinstance(card_id, str):
+    card_id = fl.as_str("card_id")
+    if not card_id:
         raise ValueError("--card_id is required")
     text = await resolve_text_input(
         config,
         inline_text=fl.as_str("text"),
-        file_path=fl.as_str("text_file"),
+        file_path=file_operand(fl, "text_file"),
         stdin=stdin,
         error_message="comment text is required",
     )

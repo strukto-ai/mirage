@@ -32,6 +32,7 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { prependStderr } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveDiscordGlob = resolveGlobOf(DISCORD_IO)
 
@@ -52,7 +53,8 @@ async function grepCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const pattern = patternArg(texts, opts.flags)
-  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  const fl = new FlagView(opts.flags, specOf('grep'))
+  const maxCount = fl.asInt('m') ?? null
 
   const pushdownWarnings: string[] = []
   const firstPath = paths[0]
@@ -61,7 +63,7 @@ async function grepCommand(
     // Discord search matches whole words while grep matches substrings,
     // and the native path returns search results verbatim as the output, so
     // a bare literal would under-report. Only -w makes the two agree.
-    if (scope.useNative && scope.guildId !== undefined && opts.flags.w === true) {
+    if (scope.useNative && scope.guildId !== undefined && fl.asBool('w')) {
       try {
         const count = maxCount ?? 100
         const raw = await searchGuild(accessor, scope.guildId, pattern, scope.channelId, count)

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FlagView,
   IOResult,
   ResourceName,
   command,
@@ -42,8 +43,9 @@ async function mkdirCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('mkdir: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const verbose = opts.flags.verbose === true
-  const parents = opts.flags.parents === true
+  const fl = new FlagView(opts.flags, specOf('mkdir'))
+  const verbose = fl.asBool('verbose')
+  const parents = fl.asBool('parents')
   const lines: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {

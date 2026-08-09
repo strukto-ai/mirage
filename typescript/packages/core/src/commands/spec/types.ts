@@ -306,7 +306,7 @@ export class CommandSpec {
 }
 
 export interface ParsedArgsInit {
-  flags: Record<string, string | boolean | number | string[]>
+  flags: Record<string, FlagValue>
   args: [string, ValueType][]
   cachePaths?: string[]
   pathFlagValues?: string[]
@@ -339,7 +339,7 @@ export interface ParsedArgsInit {
 }
 
 export class ParsedArgs {
-  readonly flags: Record<string, string | boolean | number | string[]>
+  readonly flags: Record<string, FlagValue>
   readonly args: [string, ValueType][]
   readonly cachePaths: string[]
   readonly pathFlagValues: string[]

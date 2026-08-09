@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, FlagValue, Option
+from mirage.commands.spec.types import CommandSpec, FlagValue, FlagView, Option
 from mirage.core.trello._client import card_move
 from mirage.core.trello.normalize import normalize_card
 from mirage.io.stream import yield_bytes
@@ -36,12 +36,13 @@ async def trello_card_move(
     *texts: str,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
-    card_id = _extra.get("card_id")
-    if not card_id or not isinstance(card_id, str):
+    card_id = fl.as_str("card_id")
+    if not card_id:
         raise ValueError("--card_id is required")
-    list_id = _extra.get("list_id")
-    if not list_id or not isinstance(list_id, str):
+    list_id = fl.as_str("list_id")
+    if not list_id:
         raise ValueError("--list_id is required")
     card = await card_move(config, card_id=card_id, list_id=list_id)
     return yield_bytes(

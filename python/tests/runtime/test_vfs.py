@@ -79,6 +79,23 @@ def test_mount_of_takes_the_longest_prefix():
     assert vfs.mount_of("/elsewhere/f.txt") is None
 
 
+def test_a_root_mount_is_a_prefix_like_any_other():
+    # It claims every path, which is what mounting at `/` means. The
+    # one place that cannot live with an exclusive root claim excludes
+    # it itself (WasmVFS._prefixes), because only it has a build tree
+    # to protect.
+    vfs = RecordingVFS(prefixes=["/"])
+    assert vfs.prefixes() == ["/"]
+    assert vfs.mount_of("/x.txt") == "/"
+    assert vfs.mount_of("/") == "/"
+
+
+def test_a_longer_mount_still_wins_over_the_root_one():
+    vfs = RecordingVFS(prefixes=["/", "/data/"])
+    assert vfs.mount_of("/data/f.txt") == "/data"
+    assert vfs.mount_of("/elsewhere/f.txt") == "/"
+
+
 def test_rename_across_mounts_is_refused_before_any_dispatch():
     vfs = RecordingVFS(prefixes=["/data/", "/other/"])
     with pytest.raises(CrossMountError) as exc:

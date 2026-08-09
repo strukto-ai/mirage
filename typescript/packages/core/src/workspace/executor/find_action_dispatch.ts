@@ -16,10 +16,11 @@ import { stripSlash } from '../../utils/slash.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
 
 export async function applyFindActions(
   stdout: ByteSource | null,
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   registry: MountRegistry,
   cwd: string,
 ): Promise<[ByteSource | null, Uint8Array]> {

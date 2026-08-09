@@ -37,6 +37,7 @@ import { formatFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 import type { Flags } from './types.ts'
+import type { FlagValue } from '../../../commands/spec/types.ts'
 
 export interface RunOnMountCtx {
   registry: MountRegistry
@@ -372,7 +373,7 @@ async function injectChildMounts(
   stdout: ByteSource | null,
   registry: MountRegistry,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   cwd: string,
 ): Promise<ByteSource | null> {
   if (flagKwargs.d === true || flagKwargs.R === true) return stdout

@@ -20,6 +20,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveScript } from '../utils/operands.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -60,8 +61,8 @@ async function pythonCommand(
     ]
   }
 
-  const cFlag = opts.flags.c
-  const code = typeof cFlag === 'string' ? cFlag : null
+  const fl = new FlagView(opts.flags, specOf('python3'))
+  const code = fl.asStr('c') ?? null
   const hasCode = code !== null
   let scriptPath: PathSpec | null = null
   let argStrs: string[]

@@ -47,6 +47,7 @@ async def search(
     method: str = "semantic",
     top_k: str | int | None = None,
     threshold: str | float = 0.0,
+    cwd: PathSpec | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
@@ -54,9 +55,7 @@ async def search(
     if method != "semantic":
         raise UsageError("search: only the 'semantic' method is supported")
     query = texts[0]
-    cwd = _extra.get("cwd")
-    target_paths = default_paths(paths,
-                                 cwd if isinstance(cwd, PathSpec) else None)
+    target_paths = default_paths(paths, cwd)
     mount_prefix = mount_prefix_of(
         target_paths[0].virtual,
         target_paths[0].resource_path) if target_paths else ""

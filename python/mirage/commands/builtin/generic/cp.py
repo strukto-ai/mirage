@@ -162,7 +162,9 @@ def parse_cp_flags(fl: FlagView) -> CpFlags:
         fl (FlagView): Flag view constructed with the cp spec.
     """
     update = update_mode("cp", fl)
-    suffix = fl.as_str("suffix")
+    # An empty --suffix reads as absent: GNU 9.7 `cp --backup --suffix= f g`
+    # writes the default `g~`, not a backup whose name is the original's.
+    suffix = fl.as_str("suffix") or None
     control = backup_control("cp", backup_raw(fl), suffix)
     no_clobber = fl.as_bool("no_clobber")
     if control is not None and control != "none" and (no_clobber or update

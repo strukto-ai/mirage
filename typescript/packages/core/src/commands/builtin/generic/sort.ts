@@ -25,39 +25,32 @@ import {
   type SortConfig,
 } from '../sort_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 interface SortFlags {
-  normalized: Record<string, string | boolean | number | string[]>
+  normalized: Record<string, FlagValue>
   check: boolean
   checkQuiet: boolean
   output: string | null
   zeroTerminated: boolean
 }
 
-function flagStr(
-  flags: Record<string, string | boolean | number | string[]>,
-  name: string,
-): string | null {
+function flagStr(flags: Record<string, FlagValue>, name: string): string | null {
   const value = flags[name]
   return typeof value === 'string' ? value : null
 }
 
-function flagList(
-  flags: Record<string, string | boolean | number | string[]>,
-  name: string,
-): string[] {
+function flagList(flags: Record<string, FlagValue>, name: string): string[] {
   const value = flags[name]
   if (typeof value === 'string') return [value]
   if (Array.isArray(value)) return [...value]
   return []
 }
 
-function parseFlags(
-  flags: Record<string, string | boolean | number | string[]>,
-): SortFlags | string {
+function parseFlags(flags: Record<string, FlagValue>): SortFlags | string {
   const rawCheck = flags.check
   if (
     rawCheck !== undefined &&

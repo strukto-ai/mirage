@@ -594,6 +594,9 @@ def test_parse_cp_flags_conflicts_and_grammar():
     parsed = parse_cp_flags(view({"suffix": ".bak"}))
     assert parsed.backup == "existing"
     assert parsed.suffix == ".bak"
+    # GNU 9.7: `cp --backup --suffix= f g` writes g~, so an empty suffix
+    # reads as absent rather than naming the original as its own backup.
+    assert parse_cp_flags(view({"backup": True, "suffix": ""})).suffix == "~"
     assert parse_cp_flags(view({"backup": "t"})).backup == "numbered"
     assert parse_cp_flags(view({"backup": "nil"})).backup == "existing"
     assert parse_cp_flags(view({"archive": True})).recursive is True

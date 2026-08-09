@@ -25,6 +25,7 @@ import { prefixAggregate } from '../aggregators.ts'
 import { patternArg } from '../grep_helper.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { narrowScope } from './narrow.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -39,15 +40,16 @@ async function grepCommand(
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     const pattern = patternArg(texts, opts.flags)
-    const recursive = opts.flags.r === true || opts.flags.R === true
-    const fixedString = opts.flags.F === true
+    const fl = new FlagView(opts.flags, specOf('grep'))
+    const recursive = fl.asBool('r') || fl.asBool('R')
+    const fixedString = fl.asBool('F')
     const narrowed = await narrowScope(
       accessor,
       paths,
       pattern,
       fixedString,
       recursive,
-      opts.flags.w === true,
+      fl.asBool('w'),
       opts.index ?? undefined,
     )
     resolved = narrowed.resolved

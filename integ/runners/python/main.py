@@ -144,6 +144,11 @@ async def main() -> None:
                 and not os.environ.get("SLACK_URL")):
             print(f"skip [{target_id}]: SLACK_URL not set", file=sys.stderr)
             continue
+        if (target.get("service") == "trello"
+                and not os.environ.get("TRELLO_ENDPOINT")):
+            print(f"skip [{target_id}]: TRELLO_ENDPOINT not set",
+                  file=sys.stderr)
+            continue
         if (target.get("service") == "postgres"
                 and not os.environ.get("POSTGRES_DSN")):
             print(f"skip [{target_id}]: POSTGRES_DSN not set", file=sys.stderr)

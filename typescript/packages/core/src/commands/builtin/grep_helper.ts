@@ -22,6 +22,7 @@ import { getExtension } from '../resolve.ts'
 import { PatternType } from './constants.ts'
 import { grepContextLines } from './grep_context.ts'
 import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
+import type { FlagValue } from '../spec/types.ts'
 
 export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   '.parquet',
@@ -46,7 +47,7 @@ export function escapeRegex(s: string): string {
 // list, or null when neither was supplied.
 export function patternArg(
   texts: readonly string[],
-  flags: Record<string, string | boolean | number | string[]>,
+  flags: Record<string, FlagValue>,
 ): string | null {
   const e = flags.e
   if (Array.isArray(e) && e.length > 0) return e.join('\n')
@@ -68,7 +69,7 @@ export interface PatternResolution {
 export async function resolvePatternFromFlags(
   name: string,
   texts: readonly string[],
-  flags: Record<string, string | boolean | number | string[]>,
+  flags: Record<string, FlagValue>,
   paths: readonly PathSpec[],
   mountPrefix: string | null | undefined,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -244,9 +245,7 @@ export function isLiteralPattern(pattern: string, fixedString: boolean): boolean
 // -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
 // file-filtering --glob/--type; the wrapper must defer to the generic scan
 // when any is present.
-export function hasSearchShapingFlags(
-  flags: Record<string, string | boolean | number | string[]>,
-): boolean {
+export function hasSearchShapingFlags(flags: Record<string, FlagValue>): boolean {
   if (
     flags.v === true ||
     flags.n === true ||
@@ -277,10 +276,7 @@ export function hasSearchShapingFlags(
 // list (-F with multiple -e) is a set of independent alternatives LIKE cannot
 // express, so it stays on the generic path. Backends that push a real regex
 // down (mongodb) gate on hasSearchShapingFlags alone instead.
-export function searchPushdownOk(
-  flags: Record<string, string | boolean | number | string[]>,
-  pattern: string,
-): boolean {
+export function searchPushdownOk(flags: Record<string, FlagValue>, pattern: string): boolean {
   if (pattern.includes('\n')) return false
   return isLiteralPattern(pattern, flags.F === true) && !hasSearchShapingFlags(flags)
 }

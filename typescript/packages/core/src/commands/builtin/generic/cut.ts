@@ -18,6 +18,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseCutRanges, type CutOptions } from '../cut_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -29,10 +30,7 @@ async function* chainStreams(
   }
 }
 
-function stringFlag(
-  flags: Record<string, string | boolean | number | string[]>,
-  ...names: string[]
-): string | null {
+function stringFlag(flags: Record<string, FlagValue>, ...names: string[]): string | null {
   for (const name of names) {
     const value = flags[name]
     if (typeof value === 'string') return value
@@ -40,9 +38,7 @@ function stringFlag(
   return null
 }
 
-function parseFlags(
-  flags: Record<string, string | boolean | number | string[]>,
-): CutOptions | string {
+function parseFlags(flags: Record<string, FlagValue>): CutOptions | string {
   const bytesRange = stringFlag(flags, 'b', 'bytes')
   const charsRange = stringFlag(flags, 'c', 'characters')
   const fieldsRange = stringFlag(flags, 'F', 'f', 'fields')

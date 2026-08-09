@@ -23,6 +23,7 @@ import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(GITHUB_CI_IO)
 
@@ -40,7 +41,8 @@ async function grepCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const recursive = opts.flags.r === true || opts.flags.R === true
+  const fl = new FlagView(opts.flags, specOf('grep'))
+  const recursive = fl.asBool('r') || fl.asBool('R')
   if (recursive && resolved.some((p) => isCrossRunRoot(p))) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(CROSS_RUN_MSG) })]
   }

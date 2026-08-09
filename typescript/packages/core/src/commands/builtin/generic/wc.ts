@@ -19,6 +19,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { formatRecords } from '../utils/output.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -53,9 +54,7 @@ export interface WcFlags {
   total: 'auto' | 'always' | 'only' | 'never'
 }
 
-export function parseFlags(
-  flags: Record<string, string | boolean | number | string[]>,
-): WcFlags | string {
+export function parseFlags(flags: Record<string, FlagValue>): WcFlags | string {
   const rawTotal = typeof flags.total === 'string' ? flags.total : 'auto'
   if (!['auto', 'always', 'only', 'never'].includes(rawTotal)) {
     return `wc: invalid argument '${rawTotal}' for '--total'\n`

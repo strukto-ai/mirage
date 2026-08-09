@@ -157,10 +157,14 @@ runs:
         cat /tmp/slacksrv.log
         echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
 
-    - name: Start fake Trello API
+    - name: Start fake Trello API (Prisma)
+      working-directory: integ
       shell: bash
+      env:
+        INTEG_DB_URL: file:/tmp/mirage-trello-ci.db
       run: |
-        nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trellosrv.log 2>&1 &
+        ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+        nohup ./node_modules/.bin/tsx server/trello.ts --port 5095 > /tmp/trellosrv.log 2>&1 &
         for i in $(seq 1 30); do
           grep -q "TRELLO_ENDPOINT=" /tmp/trellosrv.log && break
           sleep 1

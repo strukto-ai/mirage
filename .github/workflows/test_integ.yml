@@ -1211,8 +1211,11 @@ jobs:
 
       - name: Start fake Trello and Linear APIs
         if: matrix.facet == 'project'
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-trello-ci.db
         run: |
-          nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trello.log 2>&1 &
+          (cd integ && ./node_modules/.bin/prisma generate --schema prisma/schema.prisma)
+          (cd integ && nohup ./node_modules/.bin/tsx server/trello.ts --port 5095 > /tmp/trello.log 2>&1 &)
           nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
           for f in trello linear; do
             for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/$f.log && break; sleep 1; done

@@ -1,3 +1,4 @@
+import type { FlagValue } from '../spec/types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,9 +158,7 @@ export function parseKeydef(spec: string, globalMods: KeyMods, globalSkip: boole
   }
 }
 
-export function buildConfig(
-  flags: Record<string, string | boolean | number | string[]>,
-): SortConfig {
+export function buildConfig(flags: Record<string, FlagValue>): SortConfig {
   const globalMods: KeyMods = {
     numeric: flags.n === true,
     generalNumeric: flags.g === true,

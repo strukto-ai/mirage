@@ -636,6 +636,9 @@ def test_parse_mv_flags_conflicts_and_grammar():
     assert parsed.update == "older"
     assert parsed.exchange is True
     assert parse_mv_flags(view({"no_copy": True})).no_copy is True
+    # GNU 9.7: `mv --backup --suffix= f g` writes g~, so an empty suffix
+    # reads as absent rather than naming the original as its own backup.
+    assert parse_mv_flags(view({"backup": True, "suffix": ""})).suffix == "~"
 
 
 def _tree_rename(files: dict[str, bytes], dirs: set[str]):

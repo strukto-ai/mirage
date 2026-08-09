@@ -31,7 +31,7 @@ async def unzip(
     stdin: ByteSource | None = None,
     o: bool = False,
     args_l: bool = False,
-    d: str | None = None,
+    d: PathSpec | str | None = None,
     q: bool = False,
     p: bool = False,
     t: bool = False,

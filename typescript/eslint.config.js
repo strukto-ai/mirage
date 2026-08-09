@@ -31,12 +31,14 @@ export default tseslint.config(
     },
   },
   {
-    // Generic commands read flags only through FlagView, which is
-    // constructed with the command's spec and throws on a name the spec
-    // does not declare. Reaching into the bag directly reads a renamed or
-    // misspelled flag as false, which no test catches.
-    files: ['packages/core/src/commands/builtin/generic/*.ts'],
-    ignores: ['packages/core/src/commands/builtin/generic/*.test.ts'],
+    // Commands read flags only through FlagView, which is constructed
+    // with the command's spec and throws on a name the spec does not
+    // declare. Reaching into the bag directly reads a renamed or
+    // misspelled flag as false, which no test catches. Python's twin is
+    // `tests/commands/test_no_raw_flag_reads.py`, which walks the whole
+    // `mirage/commands` tree, so this covers the same ground.
+    files: ['packages/*/src/commands/builtin/**/*.ts'],
+    ignores: ['packages/*/src/commands/builtin/**/*.test.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',

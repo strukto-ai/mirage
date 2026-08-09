@@ -33,7 +33,6 @@ import { preloadInto } from './vfs/preload.ts'
 import { MirageFs } from './vfs/vfs.ts'
 import { MirageFsSeed } from './vfs/seed.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
-import { PYODIDE_RUNTIME } from './interface.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
@@ -155,7 +154,7 @@ const PYODIDE_CONFIG_KEYS: readonly string[] = [
 const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends PythonRuntime implements Evaluator {
-  readonly name = PYODIDE_RUNTIME
+  readonly name = 'pyodide'
   readonly [EVALUATOR] = true as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
@@ -377,7 +376,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       if (servable(prefix) || this.refused.has(prefix)) continue
       this.refused.add(prefix)
       console.warn(
-        `mirage: the ${PYODIDE_RUNTIME} runtime cannot serve a mount at ` +
+        `mirage: the ${this.name} runtime cannot serve a mount at ` +
           `'${prefix}', because that is the interpreter's own filesystem ` +
           `root; python will not see it`,
       )

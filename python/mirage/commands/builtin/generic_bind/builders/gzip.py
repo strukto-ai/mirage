@@ -20,6 +20,8 @@ from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,9 +37,9 @@ async def gzip(
     f: bool = False,
     c: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    level = extract_level(flags)
+    level = extract_level(FlagView(flags, spec=SPECS["gzip"]))
     if paths:
         paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gzip(paths,

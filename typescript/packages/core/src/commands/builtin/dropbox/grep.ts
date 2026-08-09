@@ -26,6 +26,7 @@ import { patternArg } from '../grep_helper.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { DROPBOX_IO } from './io.ts'
 import { narrowScope } from './narrow.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const dropboxResolveGlob = resolveGlobOf(DROPBOX_IO)
 
@@ -35,16 +36,17 @@ async function grepCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('grep'))
   let resolved: PathSpec[] = []
   if (paths.length > 0) {
     const pattern = patternArg(texts, opts.flags)
     // -v and -c need the walk: GNU prints non-matching lines (-v) and zero
     // counts (-c) from files a narrowed superset would never visit.
     const narrowed = await narrowScope(accessor, paths, pattern, {
-      fixedString: opts.flags.F === true,
-      recursive: opts.flags.r === true || opts.flags.R === true,
-      wholeWord: opts.flags.w === true,
-      exactFileSet: opts.flags.v === true || opts.flags.c === true,
+      fixedString: fl.asBool('F'),
+      recursive: fl.asBool('r') || fl.asBool('R'),
+      wholeWord: fl.asBool('w'),
+      exactFileSet: fl.asBool('v') || fl.asBool('c'),
       ...(opts.index !== null ? { index: opts.index } : {}),
     })
     resolved = narrowed.resolved

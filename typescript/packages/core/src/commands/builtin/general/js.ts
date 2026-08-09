@@ -20,6 +20,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveScript } from '../utils/operands.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -60,10 +61,10 @@ async function jsCommand(
     ]
   }
 
-  const eFlag = opts.flags.e
-  const code = typeof eFlag === 'string' ? eFlag : null
+  const fl = new FlagView(opts.flags, specOf('js'))
+  const code = fl.asStr('e') ?? null
   const hasCode = code !== null
-  const module = opts.flags.module === true
+  const module = fl.asBool('module')
   let scriptPath: PathSpec | null = null
   let argStrs: string[]
   if (hasCode) {

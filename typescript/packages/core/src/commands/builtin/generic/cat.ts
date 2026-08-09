@@ -18,6 +18,7 @@ import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const NL = 0x0a
@@ -76,7 +77,7 @@ interface CatDisplay {
   squeezeBlank: boolean
 }
 
-function parseFlags(flags: Record<string, string | boolean | number | string[]>): CatDisplay {
+function parseFlags(flags: Record<string, FlagValue>): CatDisplay {
   const showAll = flags.show_all === true
   return {
     numberLines: flags.number === true,

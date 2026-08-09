@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -452,6 +452,56 @@ function conformance(label: string, runtime: string, boot: string, rows: Row[]):
 conformance('monty conformance', 'monty', 'python3 -c "pass"', MONTY_ROWS)
 conformance('pyodide conformance', 'pyodide', 'python3 -c "pass"', PYODIDE_ROWS)
 conformance('quickjs conformance', 'quickjs', 'node -e "1"', QUICKJS_ROWS)
+
+async function rootWorld(runtime: string): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ops = new OpsRegistry()
+  const root = new RAMResource()
+  ops.registerResource(root)
+  return new Workspace(
+    { '/': [root, MountMode.EXEC] },
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [runtime, 'vfs'] },
+  )
+}
+
+// `/` is the one prefix a runtime could plausibly claim as its own, so
+// it is the one worth pinning. The write is verified through the shell,
+// never through the runtime that made it: a runtime that mutated only
+// its own private tree and reported success is exactly the bug here.
+describe('a root mount', () => {
+  for (const [runtime, line] of [
+    ['monty', `python3 -c "from pathlib import Path; Path('/mine.txt').write_text('R')"`],
+    ['quickjs', `node -e "const w = std.open('/mine.txt', 'w'); w.puts('R'); w.close()"`],
+  ] as const) {
+    it(`is served like any other by ${runtime}`, async () => {
+      const ws = await rootWorld(runtime)
+      const io = await ws.execute(line)
+      expect(io.exitCode, `${line} -> ${stderrStr(io)}`).toBe(0)
+      const check = await ws.execute('cat /mine.txt')
+      expect(check.exitCode, `cat failed: ${stderrStr(check)}`).toBe(0)
+      expect(stdoutStr(check)).toContain('R')
+      await ws.close()
+    }, 120_000)
+  }
+
+  it('is refused out loud by pyodide, which cannot serve one', async () => {
+    // Emscripten already owns `/`, so mounting there answers EBUSY.
+    // The guest write lands in MEMFS and is then dropped, which is
+    // silent loss: the warning is the only thing that makes it
+    // visible, so it is the assertion.
+    const seen: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      seen.push(args.join(' '))
+    })
+    const ws = await rootWorld('pyodide')
+    await ws.execute(`python3 -c "from pathlib import Path; Path('/mine.txt').write_text('R')"`)
+    const check = await ws.execute('cat /mine.txt')
+    expect(check.exitCode, 'the mount should not have the file').not.toBe(0)
+    expect(seen.join(' ')).toContain("cannot serve a mount at '/'")
+    warn.mockRestore()
+    await ws.close()
+  }, 240_000)
+})
 
 interface CountingBridge {
   dispatch: BridgeDispatchFn

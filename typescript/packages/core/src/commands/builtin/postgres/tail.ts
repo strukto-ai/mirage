@@ -25,6 +25,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_helper.ts'
 import { headTailProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
@@ -57,9 +58,10 @@ async function tailCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
+  const fl = new FlagView(opts.flags, specOf('tail'))
+  const nRaw = fl.asStr('n') ?? null
   const [lines, plusMode] = parseN(nRaw)
-  const pushdown = typeof opts.flags.c !== 'string' && !plusMode && lines > 0
+  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0
   return tailGeneric(resolved, texts, opts, (p) =>
     tailSource(accessor, p, opts.index ?? undefined, lines, pushdown),
   )
