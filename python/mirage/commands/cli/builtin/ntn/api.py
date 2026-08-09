@@ -26,6 +26,8 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue
 
+BAD_DATA = "error: Invalid JSON from --data\n"
+
 METHODS = {
     "GET": notion_get,
     "POST": notion_post,
@@ -149,10 +151,16 @@ async def api(
     if data is not None:
         if body:
             raise UsageError("request body must come from one source")
-        parsed = json.loads(data)
-        if not isinstance(parsed, dict):
+        try:
+            decoded = json.loads(data)
+        except json.JSONDecodeError:
+            # Upstream's wording and its exit 1, probed against ntn
+            # 0.21.9. Deliberately not the engine's own parse message,
+            # which python and typescript could never agree on.
+            return None, IOResult(stderr=BAD_DATA.encode(), exit_code=1)
+        if not isinstance(decoded, dict):
             raise UsageError("--data must be a JSON object")
-        body = parsed
+        body = decoded
 
     method = (fl.as_str("method") or ("POST" if body else "GET")).upper()
     call = METHODS.get(method)
@@ -162,7 +170,10 @@ async def api(
     route = route[3:] if route.startswith("/v1/") else route
     config = notion_config(inv)
     if method == "GET":
-        result = await notion_get(config, route, params=params or None)
+        result = await notion_get(config,
+                                  route,
+                                  params=params or None,
+                                  extra_headers=headers or None)
     else:
-        result = await call(config, route, body)
+        result = await call(config, route, body, extra_headers=headers or None)
     return yield_bytes(compact_json(result)), IOResult()

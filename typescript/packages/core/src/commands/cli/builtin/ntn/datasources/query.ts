@@ -20,6 +20,7 @@ import {
   queryDataSourcePage,
 } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
+import { PathSpec } from '../../../../../types.ts'
 import type { CommandFnResult } from '../../../../config.ts'
 import type { CLIInvocation } from '../../../types.ts'
 import {
@@ -32,6 +33,7 @@ import {
 } from '../util.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
 const DEFAULT_LIMIT = 25
 const DIRECTIONS: Record<string, string> = {
   asc: 'ascending',
@@ -86,6 +88,25 @@ async function resolveSource(
   return getDataSource(transport, strOf(asObject(head), 'id'))
 }
 
+// The query filter comes from --filter or --filter-file, and the file is read
+// through the op dispatcher the way himalaya reads --attach: an account CLI may
+// read a workspace file the user named on the line, it just must not treat a
+// mount as a second view of its own account's data.
+async function filterBody(
+  fl: FlagView,
+  ops: CLIInvocation['ops'],
+): Promise<Record<string, unknown> | null> {
+  const inline = fl.asStr('filter')
+  if (inline !== undefined && inline !== '') return parseJsonText(inline, '--filter')
+  const source = fl.asStr('filter_file')
+  if (source === undefined || source === '') return null
+  const dispatch = ops?.dispatch
+  if (dispatch === undefined) throw new Error('--filter-file needs a workspace to read files from')
+  const [data] = await dispatch('read', PathSpec.fromStrPath(source))
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+  return parseJsonText(DEC.decode(bytes), '--filter-file')
+}
+
 export async function query(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const body: Record<string, unknown> = {}
@@ -97,10 +118,8 @@ export async function query(inv: CLIInvocation): Promise<CommandFnResult> {
     if (cursor !== undefined && cursor !== '') body.start_cursor = cursor
     const sorts = fl.asList('sort').map(parseSort)
     if (sorts.length > 0) body.sorts = sorts
-    const inline = fl.asStr('filter')
-    if (inline !== undefined && inline !== '') {
-      body.filter = parseJsonText(inline, '--filter')
-    }
+    const chosen = await filterBody(fl, inv.ops)
+    if (chosen !== null) body.filter = chosen
   } catch (err) {
     return usageError(err)
   }

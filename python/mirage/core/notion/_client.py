@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -41,21 +42,35 @@ class NotionAPIError(RuntimeError):
         self.code = code
 
 
-def notion_headers(config: NotionConfig) -> dict[str, str]:
-    return {
+def notion_headers(config: NotionConfig,
+                   extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The headers every request carries, plus a caller's own.
+
+    Args:
+        config (NotionConfig): notion API config.
+        extra (Mapping[str, str] | None): per-request headers, which
+            `ntn api` collects from its `Header:Value` inputs. Applied
+            last so a caller can override a default, which is what the
+            real CLI does.
+    """
+    headers = {
         "Authorization": f"Bearer {reveal_secret(config.api_key)}",
         "Notion-Version": config.api_version or API_VERSION,
         "Content-Type": "application/json",
     }
+    if extra:
+        headers.update(extra)
+    return headers
 
 
 async def notion_get(
     config: NotionConfig,
     path: str,
     params: dict[str, Any] | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
-    headers = notion_headers(config)
+    headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
             data = await resp.json()
@@ -74,9 +89,10 @@ async def notion_post(
     config: NotionConfig,
     path: str,
     body: dict[str, Any] | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
-    headers = notion_headers(config)
+    headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=body or {}) as resp:
             data = await resp.json()
@@ -95,9 +111,10 @@ async def notion_patch(
     config: NotionConfig,
     path: str,
     body: dict[str, Any] | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
-    headers = notion_headers(config)
+    headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
         async with session.patch(url, headers=headers, json=body
                                  or {}) as resp:
@@ -117,9 +134,10 @@ async def notion_put(
     config: NotionConfig,
     path: str,
     body: dict[str, Any] | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     url = f"{config.base_url}{path}"
-    headers = notion_headers(config)
+    headers = notion_headers(config, extra_headers)
     async with aiohttp.ClientSession() as session:
         async with session.put(url, headers=headers, json=body or {}) as resp:
             data = await resp.json()

@@ -216,6 +216,23 @@ export async function handleCli(
   // at every level.
   const style = install.spec.usageStyle
   const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd)
+  // Before any validation: an option declaring both `env` and `required` is
+  // satisfied by a populated variable, and validation runs on the parse
+  // result, so filling afterwards would refuse a line the environment had
+  // already answered. The value deliberately does NOT join typedDests, because
+  // clap's usage line distinguishes an option the line carried from one the
+  // environment supplied.
+  for (const option of parseSpec.options) {
+    const spelling = option.long ?? option.short
+    if (option.env === null || spelling === null) continue
+    const value = session.env[option.env]
+    if (value === undefined || value === '') continue
+    const dest = flagKwargName(spelling)
+    if (parsed[2][dest] !== undefined) continue
+    parsed[2][dest] = value
+    const at = parsed[11].indexOf(spelling)
+    if (at !== -1) parsed[11].splice(at, 1)
+  }
   const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
   if (mirageHelp && flagKwargs.help === true) {
     const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
@@ -264,20 +281,6 @@ export async function handleCli(
   // Only the injected flag is dropped; a leaf that declared --help
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
-  // An option that names an environment variable takes its value from the
-  // session when the line omits it, so the leaf reads one flag instead of a
-  // flag and a fallback. Here and not in the flat parser because a shell
-  // command's environment is the shell's business, while a CLI's is part of the
-  // program its spec describes.
-  for (const option of parseSpec.options) {
-    const spelling = option.long ?? option.short
-    if (option.env === null || spelling === null) continue
-    const dest = flagKwargName(spelling)
-    const value = session.env[option.env]
-    if (flags[dest] === undefined && value !== undefined && value !== '') {
-      flags[dest] = value
-    }
-  }
 
   // The workspace doors a mount-reading verb needs ride the record as one
   // field. Most CLIs never read it: an API client has no filesystem,

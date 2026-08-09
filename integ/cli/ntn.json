@@ -441,6 +441,32 @@
         "stdout": "Row_page__a0000000-0000-4000-8000-000000000002\nShip_beta__ffff2222-3333-4444-5555-666677778888\nWrite_spec__ffff1111-2222-3333-4444-555566667777\ndata_source.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_api_inline_header",
+      "seq": 566034,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/users/me X-Trace:abc | jq -r '.name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-integ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_bad_data",
+      "seq": 566035,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '{'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: Invalid JSON from --data\n"
+      }
     }
   ]
 }

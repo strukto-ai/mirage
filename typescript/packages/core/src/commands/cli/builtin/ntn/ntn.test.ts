@@ -236,6 +236,32 @@ describe('ntn verbs', () => {
     })
   })
 
+  it('api sends inline headers on the wire', async () => {
+    // Probed on the wire against the real ntn 0.21.9, which sends
+    // `X-Foo:bar` as a request header. Recognizing the syntax and then
+    // dropping the value is the failure this pins.
+    REQUESTS.length = 0
+    await api(makeInv({}, ['v1/search', 'X-Foo:bar', 'X-Two:baz']))
+    expect(REQUESTS[0]?.headers).toEqual({ 'X-Foo': 'bar', 'X-Two': 'baz' })
+    // A header value may itself contain colons.
+    await api(makeInv({}, ['v1/search', 'X-Trace:a:b:c']))
+    expect(REQUESTS[1]?.headers).toEqual({ 'X-Trace': 'a:b:c' })
+  })
+
+  it('api omits the header map when no inline header was given', async () => {
+    REQUESTS.length = 0
+    await api(makeInv({}, ['v1/users/me']))
+    expect(REQUESTS[0]?.headers).toBeUndefined()
+  })
+
+  it('api refuses malformed --data exactly as upstream does', async () => {
+    // Probed against ntn 0.21.9: exit 1 with this wording, which is neither
+    // the engine's own parse message nor a generic usage error.
+    const [, io] = unwrap(await api(makeInv({ data: '{' }, ['v1/search'])))
+    expect(io.exitCode).toBe(1)
+    expect(DEC.decode(io.stderr)).toBe('error: Invalid JSON from --data\n')
+  })
+
   it('api builds nested bodies from bracket paths and typed assignments', async () => {
     REQUESTS.length = 0
     await api(makeInv({}, ['v1/pages', 'parent[page_id]=root', 'archived:=true']))

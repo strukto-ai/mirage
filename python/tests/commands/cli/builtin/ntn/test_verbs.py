@@ -351,11 +351,11 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
     gets = []
     posts = []
 
-    async def fake_get(config, path, params=None):
+    async def fake_get(config, path, params=None, extra_headers=None):
         gets.append((path, params))
         return {"ok": True}
 
-    async def fake_post(config, path, body=None):
+    async def fake_post(config, path, body=None, extra_headers=None):
         posts.append((path, body))
         return {"ok": True}
 
@@ -378,7 +378,7 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
 async def test_api_builds_nested_bodies(monkeypatch):
     posts = []
 
-    async def fake_post(config, path, body=None):
+    async def fake_post(config, path, body=None, extra_headers=None):
         posts.append(body)
         return {"ok": True}
 
@@ -394,7 +394,7 @@ async def test_api_builds_nested_bodies(monkeypatch):
 @pytest.mark.asyncio
 async def test_api_prints_compact_sorted_json(monkeypatch):
 
-    async def fake_get(config, path, params=None):
+    async def fake_get(config, path, params=None, extra_headers=None):
         return {"b": 1, "a": {"d": 2, "c": 3}}
 
     monkeypatch.setitem(api.__globals__, "notion_get", fake_get)

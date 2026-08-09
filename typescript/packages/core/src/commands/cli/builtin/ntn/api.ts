@@ -19,6 +19,9 @@ import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { compactJson, firstText, notionTransport, usageError } from './util.ts'
 
+const ENC = new TextEncoder()
+const BAD_DATA = 'error: Invalid JSON from --data\n'
+
 const METHODS = new Set(['GET', 'POST', 'PATCH'])
 
 type Container = Record<string, unknown> | unknown[]
@@ -72,6 +75,7 @@ function classify(
   token: string,
   body: Record<string, unknown>,
   params: Record<string, unknown>,
+  headers: Record<string, string>,
 ): void {
   const typed = token.indexOf(':=')
   if (typed !== -1) {
@@ -90,7 +94,10 @@ function classify(
   }
   const colon = token.indexOf(':')
   const equals = token.indexOf('=')
-  if (colon !== -1 && (equals === -1 || colon < equals)) return
+  if (colon !== -1 && (equals === -1 || colon < equals)) {
+    headers[token.slice(0, colon)] = token.slice(colon + 1)
+    return
+  }
   if (equals !== -1) {
     assign(body, token.slice(0, equals), token.slice(equals + 1))
     return
@@ -102,19 +109,28 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const body: Record<string, unknown> = {}
   const params: Record<string, unknown> = {}
+  const headers: Record<string, string> = {}
   let path: string
   let method: string
   try {
     path = firstText(inv.texts, 'api path')
-    for (const token of inv.texts.slice(1)) classify(token, body, params)
+    for (const token of inv.texts.slice(1)) classify(token, body, params, headers)
     const data = fl.asStr('data')
     if (data !== undefined && data !== '') {
       if (Object.keys(body).length > 0) throw new Error('request body must come from one source')
-      const parsed: unknown = JSON.parse(data)
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      let decoded: unknown
+      try {
+        decoded = JSON.parse(data)
+      } catch {
+        // Upstream's wording and its exit 1, probed against ntn 0.21.9.
+        // Deliberately not the engine's own parse message, which python and
+        // typescript could never agree on.
+        return [null, new IOResult({ stderr: ENC.encode(BAD_DATA), exitCode: 1 })]
+      }
+      if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) {
         throw new Error('--data must be a JSON object')
       }
-      Object.assign(body, parsed)
+      Object.assign(body, decoded)
     }
     const hasBody = Object.keys(body).length > 0
     method = (fl.asStr('method') ?? (hasBody ? 'POST' : 'GET')).toUpperCase()
@@ -128,6 +144,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   const call: RestCall = { method: method as RestCall['method'], path: route }
   if (method === 'GET') call.query = params
   else call.body = body
+  if (Object.keys(headers).length > 0) call.headers = headers
   const result = await notionTransport(inv.config, inv.flags).request(call)
   return [compactJson(result), new IOResult()]
 }

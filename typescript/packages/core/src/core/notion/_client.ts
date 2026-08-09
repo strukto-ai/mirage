@@ -157,6 +157,12 @@ export interface RestCall {
   path: string
   query?: Record<string, unknown>
   body?: Record<string, unknown>
+  /**
+   * Per-request headers, which `ntn api` collects from its `Header:Value`
+   * inputs. Applied last so a caller can override a default, which is what the
+   * real CLI does (probed on the wire against ntn 0.21.9).
+   */
+  headers?: Record<string, string>
 }
 
 function restCallFor(name: string, args: Record<string, unknown>): RestCall {
@@ -239,6 +245,7 @@ export class HttpNotionTransport implements NotionTransport {
         Authorization: `Bearer ${this.apiKey}`,
         'Notion-Version': this.apiVersion,
         'Content-Type': 'application/json',
+        ...(call.headers ?? {}),
       },
     }
     if (call.method !== 'GET') init.body = JSON.stringify(call.body ?? {})
