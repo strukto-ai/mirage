@@ -962,9 +962,11 @@ export {
 export { listAnnotations as githubCiListAnnotations } from './core/github_ci/annotations.ts'
 export { GITHUB_CI_PROMPT } from './resource/github_ci/prompt.ts'
 export {
+  CALENDAR_API_BASE,
   DOCS_API_BASE,
   DRIVE_API_BASE,
   DRIVE_UPLOAD_BASE,
+  FORMS_API_BASE,
   GMAIL_API_BASE,
   GoogleApiError,
   SHEETS_API_BASE,
@@ -972,9 +974,11 @@ export {
   TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
   TokenManager,
+  calendarBase,
   docsBase,
   driveBase,
   driveUploadBase,
+  formsBase,
   gmailBase,
   sheetsBase,
   slidesBase,

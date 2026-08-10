@@ -21,6 +21,8 @@ export const SLIDES_API_BASE = 'https://slides.googleapis.com/v1'
 export const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4'
 export const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1'
 export const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
+export const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
+export const FORMS_API_BASE = 'https://forms.googleapis.com/v1'
 export const TOKEN_BUFFER_SECONDS = 300
 
 export function tokenUrl(config: GoogleConfig): string {
@@ -55,6 +57,16 @@ export function sheetsBase(tokenManager: TokenManager): string {
 export function gmailBase(tokenManager: TokenManager): string {
   const base = tokenManager.config.apiBase
   return base !== undefined ? `${base}/gmail/v1` : GMAIL_API_BASE
+}
+
+export function calendarBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/calendar/v3` : CALENDAR_API_BASE
+}
+
+export function formsBase(tokenManager: TokenManager): string {
+  const base = tokenManager.config.apiBase
+  return base !== undefined ? `${base}/v1` : FORMS_API_BASE
 }
 
 export class GoogleApiError extends Error {

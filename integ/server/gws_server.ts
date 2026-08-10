@@ -60,6 +60,7 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 const SLIDE_MIME = 'application/vnd.google-apps.presentation'
+const FORM_MIME = 'application/vnd.google-apps.form'
 const OWNER = { displayName: 'Integ User', emailAddress: 'integ@example.com', me: true }
 
 // The grid a new spreadsheet gets, and the pixel sizes the live API
@@ -150,6 +151,57 @@ interface GmailLabel {
 
 const SYSTEM_LABELS = ['INBOX', 'SENT', 'UNREAD', 'TRASH']
 
+// A timed event carries dateTime (RFC3339, offset mandatory) and may name its
+// own IANA zone; an all-day event carries a floating `date` and no zone at all.
+interface EventTime {
+  date?: string
+  dateTime?: string
+  timeZone?: string
+}
+
+interface CalendarEvent {
+  id: string
+  status: string
+  summary?: string
+  description?: string
+  location?: string
+  start: EventTime
+  end: EventTime
+  attendees?: Record<string, unknown>[]
+  created: string
+  updated: string
+}
+
+interface CalendarEntry {
+  id: string
+  summary: string
+  timeZone: string
+  accessRole: string
+  primary?: boolean
+  hidden?: boolean
+}
+
+interface FormItem {
+  itemId: string
+  title?: string
+  questionItem?: Record<string, unknown>
+}
+
+interface FormDoc {
+  formId: string
+  title: string
+  documentTitle: string
+  description?: string
+  items: FormItem[]
+  responses: Record<string, unknown>[]
+  revision: number
+}
+
+// Non-UTC on purpose: a UTC default would hide exactly the day-bucketing
+// bugs this mock exists to catch. /reset can pin a different one.
+const DEFAULT_CALENDAR_TZ = 'Asia/Hong_Kong'
+const PRIMARY_CALENDAR_ID = 'integ@example.com'
+
 class GwsState {
   files = new Map<string, DriveItem>()
   drives = new Map<string, { id: string; name: string }>()
@@ -158,6 +210,9 @@ class GwsState {
   presentations = new Map<string, Presentation>()
   messages = new Map<string, GmailMessage>()
   labels = new Map<string, GmailLabel>()
+  calendars = new Map<string, CalendarEntry>()
+  events = new Map<string, Map<string, CalendarEvent>>()
+  forms = new Map<string, FormDoc>()
   private counters = new Map<string, number>()
   private ticks = 0
   // Frozen at construction (i.e. per /reset) so find -mtime windows
@@ -167,15 +222,32 @@ class GwsState {
   // gslides date prefixes, gmail date dirs) need fully baked-in listings.
   private readonly baseMs: number
 
-  constructor(epoch?: string) {
+  constructor(epoch?: string, calendarTz?: string) {
     this.baseMs = epoch === undefined ? Date.now() : Date.parse(epoch)
     for (const id of SYSTEM_LABELS) this.labels.set(id, { id, name: id, type: 'system' })
+    this.calendars.set(PRIMARY_CALENDAR_ID, {
+      id: PRIMARY_CALENDAR_ID,
+      summary: 'Integ User',
+      timeZone: calendarTz ?? DEFAULT_CALENDAR_TZ,
+      accessRole: 'owner',
+      primary: true,
+    })
+    this.events.set(PRIMARY_CALENDAR_ID, new Map())
   }
 
   nextId(kind: string): string {
     const n = (this.counters.get(kind) ?? 0) + 1
     this.counters.set(kind, n)
     return `${kind}${String(n).padStart(4, '0')}`
+  }
+
+  // Real Google event ids are 26 chars of base32hex (0-9a-v); filenames on a
+  // gcal mount embed them, so the mock must produce the real shape, not a
+  // short counter. Deterministic so integ truth files stay stable.
+  nextEventId(): string {
+    const n = (this.counters.get('event') ?? 0) + 1
+    this.counters.set('event', n)
+    return `evt${String(n).padStart(23, '0')}`
   }
 
   nowMs(): number {
@@ -1709,13 +1781,24 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     return [200, { access_token: 'gws-integ-token', expires_in: 3600, token_type: 'Bearer' }]
   }
   if (method === 'POST' && path === '/reset') {
-    const body = ctx.body.length > 0 ? (json(ctx) as { epoch?: string }) : {}
-    state = new GwsState(body.epoch)
+    const body =
+      ctx.body.length > 0 ? (json(ctx) as { epoch?: string; calendarTimeZone?: string }) : {}
+    state = new GwsState(body.epoch, body.calendarTimeZone)
     return [200, { ok: true }]
   }
 
   if (path.startsWith('/gmail/v1/')) {
     const handled = routeGmail(ctx)
+    if (handled !== null) return handled
+  }
+
+  if (path.startsWith('/calendar/v3/')) {
+    const handled = routeCalendar(ctx)
+    if (handled !== null) return handled
+  }
+
+  if (path.startsWith('/v1/forms')) {
+    const handled = routeForms(ctx)
     if (handled !== null) return handled
   }
 
@@ -2171,6 +2254,386 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   }
 
   return googleError(404, `Unknown route: ${method} ${path}`, 'NOT_FOUND')
+}
+
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(instant))
+  const get = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? '0')
+  const asUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour') % 24,
+    get('minute'),
+    get('second'),
+  )
+  return asUtc - instant
+}
+
+// Midnight local to `timeZone` on a floating date, as an absolute instant.
+// Two passes because the offset itself depends on the instant: on a DST
+// boundary the first guess lands in the wrong offset and corrects on retry.
+function zonedMidnight(date: string, timeZone: string): number {
+  const [y, mo, d] = date.split('-').map(Number)
+  const guess = Date.UTC(y as number, (mo as number) - 1, d as number)
+  const once = guess - zoneOffsetMs(guess, timeZone)
+  return guess - zoneOffsetMs(once, timeZone)
+}
+
+function eventStartMs(ev: CalendarEvent, tz: string): number {
+  if (ev.start.dateTime !== undefined) return Date.parse(ev.start.dateTime)
+  return zonedMidnight(ev.start.date as string, tz)
+}
+
+// An all-day event's end.date is EXCLUSIVE, so a single-day event spans
+// start=D, end=D+1 and its instant end is midnight opening the next day.
+function eventEndMs(ev: CalendarEvent, tz: string): number {
+  if (ev.end.dateTime !== undefined) return Date.parse(ev.end.dateTime)
+  if (ev.end.date !== undefined) return zonedMidnight(ev.end.date, tz)
+  return eventStartMs(ev, tz)
+}
+
+function calendarOr404(id: string): CalendarEntry | null {
+  const decoded = decodeURIComponent(id)
+  const key = decoded === 'primary' ? PRIMARY_CALENDAR_ID : decoded
+  return state.calendars.get(key) ?? null
+}
+
+function eventsOf(calendarId: string): Map<string, CalendarEvent> {
+  let bucket = state.events.get(calendarId)
+  if (bucket === undefined) {
+    bucket = new Map()
+    state.events.set(calendarId, bucket)
+  }
+  return bucket
+}
+
+function fmtEvent(cal: CalendarEntry, ev: CalendarEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    kind: 'calendar#event',
+    id: ev.id,
+    status: ev.status,
+    start: ev.start,
+    end: ev.end,
+    created: ev.created,
+    updated: ev.updated,
+    iCalUID: `${ev.id}@google.com`,
+    htmlLink: `https://www.google.com/calendar/event?eid=${ev.id}`,
+  }
+  // freeBusyReader sees availability only: no summary, description or
+  // location ever reaches the caller, which is what makes a day directory
+  // on such a calendar render opaque busy blocks.
+  if (cal.accessRole !== 'freeBusyReader') {
+    if (ev.summary !== undefined) out.summary = ev.summary
+    if (ev.description !== undefined) out.description = ev.description
+    if (ev.location !== undefined) out.location = ev.location
+    if (ev.attendees !== undefined) out.attendees = ev.attendees
+  }
+  return out
+}
+
+function matchesQ(ev: CalendarEvent, q: string): boolean {
+  const needle = q.toLowerCase()
+  const hay = [ev.summary, ev.description, ev.location].filter((v) => v !== undefined)
+  return hay.some((v) => (v as string).toLowerCase().includes(needle))
+}
+
+function listCalendarEvents(cal: CalendarEntry, query: URLSearchParams): [number, object] {
+  const tz = query.get('timeZone') ?? cal.timeZone
+  const showDeleted = query.get('showDeleted') === 'true'
+  const q = query.get('q')
+  const timeMin = query.get('timeMin')
+  const timeMax = query.get('timeMax')
+  let rows = [...eventsOf(cal.id).values()]
+  if (!showDeleted) rows = rows.filter((ev) => ev.status !== 'cancelled')
+  // timeMin is a lower bound on the event's END and timeMax an upper bound on
+  // its START, both exclusive: the pair is an OVERLAP query, not containment,
+  // so a multi-day or midnight-crossing event is returned by every day window
+  // it touches.
+  if (timeMin !== null) {
+    const bound = Date.parse(timeMin)
+    rows = rows.filter((ev) => eventEndMs(ev, cal.timeZone) > bound)
+  }
+  if (timeMax !== null) {
+    const bound = Date.parse(timeMax)
+    rows = rows.filter((ev) => eventStartMs(ev, cal.timeZone) < bound)
+  }
+  if (q !== null) rows = rows.filter((ev) => matchesQ(ev, q))
+  if (query.get('orderBy') === 'startTime') {
+    rows.sort((a, b) => eventStartMs(a, cal.timeZone) - eventStartMs(b, cal.timeZone))
+  }
+  const max = Number(query.get('maxResults') ?? '250')
+  const start = Number(query.get('pageToken') ?? '0')
+  const page = rows.slice(start, start + max)
+  const out: Record<string, unknown> = {
+    kind: 'calendar#events',
+    summary: cal.summary,
+    timeZone: tz,
+    accessRole: cal.accessRole,
+    items: page.map((ev) => fmtEvent(cal, ev)),
+  }
+  if (start + max < rows.length) out.nextPageToken = String(start + max)
+  return [200, out]
+}
+
+function readEventTimes(
+  body: Record<string, unknown>,
+  fallback?: CalendarEvent,
+): { start: EventTime; end: EventTime } | null {
+  const start = (body.start as EventTime | undefined) ?? fallback?.start
+  const end = (body.end as EventTime | undefined) ?? fallback?.end
+  if (start === undefined || end === undefined) return null
+  for (const t of [start, end]) {
+    if (t.date === undefined && t.dateTime === undefined) return null
+  }
+  return { start, end }
+}
+
+function routeCalendar(ctx: Ctx): [number, object | Buffer | null, string?] | null {
+  const { method, path, query } = ctx
+  const base = '/calendar/v3'
+
+  if (path === `${base}/users/me/calendarList` && method === 'GET') {
+    const showHidden = query.get('showHidden') === 'true'
+    const items = [...state.calendars.values()].filter((c) => showHidden || c.hidden !== true)
+    return [
+      200,
+      {
+        kind: 'calendar#calendarList',
+        items: items.map((c) => ({
+          kind: 'calendar#calendarListEntry',
+          id: c.id,
+          summary: c.summary,
+          timeZone: c.timeZone,
+          accessRole: c.accessRole,
+          ...(c.primary === true ? { primary: true } : {}),
+        })),
+      },
+    ]
+  }
+
+  let m = new RegExp(`^${base}/calendars/([^/]+)$`).exec(path)
+  if (m !== null && method === 'GET') {
+    const cal = calendarOr404(m[1] as string)
+    if (cal === null) return NOT_FOUND
+    return [
+      200,
+      { kind: 'calendar#calendar', id: cal.id, summary: cal.summary, timeZone: cal.timeZone },
+    ]
+  }
+
+  m = new RegExp(`^${base}/calendars/([^/]+)/events$`).exec(path)
+  if (m !== null) {
+    const cal = calendarOr404(m[1] as string)
+    if (cal === null) return NOT_FOUND
+    if (method === 'GET') return listCalendarEvents(cal, query)
+    if (method === 'POST') {
+      if (cal.accessRole !== 'owner' && cal.accessRole !== 'writer') {
+        return googleError(403, 'You need to have writer access.', 'PERMISSION_DENIED')
+      }
+      const body = json(ctx)
+      const times = readEventTimes(body)
+      if (times === null) {
+        return googleError(400, 'Missing end time.', 'INVALID_ARGUMENT')
+      }
+      const now = state.now()
+      const ev: CalendarEvent = {
+        id: state.nextEventId(),
+        status: 'confirmed',
+        summary: body.summary as string | undefined,
+        description: body.description as string | undefined,
+        location: body.location as string | undefined,
+        attendees: body.attendees as Record<string, unknown>[] | undefined,
+        start: times.start,
+        end: times.end,
+        created: now,
+        updated: now,
+      }
+      eventsOf(cal.id).set(ev.id, ev)
+      return [200, fmtEvent(cal, ev)]
+    }
+  }
+
+  m = new RegExp(`^${base}/calendars/([^/]+)/events/([^/]+)$`).exec(path)
+  if (m !== null) {
+    const cal = calendarOr404(m[1] as string)
+    if (cal === null) return NOT_FOUND
+    const eventId = decodeURIComponent(m[2] as string)
+    const bucket = eventsOf(cal.id)
+    const ev = bucket.get(eventId)
+    if (ev === undefined) {
+      return googleError(404, 'Not Found', 'NOT_FOUND')
+    }
+    if (method === 'GET') return [200, fmtEvent(cal, ev)]
+    if (cal.accessRole !== 'owner' && cal.accessRole !== 'writer') {
+      return googleError(403, 'You need to have writer access.', 'PERMISSION_DENIED')
+    }
+    if (method === 'PATCH') {
+      const body = json(ctx)
+      const times = readEventTimes(body, ev)
+      if (times === null) return googleError(400, 'Missing end time.', 'INVALID_ARGUMENT')
+      const next: CalendarEvent = {
+        ...ev,
+        summary: (body.summary as string | undefined) ?? ev.summary,
+        description: (body.description as string | undefined) ?? ev.description,
+        location: (body.location as string | undefined) ?? ev.location,
+        start: times.start,
+        end: times.end,
+        updated: state.now(),
+      }
+      bucket.set(eventId, next)
+      return [200, fmtEvent(cal, next)]
+    }
+    if (method === 'DELETE') {
+      bucket.delete(eventId)
+      return [204, null]
+    }
+  }
+
+  if (path === `${base}/freeBusy` && method === 'POST') {
+    const body = json(ctx)
+    const timeMin = String(body.timeMin ?? '')
+    const timeMax = String(body.timeMax ?? '')
+    const lo = Date.parse(timeMin)
+    const hi = Date.parse(timeMax)
+    const items = (body.items as { id?: string }[] | undefined) ?? []
+    const calendars: Record<string, unknown> = {}
+    for (const item of items) {
+      const cal = calendarOr404(String(item.id ?? ''))
+      if (cal === null) {
+        calendars[String(item.id ?? '')] = {
+          errors: [{ domain: 'global', reason: 'notFound' }],
+        }
+        continue
+      }
+      const busy = [...eventsOf(cal.id).values()]
+        .filter((ev) => ev.status !== 'cancelled')
+        .filter(
+          (ev) =>
+            eventEndMs(ev, cal.timeZone) > lo && eventStartMs(ev, cal.timeZone) < hi,
+        )
+        .sort((a, b) => eventStartMs(a, cal.timeZone) - eventStartMs(b, cal.timeZone))
+        .map((ev) => ({
+          start: new Date(eventStartMs(ev, cal.timeZone)).toISOString(),
+          end: new Date(eventEndMs(ev, cal.timeZone)).toISOString(),
+        }))
+      calendars[String(item.id ?? '')] = { busy }
+    }
+    return [200, { kind: 'calendar#freeBusy', timeMin, timeMax, calendars }]
+  }
+
+  return null
+}
+
+function fmtForm(form: FormDoc): Record<string, unknown> {
+  return {
+    formId: form.formId,
+    info: {
+      title: form.title,
+      documentTitle: form.documentTitle,
+      ...(form.description === undefined ? {} : { description: form.description }),
+    },
+    items: form.items,
+    revisionId: String(form.revision),
+    responderUri: `https://docs.google.com/forms/d/e/${form.formId}/viewform`,
+  }
+}
+
+function applyFormRequest(form: FormDoc, req: Record<string, unknown>): void {
+  const createItem = req.createItem as
+    | { item?: Record<string, unknown>; location?: { index?: number } }
+    | undefined
+  if (createItem?.item !== undefined) {
+    const item: FormItem = {
+      itemId: state.nextId('item'),
+      ...(createItem.item as Omit<FormItem, 'itemId'>),
+    }
+    const at = createItem.location?.index ?? form.items.length
+    form.items.splice(at, 0, item)
+    return
+  }
+  const updateInfo = req.updateFormInfo as
+    | { info?: { title?: string; description?: string } }
+    | undefined
+  if (updateInfo?.info !== undefined) {
+    if (updateInfo.info.title !== undefined) form.title = updateInfo.info.title
+    if (updateInfo.info.description !== undefined) form.description = updateInfo.info.description
+  }
+}
+
+function routeForms(ctx: Ctx): [number, object | Buffer | null, string?] | null {
+  const { method, path } = ctx
+
+  if (path === '/v1/forms' && method === 'POST') {
+    const body = json(ctx)
+    const info = (body.info as { title?: string; documentTitle?: string } | undefined) ?? {}
+    const title = info.title ?? 'Untitled form'
+    // Created through the Drive table on purpose: a form's formId IS its
+    // Drive file id (verified against real Google), which is the only way an
+    // agent can find an existing form, since the Forms API has no list method.
+    const item = createDriveItem(
+      info.documentTitle ?? title,
+      FORM_MIME,
+      [],
+      Buffer.alloc(0),
+      state.nextId('form'),
+    )
+    const form: FormDoc = {
+      formId: item.id,
+      title,
+      documentTitle: info.documentTitle ?? title,
+      items: [],
+      responses: [],
+      revision: 1,
+    }
+    state.forms.set(form.formId, form)
+    return [200, fmtForm(form)]
+  }
+
+  let m = /^\/v1\/forms\/([^/:]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const form = state.forms.get(m[1] as string)
+    if (form === undefined) return NOT_FOUND
+    return [200, fmtForm(form)]
+  }
+
+  m = /^\/v1\/forms\/([^/:]+):batchUpdate$/.exec(path)
+  if (m !== null && method === 'POST') {
+    const form = state.forms.get(m[1] as string)
+    if (form === undefined) return NOT_FOUND
+    const body = json(ctx)
+    const requests = (body.requests as Record<string, unknown>[] | undefined) ?? []
+    for (const req of requests) applyFormRequest(form, req)
+    form.revision += 1
+    touchNative(form.formId)
+    return [200, { form: fmtForm(form), replies: requests.map(() => ({})) }]
+  }
+
+  m = /^\/v1\/forms\/([^/:]+)\/responses$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const form = state.forms.get(m[1] as string)
+    if (form === undefined) return NOT_FOUND
+    return [200, { responses: form.responses }]
+  }
+
+  m = /^\/v1\/forms\/([^/:]+)\/responses\/([^/:]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const form = state.forms.get(m[1] as string)
+    const found = form?.responses.find((r) => r.responseId === m?.[2])
+    if (found === undefined) return NOT_FOUND
+    return [200, found]
+  }
+
+  return null
 }
 
 function rangeLabelFor(range: A1Range, requested: string): string {

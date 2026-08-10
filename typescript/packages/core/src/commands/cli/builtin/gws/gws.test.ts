@@ -69,6 +69,8 @@ describe('gws tree', () => {
       'sheets',
       'docs',
       'slides',
+      'calendar',
+      'forms',
       'gmail',
     ])
     expect(cliSpecFor('gws')).toBe(GWS)
@@ -108,6 +110,44 @@ describe('gws tree', () => {
     expect(leaf('docs', 'write').write).toBe(true)
     expect(leaf('drive', 'files', 'list').write).toBe(false)
     expect(leaf('drive', 'files', 'delete').write).toBe(true)
+  })
+
+  it('nests calendar passthroughs by discovery resource', () => {
+    expect(leaf('calendar').subcommands.map((v) => v.name)).toEqual([
+      'calendarList',
+      'calendars',
+      'events',
+      'freebusy',
+    ])
+    expect(leaf('calendar', 'events').subcommands.map((v) => v.name)).toEqual([
+      'list',
+      'get',
+      'insert',
+      'patch',
+      'delete',
+    ])
+    expect(leaf('calendar', 'events', 'list').write).toBe(false)
+    expect(leaf('calendar', 'events', 'insert').write).toBe(true)
+    expect(leaf('calendar', 'events', 'delete').write).toBe(true)
+    // freebusy.query is a POST that mutates nothing, but write follows the
+    // HTTP verb everywhere else in the tree and a second rule would be worse.
+    expect(leaf('calendar', 'freebusy', 'query').write).toBe(true)
+  })
+
+  it('nests forms passthroughs by discovery resource', () => {
+    expect(leaf('forms').subcommands.map((v) => v.name)).toEqual(['forms'])
+    expect(leaf('forms', 'forms').subcommands.map((v) => v.name)).toEqual([
+      'create',
+      'get',
+      'batchUpdate',
+      'responses',
+    ])
+    expect(leaf('forms', 'forms', 'responses').subcommands.map((v) => v.name)).toEqual([
+      'list',
+      'get',
+    ])
+    expect(leaf('forms', 'forms', 'get').write).toBe(false)
+    expect(leaf('forms', 'forms', 'create').write).toBe(true)
   })
 
   it('accepts and preserves a refreshFn callback at install time', () => {

@@ -15,14 +15,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   DOCS_API_BASE,
+  CALENDAR_API_BASE,
   DRIVE_API_BASE,
+  FORMS_API_BASE,
   DRIVE_UPLOAD_BASE,
   SHEETS_API_BASE,
   SLIDES_API_BASE,
   TOKEN_URL,
   TokenManager,
   docsBase,
+  calendarBase,
   driveBase,
+  formsBase,
   driveUploadBase,
   refreshAccessToken,
   sheetsBase,
@@ -145,6 +149,8 @@ describe('api base helpers', () => {
     expect(docsBase(tm)).toBe(DOCS_API_BASE)
     expect(slidesBase(tm)).toBe(SLIDES_API_BASE)
     expect(sheetsBase(tm)).toBe(SHEETS_API_BASE)
+    expect(calendarBase(tm)).toBe(CALENDAR_API_BASE)
+    expect(formsBase(tm)).toBe(FORMS_API_BASE)
     expect(tokenUrl(tm.config)).toBe(TOKEN_URL)
   })
 
@@ -159,6 +165,8 @@ describe('api base helpers', () => {
     expect(docsBase(tm)).toBe('http://127.0.0.1:19999/v1')
     expect(slidesBase(tm)).toBe('http://127.0.0.1:19999/v1')
     expect(sheetsBase(tm)).toBe('http://127.0.0.1:19999/v4')
+    expect(calendarBase(tm)).toBe('http://127.0.0.1:19999/calendar/v3')
+    expect(formsBase(tm)).toBe('http://127.0.0.1:19999/v1')
     expect(tokenUrl(tm.config)).toBe('http://127.0.0.1:19999/token')
   })
 })

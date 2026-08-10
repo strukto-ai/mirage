@@ -28,6 +28,8 @@ DOCS_API_BASE = "https://docs.googleapis.com/v1"
 SLIDES_API_BASE = "https://slides.googleapis.com/v1"
 SHEETS_API_BASE = "https://sheets.googleapis.com/v4"
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1"
+CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+FORMS_API_BASE = "https://forms.googleapis.com/v1"
 DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3"
 TOKEN_BUFFER_SECONDS = 300
 
@@ -117,6 +119,16 @@ def sheets_base(token_manager: "TokenManager") -> str:
 def gmail_base(token_manager: "TokenManager") -> str:
     base = token_manager.config.api_base
     return f"{base}/gmail/v1" if base else GMAIL_API_BASE
+
+
+def calendar_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/calendar/v3" if base else CALENDAR_API_BASE
+
+
+def forms_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/v1" if base else FORMS_API_BASE
 
 
 async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:

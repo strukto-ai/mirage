@@ -14,8 +14,10 @@
 
 import type { TokenManager } from '../../../../core/google/_client.ts'
 import {
+  calendarBase,
   docsBase,
   driveBase,
+  formsBase,
   gmailBase,
   sheetsBase,
   slidesBase,
@@ -28,7 +30,7 @@ import {
 // (sheets read/write/append, docs write, the gmail helpers) stay
 // hand-written beside them in the tree.
 
-export type GwsService = 'drive' | 'docs' | 'sheets' | 'slides' | 'gmail'
+export type GwsService = 'drive' | 'docs' | 'sheets' | 'slides' | 'gmail' | 'calendar' | 'forms'
 
 export interface GwsMethod {
   service: GwsService
@@ -231,6 +233,104 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     http: 'GET',
     path: '/users/{userId}/messages/{messageId}/attachments/{id}',
   },
+  {
+    service: 'calendar',
+    resource: 'calendarList',
+    method: 'list',
+    http: 'GET',
+    path: '/users/me/calendarList',
+  },
+  {
+    service: 'calendar',
+    resource: 'calendars',
+    method: 'get',
+    http: 'GET',
+    path: '/calendars/{calendarId}',
+  },
+  {
+    service: 'calendar',
+    resource: 'events',
+    method: 'list',
+    http: 'GET',
+    path: '/calendars/{calendarId}/events',
+  },
+  {
+    service: 'calendar',
+    resource: 'events',
+    method: 'get',
+    http: 'GET',
+    path: '/calendars/{calendarId}/events/{eventId}',
+  },
+  {
+    service: 'calendar',
+    resource: 'events',
+    method: 'insert',
+    http: 'POST',
+    path: '/calendars/{calendarId}/events',
+    needsBody: true,
+  },
+  {
+    service: 'calendar',
+    resource: 'events',
+    method: 'patch',
+    http: 'PATCH',
+    path: '/calendars/{calendarId}/events/{eventId}',
+    needsBody: true,
+  },
+  {
+    service: 'calendar',
+    resource: 'events',
+    method: 'delete',
+    http: 'DELETE',
+    path: '/calendars/{calendarId}/events/{eventId}',
+  },
+  {
+    service: 'calendar',
+    resource: 'freebusy',
+    method: 'query',
+    http: 'POST',
+    path: '/freeBusy',
+    needsBody: true,
+  },
+  {
+    service: 'forms',
+    resource: 'forms',
+    method: 'create',
+    http: 'POST',
+    path: '/forms',
+    needsBody: true,
+    placement: 'relocate',
+    idField: 'formId',
+  },
+  {
+    service: 'forms',
+    resource: 'forms',
+    method: 'get',
+    http: 'GET',
+    path: '/forms/{formId}',
+  },
+  {
+    service: 'forms',
+    resource: 'forms',
+    method: 'batchUpdate',
+    http: 'POST',
+    path: '/forms/{formId}:batchUpdate',
+    needsBody: true,
+  },
+  {
+    service: 'forms',
+    resource: 'forms responses',
+    method: 'list',
+    http: 'GET',
+    path: '/forms/{formId}/responses',
+  },
+  {
+    service: 'forms',
+    resource: 'forms responses',
+    method: 'get',
+    http: 'GET',
+    path: '/forms/{formId}/responses/{responseId}',
+  },
 ]
 
 export function gwsMethodDescription(m: GwsMethod): string {
@@ -243,4 +343,6 @@ export const SERVICE_BASES: Record<GwsService, (tm: TokenManager) => string> = {
   sheets: sheetsBase,
   slides: slidesBase,
   gmail: gmailBase,
+  calendar: calendarBase,
+  forms: formsBase,
 }

@@ -109,6 +109,16 @@ GWS = CLISpec(
             subcommands=api_groups("slides"),
         ),
         CLISpec(
+            name="calendar",
+            description="Google calendar API commands",
+            subcommands=api_groups("calendar"),
+        ),
+        CLISpec(
+            name="forms",
+            description="Google forms API commands",
+            subcommands=api_groups("forms"),
+        ),
+        CLISpec(
             name="gmail",
             description="Google gmail API commands",
             subcommands=api_groups("gmail") + (

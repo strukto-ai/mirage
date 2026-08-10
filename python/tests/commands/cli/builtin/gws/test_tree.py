@@ -32,8 +32,9 @@ def leaf(*path: str):
 def test_tree_lists_every_service():
     assert GWS.name == "gws"
     assert GWS.config_model is GoogleConfig
-    assert [g.name for g in GWS.subcommands
-            ] == ["drive", "sheets", "docs", "slides", "gmail"]
+    assert [g.name for g in GWS.subcommands] == [
+        "drive", "sheets", "docs", "slides", "calendar", "forms", "gmail"
+    ]
 
 
 def test_passthroughs_nest_by_discovery_resource():
@@ -60,6 +61,29 @@ def test_writes_follow_http_semantics():
     assert leaf("drive", "files", "delete").write
     assert leaf("sheets", "spreadsheets", "batchUpdate").write
     assert not leaf("gmail", "triage").write
+
+
+def test_calendar_passthroughs_nest_by_discovery_resource():
+    assert [v.name for v in leaf("calendar").subcommands
+            ] == ["calendarList", "calendars", "events", "freebusy"]
+    assert [v.name for v in leaf("calendar", "events").subcommands
+            ] == ["list", "get", "insert", "patch", "delete"]
+    assert not leaf("calendar", "events", "list").write
+    assert leaf("calendar", "events", "insert").write
+    assert leaf("calendar", "events", "delete").write
+    # freebusy.query is a POST that mutates nothing, but write follows the
+    # HTTP verb everywhere else in the tree and a second rule would be worse.
+    assert leaf("calendar", "freebusy", "query").write
+
+
+def test_forms_passthroughs_nest_by_discovery_resource():
+    assert [v.name for v in leaf("forms").subcommands] == ["forms"]
+    assert [v.name for v in leaf("forms", "forms").subcommands
+            ] == ["create", "get", "batchUpdate", "responses"]
+    assert [v.name for v in leaf("forms", "forms", "responses").subcommands
+            ] == ["list", "get"]
+    assert not leaf("forms", "forms", "get").write
+    assert leaf("forms", "forms", "create").write
 
 
 @pytest.mark.asyncio
