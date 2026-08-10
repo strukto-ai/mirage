@@ -17,7 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
-from mirage.utils.ranges import slice_window
+from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 
 
 def _make_read(fn: OpFn) -> OpFn:
@@ -45,6 +45,12 @@ def _make_ranged_read(table: OpsTable) -> OpFn:
     A zero-length read is answered here rather than sent anywhere: no
     store can express an empty range, and the answer is known.
 
+    A window starting at or past EOF is the one case where the two paths
+    do not agree on their own: slicing yields empty, the POSIX answer,
+    while an HTTP store refuses with 416. Normalizing here rather than in
+    each reader keeps the op's contract one thing, and keeps a backend
+    from becoming the odd one out the day it grows a native range.
+
     Args:
         table (OpsTable): the backend's op table.
     """
@@ -61,7 +67,12 @@ def _make_ranged_read(table: OpsTable) -> OpFn:
         whole = not offset and size is None
         native = table.read_range
         if native is not None and not whole:
-            return await native(accessor, path, index, offset, size)
+            try:
+                return await native(accessor, path, index, offset, size)
+            except Exception as exc:
+                if not is_unsatisfiable_range(exc):
+                    raise
+                return b""
         data = await table.read_bytes(accessor, path, index)
         if whole:
             return data

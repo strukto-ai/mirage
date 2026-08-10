@@ -36,14 +36,17 @@ async def tee(
     if not paths:
         raise ValueError("tee: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_tee(paths,
-                             texts,
-                             read_stream=bound_op(ops.read_stream, accessor,
-                                                  index),
-                             write_bytes=partial(ops.require(Operation.WRITE),
-                                                 accessor),
-                             stdin=stdin,
-                             flags=flags)
+    # A backend that can append natively does; the rest fall back to the
+    # read-modify-write inside the generic.
+    append = ops.append
+    return await generic_tee(
+        paths,
+        texts,
+        read_stream=bound_op(ops.read_stream, accessor, index),
+        write_bytes=partial(ops.require(Operation.WRITE), accessor),
+        append_bytes=(None if append is None else partial(append, accessor)),
+        stdin=stdin,
+        flags=flags)
 
 
 BUILDER = Builder('tee',

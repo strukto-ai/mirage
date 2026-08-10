@@ -27,6 +27,7 @@ import {
   type MontySessionLike,
 } from './binding.ts'
 import { DEFAULT_PROG, EVAL_INTERRUPT_SECONDS, INCOMPLETE_MARKERS } from './constants.ts'
+import { unhonoredNotice, type InitFlags } from '../flags.ts'
 import { displayError } from './errors.ts'
 import { MirageOSAccess } from './osaccess.ts'
 import { MontyVFS } from './vfs.ts'
@@ -94,6 +95,10 @@ function toEvalValue(value: unknown): EvalValue {
  */
 export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'monty'
+  // No import system to resolve a module with, so `-m` has nothing to
+  // run; the refusal names this runtime rather than inventing a
+  // "No module named" that would imply a search happened.
+  override readonly runsModules = false
   readonly [EVALUATOR] = true as const
   private workspaceBridge: BridgeDispatchFn | null = null
   private vfs: MontyVFS | null = null
@@ -113,7 +118,29 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     }
   }
 
+  /**
+   * Run one program, reporting any switch this engine cannot honor.
+   *
+   * Monty implements a Python subset with no `compile`, no `warnings`
+   * and no `sys.path`, so the interpreter-init switches have nothing to
+   * act on here even though every real-CPython engine honors them. The
+   * notice rides on stderr and the program's own exit code stands.
+   *
+   * Args:
+   *   args: the execution request.
+   */
   async run(args: RunArgs): Promise<RunResult> {
+    const notice = unhonoredNotice((args.flags ?? {}) as InitFlags, this.name)
+    const result = await this.runOne(args)
+    if (notice.length === 0) return result
+    const stderr = result.stderr ?? new Uint8Array()
+    const merged = new Uint8Array(notice.length + stderr.length)
+    merged.set(notice, 0)
+    merged.set(stderr, notice.length)
+    return { ...result, stderr: merged }
+  }
+
+  private async runOne(args: RunArgs): Promise<RunResult> {
     const pool = await this.ensurePool()
     const session = await pool.checkout()
     // Monty executes on its own worker process, so the event loop stays

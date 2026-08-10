@@ -227,12 +227,26 @@ class Operand:
         required (bool): the line must supply this slot; one that does
             not is a usage error the parser reports, rather than
             something each leaf re-discovers and words its own way.
+        remainder (bool): every word from this slot on is gathered
+            verbatim, options included. This is argparse's
+            ``nargs=argparse.REMAINDER`` and POSIX's own option order:
+            the first operand ends option parsing, where GNU's default
+            permutes instead (``ls a -1`` reads ``-1`` as a flag,
+            ``POSIXLY_CORRECT=1 ls a -1`` reads it as a filename). Set
+            it for a command that dispatches to another program, which
+            is the case argparse documents it for: python3's script and
+            the words after it are the script's argv, so
+            ``python3 s.py --foo`` must hand ``--foo`` over untouched
+            while ``python3 -zz s.py`` must still refuse ``-zz`` as
+            python3's own. One switch cannot do both, which is why the
+            boundary has to be declared.
     """
     type: ValueType = "path"
     provided_by: tuple[str, ...] = ()
     text_when: tuple[str, ...] = ()
     name: str = ""
     required: bool = False
+    remainder: bool = False
 
 
 @dataclass(frozen=True)

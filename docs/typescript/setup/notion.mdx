@@ -54,9 +54,9 @@ await ws.execute('ls /notion/')
 
 ## Acting on Notion
 
-Acting on Notion (creating and editing pages, appending blocks,
-comments, search) goes through the [ntn CLI](/typescript/cli/ntn)
-when installed.
+Acting on Notion (creating, editing and trashing pages, querying data
+sources, and every route that has no typed verb) goes through the
+[ntn CLI](/typescript/cli/ntn) when installed.
 
 ## Layout
 
@@ -71,33 +71,40 @@ when installed.
   databases/
     <database-title>__<database-id>/
       database.json
-      <row-page-title>__<page-id>/
-        page.json
-        ...
+      <data-source-name>__<data-source-id>/
+        data_source.json
+        <row-page-title>__<page-id>/
+          page.json
+          ...
 ```
 
-`database.json` is the database's identity plus its typed column schema,
-with no rows inline; `ls` the database directory to enumerate row pages.
+Since the `2025-09-03` API generation a database is a container of **data
+sources**, and both the column schema and the rows live on the data
+source, so a row page sits one level deeper than the page tree.
+`database.json` is the container's identity plus the `data_sources` stubs
+that name the directories beneath it, and carries **no** `properties`.
 The shape is identical to the Python connector:
 
 ```json
 {
-  "database_id": "2c4d6a7f-5bf3-8036-bed2-d1c95826f76b",
-  "title": "Item",
-  "url": "https://www.notion.so/2c4d6a7f5bf38036bed2d1c95826f76b",
-  "created_time": "2025-12-09T23:36:00.000Z",
-  "last_edited_time": "2026-04-15T12:30:00.000Z",
+  "database_id": "eeee1111-2222-3333-4444-555566667777",
+  "title": "Tasks",
+  "url": "https://www.notion.so/eeee1111222233334444555566667777",
+  "created_time": "2026-01-01T00:00:00.000Z",
+  "last_edited_time": "2026-01-02T00:00:00.000Z",
   "parent": { "type": "workspace", "workspace": true },
   "archived": false,
   "is_inline": false,
-  "properties": {
-    "Name": { "id": "title", "type": "title", "title": {} },
-    "Number": { "id": "e%5BNQ", "type": "number", "number": { "format": "number" } },
-    "Date": { "id": "%3BgQq", "type": "date", "date": {} }
-  }
+  "data_sources": [
+    { "id": "d5000000-2222-3333-4444-555566667777", "name": "Tasks" }
+  ]
 }
 ```
 
+`data_source.json` holds the typed column schema under `properties`; `ls`
+the data source directory to enumerate row pages.
+
 A database row is itself a page: its `page.json` reports `parent_type` of
-`database_id`. For full `page.json` field details and supported edits see
+`data_source_id`, and its cell values ride in the same file under
+`properties`. For full `page.json` field details and supported edits see
 the [Python Notion docs](/python/resource/notion).

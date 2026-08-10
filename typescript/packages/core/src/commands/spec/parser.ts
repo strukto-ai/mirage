@@ -191,7 +191,7 @@ export function parseCommand(
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
   // flag never corrupts pattern/path classification.
-  const lenientDashOperands = cs.restKind !== null && cs.restKind !== 'path'
+  const lenientDashOperands = cs.restKind !== null && cs.restKind !== 'path' && !cs.remainder
   i = 0
   let endOfFlags = false
 
@@ -328,7 +328,9 @@ export function parseCommand(
           break
         }
       }
-      if (matchedValue) continue
+      if (matchedValue) {
+        continue
+      }
 
       if (cs.boolSpellings.has(tok)) {
         setBoolFlag(flags, cs, tok)
@@ -400,6 +402,10 @@ export function parseCommand(
     rawArgs.push(tok)
     rawIndices.push(origIndices[i] ?? -1)
     rawBases.push(base)
+    // The first operand ends option parsing outright under
+    // argparse's REMAINDER, so a script's own flags reach the script
+    // of being read as the interpreter's.
+    if (cs.remainder) endOfFlags = true
     i += 1
   }
 

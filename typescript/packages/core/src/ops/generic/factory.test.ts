@@ -240,6 +240,33 @@ describe('the read op and byte ranges', () => {
     expect(native).not.toHaveBeenCalled()
   })
 
+  it('reads a window past the end as empty, not as a 416', async () => {
+    // A POSIX read at or past EOF is short, not an error, and that is what the
+    // slice fallback gives. An HTTP store refuses instead, so wiring a native
+    // range used to change the answer for the same call; normalizing here keeps
+    // the op meaning one thing whichever path served it.
+    const refused = Object.assign(new Error('InvalidRange'), {
+      name: 'InvalidRange',
+      $metadata: { httpStatusCode: 416 },
+    })
+    const native = vi.fn(() => Promise.reject(refused))
+    const table = bytes(makeTable({ readRange: native }))
+    expect(await readOp(table).fn(ACCESSOR, PATH, [], { offset: 99, size: 2 })).toEqual(
+      new Uint8Array(0),
+    )
+    expect(native).toHaveBeenCalledOnce()
+  })
+
+  it('still propagates a range read that failed for a real reason', async () => {
+    const denied = Object.assign(new Error('AccessDenied'), {
+      $metadata: { httpStatusCode: 403 },
+    })
+    const table = bytes(makeTable({ readRange: vi.fn(() => Promise.reject(denied)) }))
+    await expect(readOp(table).fn(ACCESSOR, PATH, [], { offset: 1, size: 2 })).rejects.toThrow(
+      'AccessDenied',
+    )
+  })
+
   it('asks the backend nothing for a zero-length read', async () => {
     // No store can express an empty range, and the answer is known, so it is
     // served here rather than turned into a request that would either fetch the

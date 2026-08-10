@@ -144,12 +144,19 @@ async def query(
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(result)), IOResult()
 
-    # Columns are the schema's property names in alphabetical order,
-    # which is what the upstream CLI prints whatever order the API
-    # happens to report the schema in.
-    columns = sorted((data_source.get("properties") or {}).keys())
+    # Columns are the property names the returned rows actually carry, in
+    # alphabetical order, not the data source's whole schema. Upstream
+    # derives them from the page objects it got back, so a result set that
+    # does not cover the schema prints narrower: a row created from Markdown
+    # alone holds only its title column, and on its own it prints as
+    # `<id>\t<title>` rather than as one title among seven blanks.
+    rows = result.get("results") or []
+    columns = sorted(
+        {name
+         for row in rows
+         for name in (row.get("properties") or {})})
     lines: list[str] = []
-    for row in result.get("results") or []:
+    for row in rows:
         props = row.get("properties") or {}
         cells = [property_cell(props.get(name)) for name in columns]
         lines.append("\t".join([str(row.get("id", "")), *cells]) + "\n")

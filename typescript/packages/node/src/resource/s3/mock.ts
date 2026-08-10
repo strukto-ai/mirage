@@ -75,11 +75,30 @@ function notFound(): Error {
   return err
 }
 
+function invalidRange(): Error {
+  const err: Error & { name: string; $metadata?: { httpStatusCode: number } } = new Error(
+    'InvalidRange',
+  )
+  err.name = 'InvalidRange'
+  err.$metadata = { httpStatusCode: 416 }
+  return err
+}
+
+/**
+ * The slice a real ranged GET would return, refusals included.
+ *
+ * S3 answers 416 for a window starting at or past the end of a non-empty
+ * object. The mock used to slice regardless and hand back an empty array —
+ * which is the answer the ops layer produces only *after* normalizing that
+ * refusal, so agreeing with the fixed code for free left the normalization
+ * untested.
+ */
 function sliceRange(data: Uint8Array, rangeSpec: string | undefined): Uint8Array {
   if (!rangeSpec?.startsWith('bytes=')) return data
   const bounds = rangeSpec.slice(6).split('-', 2)
   const start = bounds[0] ? Number.parseInt(bounds[0], 10) : 0
   const end = bounds[1] ? Number.parseInt(bounds[1], 10) : data.byteLength - 1
+  if (data.byteLength > 0 && start >= data.byteLength) throw invalidRange()
   return data.slice(start, end + 1)
 }
 

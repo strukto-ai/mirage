@@ -14,7 +14,8 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
-import { isEnoent, modifiedTs } from '../../../core/generic/find.ts'
+import { modifiedTs } from '../../../core/generic/find.ts'
+import { isEnoent } from '../../../utils/errors.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'

@@ -1,4 +1,4 @@
-import type { CommandIO } from '@struktoai/mirage-core'
+import { type CommandIO, rangeOf } from '@struktoai/mirage-core'
 import type { NextcloudAccessor } from '../../../accessor/nextcloud.ts'
 import { SCOPE_ERROR } from '../../../core/nextcloud/constants.ts'
 import { copy } from '../../../core/nextcloud/copy.ts'
@@ -25,6 +25,7 @@ export const NEXTCLOUD_IO: CommandIO<NextcloudAccessor> = {
   maxGlobMatches: SCOPE_ERROR,
   readdir,
   readBytes: read,
+  readRange: rangeOf(read),
   readStream: stream,
   stat,
   isMounted: () => true,

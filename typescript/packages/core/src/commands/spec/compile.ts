@@ -86,6 +86,9 @@ export class CompiledSpec {
   readonly numericDest: string | null
   /** Kind of the rest operand. */
   readonly restKind: ValueType | null
+  // The rest operand gathers every word from the first operand on,
+  // options included (Operand.remainder, argparse nargs=REMAINDER).
+  readonly remainder: boolean
   // Canonical spelling of the option that re-bases the path operands
   // after it (CommandSpec.operandBase, tar's -C).
   readonly baseDest: string | null
@@ -114,6 +117,7 @@ export class CompiledSpec {
     numericDest: string | null
     restKind: ValueType | null
     baseDest: string | null
+    remainder: boolean
   }) {
     this.boolSpellings = fields.boolSpellings
     this.valueSpellings = fields.valueSpellings
@@ -138,6 +142,7 @@ export class CompiledSpec {
     this.numericDest = fields.numericDest
     this.restKind = fields.restKind
     this.baseDest = fields.baseDest
+    this.remainder = fields.remainder
   }
 
   /** Canonical spelling for a typed spelling. */
@@ -311,6 +316,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     numericDest,
     restKind: spec.rest !== null ? spec.rest.type : null,
     baseDest,
+    remainder: spec.rest?.remainder ?? false,
   })
   CACHE.set(spec, compiled)
   return compiled

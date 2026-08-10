@@ -153,7 +153,7 @@ export interface HttpNotionTransportOptions {
 }
 
 export interface RestCall {
-  method: 'GET' | 'POST' | 'PATCH' | 'PUT'
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   path: string
   query?: Record<string, unknown>
   /**
@@ -252,7 +252,11 @@ export class HttpNotionTransport implements NotionTransport {
         ...(call.headers ?? {}),
       },
     }
-    if (call.method !== 'GET') init.body = JSON.stringify(call.body ?? {})
+    // GET and DELETE carry no body: the only route DELETE exists on is
+    // /v1/blocks/{id}, whose whole payload is the id in the path.
+    if (call.method !== 'GET' && call.method !== 'DELETE') {
+      init.body = JSON.stringify(call.body ?? {})
+    }
     const res = await this.fetch(url, init)
     const data = (await res.json()) as Record<string, unknown>
     if (res.status >= 400) {

@@ -16,7 +16,7 @@ import { IOResult } from '../../../io/types.ts'
 import { PolicyDenied } from '../../../policy/index.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
-import { fsStrerror, isFsError, isMissingOp } from '../../../utils/errors.ts'
+import { fsStrerror, isEnoent, isFsError, isMissingOp } from '../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -236,10 +236,6 @@ function isReadOnlyError(err: unknown): boolean {
   // text happens to contain "read-only".
   if (err instanceof PolicyDenied) return false
   return err instanceof Error && err.message.includes('read-only')
-}
-
-function isEnoent(err: unknown): boolean {
-  return err instanceof Error && (err as { code?: string }).code === 'ENOENT'
 }
 
 interface SetAttrFields {

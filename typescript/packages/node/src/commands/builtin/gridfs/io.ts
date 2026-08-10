@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandIO } from '@struktoai/mirage-core'
+import { type CommandIO, rangeOf } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
 import { SCOPE_ERROR } from '../../../core/gridfs/constants.ts'
 import { copy as gridfsCopy } from '../../../core/gridfs/copy.ts'
@@ -35,6 +35,7 @@ import { write as gridfsWrite } from '../../../core/gridfs/write.ts'
 export const GRIDFS_IO: CommandIO<GridFSAccessor> = {
   readdir: gridfsReaddir,
   readBytes: gridfsRead,
+  readRange: rangeOf(gridfsRead),
   readStream: gridfsStream,
   stat: gridfsStat,
   isMounted: () => true,

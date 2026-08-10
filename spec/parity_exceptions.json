@@ -1,31 +1,81 @@
 {
-  "resource_expansions": {
-    "python": {
-      "hf_buckets": ["hf_buckets", "hf_datasets", "hf_models", "hf_spaces"]
+  "command_io": {
+    "box": {
+      "slots": "python range-reads; the typescript core read has no window argument."
+    },
+    "dropbox": {
+      "slots": "python range-reads; the typescript core read has no window argument."
+    },
+    "gdrive": {
+      "slots": "python range-reads; the typescript core read has no window argument."
+    },
+    "hf": {
+      "slots": "find is a slot in python and a bespoke command in typescript (see notion) \u2014 the same query, expressed at a different layer."
+    },
+    "notion": {
+      "slots": "find is a slot in python and a bespoke command in typescript (notion/find.ts). Both pass stat=None, so the -mtime behavior matches; only the layer differs."
+    },
+    "onedrive": {
+      "slots": "python range-reads; typescript has no core/onedrive/read.ts to add a window to."
+    },
+    "sharepoint": {
+      "slots": "python range-reads; typescript has no core/sharepoint/read.ts to add a window to."
+    },
+    "ssh": {
+      "slots": "python range-reads over SFTP; typescript's read is whole-file because of the ssh2 256 KiB packet cap."
     }
   },
-  "language_only_resources": {
-    "opfs": "Browser-only OPFS backend. Python has no browser runtime, so there is nothing to mirror."
-  },
-  "unconstructible_resources": {
+  "command_io_aliases": {
     "python": {
-      "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_resource entry."
-    },
-    "node": {
-      "history": "See python: the history view mount is workspace-internal."
-    },
-    "browser": {
-      "history": "See python: the history view mount is workspace-internal.",
-      "databricks_volume": "Registers commands in the browser bundle but has no browser registry factory. Both it and jaeger are pure HTTP, so the omission looks accidental rather than a runtime limit — confirm the intended browser scope before wiring them up.",
-      "jaeger": "Registers commands in the browser bundle but has no browser registry factory. See databricks_volume."
+      "hf_buckets": "hf"
     }
   },
   "commands": {
     "grep": {
       "by_resource": {
-        "github": ["has_provision"]
+        "github": [
+          "has_provision"
+        ]
       },
       "reason": "TypeScript has no github grep provision. Python's is a bespoke cost model that walks the index to sum matched bytes and read ops, and it reaches IndexCacheStore internals, so porting it needs its own change rather than riding along with the parity gate."
     }
+  },
+  "language_only_resources": {
+    "opfs": "Browser-only OPFS backend. Python has no browser runtime, so there is nothing to mirror."
+  },
+  "resource_capabilities": {
+    "github": {
+      "supports_snapshot": "TypeScript records the blob SHA as a snapshot fingerprint; python stamps the same SHA in core/github/stat.py but does not declare SUPPORTS_SNAPSHOT, so no drift check fires. Left to the snapshot redesign (#721) rather than flipped here, because turning it on changes what a python snapshot records."
+    },
+    "lancedb": {
+      "caches_reads": "TypeScript computes it per mount from the URI scheme (remote tables cache, local ones do not); python has no such branch and never caches. A value, not a table, so there is nothing to single-source."
+    }
+  },
+  "resource_expansions": {
+    "python": {
+      "hf_buckets": [
+        "hf_buckets",
+        "hf_datasets",
+        "hf_models",
+        "hf_spaces"
+      ]
+    }
+  },
+  "unconstructible_resources": {
+    "browser": {
+      "databricks_volume": "Registers commands in the browser bundle but has no browser registry factory. Both it and jaeger are pure HTTP, so the omission looks accidental rather than a runtime limit \u2014 confirm the intended browser scope before wiring them up.",
+      "history": "See python: the history view mount is workspace-internal.",
+      "jaeger": "Registers commands in the browser bundle but has no browser registry factory. See databricks_volume."
+    },
+    "node": {
+      "history": "See python: the history view mount is workspace-internal."
+    },
+    "python": {
+      "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_resource entry."
+    }
+  },
+  "variant_resource_facts": {
+    "capabilities": {},
+    "command_io": {}
   }
 }

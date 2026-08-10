@@ -50,3 +50,49 @@ export function rangeHeader(offset: number, size: number | null): string | null 
 export function sliceWindow(data: Uint8Array, offset: number, size: number | null): Uint8Array {
   return data.slice(offset, size === null ? undefined : offset + size)
 }
+
+// HTTP 416, and the spellings the stores put on it. S3 and its clones answer
+// `InvalidRange`, Azure/OneDrive `InvalidRange` too, and a bare WebDAV or
+// static host only sets the status line.
+const UNSATISFIABLE_CODES = new Set(['InvalidRange', 'RequestedRangeNotSatisfiable'])
+
+function errorFields(err: unknown): {
+  status: number | undefined
+  code: string | undefined
+  message: string
+} {
+  if (typeof err !== 'object' || err === null)
+    return { status: undefined, code: undefined, message: String(err) }
+  const e = err as {
+    $metadata?: { httpStatusCode?: number }
+    statusCode?: number
+    status?: number
+    Code?: string
+    code?: string
+    name?: string
+    message?: string
+  }
+  const status = e.$metadata?.httpStatusCode ?? e.statusCode ?? e.status
+  return {
+    status: typeof status === 'number' ? status : undefined,
+    code: e.Code ?? e.code ?? e.name,
+    message: e.message ?? '',
+  }
+}
+
+/**
+ * Whether an error means "that byte window starts past the end of the object".
+ *
+ * A POSIX read at or past EOF returns zero bytes; an HTTP store answers 416
+ * instead, and every backend spells the refusal differently. The predicate
+ * lives here so the ops factory can turn all of them into the empty read the
+ * caller expects, rather than each backend re-deciding.
+ *
+ * @param err whatever the backend reader threw
+ */
+export function isUnsatisfiableRange(err: unknown): boolean {
+  const { status, code, message } = errorFields(err)
+  if (status === 416) return true
+  if (code !== undefined && UNSATISFIABLE_CODES.has(code)) return true
+  return /range not satisfiable/i.test(message)
+}

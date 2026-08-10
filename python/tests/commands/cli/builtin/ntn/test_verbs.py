@@ -279,6 +279,50 @@ async def test_datasources_query_sorts_columns_by_name(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_datasources_query_takes_columns_from_the_rows(monkeypatch):
+    # Upstream derives the columns from the page objects it got back, not
+    # from the data source's schema, so a result set that does not cover
+    # the schema prints narrower. A row created from Markdown alone holds
+    # only its title column, and on its own it prints as `<id>\t<title>`
+    # rather than as one title among blanks.
+    async def fake_source(config, source_id):
+        return {
+            "id": source_id,
+            "properties": {
+                "Priority": {
+                    "type": "number"
+                },
+                "Name": {
+                    "type": "title"
+                },
+            },
+        }
+
+    async def fake_query(config, source_id, body):
+        return {
+            "results": [{
+                "id": "R2",
+                "properties": {
+                    "Name": {
+                        "type": "title",
+                        "title": [{
+                            "plain_text": "Row page"
+                        }],
+                    },
+                },
+            }],
+            "has_more":
+            False,
+        }
+
+    monkeypatch.setitem(query.__globals__, "get_data_source", fake_source)
+    monkeypatch.setitem(query.__globals__, "query_data_source_page",
+                        fake_query)
+    out, _io = await query(CLIInvocation(CONFIG, texts=("S1", ), flags={}))
+    assert await _text(out) == "R2\tRow page\n"
+
+
+@pytest.mark.asyncio
 async def test_datasources_query_reports_the_next_cursor(monkeypatch):
 
     async def fake_source(config, source_id):

@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.constants import (OLD_OPTION_EXIT, USAGE_EXIT,
+from mirage.commands.spec.constants import (OLD_OPTION_EXIT, PYTHON_NAMES,
+                                            PYTHON_USAGE, USAGE_EXIT,
                                             USAGE_HINT_PREFIX)
 from mirage.commands.spec.types import CommandName
 
@@ -25,6 +26,18 @@ def usage_exit_code(cmd_name: str) -> int:
         cmd_name (str): command name.
     """
     return USAGE_EXIT.get(cmd_name, 1)
+
+
+def python_option_error(cmd_name: str, line: str) -> tuple[bytes, int]:
+    """CPython's option refusal: one message line, then its usage block.
+
+    Args:
+        cmd_name (str): the interpreter as invoked, which names the
+            usage line ('python' or 'python3').
+        line (str): the message line, newline included.
+    """
+    return (line + PYTHON_USAGE.format(name=cmd_name)).encode(), \
+        usage_exit_code(cmd_name)
 
 
 def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
@@ -45,6 +58,14 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
         return line.encode(), usage_exit_code(cmd_name)
+    if cmd_name in PYTHON_NAMES:
+        # CPython's own two shapes, which do not match each other: the
+        # short form capitalizes and takes a colon, the long form does
+        # neither. Both pinned on 3.12.13.
+        if token.startswith("--"):
+            return python_option_error(cmd_name, f"unknown option {token}\n")
+        dashed = token if token.startswith("-") else f"-{token}"
+        return python_option_error(cmd_name, f"Unknown option: {dashed}\n")
     if token.startswith("--"):
         line = f"{cmd_name}: unrecognized option '{token}'\n"
     else:
@@ -118,6 +139,10 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         cmd_name (str): command name for the message and exit code.
         token (str): long token ('--max-depth') or short char ('m').
     """
+    if cmd_name in PYTHON_NAMES:
+        dashed = token if token.startswith("-") else f"-{token}"
+        return python_option_error(
+            cmd_name, f"Argument expected for the {dashed} option\n")
     if token.startswith("--"):
         line = f"{cmd_name}: option '{token}' requires an argument\n"
     else:

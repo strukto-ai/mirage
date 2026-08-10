@@ -391,7 +391,7 @@ describe('parseCommand — unknown dash tokens warn and drop', () => {
   })
 
   it('keeps dash tokens for TEXT-rest commands', () => {
-    const p = parseCommand(specOf('python'), ['-x', 'hello'], '/')
+    const p = parseCommand(specOf('expr'), ['-x', 'hello'], '/')
     expect(p.texts()).toEqual(['-x', 'hello'])
     expect(p.warnings).toEqual([])
   })
@@ -1109,5 +1109,32 @@ describe('options an environment variable supplies', () => {
     const parsed = parseCommand(versioned, [], '/', { X_VERSION: '9' })
     expect(parsed.flags['--version']).toBe('9')
     expect(parsed.typedDests).toEqual([])
+  })
+})
+
+describe('parseCommand — remainder (argparse nargs=REMAINDER)', () => {
+  const PYTHON_LIKE = new CommandSpec({
+    options: [new Option({ short: '-c', type: 'str' }), new Option({ short: '-u' })],
+    rest: new Operand({ type: 'str', remainder: true }),
+  })
+
+  it('rejects an unknown flag before the operand', () => {
+    const p = parseCommand(PYTHON_LIKE, ['-z', '-c', 'print(1)'], '/')
+    expect(p.invalidOptions).toEqual(['z'])
+  })
+
+  it('keeps dash words after the operand verbatim', () => {
+    const p = parseCommand(PYTHON_LIKE, ['s.py', '--foo', '-z'], '/')
+    expect(p.texts()).toEqual(['s.py', '--foo', '-z'])
+    expect(p.invalidOptions).toEqual([])
+  })
+
+  it('consumes the marker that hands off the line', () => {
+    // The router writes the `--`; the parser eats exactly that one, so
+    // the words after it are the program's argv.
+    const p = parseCommand(PYTHON_LIKE, ['-c', 'print(1)', '--', '-u', 'x'], '/')
+    expect(p.flags['-c']).toBe('print(1)')
+    expect(p.flags['-u']).not.toBe(true)
+    expect(p.texts()).toEqual(['-u', 'x'])
   })
 })

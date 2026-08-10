@@ -130,6 +130,9 @@ describe('normalizePage', () => {
       archived: false,
       created_by: 'user-1',
       last_edited_by: 'user-2',
+      properties: {
+        Name: { id: 'title', type: 'title', title: [{ plain_text: 'Hello' }] },
+      },
       markdown: 'Hi\n\n# Title\n',
       blocks,
     })
@@ -150,9 +153,30 @@ describe('normalizePage', () => {
       archived: false,
       created_by: '',
       last_edited_by: '',
+      properties: {},
       markdown: '',
       blocks: [],
     })
+  })
+
+  // A database row's cells are its `properties`, and they are the reason the
+  // row exists. Without them `cat` on a row answered with metadata and an
+  // empty markdown, and the row's actual data was reachable only through
+  // `ntn datasources query`.
+  it('carries the cells of a database row', () => {
+    const page = {
+      id: 'row-1',
+      parent: { type: 'data_source_id', data_source_id: 'ds-1' },
+      properties: {
+        Name: { id: 'title', type: 'title', title: [{ plain_text: 'Write spec' }] },
+        Priority: { id: 'pri', type: 'number', number: 2 },
+      },
+    }
+    const out = normalizePage(page, [])
+    expect(out.parent_id).toBe('ds-1')
+    // Kept as Notion's own property objects, not flattened, so the ids and
+    // types the schema is written in survive the render.
+    expect(out.properties).toEqual(page.properties)
   })
 
   it('drops child_page and child_database blocks from the body', () => {

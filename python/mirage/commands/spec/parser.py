@@ -216,7 +216,7 @@ def parse_command(
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
     # stray flag never corrupts pattern/path classification.
     lenient_dash_operands = (cs.rest_kind is not None
-                             and cs.rest_kind != "path")
+                             and cs.rest_kind != "path" and not cs.remainder)
     i = 0
     end_of_flags = False
 
@@ -406,6 +406,11 @@ def parse_command(
         raw_args.append(tok)
         raw_indices.append(orig_indices[i])
         raw_bases.append(base)
+        # argparse's REMAINDER: the first operand ends option parsing,
+        # so a script's own flags reach the script instead of being read
+        # as the interpreter's.
+        if cs.remainder:
+            end_of_flags = True
         i += 1
 
     # Snapshot before defaults land, because "typed" and "present" stop

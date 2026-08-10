@@ -14,7 +14,6 @@
 
 import type { BoxAccessor } from '../../../accessor/box.ts'
 import { size as boxDu, entries as boxDuAll } from '../../../core/box/du/index.ts'
-import { find as boxFind } from '../../../core/box/find.ts'
 import { read as boxRead, stream as boxStream } from '../../../core/box/read.ts'
 import { readdir as boxReaddir } from '../../../core/box/readdir.ts'
 import { stat as boxStat } from '../../../core/box/stat.ts'
@@ -51,5 +50,11 @@ export const BOX_IO: CommandIO<BoxAccessor> = {
   dirCopy: boxCopy,
   create: boxCreate,
   truncate: boxTruncate,
-  find: boxFind,
+  // No `find` slot on purpose, matching python. A native op is worth
+  // wiring only when it pushes the search down to the API; Box has no
+  // such call, so the op could only re-walk readdir/stat — which is what
+  // the find and cp builders already do, except they walk with the
+  // mount's own index, the namespace stat overlay (`find -mtime` after a
+  // `touch -d`) and the symlink table (`-empty`). Wiring the walk as an
+  // op silently dropped all three.
 }

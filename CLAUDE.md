@@ -248,6 +248,51 @@ never lists it. Two mechanisms follow from that, and they are separate.
   refusing one that happens to spell a mount root would deny an
   ordinary listing.
 
+## `CommandSpec` and `Operand` are not a scratchpad
+
+Both dataclasses are shared by every command in the repo, so a field
+added for one command is a field every other command's author has to
+read past, and a fourth one turns the grammar into a pile of per-command
+dialects. **Do not add a field to `CommandSpec`, `Operand` or `Option`
+unless POSIX *and* argparse both already have the concept, and then name
+it after theirs, not after the mechanism it trips inside the parser.**
+
+Both, not either. The test is literal, not a judgement call: write the
+equivalent line in argparse and run it. If argparse parses it, the
+concept is borrowed and the field is allowed. If argparse cannot express
+it, the behavior belongs to the one command that needs it and must be
+handled in that command, not in the shared grammar.
+
+POSIX alone is not enough, and python3 is exactly why: POSIX specifies
+an option whose argument is a program (`sh -c command_string [command_name [argument...]]`, and python3's own synopsis
+`python [option] ... [-c cmd | -m mod | file | -] [arg] ...`), so an
+either-or rule would license the `Option` field this section exists to
+refuse. argparse is the narrower gate because it is the parser this
+spec layer is modelled on, so a concept it cannot express is one the
+grammar has no shape for.
+
+Both halves of python3's command line are the worked example, and they
+come out on opposite sides:
+
+- **Allowed: `Operand.remainder`.** It is `nargs=argparse.REMAINDER`,
+  which is POSIX's own option order (the first operand ends option
+  parsing; GNU's permuting default is the extension, and `POSIXLY_CORRECT=1 ls a -1` shows the difference). argparse spells
+  it on the positional slot, so mirage spells it on `Operand` too, and
+  `CommandSpec` does not change at all.
+- **Not allowed: an option whose argument is a program.** `python3 -c 'code' -u x` must hand `-u` to the code, but
+  `add_argument("-c"); add_argument("rest", nargs=REMAINDER)` answers
+  `unrecognized arguments: -u`. CPython's own command line is parsed in C
+  for exactly this reason. There is no concept to borrow, so this does
+  not become an `Option` field.
+
+A `CLISpec` **is** a `CommandSpec` (python: subclass; TypeScript:
+`extends`), and every level of a CLI tree parses with the ordinary spec
+machinery. Moving a command to the CLI tier therefore does not exempt it
+from this rule, because it still parses with the same `Option` and
+`Operand`. The CLI tier is for a program *tree* (a verb the line selects,
+like `git status` or `ntn api`), not for a program with an unusual
+option grammar.
+
 ## An option that chdirs: `operand_base`
 
 `tar -C` is not a flag the command reads once, it is a chdir for the path

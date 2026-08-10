@@ -14,13 +14,112 @@
     "has_write": false,
     "resources": []
   },
+  "description": "Run Python on the workspace's bound runtime.",
   "options": [
     {
+      "description": "Run the next argument as a program.",
       "short": "-c",
       "type": "str"
+    },
+    {
+      "description": "Run the named module as __main__.",
+      "short": "-m",
+      "type": "str"
+    },
+    {
+      "description": "(Ignored) Unbuffered output. Mirage buffers every stream and returns it whole.",
+      "short": "-u",
+      "type": "bool"
+    },
+    {
+      "count": true,
+      "description": "Warn on str(bytes) and on comparing bytes with str; -bb raises instead.",
+      "short": "-b",
+      "type": "bool"
+    },
+    {
+      "description": "Do not write .pyc files on import.",
+      "short": "-B",
+      "type": "bool"
+    },
+    {
+      "description": "Ignore PYTHON* environment variables.",
+      "short": "-E",
+      "type": "bool"
+    },
+    {
+      "description": "Isolated mode: implies -E and -s.",
+      "short": "-I",
+      "type": "bool"
+    },
+    {
+      "count": true,
+      "description": "Remove assert and __debug__ blocks; -OO also strips docstrings.",
+      "short": "-O",
+      "type": "bool"
+    },
+    {
+      "description": "Do not prepend the script's directory to sys.path.",
+      "short": "-P",
+      "type": "bool"
+    },
+    {
+      "description": "(Ignored) Suppress the version banner. Mirage prints none.",
+      "short": "-q",
+      "type": "bool"
+    },
+    {
+      "description": "Do not add the user site directory to sys.path.",
+      "short": "-s",
+      "type": "bool"
+    },
+    {
+      "description": "Do not run 'import site' on initialization.",
+      "short": "-S",
+      "type": "bool"
+    },
+    {
+      "description": "Set a warning control filter.",
+      "multiple": true,
+      "short": "-W",
+      "type": "str"
+    },
+    {
+      "description": "Skip the script file's first line, for a non-Unix #! form.",
+      "short": "-x",
+      "type": "bool"
+    },
+    {
+      "description": "Set an implementation-specific option.",
+      "multiple": true,
+      "short": "-X",
+      "type": "str"
+    },
+    {
+      "choices": [
+        "always",
+        "default",
+        "never"
+      ],
+      "description": "How to validate hash-based .pyc files.",
+      "long": "--check-hash-based-pycs",
+      "type": "str"
+    },
+    {
+      "description": "Show this help message and exit.",
+      "long": "--help",
+      "short": "-h",
+      "type": "bool"
+    },
+    {
+      "description": "Show version information and exit.",
+      "long": "--version",
+      "short": "-V",
+      "type": "bool"
     }
   ],
   "rest": {
+    "remainder": true,
     "type": "str"
   }
 }

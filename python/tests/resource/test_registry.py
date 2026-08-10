@@ -43,6 +43,38 @@ def test_registry_matches_the_committed_spec_manifest():
         "rerun scripts/gen_specs.py")
 
 
+def test_capabilities_match_the_committed_spec_manifest():
+    """Every registry class's capability values must match the dump.
+
+    Membership alone says a backend can be built, not how it behaves once
+    mounted. These four values decide how stale a listing may be, whether
+    reads are cached, whether a snapshot records a fingerprint and whether
+    a size is knowable without fetching, and each was an independent hand
+    edit until the dump started carrying them.
+    """
+    manifest = json.loads(SPEC_RESOURCES.read_text())["capabilities"]
+    live = {
+        name: {
+            "index_ttl": cls.index_ttl,
+            "caches_reads": cls.caches_reads,
+            "supports_snapshot": cls.SUPPORTS_SNAPSHOT,
+            "sizes_always_known": cls.SIZES_ALWAYS_KNOWN,
+        }
+        for name, cls in ((n, registry.resolve_class(e.resource_path))
+                          for n, e in REGISTRY.items())
+    }
+    dumped = {
+        name: {
+            k: v
+            for k, v in entry.items() if k in live[name]
+        }
+        for name, entry in manifest.items()
+    }
+    assert live == dumped, ("resource capabilities drifted from "
+                            "spec/python/resources.json; rerun "
+                            "scripts/gen_specs.py")
+
+
 def test_build_ram_returns_ram_resource():
     from mirage.resource.ram import RAMResource
     p = build_resource("ram")

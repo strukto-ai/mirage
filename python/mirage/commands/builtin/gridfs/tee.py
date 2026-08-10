@@ -16,9 +16,8 @@ from functools import partial
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.tee import parse_flags, write_output
+from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.builtin.gridfs.io import resolve_glob
-from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -39,23 +38,15 @@ async def tee(
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
-    try:
-        parsed = parse_flags(flags)
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     paths = await resolve_glob(accessor, paths, index)
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raw = (" ".join(texts)).encode() if texts else b""
-    write_data = raw
-    if parsed.append:
-        try:
-            existing = b""
-            async for chunk in read_stream(accessor, paths[0], index=index):
-                existing += chunk
-            write_data = existing + raw
-        except FileNotFoundError:
-            # appending to a missing object starts from empty
-            pass
-    return await write_output(partial(write_bytes, accessor), paths[0],
-                              write_data, raw)
+    # The wrapper is wiring only: every flag semantic, the write to each
+    # operand and the append fallback live in the generic. This file used
+    # to restate them and wrote only paths[0].
+    return await generic_tee(paths,
+                             texts,
+                             read_stream=partial(read_stream,
+                                                 accessor,
+                                                 index=index),
+                             write_bytes=partial(write_bytes, accessor),
+                             stdin=stdin,
+                             flags=flags)

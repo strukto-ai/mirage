@@ -68,6 +68,42 @@ exemption. `python/tests/resource/test_registry.py` and
 re-copying the name list, so neither can pin an omission the way the old
 hand-written set pinned SharePoint's.
 
+Two more tables record what a backend *does*, not just that it exists.
+Membership never said whether a mount serves ten-minute-stale listings or
+pushes a `du` down to the API, and both facts were hand-maintained on each
+side.
+
+`capabilities` carries, per registry name, `index_ttl`, `caches_reads`,
+`supports_snapshot` and `sizes_always_known`, plus whether the class overrides
+`storage_id` and `statfs` (booleans, since the base answers are per-instance
+identity and UNKNOWN). Python reads them off the class. TypeScript reads them
+from the class *declarations* (`scripts/resource_facts.ts`): the twins are
+instance fields, so observing them at runtime would mean constructing the
+resource, and construction is not inert — `buildResource('github', {})` issues
+an HTTP request and `postgres` opens a connection. A value the extractor
+cannot read as a literal is dumped verbatim as `<expr:…>` rather than guessed,
+so it surfaces as a real mismatch instead of a plausible default. A browser
+factory that exists only to explain that the runtime cannot serve the backend
+(`lancedb`, `email`) dumps `null`, and the node entry is the one compared
+against Python.
+
+`command_io` carries, per backend command package, the wired `CommandIO` slot
+names plus `local`, `max_glob_matches` and `max_du_entries`. The adapter's slot
+set is a hand-filled literal nothing else reads, so a backend could omit `du`
+or `find` and fall back to the capped readdir walk — a partial total and an
+exit 1 past the cap — while its twin pushed the same query down to the API.
+Where the two languages name the package differently, `command_io_aliases`
+maps Python's name onto TypeScript's.
+
+Both tables are diffed **node against browser first**, then the merged
+TypeScript view against Python. Python has no runtime split, so the merge has
+to pick one variant and it prefers node; without the first diff that preference
+silently discarded a divergence instead of resolving one. It did: the fifteen
+browser S3-family resources declared neither `sizes_always_known` nor
+`storage_id` where their node twins declared both, and Python matched node, so
+every gate passed while a browser `mv` between two mounts of one bucket saw two
+separate storages.
+
 Divergences that are structural rather than bugs live in
 `parity_exceptions.json`:
 
@@ -80,6 +116,10 @@ Divergences that are structural rather than bugs live in
 - `commands` — per-command exemptions. `fields` mutes a whole top-level field;
   `by_resource` names one resource and one metadata key, so an exemption
   cannot quietly hide a second divergence on the same command.
+- `resource_capabilities` and `command_io` — one resource and one key per
+  entry, same rule: an exemption covers the fact it names and nothing else.
+- `variant_resource_facts.<table>` — the same, for a fact that legitimately
+  differs between the node and browser runtimes rather than between languages.
 
 The checker fails on a *stale* exception, so an entry cannot outlive the
 divergence it documents. An exemption counts as used only when it actually

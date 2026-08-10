@@ -73,7 +73,20 @@ async function resolveNodeIndexURL(): Promise<string | null> {
   }
 }
 
-export async function loadPyodideRuntime(home?: string): Promise<PyodideInterface> {
+/** Distribution knobs a deployment can point at its own prebuilt assets. */
+export interface PyodideLoadOptions {
+  home?: string
+  // Where wheels are fetched from, which is NOT indexURL: the npm
+  // pyodide package ships pyodide-lock.json and no wheels at all, so a
+  // deployment wanting packages offline points this at its own build.
+  packageBaseUrl?: string
+  lockFileURL?: string
+  packages?: readonly string[]
+}
+
+export async function loadPyodideRuntime(
+  options: PyodideLoadOptions = {},
+): Promise<PyodideInterface> {
   let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
   try {
     mod = (await import('pyodide')) as unknown as {
@@ -86,8 +99,16 @@ export async function loadPyodideRuntime(home?: string): Promise<PyodideInterfac
     )
   }
   const indexURL =
-    home ?? envHome() ?? (await resolveNodeIndexURL()) ?? (isNode() ? null : PYODIDE_CDN_URL)
+    options.home ??
+    envHome() ??
+    (await resolveNodeIndexURL()) ??
+    (isNode() ? null : PYODIDE_CDN_URL)
   const opts: Record<string, unknown> = { stdout: noopIo, stderr: noopIo }
+  if (options.packageBaseUrl !== undefined) opts.packageBaseUrl = options.packageBaseUrl
+  if (options.lockFileURL !== undefined) opts.lockFileURL = options.lockFileURL
+  if (options.packages !== undefined && options.packages.length > 0) {
+    opts.packages = [...options.packages]
+  }
   if (indexURL !== null) opts.indexURL = indexURL
   try {
     const runtime = await mod.loadPyodide(opts)

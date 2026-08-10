@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import CommandIO, DuOps
+from mirage.core.ssh.append import append_bytes as _append
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.create import create as _create
@@ -43,6 +44,7 @@ IO = CommandIO(
     local=False,
     max_glob_matches=SCOPE_ERROR,
     write=_write,
+    append=_append,
     exists=_exists,
     mkdir=_mkdir,
     unlink=_unlink,

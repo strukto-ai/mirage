@@ -223,6 +223,13 @@ export function isFsError(err: unknown): boolean {
   return typeof code === 'string' && gnuStrerror(code) !== null
 }
 
+// `enoent()` puts the *path* in the message, so matching on message text never
+// fires; the stamped code is the only reliable signal. Python's twin is
+// `except FileNotFoundError`. Three modules had grown their own copy of this.
+export function isEnoent(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
+}
+
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):
 // every stamped filesystem code plus the unstamped no-mount refusal.
 // Mirrors Python's `except (OSError, ValueError)`, where ValueError is

@@ -220,6 +220,18 @@ export interface OperandInit {
    */
   textWhen?: readonly string[]
   /**
+   * Every word from this slot on is gathered verbatim, options included.
+   * This is argparse's `nargs=argparse.REMAINDER` and POSIX's own option
+   * order: the first operand ends option parsing, where GNU's default
+   * permutes instead (`ls a -1` reads -1 as a flag, `POSIXLY_CORRECT=1
+   * ls a -1` reads it as a filename). Set it for a command that
+   * dispatches to another program, which is the case argparse documents
+   * it for: python3's script and the words after it are the script's
+   * argv, so `python3 s.py --foo` must hand --foo over untouched while
+   * `python3 -zz s.py` must still refuse -zz as python3's own.
+   */
+  remainder?: boolean
+  /**
    * Flags that supply this operand's value. When any is present the slot is
    * skipped and remaining args classify as rest (e.g. grep's pattern with
    * -e/-f). This is the declarative form of the conditional real tools write
@@ -250,6 +262,7 @@ export class Operand {
   readonly textWhen: readonly string[]
   readonly name: string
   readonly required: boolean
+  readonly remainder: boolean
 
   constructor(init: OperandInit = {}) {
     this.type = init.type ?? 'path'
@@ -257,6 +270,7 @@ export class Operand {
     this.textWhen = init.textWhen ?? []
     this.name = init.name ?? ''
     this.required = init.required ?? false
+    this.remainder = init.remainder ?? false
     Object.freeze(this)
   }
 }
@@ -298,6 +312,12 @@ export class CommandSpec {
   // every other path-valued flag keeps resolving against the session
   // cwd, which is what GNU does with -f.
   readonly operandBase: string | null
+  // python3's rule: parse options strictly until the first operand,
+  // then take every remaining word verbatim. An interpreter needs both
+  // halves at once -- an unknown flag before the script is a usage
+  // error, while `python3 s.py --foo` must hand `--foo` to the script
+  // -- and the free-text leniency that serves echo/bash can only
+  // express the second.
 
   constructor(init: CommandSpecInit = {}) {
     this.options = init.options ?? []
