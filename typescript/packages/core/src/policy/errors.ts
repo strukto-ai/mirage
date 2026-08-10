@@ -32,10 +32,16 @@ export class PolicyError extends Error {
  * classifies it to -EACCES; the distinct class lets handlers that
  * special-case mount-mode refusals (the read-only wording) tell a
  * policy deny apart.
+ *
+ * `completed` says whether the refused op had already run against the
+ * backend: a postOps deny suppresses the result, not the effect, so
+ * the door's caller must still account for the op (the fs facade
+ * records it). A preOps deny leaves it false, the constructed default.
  */
 export class PolicyDenied extends Error {
   readonly code = 'EACCES'
   readonly virtualPath: string
+  completed = false
 
   constructor(message: string, virtualPath: string) {
     super(message)

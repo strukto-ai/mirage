@@ -46,7 +46,6 @@ from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session import Session, SessionManager, SessionStore
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
@@ -168,14 +167,15 @@ class Workspace:
         self._registry.mount(HISTORY_PREFIX,
                              HistoryViewResource(self.observer),
                              MountMode.READ)
+        # The facade delegates every op to the dispatcher, so FUSE and
+        # programmatic ws.ops walk the same pipeline as a shell command
+        # and the policy gates fire exactly once, at that door.
         self._ops = Ops(self._registry.ops_mounts(),
-                        on_write=self._invalidate_after_write_by_path,
                         observer=self.observer,
                         agent_id=agent_id or "",
                         session_id=session_id,
                         links=self._namespace,
-                        stat_overlay=self._merge_overlay,
-                        policies=self._registry.policies)
+                        dispatch=self._dispatcher.dispatch)
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
 
         self._runtimes, self._policy_router = wire_runtime_world(
@@ -673,18 +673,6 @@ class Workspace:
 
     # ── mount management ────────────────────────────────────────────────────
 
-    def _merge_overlay(self, path: str, stat: FileStat) -> FileStat:
-        """Overlay namespace attrs onto an ops-facade stat.
-
-        Injected into Ops so FUSE and the os patch report chmod/chown/touch
-        results identically to dispatch("stat").
-
-        Args:
-            path (str): virtual path (already link-resolved).
-            stat (FileStat): the backend-reported stat.
-        """
-        return merge_overlay_stat(self._namespace.meta_for(path), stat)
-
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
         await self._namespace.ensure_loaded()
@@ -714,13 +702,6 @@ class Workspace:
                        io: IOResult,
                        records: list[OpRecord] | None = None) -> None:
         await self._dispatcher.apply_io(io, records=records)
-
-    async def _invalidate_after_write_by_path(self,
-                                              path: str,
-                                              observed: float | None = None
-                                              ) -> None:
-        await self._dispatcher.invalidate_after_write_by_path(
-            path, observed=observed)
 
     @overload
     async def execute(

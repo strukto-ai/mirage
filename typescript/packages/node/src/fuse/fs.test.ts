@@ -201,6 +201,21 @@ describe('MirageFS — drainOps()', () => {
     expect(Array.isArray(drained)).toBe(true)
     expect(mfs.drainOps()).toHaveLength(0)
   })
+
+  it('accounts for writes too, not only reads', async () => {
+    // The mount runs every op through the fs facade, which is what
+    // records them; a write issued straight at the dispatcher would
+    // mutate the mount and leave drainOps reporting nothing.
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    const bytes = Buffer.from('written through the mount\n')
+    const [, fh] = await callOp<[number, number]>(mfs, 'create', '/data/fresh.txt', 0o100644)
+    await callOp(mfs, 'write', '/data/fresh.txt', fh, bytes, bytes.byteLength, 0)
+    await callOp(mfs, 'flush', '/data/fresh.txt', fh)
+    const ops = mfs.drainOps().map((r) => r.op)
+    expect(ops).toContain('create')
+    expect(ops).toContain('write')
+  })
 })
 
 describe('MirageFS — ops() registers access', () => {

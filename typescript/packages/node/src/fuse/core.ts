@@ -18,7 +18,6 @@ import {
   FileType,
   isMissingOp,
   type OpRecord,
-  PathSpec,
   rstripSlash,
   type Session,
   type Workspace,
@@ -72,6 +71,12 @@ export interface MountCoreOptions {
  * contains, an adapter decides *how* to say it to a particular kernel
  * interface. Adapters translate the errors thrown here into their own
  * error codes with `classifyErrno`. Mirrors Python's `MountCore`.
+ *
+ * Every op goes through `ws.fs`, which delegates to the dispatcher, so
+ * a mount walks the same door as a shell line (mount modes, policies,
+ * cache, invalidation) and every op it runs lands in `ws.records` for
+ * `drainOps`. Reaching `ws.dispatch` from here instead would skip the
+ * record; reaching a backend directly would skip the door.
  */
 export class MountCore {
   readonly ws: Workspace
@@ -243,12 +248,7 @@ export class MountCore {
   }
 
   private async writeFile(path: string, data: Uint8Array): Promise<void> {
-    // Keep writes on Workspace.dispatch rather than Workspace.fs.writeFile:
-    // dispatch is where Mirage enforces mount modes, revision tracking, and
-    // post-write invalidation. The lower-level fs helper is useful internally,
-    // but using it from a mount made READ-mode mounts reject create while
-    // still allowing buffered overwrite on flush.
-    await this.ws.dispatch('write', this.resolve(path), [data])
+    await this.ws.fs.writeFile(this.resolve(path), data)
   }
 
   // ── POSIX surface (throws; adapters classify) ────────────────────
@@ -357,7 +357,7 @@ export class MountCore {
     // "create empty" from "write bytes" get the right code path. Falls back
     // to writeFile(empty) when the resource doesn't expose `create`.
     try {
-      await this.ws.dispatch('create', this.resolve(path))
+      await this.ws.fs.create(this.resolve(path))
     } catch (dispatchErr) {
       if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
       await this.writeFile(path, new Uint8Array(0))
@@ -366,9 +366,7 @@ export class MountCore {
   }
 
   async mkdir(path: string): Promise<void> {
-    // Metadata ops route through dispatch (not ws.fs) so the file cache and
-    // readdir index are invalidated like any other write.
-    await this.ws.dispatch('mkdir', this.resolve(path))
+    await this.ws.fs.mkdir(this.resolve(path))
   }
 
   readlink(path: string): string {
@@ -399,12 +397,16 @@ export class MountCore {
       this.prefetchCache.delete(path)
       return
     }
-    await this.ws.dispatch('unlink', this.resolve(path))
+    await this.ws.fs.unlink(this.resolve(path))
     this.xattrs.delete(path)
   }
 
   async rename(src: string, dst: string): Promise<void> {
-    await this.ws.dispatch('rename', this.resolve(src), [PathSpec.fromStrPath(this.resolve(dst))])
+    // The facade is where a cross-mount pair is refused with EXDEV,
+    // which is what makes `mv` between two backends fall back to
+    // copy+unlink instead of addressing the destination against the
+    // source's backend.
+    await this.ws.fs.rename(this.resolve(src), this.resolve(dst))
     const moved = this.xattrs.get(src)
     if (moved !== undefined) {
       this.xattrs.delete(src)
@@ -426,7 +428,7 @@ export class MountCore {
       // readdir failure — fall through to rmdir and let it raise the real
       // error (e.g. ENOENT for missing path).
     }
-    await this.ws.dispatch('rmdir', this.resolve(path))
+    await this.ws.fs.rmdir(this.resolve(path))
     this.xattrs.delete(path)
   }
 
@@ -435,7 +437,7 @@ export class MountCore {
     // backends). Fall back to read/resize/write for resources that don't
     // expose one.
     try {
-      await this.ws.dispatch('truncate', this.resolve(path), [size])
+      await this.ws.fs.truncate(this.resolve(path), size)
     } catch (dispatchErr) {
       if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
       const data = await this.ws.fs

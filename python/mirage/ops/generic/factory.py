@@ -193,13 +193,12 @@ def make_generic_ops(
     command factory skips write commands on read-only backends.
 
     ``index`` is forwarded into read/readdir/stat for every backend, so
-    there is deliberately no ``forward_index`` knob here. Both write
-    paths evict the parent listing: ``dispatch`` through
-    :meth:`Dispatcher.invalidate_after_write`, and the VFS/FUSE surface
-    through the ``on_write`` hook :class:`Ops` is built with. TS keeps a
-    ``forwardIndex: false`` for ram/disk/redis/ssh because its
-    ``WorkspaceFS`` has no equivalent of that hook and reaches the ops
-    registry directly, so a forwarded index there is never evicted.
+    there is deliberately no ``forward_index`` knob here, in either
+    language. Every write path evicts the parent listing through
+    :meth:`Dispatcher.invalidate_after_write`, and both VFS/FUSE
+    surfaces (:class:`Ops`, TypeScript's ``WorkspaceFS``) delegate to
+    that same dispatcher, so the door that populates a listing is the
+    door that evicts it.
 
     Every op emitted here is filetype-agnostic. To serve one extension
     differently, register a filetype-scoped op on the mount; the mount

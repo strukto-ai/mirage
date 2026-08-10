@@ -622,11 +622,20 @@ class MountEntry:
         Tries filetype-specific first, then resource-specific.
         First non-None result wins.
 
+        A caller may override the filetype by passing one, and passing
+        None asks for the by-resource op even where a filetype-scoped
+        one is registered. That is what a read-modify-write needs: it
+        hands whatever it read straight back to ``write``, which always
+        stores, so reading a rendered form would store the rendering
+        over the file. TypeScript spells the same override
+        ``readFile(path, {raw: true})``.
+
         Args:
             op_name (str): operation name (e.g. "read", "stat").
             path (str): virtual path.
         """
-        filetype = get_extension(path)
+        filetype = (kwargs.pop("filetype")
+                    if "filetype" in kwargs else get_extension(path))
         levels = self._resolve_cascade(op_name, filetype, self._ops,
                                        self._general_ops)
         if not levels:

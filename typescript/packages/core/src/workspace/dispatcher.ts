@@ -136,7 +136,13 @@ export class Dispatcher {
     const opWrite = POLICY_WRITE_OPS.has(opName)
     await preOpsGate(this.policies, opName, p, opWrite, mountPrefix)
     const caches = cachesReads(resource)
-    if (caches && mount !== null && DISPATCH_READ_OPS.has(opName)) {
+    // The file cache is keyed on the path alone, and what a command put
+    // there is the rendered read. A raw read asks for a different value
+    // under the same key, so it must not be served from that cache;
+    // nothing populates it from here, so skipping the probe is the
+    // whole fix. Mirrors Python's Dispatcher.dispatch.
+    const raw = kwargs?.filetype === null
+    if (caches && !raw && mount !== null && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
         const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, cached)

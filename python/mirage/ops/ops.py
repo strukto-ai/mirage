@@ -13,61 +13,52 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import time
-from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.limit import apply_op_limit
-from mirage.commands.resolve import COMPOUND_EXTENSIONS
-from mirage.context import (assert_mount_allowed, effective_mount_mode,
-                            mount_allowed)
 from mirage.observe import OpRecord
-from mirage.observe.context import push_mount_prefix
-from mirage.ops.config import (NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks,
-                               OpsMount)
-from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
-                                       namespace_stat)
-from mirage.ops.registry import OpsRegistry, RegisteredOp
-from mirage.ops.types import StatOverlay
-from mirage.policy import Policies, post_ops_gate, pre_ops_gate
+from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
+from mirage.policy import PolicyDenied
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, MountMode, PathSpec
-from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import owner_prefix
 
 
 class Ops:
+    """The typed op facade FUSE and programmatic callers use.
+
+    Every op delegates to the workspace dispatcher, so FUSE and
+    ``ws.ops`` walk the same pipeline as a shell command: link follow,
+    session grants, admission policies, cache read-through, namespace
+    structure, and write invalidation all fire once, at that one door.
+    The facade keeps only what is its own: the typed surface, op
+    recording (``records``/``network_bytes``), and the mount-table
+    helpers.
+
+    ``dispatch`` is required, so there is no workspace-less mode. A
+    second pipeline here would be a second door, and it drifted from
+    the real one exactly as expected: it served no cache, saw no
+    namespace structure, and fired the gates only when a caller
+    remembered to hand it policies. TypeScript's ``WorkspaceFS`` takes
+    the same stance.
+    """
 
     def __init__(self,
                  mounts: list[OpsMount],
-                 on_write: Callable[[str, float | None], Awaitable[None]]
-                 | None = None,
+                 dispatch: DispatchFn,
                  observer: Any | None = None,
                  agent_id: str = "default",
                  session_id: str = "default",
-                 links: NamespaceLinks | None = None,
-                 stat_overlay: StatOverlay | None = None,
-                 policies: Policies | None = None) -> None:
+                 links: NamespaceLinks | None = None) -> None:
         self._mounts = sorted(mounts,
                               key=lambda m: len(m.prefix),
                               reverse=True)
-        self._locks: dict[str, asyncio.Lock] = {}
-        self._on_write = on_write
         self._observer = observer
         self._agent_id = agent_id
         self._session_id = session_id
         self._links = links
-        self._stat_overlay = stat_overlay
-        # Admission policies, shared with the workspace registry. This
-        # facade is the door FUSE and programmatic ws.ops come through,
-        # so the pre/post op hooks must fire here too, not only on the
-        # shell's dispatcher.
-        self._policies = policies
-        self._registry = OpsRegistry()
-        for m in self._mounts:
-            for ro in m.ops:
-                self._registry.register(ro)
+        self._dispatch = dispatch
         self.records: list[OpRecord] = []
 
     @property
@@ -75,7 +66,7 @@ class Ops:
         """The workspace symlink table, when this facade fronts one.
 
         FUSE reads it for symlink entries (getattr/readlink/readdir and
-        link create/remove); None for standalone Ops without a workspace.
+        link create/remove); None when the workspace has no link table.
         """
         return self._links
 
@@ -130,13 +121,6 @@ class Ops:
                 found.append((m.prefix, m.resource_type))
         return found
 
-    def register_op(self, fn) -> None:
-        if hasattr(fn, "_registered_ops"):
-            for ro in fn._registered_ops:
-                self._registry.register(ro)
-        elif isinstance(fn, RegisteredOp):
-            self._registry.register(fn)
-
     def unmount(self, prefix: str) -> None:
         stripped = prefix.strip("/")
         norm = ("/" + stripped + "/" if stripped else "/")
@@ -158,22 +142,6 @@ class Ops:
             asyncio.ensure_future(
                 self._observer.log_op(rec, self._agent_id, self._session_id))
 
-    @staticmethod
-    def _get_filetype(path: str) -> str | None:
-        basename = path.rsplit("/", 1)[-1]
-        for ext in COMPOUND_EXTENSIONS:
-            if basename.endswith(ext):
-                return ext
-        dot = path.rfind(".")
-        if dot == -1 or "/" in path[dot:]:
-            return None
-        return path[dot:]
-
-    def _lock_for(self, path: str) -> asyncio.Lock:
-        if path not in self._locks:
-            self._locks[path] = asyncio.Lock()
-        return self._locks[path]
-
     def _owner(self, path: str) -> OpsMount | None:
         """The mount owning ``path`` by longest prefix, or None."""
         owner = owner_prefix((m.prefix for m in self._mounts), path)
@@ -181,178 +149,98 @@ class Ops:
             return None
         return next(m for m in self._mounts if m.prefix == owner)
 
-    def _resolve(
-            self, path: str
-    ) -> tuple[str, str, Accessor, IndexCacheStore, MountMode]:
-        """Returns (resource_type, rel_path, accessor, index, mode).
-
-        Args:
-            path (str): Virtual path to resolve.
-
-        Returns:
-            tuple: resource_type, rel_path, accessor, index, mode.
-        """
-        m = self._owner(path)
-        if m is None:
-            raise ValueError(f"no mount matches path: {path!r}")
-        norm = "/" + path.strip("/")
-        rel_path = "/" + norm[len(m.prefix):]
-        return m.resource_type, rel_path, m.accessor, m.index, m.mode
-
     def _mount_prefix(self, path: str) -> str:
         m = self._owner(path)
         return "" if m is None else m.prefix.rstrip("/")
 
-    async def _invalidate(self,
-                          path: str,
-                          observed: float | None = None) -> None:
-        if self._on_write is not None:
-            await self._on_write(path, observed)
+    @staticmethod
+    def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
+        """The op's byte count for recording: result first, else input.
 
-    def _namespace_result(self, op: str,
-                          path: str) -> "list[str] | FileStat | None":
-        """The namespace's own answer for a path no backend serves.
+        Args:
+            result (Any): what the op returned.
+            kwargs (dict): the op's keyword arguments (write payloads
+                travel as ``data``).
+        """
+        if isinstance(result, (bytes, bytearray)):
+            return len(result)
+        return next(
+            (len(v)
+             for v in kwargs.values() if isinstance(v, (bytes, bytearray))), 0)
 
-        Mirrors the workspace dispatcher: a directory that exists only
-        because a mount or a link sits below it still lists and stats,
-        so FUSE and programmatic callers agree with the shell. None for
-        any other op, or when the namespace knows nothing at ``path``.
+    async def _call(self, op: str, path: str, **kwargs) -> Any:
+        """Run one op through the workspace dispatcher and record it.
+
+        The door owns the whole pipeline (follow, grants, gates, cache,
+        structure, invalidation); the facade's own share is the record.
+        The path is link-followed here first so the record carries the
+        resolved path; the door's second follow of an already-resolved
+        path is a no-op.
+
+        Whether the op is a write is the door's call too: it reads that
+        off the op name, so there is nothing for a caller here to
+        declare.
 
         Args:
             op (str): the op name.
-            path (str): the virtual path being answered.
+            path (str): the virtual path.
+            **kwargs: op arguments, by the op function's names.
         """
-        if op == "readdir":
-            return namespace_listing(self.mount_prefixes(), self._links, path)
-        if op == "stat":
-            return namespace_stat(self.mount_prefixes(), self._links, path)
-        return None
-
-    async def _gated_namespace(self, op: str, path: str, write: bool,
-                               fallback: "list[str] | FileStat"):
-        """Gate a namespace-served answer exactly like a backend one.
-
-        Mirrors the workspace dispatcher: no owning prefix (the gates
-        see ""), but admission still fires so a policy that bounds
-        readdir or stat by path covers the synthetic answer too.
-
-        Args:
-            op (str): the op name.
-            path (str): the virtual path being answered.
-            write (bool): whether the op is a write for policy admission.
-            fallback (list[str] | FileStat): the namespace's answer.
-        """
-        if self._policies is None:
-            return fallback
-        scope = PathSpec(virtual=path,
-                         directory=path.rsplit("/", 1)[0] or "/",
-                         resource_path="")
-        await pre_ops_gate(self._policies, op, scope, write, "")
-        bound = await post_ops_gate(self._policies, op, scope, write, "",
-                                    fallback)
-        if bound is not None:
-            return await apply_op_limit(fallback, bound)
-        return fallback
-
-    async def _call(self,
-                    op: str,
-                    path: str,
-                    *args,
-                    write: bool = False,
-                    **kwargs):
         start = int(time.monotonic() * 1000)
         if self._links is not None and op not in NO_FOLLOW_OPS:
             path = self._links.follow(path)
+        owner = self._owner(path)
         try:
-            resource_type, rel_path, accessor, index, mode = self._resolve(
-                path)
-        except ValueError:
-            fallback = self._namespace_result(op, path)
-            if fallback is None:
-                raise
-            return await self._gated_namespace(op, path, write, fallback)
-        mount_prefix = self._mount_prefix(path)
-        if not mount_allowed(mount_prefix):
-            # The mount is real but ungranted, and the namespace may
-            # still owe the session a directory here: a granted mount
-            # below it already put this path's name in a listing, so
-            # walking down to the grant must answer. The names are
-            # session-filtered, so nothing of the mount's own content
-            # leaks; a path the structure does not owe falls through to
-            # the canonical denial below.
-            fallback = self._namespace_result(op, path)
-            if fallback is not None:
-                return await self._gated_namespace(op, path, write, fallback)
-        assert_mount_allowed(mount_prefix)
-        if write and effective_mount_mode(mount_prefix,
-                                          mode) == MountMode.READ:
-            raise PermissionError(f"mount at {path!r} is read-only")
-        prev_prefix = push_mount_prefix(mount_prefix)
-        filetype = self._get_filetype(rel_path)
-        scope = PathSpec(
-            virtual=path,
-            directory=path.rsplit("/", 1)[0] or "/",
-            resource_path=mount_key(path, mount_prefix),
-        )
-        if self._policies is not None:
-            await pre_ops_gate(self._policies, op, scope, write, mount_prefix)
-        try:
-            result = await self._registry.call(op,
-                                               resource_type,
-                                               accessor,
-                                               scope,
-                                               *args,
-                                               filetype=filetype,
-                                               index=index,
-                                               **kwargs)
-        except FileNotFoundError:
-            result = self._namespace_result(op, path)
-            if result is None:
-                raise
-        finally:
-            push_mount_prefix(prev_prefix)
-        if op == "readdir":
-            result = merge_readdir(result, self.mount_prefixes(), self._links,
-                                   path)
-        if isinstance(result, (bytes, bytearray)):
-            nbytes = len(result)
-        else:
-            nbytes = next(
-                (len(a) for a in args if isinstance(a, (bytes, bytearray))), 0)
-        self._record(op, path, resource_type, nbytes, start)
-        if write:
-            observed = time.time() if op in STAMP_WRITE_OPS else None
-            await self._invalidate(path, observed)
-        # Bookkeeping precedes the post gate: a denied result is still a
-        # completed backend op, so the caches and observation must
-        # reflect it before the deny suppresses it.
-        if self._policies is not None:
-            bound = await post_ops_gate(self._policies, op, scope, write,
-                                        mount_prefix, result)
-            if bound is not None:
-                result = await apply_op_limit(result, bound)
-        if (op == "stat" and self._stat_overlay is not None
-                and isinstance(result, FileStat)):
-            return self._stat_overlay(path, result)
+            result, io = await self._dispatch(op, PathSpec.from_str_path(path),
+                                              **kwargs)
+        except PolicyDenied as denied:
+            # A post_ops deny suppresses the result, not the effect: the
+            # backend already mutated, so observation must reflect the
+            # op before the deny propagates.
+            if denied.completed and owner is not None:
+                self._record(op, path, owner.resource_type,
+                             self._payload_bytes(None, kwargs), start)
+            raise
+        if owner is not None:
+            # A cache-served read moved no bytes over the network;
+            # "ram" is what OpRecord.is_cache reads.
+            source = "ram" if io.reads else owner.resource_type
+            self._record(op, path, source, self._payload_bytes(result, kwargs),
+                         start)
         return result
 
     async def read(self,
                    path: str,
                    offset: int = 0,
-                   size: int | None = None) -> bytes:
+                   size: int | None = None,
+                   raw: bool = False) -> bytes:
         """Read file content.
+
+        ``raw`` asks for the stored bytes, skipping a filetype-scoped
+        read op the mount registers for this extension and the file
+        cache a command's rendered read may have filled. Read-modify-
+        write is what needs it: the merged buffer goes back through
+        ``write``, which stores, so reading the rendering would store
+        the rendering over the file. TypeScript spells the same thing
+        ``readFile(path, {raw: true})``.
 
         Args:
             path (str): Virtual path.
             offset (int): Byte offset for range reads.
             size (int | None): Number of bytes for range reads.
+            raw (bool): Read stored bytes rather than a rendered form.
 
         Returns:
             bytes: File content.
         """
+        kwargs: dict[str, Any] = {"filetype": None} if raw else {}
         if offset or size is not None:
-            return await self._call("read", path, offset=offset, size=size)
-        return await self._call("read", path)
+            return await self._call("read",
+                                    path,
+                                    offset=offset,
+                                    size=size,
+                                    **kwargs)
+        return await self._call("read", path, **kwargs)
 
     async def write(self, path: str, data: bytes) -> None:
         """Write file content.
@@ -361,7 +249,7 @@ class Ops:
             path (str): Virtual path.
             data (bytes): Content to write.
         """
-        await self._call("write", path, data, write=True)
+        await self._call("write", path, data=data)
 
     async def append(self, path: str, data: bytes) -> None:
         """Append data to a file.
@@ -370,7 +258,7 @@ class Ops:
             path (str): Virtual path.
             data (bytes): Content to append.
         """
-        await self._call("append", path, data, write=True)
+        await self._call("append", path, data=data)
 
     async def stat(self, path: str) -> FileStat:
         return await self._call("stat", path)
@@ -379,7 +267,7 @@ class Ops:
         return await self._call("readdir", path)
 
     async def mkdir(self, path: str) -> None:
-        await self._call("mkdir", path, write=True)
+        await self._call("mkdir", path)
 
     async def unlink(self, path: str) -> None:
         """Delete file.
@@ -387,42 +275,35 @@ class Ops:
         Args:
             path (str): Virtual path.
         """
-        await self._call("unlink", path, write=True)
+        await self._call("unlink", path)
 
     async def rmdir(self, path: str) -> None:
-        await self._call("rmdir", path, write=True)
+        await self._call("rmdir", path)
 
     async def rename(self, src: str, dst: str) -> None:
-        """Rename file or directory.
+        """Rename file or directory within one mount.
+
+        Both ends must resolve to the same mount: a mount is a
+        filesystem boundary, and the facade is where a kernel-facing
+        whole-workspace FUSE mount needs the refusal, so `mv` between
+        two backends falls back to its copy+unlink path instead of
+        corrupting one backend's key space with the other's path.
 
         Args:
             src (str): Source virtual path.
             dst (str): Destination virtual path.
+
+        Raises:
+            OSError: EXDEV when the two ends resolve to different
+                mounts.
         """
-        start = int(time.monotonic() * 1000)
-        resource_type, _, accessor, _, mode = self._resolve(src)
-        mount_prefix = self._mount_prefix(src)
-        assert_mount_allowed(mount_prefix)
-        if effective_mount_mode(mount_prefix, mode) == MountMode.READ:
-            raise PermissionError(f"mount at {src!r} is read-only")
-        src_scope = PathSpec(
-            virtual=src,
-            directory=src.rsplit("/", 1)[0] or "/",
-            resource_path=mount_key(src, mount_prefix),
-        )
-        dst_scope = PathSpec(
-            virtual=dst,
-            directory=dst.rsplit("/", 1)[0] or "/",
-            resource_path=mount_key(dst, mount_prefix),
-        )
-        fn = self._registry.resolve("rename", resource_type)
-        await fn(accessor, src_scope, dst_scope)
-        await self._invalidate(src)
-        await self._invalidate(dst)
-        self._record("rename", src, resource_type, 0, start)
+        if self._mount_prefix(src) != self._mount_prefix(dst):
+            raise OSError(errno.EXDEV, "Invalid cross-device link", src, None,
+                          dst)
+        await self._call("rename", src, dst=PathSpec.from_str_path(dst))
 
     async def create(self, path: str) -> None:
-        await self._call("create", path, write=True)
+        await self._call("create", path)
 
     async def truncate(self, path: str, length: int) -> None:
         """Truncate file to given length.
@@ -431,7 +312,7 @@ class Ops:
             path (str): Virtual path.
             length (int): Target length in bytes.
         """
-        await self._call("truncate", path, length, write=True)
+        await self._call("truncate", path, length=length)
 
     @property
     def network_records(self) -> list[OpRecord]:
@@ -461,7 +342,7 @@ class Ops:
         The catch-all virtual root at ``/`` is skipped on purpose: it matches
         every absolute path, so counting it would hijack real filesystem
         paths (a FUSE mountpoint, ``/tmp``) into ops. Routing to the root for
-        ops themselves still happens via ``_resolve``; this gate is only about
+        ops themselves still happens at the door; this gate is only about
         what the interception should leave alone.
 
         Args:

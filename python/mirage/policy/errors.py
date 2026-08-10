@@ -31,4 +31,11 @@ class PolicyDenied(PermissionError):
     ``<cmd>: <path>: Permission denied`` line. The distinct type lets
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
+
+    ``completed`` says whether the refused op had already run against
+    the backend: a post_ops deny suppresses the result, not the effect,
+    so the door's caller must still account for the op (the ops facade
+    records it). A pre_ops deny leaves it False, the class default.
     """
+
+    completed = False

@@ -17,10 +17,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage import Workspace
 from mirage.cache.index import IndexEntry
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
 from mirage.resource.discord import DiscordConfig, DiscordResource
 from mirage.types import FileType, MountMode
 
@@ -46,9 +46,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _make_resource() -> DiscordResource:
+def _make_world() -> tuple[DiscordResource, Workspace]:
+    # Seeding happens after the mount: installing a resource re-derives
+    # its index from the workspace's config, so an index seeded before
+    # is thrown away, and a second workspace over the same resource
+    # would throw away this one.
     config = DiscordConfig(token="test-token")
     resource = DiscordResource(config=config)
+    ws = Workspace({f"{PREFIX}/": resource}, mode=MountMode.READ)
     index = resource.index
     _run(
         index.put(
@@ -123,29 +128,17 @@ def _make_resource() -> DiscordResource:
                         resource_type="discord/member",
                         vfs_name="alice.json")),
         ]))
-    return resource
-
-
-def _make_ops(resource: DiscordResource) -> Ops:
-    mount = OpsMount(
-        prefix=f"{PREFIX}/",
-        resource_type=resource.name,
-        accessor=resource.accessor,
-        index=resource.index,
-        mode=MountMode.READ,
-        ops=resource.ops_list(),
-    )
-    return Ops([mount])
+    return resource, ws
 
 
 @pytest.fixture
-def resource():
-    return _make_resource()
+def world():
+    return _make_world()
 
 
 @pytest.fixture
-def ops(resource):
-    return _make_ops(resource)
+def ops(world) -> Ops:
+    return world[1].ops
 
 
 @pytest.fixture

@@ -25,6 +25,9 @@ export const EISDIR = 21
 export const EROFS = 30
 // macOS value; Linux is 39 — fuse-native normalizes.
 export const ENOTEMPTY = 66
+// A rename across mounts. The kernel reads this as "not one filesystem"
+// and `mv` falls back to copy+unlink, so it must survive the trip out.
+export const EXDEV = 18
 
 const CODE_ERRNO: Record<string, number> = {
   ENOTEMPTY,
@@ -35,6 +38,7 @@ const CODE_ERRNO: Record<string, number> = {
   ENOENT,
   EINVAL,
   EROFS,
+  EXDEV,
 }
 
 const MESSAGE_ERRNO: [string[], number][] = [

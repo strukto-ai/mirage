@@ -16,13 +16,10 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied } from '../policy/errors.ts'
-import { Policies } from '../policy/policies.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
-import { MountNotAllowedError } from '../context/session_context.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, Limit, MountMode } from '../types.ts'
-import { enoent, enotdir } from '../utils/errors.ts'
-import { WorkspaceFS } from './fs.ts'
+import { enotdir } from '../utils/errors.ts'
 import { Workspace } from './workspace.ts'
 
 const DEC = new TextDecoder()
@@ -229,101 +226,169 @@ describe('WorkspaceFS policy door', () => {
   })
 })
 
-// The resolver-miss structure fallback (a directory that exists only
-// because a mount sits below it) answers with no owning mount, so the
-// gates fire with prefix '' — skipping them would make "no mount here"
-// a policy bypass.
-describe('WorkspaceFS structure fallback still clears admission', () => {
-  class SealInner implements Policy {
+// The facade is not a second pipeline: it hands every op to the
+// dispatcher, so what the shell sees and what ws.fs sees cannot drift,
+// and each gate fires exactly once per op.
+describe('WorkspaceFS is one door with the dispatcher', () => {
+  class CountPre implements Policy {
+    readonly seen: string[] = []
     preOps(ctx: OpsContext): Action | null {
-      if (ctx.path.virtual === '/data/inner') return { kind: 'deny', message: 'sealed\n' }
+      this.seen.push(`${ctx.op}:${ctx.prefix}`)
       return null
     }
   }
 
-  function mkStructureFS(policies: Policies): WorkspaceFS {
-    return new WorkspaceFS(
-      () => Promise.reject(enoent('/data/inner')),
-      new OpsRegistry(),
-      null,
-      null,
-      null,
-      policies,
-      () => '',
-      () => ['/data/inner/deep/'],
+  it('fires each admission gate exactly once per op', async () => {
+    const counter = new CountPre()
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace(
+      { '/data': resource },
+      { mode: MountMode.WRITE, ops, policies: [counter] },
     )
-  }
-
-  it('a policy deny covers the synthetic readdir and stat', async () => {
-    const policies = new Policies()
-    policies.add(new SealInner())
-    const fs = mkStructureFS(policies)
-    await expect(fs.readdir('/data/inner')).rejects.toThrow(PolicyDenied)
-    await expect(fs.stat('/data/inner')).rejects.toThrow(PolicyDenied)
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    await ws.fs.readFile('/data/a.txt')
+    expect(counter.seen).toEqual(['write:/data/', 'read:/data/'])
   })
 
-  it('the synthetic answer serves when no policy objects', async () => {
-    const fs = mkStructureFS(new Policies())
-    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+  it('serves the namespace structure a nested mount implies', async () => {
+    // '/data/inner' is served by no backend: it exists only because a
+    // mount sits below it. The dispatcher answers it, so the facade
+    // does too.
+    const outer = new RAMResource()
+    const inner = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(outer)
+    ops.registerResource(inner)
+    const ws = new Workspace({}, { mode: MountMode.WRITE, ops })
+    ws.addMount('/data/inner/deep', inner, MountMode.WRITE)
+    ws.addMount('/other', outer, MountMode.WRITE)
+    expect(await ws.fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+    expect((await ws.fs.stat('/data/inner')).type).toBe(FileType.DIRECTORY)
+  })
+
+  it('renders a registered filetype, and raw asks for the stored bytes', async () => {
+    // The door stamps the path's extension so a filetype-scoped op wins;
+    // `raw` passes an explicit null filetype to stop that, which is the
+    // read the FUSE read-modify-write path needs.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: '.gdoc.json',
+      write: false,
+      fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
+    })
+    const ws = new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+    await ws.fs.writeFile('/m/doc.gdoc.json', 'stored')
+    expect(await ws.fs.readFileText('/m/doc.gdoc.json')).toBe('rendered')
+    expect(DEC.decode(await ws.fs.readFile('/m/doc.gdoc.json', { raw: true }))).toBe('stored')
+  })
+
+  it('does not serve a raw read from the file cache', async () => {
+    // A rendering command's read lands in the file cache keyed on the
+    // path alone (that is what `applyIo` does with an IOResult), so the
+    // rendering sits under the very key a raw read asks for. Seeding
+    // the cache directly is the same state one command earlier reaches.
+    // Mirrors Python's tests/ops/test_raw_read.py.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+    await ws.fs.writeFile('/m/doc.gdoc.json', 'stored')
+    await ws.cache.set('/m/doc.gdoc.json', new TextEncoder().encode('rendered'))
+    expect(await ws.fs.readFileText('/m/doc.gdoc.json')).toBe('rendered')
+    expect(DEC.decode(await ws.fs.readFile('/m/doc.gdoc.json', { raw: true }))).toBe('stored')
+  })
+
+  it('refuses a write to a read-only mount at the door', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/ro': resource }, { mode: MountMode.READ, ops })
+    await expect(ws.fs.writeFile('/ro/a.txt', 'x')).rejects.toThrow('read-only')
   })
 })
 
-describe('WorkspaceFS structure below an ungranted mount', () => {
-  function mkUngrantedFS(prefixes: string[]): WorkspaceFS {
-    return new WorkspaceFS(
-      () => Promise.reject(new MountNotAllowedError('agent', '/data')),
-      new OpsRegistry(),
-      null,
-      null,
-      null,
-      new Policies(),
-      () => '',
-      () => prefixes,
-    )
+describe('WorkspaceFS accounting survives the delegation', () => {
+  class DenyBigReads implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read') return { kind: 'deny', message: 'too big\n' }
+      return null
+    }
   }
 
-  it('serves the granted structure instead of the denial', async () => {
-    // The resolver rejects because the owning mount is ungranted, but a
-    // granted mount below the path already put its name in a listing,
-    // so walking down to the grant must answer.
-    const fs = mkUngrantedFS(['/data/inner/deep/'])
-    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
-    const st = await fs.stat('/data/inner')
-    expect(st.type).toBe(FileType.DIRECTORY)
-  })
-
-  it('a path the structure does not owe keeps the canonical denial', async () => {
-    const fs = mkUngrantedFS([])
-    await expect(fs.readdir('/data/inner')).rejects.toThrow(MountNotAllowedError)
-    await expect(fs.stat('/data/inner')).rejects.toThrow(MountNotAllowedError)
-  })
-
-  it("gates the fallback with the synthetic '' prefix, not the ungranted mount's", async () => {
-    // prefixOf still resolves the real ungranted '/data/' here, but the
-    // namespace's own answer has no owning mount: the gates must see ''
-    // exactly as the dispatcher and both Python doors report it, or a
-    // mount-scoped policy diverges between ws.readdir and ws.dispatch.
-    const seen: string[] = []
-    class RecordPrefix implements Policy {
-      preOps(ctx: OpsContext): Action | null {
-        seen.push(ctx.prefix)
-        return null
-      }
+  class SealReads implements Policy {
+    preOps(ctx: OpsContext): Action | null {
+      if (ctx.op === 'read') return { kind: 'deny', message: 'sealed\n' }
+      return null
     }
-    const policies = new Policies()
-    policies.add(new RecordPrefix())
-    const fs = new WorkspaceFS(
-      () => Promise.reject(new MountNotAllowedError('agent', '/data')),
-      new OpsRegistry(),
-      null,
-      null,
-      null,
-      policies,
-      () => '/data/',
-      () => ['/data/inner/deep/'],
-    )
-    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
-    await fs.stat('/data/inner')
-    expect(seen).toEqual(['', ''])
+  }
+
+  function mkWs(policy: Policy): Workspace {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    return new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops, policies: [policy] })
+  }
+
+  it('records a post-denied read: the backend already ran', async () => {
+    const ws = mkWs(new DenyBigReads())
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    await expect(ws.fs.readFile('/data/a.txt')).rejects.toThrow(PolicyDenied)
+    expect(ws.records.map((r) => r.op)).toEqual(['write', 'read'])
+  })
+
+  it('records nothing for a pre-denied read: the backend never ran', async () => {
+    const ws = mkWs(new SealReads())
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    await expect(ws.fs.readFile('/data/a.txt')).rejects.toThrow(PolicyDenied)
+    expect(ws.records.map((r) => r.op)).toEqual(['write'])
+  })
+})
+
+describe('WorkspaceFS rename is bounded by the mount', () => {
+  function mkTwoMounts(): Workspace {
+    const a = new RAMResource()
+    const b = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(a)
+    ops.registerResource(b)
+    const ws = new Workspace({}, { mode: MountMode.WRITE, ops })
+    ws.addMount('/a', a, MountMode.WRITE)
+    ws.addMount('/b', b, MountMode.WRITE)
+    return ws
+  }
+
+  it('renames within one mount', async () => {
+    const ws = mkTwoMounts()
+    await ws.fs.writeFile('/a/x.txt', 'bytes')
+    await ws.fs.rename('/a/x.txt', '/a/y.txt')
+    expect(await ws.fs.readFileText('/a/y.txt')).toBe('bytes')
+    expect(await ws.fs.exists('/a/x.txt')).toBe(false)
+  })
+
+  it('refuses a cross-mount rename with EXDEV, leaving the source intact', async () => {
+    // EXDEV is what tells a caller (the kernel behind a FUSE mount, and
+    // mv behind that) to fall back to copy+unlink instead of addressing
+    // the destination against the source's backend.
+    const ws = mkTwoMounts()
+    await ws.fs.writeFile('/a/x.txt', 'bytes')
+    await expect(ws.fs.rename('/a/x.txt', '/b/y.txt')).rejects.toMatchObject({ code: 'EXDEV' })
+    expect(await ws.fs.readFileText('/a/x.txt')).toBe('bytes')
+    expect(await ws.fs.exists('/b/y.txt')).toBe(false)
+  })
+
+  it('refuses a rename to a path no mount serves', async () => {
+    const ws = mkTwoMounts()
+    await ws.fs.writeFile('/a/x.txt', 'bytes')
+    await expect(ws.fs.rename('/a/x.txt', '/nowhere/y.txt')).rejects.toMatchObject({
+      code: 'EXDEV',
+    })
+    expect(await ws.fs.readFileText('/a/x.txt')).toBe('bytes')
   })
 })

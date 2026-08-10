@@ -538,9 +538,9 @@ class _SizelessOps:
         s = await self._inner.stat(path)
         return s.model_copy(update={"size": None})
 
-    async def read(self, path):
+    async def read(self, path, offset=0, size=None, raw=False):
         self.read_calls += 1
-        return await self._inner.read(path)
+        return await self._inner.read(path, offset, size, raw)
 
 
 _PAYLOAD = b"payload-bytes"

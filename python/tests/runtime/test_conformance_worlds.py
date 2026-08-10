@@ -55,12 +55,11 @@ quickjs_live = pytest.mark.skipif(
 # that starts passing early fails loud instead of rotting as a silent
 # xpass. R1 (mount structure into the door: readdir/stat merge child
 # mounts and namespace links behind the session guard, fan-out and the
-# ls fact session-filtered) has landed, which is why the structure and
-# enumeration groups run unmarked. R2 = one guarded door for every op,
-# closing the guest session leaks that remain (the thread-hop drops the
-# session contextvar, so a guest reads and writes unscoped).
+# ls fact session-filtered) landed, which is why the structure and
+# enumeration groups run unmarked. R2 (one guarded door for every op;
+# RuntimeVFS captures the launch session and re-binds it across the
+# thread hop) landed too, so the guest confinement group runs unmarked.
 
-R2_GUEST = "R2: the guest thread-hop drops the session, so ops run unscoped"
 CWD = "runtime cwd is not wired: guests resolve no relative paths"
 
 
@@ -574,7 +573,6 @@ async def test_fanout_hides_shadowed_keys_when_no_descendant_is_granted(
         "console.log(f.readAsString())\"",
     }),
 )
-@pytest.mark.xfail(reason=R2_GUEST, strict=True)
 async def test_guest_cannot_read_ungranted_mount(runtime: str, line: str):
     """A confined guest reading ``/closed`` must be refused, not served.
 
@@ -592,7 +590,6 @@ async def test_guest_cannot_read_ungranted_mount(runtime: str, line: str):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=R2_GUEST, strict=True)
 async def test_guest_cannot_write_ungranted_mount():
     ws = scoped_world("monty")
     try:
@@ -607,7 +604,6 @@ async def test_guest_cannot_write_ungranted_mount():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=R2_GUEST, strict=True)
 async def test_guest_cannot_follow_link_out_of_scope():
     """A cross-mount symlink is not an escape hatch from confinement."""
     ws = scoped_world("monty")

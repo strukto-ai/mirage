@@ -122,4 +122,17 @@ describe('MountCore', () => {
     expect(core.resolve('/')).toBe('/data')
     expect(core.resolve('/x.txt')).toBe('/data/x.txt')
   })
+
+  it('reports EXDEV for a rename across two mounts', async () => {
+    // A whole-workspace mount spans several backends; the kernel probes
+    // rename first and falls back to copy+unlink only on EXDEV, so this
+    // refusal is what keeps `mv` between two backends working.
+    const core = await mkCore()
+    await expect(core.rename('/data/greeting.txt', '/extra/greeting.txt')).rejects.toMatchObject({
+      code: 'EXDEV',
+    })
+    const fh = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', fh, 0, 100)
+    expect(new TextDecoder().decode(body)).toBe('hello world\n')
+  })
 })

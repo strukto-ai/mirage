@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Coroutine
 from typing import Any, Callable, Literal
 
+from mirage.context import (get_current_session, reset_current_session,
+                            set_current_session)
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.resolver import MountResolver
 from mirage.types import FileStat, PathSpec
@@ -62,9 +65,15 @@ class RuntimeVFS:
     The surface is sync on purpose: guest calls arrive on a worker
     thread (wasm) or the binding's own thread (monty), so every op hops
     to the workspace loop with `run_coroutine_threadsafe` and blocks
-    that caller. The hop carries the launching task's contextvars, so
-    session mount modes are enforced inside the op exactly as they are
-    for a shell command.
+    that caller. The hop cannot carry the launching task's contextvars:
+    what travels is the calling thread's context, and the threads guest
+    calls arrive on (monty's tokio workers, wasmtime's run thread) never
+    had the session bound. So the VFS captures the session on the
+    launching task at construction — every runtime builds one per run,
+    and monty builds one per eval — and re-binds it around each
+    dispatched op, the same bracket FUSE's ``MountCore`` puts around its
+    ops. Session mount modes are then enforced inside the op exactly as
+    they are for a shell command.
 
     Args:
         dispatch (Callable): the workspace dispatch coroutine function.
@@ -81,11 +90,32 @@ class RuntimeVFS:
         self._loop = loop
         self._resolver = resolver
         self._no_append: set[str] = set()
+        self._session = get_current_session()
 
     def _raw(self, op: str, path: str, **kwargs: Any) -> Any:
         coro = self._dispatch(op, PathSpec.from_str_path(path), **kwargs)
-        result, _ = asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+        result, _ = asyncio.run_coroutine_threadsafe(self._bind_session(coro),
+                                                     self._loop).result()
         return result
+
+    async def _bind_session(self, coro: Coroutine[Any, Any, Any]) -> Any:
+        """Run one dispatched op under the captured launch session.
+
+        Set inside the coroutine so the token lands on the event-loop
+        task that executes the op, mirroring ``MountCore._bind_session``.
+
+        Args:
+            coro (Coroutine): the dispatch coroutine to run under the
+                session.
+
+        Returns:
+            Any: whatever the wrapped coroutine returns.
+        """
+        token = set_current_session(self._session)
+        try:
+            return await coro
+        finally:
+            reset_current_session(token)
 
     def call(self, op: str, path: str, **kwargs: Any) -> Any:
         """Run one workspace op and return its result.

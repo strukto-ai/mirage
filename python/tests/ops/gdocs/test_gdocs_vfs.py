@@ -17,32 +17,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage import MountMode, Workspace
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
-from mirage.ops.gdocs import OPS as GDOCS_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import MountMode
+from mirage.resource.gdocs import GDocsConfig, GDocsResource
 
 
-def _make_gdocs_ops():
-    accessor = GDocsAccessor(config=None, token_manager=None)
-    ops_list = []
-    for fn in GDOCS_OPS:
-        if isinstance(fn, RegisteredOp):
-            ops_list.append(fn)
-        elif hasattr(fn, "_registered_ops"):
-            ops_list.extend(fn._registered_ops)
-    mount = OpsMount(
-        prefix="/gdocs/",
-        resource_type="gdocs",
-        accessor=accessor,
-        index=RAMIndexCacheStore(),
-        mode=MountMode.READ,
-        ops=ops_list,
-    )
-    return Ops([mount])
+def _make_gdocs_ops() -> Ops:
+    resource = GDocsResource(
+        config=GDocsConfig(client_id="x", refresh_token="y"))
+    return Workspace({"/gdocs/": resource}, mode=MountMode.READ).ops
 
 
 @pytest.mark.asyncio

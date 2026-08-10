@@ -26,6 +26,7 @@ import {
   ENOTEMPTY,
   EROFS,
   errnoError,
+  EXDEV,
 } from './errors.ts'
 
 describe('classifyErrno', () => {
@@ -37,6 +38,10 @@ describe('classifyErrno', () => {
     ['ENOENT', ENOENT],
     ['EINVAL', EINVAL],
     ['EROFS', EROFS],
+    // A cross-mount rename refusal: the kernel reads EXDEV as "not one
+    // filesystem" and mv falls back to copy+unlink, so this may not
+    // degrade to EIO on the way out of the mount.
+    ['EXDEV', EXDEV],
   ])('maps the %s code property', (code, expected) => {
     expect(classifyErrno(errnoError(code, 'boom'))).toBe(expected)
   })

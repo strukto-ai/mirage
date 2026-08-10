@@ -65,7 +65,9 @@ export async function postOpsGate(
   if (!policies.wants('postOps')) return null
   const [deny, bound] = await policies.postOps({ op, path, write, prefix, result })
   if (deny !== null) {
-    throw new PolicyDenied(deny.message.replace(/\n$/, ''), path.virtual)
+    const denied = new PolicyDenied(deny.message.replace(/\n$/, ''), path.virtual)
+    denied.completed = true
+    throw denied
   }
   return bound
 }

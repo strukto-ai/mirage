@@ -412,7 +412,7 @@ class MountCore:
             return len(data)
         existing = b""
         try:
-            existing = self._run(self._ops.read(self.resolve(path)))
+            existing = self._run(self._ops.read(self.resolve(path), raw=True))
         except FileNotFoundError:
             # missing file: start from empty and let the write create it
             pass
@@ -568,7 +568,7 @@ class MountCore:
             return
         existing = b""
         try:
-            existing = self._run(self._ops.read(self.resolve(path)))
+            existing = self._run(self._ops.read(self.resolve(path), raw=True))
         except FileNotFoundError:
             # missing file: start from empty; the write creates it
             pass

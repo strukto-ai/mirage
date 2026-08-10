@@ -17,34 +17,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
+from mirage import MountMode, Workspace
+from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
-from mirage.ops.gdrive import OPS as GDRIVE_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import MountMode
+from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 
 
-def _make_gdrive_ops():
-    accessor = GDriveAccessor(config=None, token_manager=None)
-    index = RAMIndexCacheStore()
-    ops_list = []
-    for fn in GDRIVE_OPS:
-        if isinstance(fn, RegisteredOp):
-            ops_list.append(fn)
-        elif hasattr(fn, "_registered_ops"):
-            ops_list.extend(fn._registered_ops)
-    mount = OpsMount(
-        prefix="/gdrive/",
-        resource_type="gdrive",
-        accessor=accessor,
-        index=index,
-        mode=MountMode.READ,
-        ops=ops_list,
-    )
-    return Ops([mount]), index
+def _make_gdrive_ops() -> tuple[Ops, IndexCacheStore]:
+    # Mounting re-derives the resource's index from the workspace's
+    # config, so the store to seed is the one the mount ends up with.
+    resource = GoogleDriveResource(
+        config=GoogleDriveConfig(client_id="x", refresh_token="y"))
+    ws = Workspace({"/gdrive/": resource}, mode=MountMode.READ)
+    return ws.ops, resource.index
 
 
 @pytest.mark.asyncio

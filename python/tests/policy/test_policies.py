@@ -177,6 +177,8 @@ async def test_pre_ops_gate_raises_eacces():
     assert excinfo.value.errno == errno.EACCES
     assert excinfo.value.filename == "/data/x"
     assert "no reads" in str(excinfo.value)
+    # A pre deny means the backend never ran.
+    assert excinfo.value.completed is False
     # No opinion on writes: the gate passes silently.
     await pre_ops_gate(policies, "write", _path("/data/x"), True, "/data/")
 
@@ -191,6 +193,9 @@ async def test_post_ops_gate_suppresses_the_result():
         await post_ops_gate(policies, "read", _path("/data/x"), False,
                             "/data/", b"a long secret payload")
     assert excinfo.value.errno == errno.EACCES
+    # A post deny suppresses the result of an op that already ran; the
+    # flag is what lets a door keep its accounting of the completed op.
+    assert excinfo.value.completed is True
 
 
 class CapFour(Policy):

@@ -22,12 +22,11 @@ from mirage.types import PathSpec
 
 # The ops factory forwards the index cache store into read/readdir/stat for
 # every backend. Disk carries a 60s index TTL, so a cached listing would hide
-# a mutation for a full minute unless something evicts it. Two surfaces do:
-# ``dispatch`` through Dispatcher.invalidate_after_write, and the VFS/FUSE
-# ``Ops`` facade through the ``on_write`` hook it is constructed with. TS
-# mirrors these in packages/node/src/ops/index_invalidation.test.ts, where the
-# second half fails instead: its WorkspaceFS has no ``on_write`` equivalent,
-# which is why the TS ops factory still sets ``forwardIndex: false``.
+# a mutation for a full minute unless something evicts it. Both surfaces do,
+# and for one reason: ``dispatch`` and the VFS/FUSE ``Ops`` facade are the
+# same door, so every write goes through Dispatcher.invalidate_after_write.
+# TS mirrors this file, and now the whole of it, in
+# packages/node/src/ops/index_invalidation.test.ts.
 
 
 def _spec(virtual: str, rel: str) -> PathSpec:

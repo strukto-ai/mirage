@@ -57,22 +57,6 @@ export interface MakeGenericOpsOptions {
   mkdirParents?: boolean
   /** Op names to skip because the backend registers an irregular wrapper. */
   overrides?: ReadonlySet<string>
-  /**
-   * Forward `kwargs.index` into read/readdir/stat (default true). Off for
-   * the mutable local backends (ram/disk/redis/ssh), whose non-zero index
-   * TTL would otherwise let a cached listing outlive the mutation.
-   *
-   * `ws.dispatch` is safe on its own: the dispatcher calls
-   * `invalidateAfterWriteByPath` after every write op. `WorkspaceFS` is
-   * not. It reaches `OpsRegistry.call` directly, so a forwarded index is
-   * never evicted and readdir replays the pre-mutation listing for the
-   * whole TTL. Python has no such knob because its `Ops` facade takes an
-   * `on_write` hook (`Ops(..., on_write=self._invalidate_after_write_by_path)`)
-   * and fires it on the same path; giving `WorkspaceFS` that hook is what
-   * would retire this option. `packages/node/src/ops/index_invalidation.test.ts`
-   * pins both halves.
-   */
-  forwardIndex?: boolean
 }
 
 const expectPathSpec = (value: unknown, op: string): PathSpec => {
@@ -121,8 +105,6 @@ export function makeGenericOps<A extends Accessor>(
   }
 
   const asA = (accessor: Accessor): A => accessor as A
-  const pickIndex = (kwargs: OpKwargs): OpKwargs['index'] =>
-    options.forwardIndex === false ? undefined : kwargs.index
 
   // A backend that can fetch a range natively does so, which is the whole
   // point on an object store: one ranged GET instead of the whole file. Every
@@ -147,25 +129,25 @@ export function makeGenericOps<A extends Accessor>(
       const native = table.readRange
       if (native !== undefined && !whole) {
         try {
-          return await native(asA(accessor), path, pickIndex(kwargs), offset, size)
+          return await native(asA(accessor), path, kwargs.index, offset, size)
         } catch (err) {
           if (!isUnsatisfiableRange(err)) throw err
           return new Uint8Array(0)
         }
       }
-      const data = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
+      const data = await table.readBytes(asA(accessor), path, kwargs.index)
       return whole ? data : sliceWindow(data, offset, size)
     },
     false,
   )
   emit(
     'readdir',
-    (accessor, path, _args, kwargs) => table.readdir(asA(accessor), path, pickIndex(kwargs)),
+    (accessor, path, _args, kwargs) => table.readdir(asA(accessor), path, kwargs.index),
     false,
   )
   emit(
     'stat',
-    (accessor, path, _args, kwargs) => table.stat(asA(accessor), path, pickIndex(kwargs)),
+    (accessor, path, _args, kwargs) => table.stat(asA(accessor), path, kwargs.index),
     false,
   )
 

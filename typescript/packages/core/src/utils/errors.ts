@@ -67,6 +67,13 @@ export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
 }
 
+// A rename whose two ends sit on different mounts. POSIX's answer for a
+// rename across filesystems, and the one a caller reads as "copy and
+// unlink instead" (that is what makes `mv` work over a FUSE mount).
+export function exdev(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EXDEV')
+}
+
 // The errno a failed directory listing should report. opendir reports ENOTDIR
 // only when a component of the path exists and is not a directory (GNU
 // `ls /f.txt/x` -> 'Not a directory'); a component that does not exist at all
@@ -192,6 +199,7 @@ const STRERROR: Record<string, string> = {
   EEXIST: 'File exists',
   ENOTEMPTY: 'Directory not empty',
   ENOTSUP: 'Operation not supported',
+  EXDEV: 'Invalid cross-device link',
 }
 
 // GNU strerror text for a POSIX error code, or null if not a recognized

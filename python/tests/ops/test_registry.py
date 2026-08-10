@@ -14,14 +14,10 @@
 
 import pytest
 
-from mirage.accessor.base import NOOPAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.ops import Ops
-from mirage.ops.config import OpsMount
+from mirage import MountMode, Workspace
 from mirage.ops.registry import OpsRegistry, RegisteredOp, op
 from mirage.ops.s3 import OPS as S3_VFS_OPS
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
 
 
 class TestOpDecorator:
@@ -203,17 +199,10 @@ class TestFiletypeOps:
 
     @pytest.mark.asyncio
     async def test_registered_for_s3(self):
-        s3_ops = list(S3_VFS_OPS)
-        mount = OpsMount(
-            prefix="/s3/",
-            resource_type="s3",
-            accessor=NOOPAccessor(),
-            index=RAMIndexCacheStore(),
-            mode=MountMode.READ,
-            ops=s3_ops,
-        )
-        ops = Ops([mount])
-        fn = ops._registry.resolve("read", "s3", filetype=".parquet")
+        registry = OpsRegistry()
+        for ro in S3_VFS_OPS:
+            registry.register(ro)
+        fn = registry.resolve("read", "s3", filetype=".parquet")
         assert fn is not None
 
     @pytest.mark.asyncio
@@ -223,14 +212,6 @@ class TestFiletypeOps:
         store.dirs.add("/")
         store.files["/test.txt"] = b"hello"
         store.modified["/test.txt"] = "2024-01-01T00:00:00"
-        mount = OpsMount(
-            prefix="/data/",
-            resource_type="ram",
-            accessor=resource.accessor,
-            index=RAMIndexCacheStore(),
-            mode=MountMode.READ,
-            ops=resource.ops_list(),
-        )
-        ops = Ops([mount])
-        result = await ops.read("/data/test.txt")
+        ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+        result = await ws.ops.read("/data/test.txt")
         assert result == b"hello"

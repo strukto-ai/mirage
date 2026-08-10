@@ -30,8 +30,12 @@ import { MontyRuntime } from './python/monty/index.ts'
 // R1 (mount structure into the door: readdir/stat merge child mounts
 // and namespace links behind the session guard, fan-out and the ls
 // fact session-filtered) has landed, which is why the structure and
-// enumeration groups run unmarked. Facts still broken run as it.fails
-// with the reason beside them, and start passing loud when fixed.
+// enumeration groups run unmarked. So has R2 (one guarded door for
+// every op): the confinement group was always green here, because a
+// TypeScript guest reaches the door through the same async context
+// that holds the session, where Python had to re-bind it across a
+// thread hop. Facts still broken run as it.fails with the reason
+// beside them, and start passing loud when fixed.
 
 async function structureWorld(): Promise<Workspace> {
   const parser = await getTestParser()

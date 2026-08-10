@@ -13,13 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import threading
 
 import pytest
 
+from mirage.context import (get_current_session, reset_current_session,
+                            set_current_session)
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS, plan_flush
 from mirage.utils.errors import OperationNotSupportedError
+from mirage.workspace.session import Session
 
 
 class RecordingVFS(RuntimeVFS):
@@ -146,3 +150,43 @@ async def test_an_unregistered_op_surfaces_as_not_implemented():
     vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
     with pytest.raises(NotImplementedError):
         await asyncio.to_thread(vfs.mkdir, "/data/sub")
+
+
+class SessionSpyDispatch(RecordingDispatch):
+    """Records the session bound inside the dispatched op."""
+
+    def __init__(self):
+        super().__init__()
+        self.sessions = []
+
+    async def __call__(self, op, path, **kwargs):
+        self.sessions.append(get_current_session())
+        return await super().__call__(op, path, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_hop_rebinds_the_launch_session_on_a_bare_thread():
+    # Monty's tokio workers and wasmtime's run thread carry no Python
+    # context, so a bare Thread models them: the op arrives with an
+    # empty context and only the VFS's captured session can scope it.
+    dispatch = SessionSpyDispatch()
+    sess = Session(session_id="agent")
+    token = set_current_session(sess)
+    try:
+        vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    finally:
+        reset_current_session(token)
+    worker = threading.Thread(target=vfs.read, args=("/data/f.txt", ))
+    worker.start()
+    await asyncio.to_thread(worker.join)
+    assert dispatch.sessions == [sess]
+
+
+@pytest.mark.asyncio
+async def test_a_sessionless_launch_dispatches_unscoped():
+    dispatch = SessionSpyDispatch()
+    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    worker = threading.Thread(target=vfs.read, args=("/data/f.txt", ))
+    worker.start()
+    await asyncio.to_thread(worker.join)
+    assert dispatch.sessions == [None]

@@ -12,120 +12,64 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NOOPAccessor } from '../accessor/base.ts'
-import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
-import { getExtension } from '../commands/resolve.ts'
-import { MountNotAllowedError } from '../context/session_context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
-import type { StatOverlay } from '../ops/types.ts'
-import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
-import { type Policies, postOpsGate, preOpsGate } from '../policy/policies.ts'
-import type { Resource } from '../resource/base.ts'
-import type { FileStat, MountMode } from '../types.ts'
-import { FileType, PathSpec } from '../types.ts'
-import { isMissingPath } from '../utils/errors.ts'
-
-const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
-
-export type Resolver = (path: string) => Promise<[Resource, PathSpec, MountMode]>
+import type { OpKwargs } from '../ops/registry.ts'
+import { PolicyDenied } from '../policy/errors.ts'
+import type { FileStat } from '../types.ts'
+import { FileType, PathSpec, ResourceName } from '../types.ts'
+import { exdev, isMissingPath } from '../utils/errors.ts'
+import type { DispatchFn } from './executor/cross_mount.ts'
 
 export type OpSink = (rec: OpRecord) => Promise<void>
 
-export type PrefixOf = (path: string) => string
+interface MountOwner {
+  readonly prefix: string
+  readonly kind: string
+}
 
+export type OwnerOf = (path: string) => MountOwner | null
+
+// The op's byte count for recording: the result first, else the input
+// (write payloads travel as the first positional argument). Mirrors
+// Python's Ops._payload_bytes.
+function payloadBytes(result: unknown, args: readonly unknown[]): number {
+  if (result instanceof Uint8Array) return result.byteLength
+  for (const arg of args) {
+    if (arg instanceof Uint8Array) return arg.byteLength
+  }
+  return 0
+}
+
+/**
+ * The typed op facade FUSE and programmatic embedders call.
+ *
+ * Every op delegates to the workspace dispatcher, so `ws.fs` walks the
+ * same pipeline as a shell command: link follow, session grants,
+ * admission policies, cache read-through, namespace structure, and
+ * post-write invalidation all fire once, at that one door. The facade
+ * keeps only what is its own: the typed surface and op recording
+ * (`ws.records`, and the network/cache split derived from it). Mirrors
+ * Python's `Ops` attached to a workspace.
+ */
 export class WorkspaceFS {
-  private readonly resolver: Resolver
-  private readonly ops: OpsRegistry
+  private readonly dispatch: DispatchFn
   private readonly sink: OpSink | null
-  // Injected namespace seam (workspace wires it); FUSE reads `links` for
-  // its symlink surface, and every op here follows links before resolving
-  // so the facade and dispatch can never disagree on the operand.
+  // Injected namespace seam (workspace wires it); FUSE reads `links`
+  // for its symlink surface.
   readonly links: NamespaceLinks | null
-  private readonly statOverlay: StatOverlay | null
-  // Policy seam: this facade is an op door like the dispatcher (FUSE and
-  // programmatic access read through it), so pre/post op hooks must fire
-  // here too, mirroring the Python Ops door. Null means ungated, for
-  // direct construction in tests.
-  private readonly policies: Policies | null
-  private readonly prefixOf: PrefixOf | null
-  // Live view of the workspace mount prefixes, for the structure merge:
-  // this facade is a second door beside the dispatcher until they
-  // collapse (R2), so both must answer readdir and stat with the same
-  // namespace structure. Null means no structure to merge (direct
-  // construction in tests).
-  private readonly prefixes: (() => string[]) | null
+  private readonly ownerOf: OwnerOf
 
   constructor(
-    resolver: Resolver,
-    ops: OpsRegistry,
+    dispatch: DispatchFn,
     sink: OpSink | null = null,
     links: NamespaceLinks | null = null,
-    statOverlay: StatOverlay | null = null,
-    policies: Policies | null = null,
-    prefixOf: PrefixOf | null = null,
-    prefixes: (() => string[]) | null = null,
+    ownerOf: OwnerOf = () => null,
   ) {
-    this.resolver = resolver
-    this.ops = ops
+    this.dispatch = dispatch
     this.sink = sink
     this.links = links
-    this.statOverlay = statOverlay
-    this.policies = policies
-    this.prefixOf = prefixOf
-    this.prefixes = prefixes
-  }
-
-  /**
-   * The namespace's own answer for a path no backend serves, mirroring
-   * the dispatcher: a directory that exists only because a mount or a
-   * link sits below it still lists and stats. Null for any other op,
-   * or when the namespace knows nothing at `path`.
-   */
-  private namespaceResult(op: string, path: string): string[] | FileStat | null {
-    if (this.prefixes === null) return null
-    if (op === 'readdir') return namespaceListing(this.prefixes(), this.links, path)
-    if (op === 'stat') return namespaceStat(this.prefixes(), this.links, path)
-    return null
-  }
-
-  private follow(op: string, path: string): string {
-    if (this.links === null || NO_FOLLOW_OPS.has(op)) return path
-    return this.links.follow(path)
-  }
-
-  // `prefix` overrides the mount attribution; the structure fallbacks
-  // pass '' ("no owning mount"), matching how the dispatcher and both
-  // Python doors gate the same synthetic answer.
-  private async firePreOps(
-    op: string,
-    path: string,
-    pathSpec: PathSpec,
-    write: boolean,
-    prefix?: string,
-  ): Promise<void> {
-    if (this.policies === null) return
-    const p = prefix ?? (this.prefixOf !== null ? this.prefixOf(path) : '')
-    await preOpsGate(this.policies, op, pathSpec, write, p)
-  }
-
-  // Bookkeeping precedes this gate: a denied result is still a completed
-  // backend op, so recording runs first and the deny only suppresses
-  // what the caller sees (mirrors the Python Ops door).
-  private async firePostOps(
-    op: string,
-    path: string,
-    pathSpec: PathSpec,
-    write: boolean,
-    result: unknown,
-    prefix?: string,
-  ): Promise<unknown> {
-    if (this.policies === null) return result
-    const p = prefix ?? (this.prefixOf !== null ? this.prefixOf(path) : '')
-    const bound = await postOpsGate(this.policies, op, pathSpec, write, p, result)
-    if (bound !== null) return applyOpLimit(result, bound)
-    return result
+    this.ownerOf = ownerOf
   }
 
   private async record(
@@ -148,25 +92,54 @@ export class WorkspaceFS {
     )
   }
 
-  async readFile(path: string, options: { raw?: boolean } = {}): Promise<Uint8Array> {
+  /**
+   * Run one op through the workspace dispatcher and record it.
+   *
+   * The door owns the whole pipeline (follow, grants, gates, cache,
+   * structure, invalidation); the facade's own share is the record. The
+   * path is link-followed here first so the record carries the resolved
+   * path; the door's second follow of an already-resolved path is a
+   * no-op. Mirrors Python's Ops._through_door.
+   */
+  private async through(
+    op: string,
+    path: string,
+    args: readonly unknown[] = [],
+    kwargs: OpKwargs = {},
+  ): Promise<unknown> {
     const start = Date.now()
-    path = this.follow('read', path)
-    const [resource, pathSpec] = await this.resolver(path)
-    const filetype = options.raw === true ? null : getExtension(path)
-    const kwargs: OpKwargs = {}
-    if (filetype !== null) kwargs.filetype = filetype
-    if (resource.index !== undefined) kwargs.index = resource.index
-    await this.firePreOps('read', path, pathSpec, false)
-    const result = (await this.ops.call(
-      'read',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-      [],
-      kwargs,
-    )) as Uint8Array
-    await this.record('read', path, resource.kind, result.byteLength, start)
-    return (await this.firePostOps('read', path, pathSpec, false, result)) as Uint8Array
+    const followed = this.links !== null && !NO_FOLLOW_OPS.has(op) ? this.links.follow(path) : path
+    const owner = this.ownerOf(followed)
+    let result: unknown
+    let cached = false
+    try {
+      const [value, io] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs)
+      result = value
+      cached = Object.keys(io.reads).length > 0
+    } catch (err) {
+      // A postOps deny suppresses the result, not the effect: the
+      // backend already mutated, so observation must reflect the op
+      // before the deny propagates.
+      if (err instanceof PolicyDenied && err.completed && owner !== null) {
+        await this.record(op, followed, owner.kind, payloadBytes(null, args), start)
+      }
+      throw err
+    }
+    if (owner !== null) {
+      // A cache-served read moved no bytes over the network; 'ram' is
+      // what OpRecord.isCache reads.
+      const source = cached ? ResourceName.RAM : owner.kind
+      await this.record(op, followed, source, payloadBytes(result, args), start)
+    }
+    return result
+  }
+
+  // `raw` skips the filetype cascade: an explicit null filetype stops
+  // the door from stamping the path's extension, so a rendered read op
+  // (gdoc/gsheet/gmail) is bypassed and the stored bytes come back.
+  async readFile(path: string, options: { raw?: boolean } = {}): Promise<Uint8Array> {
+    const kwargs: OpKwargs = options.raw === true ? { filetype: null } : {}
+    return (await this.through('read', path, [], kwargs)) as Uint8Array
   }
 
   async readFileText(path: string, encoding = 'utf-8'): Promise<string> {
@@ -175,113 +148,16 @@ export class WorkspaceFS {
   }
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
-    const start = Date.now()
-    path = this.follow('write', path)
-    const [resource, pathSpec] = await this.resolver(path)
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
-    const kwargs = resource.index !== undefined ? { index: resource.index } : {}
-    await this.firePreOps('write', path, pathSpec, true)
-    await this.ops.call(
-      'write',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-      [bytes],
-      kwargs,
-    )
-    await this.record('write', path, resource.kind, bytes.byteLength, start)
-    await this.firePostOps('write', path, pathSpec, true, null)
+    await this.through('write', path, [bytes])
   }
 
   async readdir(path: string): Promise<string[]> {
-    const start = Date.now()
-    path = this.follow('readdir', path)
-    let resolved: [Resource, PathSpec, MountMode]
-    try {
-      resolved = await this.resolver(path)
-    } catch (err) {
-      // No mount serves the path, or a real mount is ungranted; mirror
-      // the dispatcher and fire the gates anyway, with the synthetic ''
-      // prefix (a grant-miss resolves to the real ungranted prefix,
-      // which must not attribute the namespace's own answer), so a
-      // policy that bounds readdir by path covers the synthetic answer
-      // too. The merged names are session-filtered, so an ungranted
-      // mount's own content never leaks.
-      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
-      const fallback = eligible ? this.namespaceResult('readdir', path) : null
-      if (fallback === null) throw err
-      const pathSpec = PathSpec.fromStrPath(path)
-      await this.firePreOps('readdir', path, pathSpec, false, '')
-      return (
-        ((await this.firePostOps('readdir', path, pathSpec, false, fallback, '')) as
-          | string[]
-          | null) ?? []
-      )
-    }
-    const [resource, pathSpec] = resolved
-    const kwargs = resource.index !== undefined ? { index: resource.index } : {}
-    await this.firePreOps('readdir', path, pathSpec, false)
-    let result: string[] | null
-    try {
-      result = (await this.ops.call(
-        'readdir',
-        resource.kind,
-        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-        pathSpec,
-        [],
-        kwargs,
-      )) as string[] | null
-    } catch (err) {
-      const fallback = isMissingPath(err) ? this.namespaceResult('readdir', path) : null
-      if (fallback === null) throw err
-      result = fallback as string[]
-    }
-    if (this.prefixes !== null) {
-      result = mergeReaddir(result ?? [], this.prefixes(), this.links, path)
-    }
-    await this.record('readdir', path, resource.kind, 0, start)
-    return (
-      ((await this.firePostOps('readdir', path, pathSpec, false, result)) as string[] | null) ?? []
-    )
+    return ((await this.through('readdir', path)) as string[] | null) ?? []
   }
 
   async stat(path: string): Promise<FileStat> {
-    const start = Date.now()
-    path = this.follow('stat', path)
-    let resolved: [Resource, PathSpec, MountMode]
-    try {
-      resolved = await this.resolver(path)
-    } catch (err) {
-      // Same gate routing as the readdir resolver miss above.
-      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
-      const fallback = eligible ? this.namespaceResult('stat', path) : null
-      if (fallback === null) throw err
-      const pathSpec = PathSpec.fromStrPath(path)
-      await this.firePreOps('stat', path, pathSpec, false, '')
-      return (await this.firePostOps('stat', path, pathSpec, false, fallback, '')) as FileStat
-    }
-    const [resource, pathSpec] = resolved
-    const kwargs = resource.index !== undefined ? { index: resource.index } : {}
-    await this.firePreOps('stat', path, pathSpec, false)
-    let result: FileStat
-    try {
-      result = (await this.ops.call(
-        'stat',
-        resource.kind,
-        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-        pathSpec,
-        [],
-        kwargs,
-      )) as FileStat
-    } catch (err) {
-      const fallback = isMissingPath(err) ? this.namespaceResult('stat', path) : null
-      if (fallback === null) throw err
-      result = fallback as FileStat
-    }
-    await this.record('stat', path, resource.kind, 0, start)
-    result = (await this.firePostOps('stat', path, pathSpec, false, result)) as FileStat
-    if (this.statOverlay !== null) return this.statOverlay(path, result)
-    return result
+    return (await this.through('stat', path)) as FileStat
   }
 
   // The three probes below answer "is this path there?", so only a genuine
@@ -320,66 +196,39 @@ export class WorkspaceFS {
   }
 
   async mkdir(path: string): Promise<void> {
-    const start = Date.now()
-    path = this.follow('mkdir', path)
-    const [resource, pathSpec] = await this.resolver(path)
-    await this.firePreOps('mkdir', path, pathSpec, true)
-    await this.ops.call(
-      'mkdir',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-    )
-    await this.record('mkdir', path, resource.kind, 0, start)
-    await this.firePostOps('mkdir', path, pathSpec, true, null)
+    await this.through('mkdir', path)
+  }
+
+  async create(path: string): Promise<void> {
+    await this.through('create', path)
+  }
+
+  async truncate(path: string, length: number): Promise<void> {
+    await this.through('truncate', path, [length])
   }
 
   async unlink(path: string): Promise<void> {
-    const start = Date.now()
-    path = this.follow('unlink', path)
-    const [resource, pathSpec] = await this.resolver(path)
-    await this.firePreOps('unlink', path, pathSpec, true)
-    await this.ops.call(
-      'unlink',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-    )
-    await this.record('unlink', path, resource.kind, 0, start)
-    await this.firePostOps('unlink', path, pathSpec, true, null)
+    await this.through('unlink', path)
   }
 
   async rmdir(path: string): Promise<void> {
-    const start = Date.now()
-    path = this.follow('rmdir', path)
-    const [resource, pathSpec] = await this.resolver(path)
-    await this.firePreOps('rmdir', path, pathSpec, true)
-    await this.ops.call(
-      'rmdir',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-    )
-    await this.record('rmdir', path, resource.kind, 0, start)
-    await this.firePostOps('rmdir', path, pathSpec, true, null)
+    await this.through('rmdir', path)
   }
 
+  /**
+   * Rename a file or directory within one mount.
+   *
+   * Both ends must resolve to the same mount: a mount is a filesystem
+   * boundary, and the facade is where a kernel-facing whole-workspace
+   * FUSE mount needs the refusal, so `mv` between two backends falls
+   * back to its copy+unlink path instead of corrupting one backend's
+   * key space with the other's path. Mirrors Python's Ops.rename.
+   */
   async rename(src: string, dst: string): Promise<void> {
-    const start = Date.now()
-    src = this.follow('rename', src)
-    dst = this.follow('rename', dst)
-    const [resource, srcSpec] = await this.resolver(src)
-    const [, dstSpec] = await this.resolver(dst)
-    await this.firePreOps('rename', src, srcSpec, true)
-    await this.ops.call(
-      'rename',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      srcSpec,
-      [dstSpec],
-    )
-    await this.record('rename', src, resource.kind, 0, start)
-    await this.firePostOps('rename', src, srcSpec, true, null)
+    if ((this.ownerOf(src)?.prefix ?? '') !== (this.ownerOf(dst)?.prefix ?? '')) {
+      throw exdev(src)
+    }
+    await this.through('rename', src, [PathSpec.fromStrPath(dst)])
   }
 
   async cat(path: string): Promise<string> {

@@ -145,8 +145,14 @@ class Dispatcher:
         write = op in _POLICY_WRITE_OPS
         await pre_ops_gate(policies, op, path, write, mount.prefix)
         caches_reads = mount.resource.caches_reads
+        # The file cache is keyed on the path alone, and what a command
+        # put there is the rendered read. A raw read asks for a
+        # different value under the same key, so it must not be served
+        # from that cache; nothing populates it from here, so skipping
+        # the probe is the whole fix.
+        raw = "filetype" in kwargs and kwargs["filetype"] is None
 
-        if caches_reads and op in _DISPATCH_READ_OPS:
+        if caches_reads and not raw and op in _DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):
@@ -239,30 +245,6 @@ class Dispatcher:
             await self._cache.clear()
         for mount in self._namespace.registry.mounts():
             await mount.resource.index.clear()
-
-    async def invalidate_after_write_by_path(self,
-                                             path: str,
-                                             observed: float | None = None
-                                             ) -> None:
-        """Drop file-cache + stale parent index after a write to `path`.
-
-        Single source of truth for post-write invalidation. Called from
-        both `Workspace.dispatch()` and `Ops._call(write=True)` so a
-        write through any code path sees the same invalidation rules:
-        file cache is dropped only for read-caching mounts, and the
-        parent directory index is dirtied for any mount that maintains
-        an index. No-op for paths that resolve to no known mount.
-
-        Args:
-            path (str): absolute mount path that was written.
-        """
-        try:
-            mount = self._namespace.mount_for(path)
-        except ValueError:
-            return
-        spec = PathSpec.from_str_path(
-            path, mount_key(path, mount.prefix.rstrip("/")))
-        await self.invalidate_after_write(mount, spec, observed=observed)
 
     async def invalidate_after_write(self,
                                      mount: MountEntry,

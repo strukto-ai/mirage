@@ -65,7 +65,6 @@ import type { EvalResult } from '../runtime/types.ts'
 import { PyodideUnavailableError } from '../runtime/python/types.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
-import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
@@ -253,18 +252,21 @@ export class Workspace {
         mount.commandLimits.set(cmd, sg)
       }
     }
+    // The facade delegates every op to the dispatcher, so FUSE and
+    // programmatic ws.fs walk the same pipeline as a shell command and
+    // the policy gates fire exactly once, at that door. It keeps the
+    // record, which is its own.
     this.fs = new WorkspaceFS(
-      (path) => this.resolve(path),
-      this.opsRegistry,
+      this.dispatcher.dispatch,
       async (rec) => {
         this.records.push(rec)
         await this.observer.logOp(rec, this.agentId ?? '', this.sessionManager.defaultId)
       },
       this.namespace,
-      (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
-      this.registry.policies,
-      (path) => this.registry.mountFor(path)?.prefix ?? '',
-      () => this.registry.mountPrefixes(),
+      (path) => {
+        const mount = this.registry.mountFor(path)
+        return mount === null ? null : { prefix: mount.prefix, kind: mount.resource.kind }
+      },
     )
   }
 

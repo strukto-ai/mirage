@@ -19,8 +19,9 @@ import pytest
 import pytest_asyncio
 
 from mirage.fuse.core import MountCore
+from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 
@@ -132,3 +133,67 @@ async def test_resolve_honors_root_prefix():
     core = MountCore(ws.ops, root_prefix="/data/")
     assert core.resolve("/") == "/data"
     assert core.resolve("/x.txt") == "/data/x.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_across_mounts_reports_exdev():
+    # A whole-workspace mount spans several backends; the kernel probes
+    # rename first and falls back to copy+unlink only on EXDEV, so the
+    # facade's refusal is what keeps `mv` between two backends working.
+    ws = Workspace({
+        "/data/": RAMResource(),
+        "/other/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    core = MountCore(ws.ops)
+    core.write("/data/x.txt", b"body", 0, None)
+    with pytest.raises(OSError) as exc:
+        core.rename("/data/x.txt", "/other/x.txt")
+    assert exc.value.errno == errno.EXDEV
+    assert core.read("/data/x.txt", 100, 0, None) == b"body"
+
+
+@op("read", resource="ram", filetype=".tally")
+async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
+    return b"RENDERED-AND-MUCH-LONGER"
+
+
+def _tally_core() -> MountCore:
+    resource = RAMResource()
+    resource.register_op(_read_tally)
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    return MountCore(ws.ops)
+
+
+@pytest.mark.asyncio
+async def test_partial_write_merges_against_stored_bytes():
+    # Read-modify-write hands its merged buffer to `write`, which
+    # stores, so the read that feeds it has to be the stored bytes. A
+    # mount that renders this extension would otherwise have the
+    # rendering written over the file on any partial write.
+    core = _tally_core()
+    core.write("/data/books.tally", b"0123456789", 0, None)
+    core.write("/data/books.tally", b"XY", 4, None)
+    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    assert stored == b"0123XY6789"
+
+
+@pytest.mark.asyncio
+async def test_read_still_renders_after_a_partial_write():
+    # The other half of the same rule: only the write path reads raw.
+    core = _tally_core()
+    core.write("/data/books.tally", b"0123456789", 0, None)
+    core.write("/data/books.tally", b"XY", 4, None)
+    body = core.read("/data/books.tally", 100, 0, None)
+    assert body == b"RENDERED-AND-MUCH-LONGER"
+
+
+@pytest.mark.asyncio
+async def test_buffered_write_flush_merges_against_stored_bytes():
+    core = _tally_core()
+    core.write("/data/books.tally", b"0123456789", 0, None)
+    fh = core.open("/data/books.tally")
+    core.write("/data/books.tally", b"XY", 4, fh)
+    core.release(fh)
+    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    assert stored == b"0123XY6789"

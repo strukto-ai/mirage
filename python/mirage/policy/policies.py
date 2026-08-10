@@ -81,8 +81,10 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
                          prefix=prefix,
                          result=result))
     if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
-                           path.virtual)
+        denied = PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
+                              path.virtual)
+        denied.completed = True
+        raise denied
     return bound
 
 
