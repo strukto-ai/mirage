@@ -27,6 +27,33 @@ const VALUE_FLAGS: Readonly<Record<string, string>> = {
   check_hash_based_pycs: '--check-hash-based-pycs',
 }
 
+// The -X names CPython gives an effect beyond landing in
+// sys._xoptions, so a warm interpreter that only populates that dict
+// has not honored them. Every one is read out of the read-only
+// sys.flags or installed at interpreter start (dev, utf8,
+// warn_default_encoding, importtime, frozen_modules, cpu_count,
+// no_debug_ranges, perf*, showrefcount) or needs a library call this
+// wrapper does not make (faulthandler, int_max_str_digits,
+// pycache_prefix, tracemalloc). An arbitrary name is deliberately
+// absent: on CPython it does nothing but land in the dict either.
+// Pinned against `python3 --help-xoptions` on 3.13.7.
+const X_EFFECTS: ReadonlySet<string> = new Set([
+  'cpu_count',
+  'dev',
+  'faulthandler',
+  'frozen_modules',
+  'importtime',
+  'int_max_str_digits',
+  'no_debug_ranges',
+  'perf',
+  'perf_jit',
+  'pycache_prefix',
+  'showrefcount',
+  'tracemalloc',
+  'utf8',
+  'warn_default_encoding',
+])
+
 /** One run's interpreter-init switches, as the command parsed them. */
 export interface InitFlags {
   b?: number
@@ -66,6 +93,15 @@ function unhonored(flags: InitFlags, honored: readonly string[]): string[] {
   for (const [key, spelling] of Object.entries(VALUE_FLAGS)) {
     if (honored.includes(key)) continue
     if (flags[key as keyof InitFlags]) present.push(spelling)
+  }
+  // Reported per name rather than per letter: an engine can honor what
+  // -X means for sys._xoptions and still not act on the handful of
+  // names CPython gives a real effect.
+  for (const value of flags.X ?? []) {
+    const optName = value.split('=')[0] ?? ''
+    if (X_EFFECTS.has(optName) && !honored.includes(`X:${optName}`)) {
+      present.push(`-X ${optName}`)
+    }
   }
   return present
 }

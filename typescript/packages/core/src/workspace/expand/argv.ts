@@ -87,11 +87,17 @@ export async function expandArgv(
   const name = expanded.slice(0, consumed).join(' ')
   // Before anything reads the line: an option carrying a program hands
   // the words after it to that program, and POSIX's own `--` is how that
-  // handoff is spelled.
-  const lineWords = [
-    ...expanded.slice(0, consumed),
-    ...endOptionsAfterProgram(name, expanded.slice(consumed)),
-  ]
+  // handoff is spelled. Only when the interpreter is what runs, though:
+  // a shell function of the same name takes the line instead (bash's own
+  // rule), and it must receive the words as typed rather than a marker
+  // meant for a parser it does not have. `command python3` masks the
+  // function for its inner run, which is exactly when the rewrite
+  // applies again. A CLI cannot reach here at all, since registerCli
+  // refuses a shell builtin's name.
+  const shadowed = Object.hasOwn(session.functions, name)
+  const lineWords = shadowed
+    ? [...expanded]
+    : [...expanded.slice(0, consumed), ...endOptionsAfterProgram(name, expanded.slice(consumed))]
 
   const policy = wordPolicy(route(name, session, registry))
   let wordKinds: (ValueType | null)[] | null = null

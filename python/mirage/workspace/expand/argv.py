@@ -107,9 +107,16 @@ async def expand_argv(
 
     # Before anything reads the line: an option carrying a program hands
     # the words after it to that program, and POSIX's own `--` is how
-    # that handoff is spelled.
-    expanded = expanded[:consumed] + end_options_after_program(
-        name, expanded[consumed:])
+    # that handoff is spelled. Only when the interpreter is what runs,
+    # though: a shell function of the same name takes the line instead
+    # (bash's own rule), and it must receive the words as typed rather
+    # than a marker meant for a parser it does not have. `command
+    # python3` masks the function for its inner run, which is exactly
+    # when the rewrite applies again. A CLI cannot reach here at all,
+    # since register_cli refuses a shell builtin's name.
+    if name not in session.functions:
+        expanded = expanded[:consumed] + end_options_after_program(
+            name, expanded[consumed:])
 
     policy = word_policy(route(name, session, registry))
     word_kinds: list[ValueType | None] | None = None

@@ -29,6 +29,32 @@ VALUE_FLAGS: dict[str, str] = {
     "check_hash_based_pycs": "--check-hash-based-pycs",
 }
 
+# The -X names CPython gives an effect beyond landing in sys._xoptions,
+# so a warm interpreter that only populates that dict has not honored
+# them. Every one is read out of the read-only sys.flags or installed at
+# interpreter start (dev, utf8, warn_default_encoding, importtime,
+# frozen_modules, cpu_count, no_debug_ranges, perf*, showrefcount) or
+# needs a library call the engine does not make (faulthandler,
+# int_max_str_digits, pycache_prefix, tracemalloc). An arbitrary name is
+# deliberately absent: on CPython it does nothing but land in the dict
+# either. Pinned against `python3 --help-xoptions` on 3.13.7.
+X_EFFECTS: frozenset[str] = frozenset({
+    "cpu_count",
+    "dev",
+    "faulthandler",
+    "frozen_modules",
+    "importtime",
+    "int_max_str_digits",
+    "no_debug_ranges",
+    "perf",
+    "perf_jit",
+    "pycache_prefix",
+    "showrefcount",
+    "tracemalloc",
+    "utf8",
+    "warn_default_encoding",
+})
+
 
 def init_argv(flags: dict[str, Any]) -> list[str]:
     """CPython command-line switches for one run's interpreter flags.
@@ -85,6 +111,13 @@ def unhonored(
     for key, spelling in VALUE_FLAGS.items():
         if key not in honored and flags.get(key):
             present.append(spelling)
+    # Reported per name rather than per letter: an engine can honor what
+    # -X means for sys._xoptions and still not act on the handful of
+    # names CPython gives a real effect.
+    for value in flags.get("X") or []:
+        opt_name = str(value).split("=")[0]
+        if opt_name in X_EFFECTS and f"X:{opt_name}" not in honored:
+            present.append(f"-X {opt_name}")
     return present
 
 

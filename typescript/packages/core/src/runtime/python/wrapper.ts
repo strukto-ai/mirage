@@ -178,9 +178,20 @@ _stdin_text = io.TextIOWrapper(_stdin_buf, encoding='utf-8', errors='replace')
 # Deleting PYTHON* from os.environ was that fake, and it was wrong in
 # the other direction too: CPython's -E stops those variables
 # configuring startup, it does not hide them from the program, which
-# can still read PYTHONPATH out of os.environ. One divergence stands:
-# sys.flags is read-only, so introspecting code sees optimize == 0 even
-# when -O was honored.
+# can still read PYTHONPATH out of os.environ.
+#
+# Two bounded divergences follow from the same fact, that the resident
+# interpreter's own level is 0 and cannot be changed: introspecting
+# code sees sys.flags.optimize == 0 even when -O was honored, and -O
+# reaches only the code compiled here, so a module imported from
+# sys.path still compiles unoptimized (its asserts run, and -OO leaves
+# its docstrings). Reporting -O as ignored would be the larger lie,
+# since the payload really is compiled at the requested level.
+# A known -X name is a third case and is reported, because populating
+# sys._xoptions is all this can do for one: -X dev and
+# -X warn_default_encoding are read out of sys.flags, which is
+# read-only. An arbitrary -X name is silent, since landing in
+# sys._xoptions is all it does on CPython either.
 _flags     = dict(_init_flags) if _init_flags is not None else {}
 # CPython counts -OOO as optimize 3 in sys.flags but compile() accepts
 # only -1..2 and raises ValueError above that, so the extra Os saturate
@@ -206,7 +217,14 @@ try:
         # that asked for nothing.
         _saved_filters = _warnings.filters[:]
         for _spec in _flags.get('W') or []:
-            _warnings._setoption(str(_spec))
+            try:
+                _warnings._setoption(str(_spec))
+            except _warnings._OptionError as _werr:
+                # CPython names a bad filter at startup and runs the
+                # program anyway; raising here would kill a line every
+                # other runtime completes. The message is _OptionError's
+                # own, which is what CPython prints after the colon.
+                _err_text.write('Invalid -W option ignored: %s\\n' % (_werr,))
     sys.stdin  = _stdin_text
     sys.stdout = _out_text
     sys.stderr = _err_text

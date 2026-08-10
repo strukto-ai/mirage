@@ -50,4 +50,26 @@ describe('unhonoredNotice', () => {
   it('says nothing about an absent switch', () => {
     expect(unhonoredNotice({ B: false, O: 0, W: [] }, 'monty').length).toBe(0)
   })
+
+  it('reports a known -X name even when -X itself is honored', () => {
+    // Populating sys._xoptions is all a warm interpreter can do for
+    // -X dev, whose real effect is read out of the read-only sys.flags.
+    expect(text(unhonoredNotice({ X: ['dev'] }, 'pyodide', ['X']))).toBe(
+      "python3: warning: -X dev is ignored by the 'pyodide' runtime\n",
+    )
+  })
+
+  it('reports a known -X name without its value', () => {
+    expect(text(unhonoredNotice({ X: ['tracemalloc=5'] }, 'pyodide', ['X']))).toContain(
+      '-X tracemalloc is ignored',
+    )
+  })
+
+  it('stays silent about an arbitrary -X name', () => {
+    expect(unhonoredNotice({ X: ['nosuchopt'] }, 'pyodide', ['X']).length).toBe(0)
+  })
+
+  it('stays silent about a known -X name the engine acts on', () => {
+    expect(unhonoredNotice({ X: ['dev'] }, 'pyodide', ['X', 'X:dev']).length).toBe(0)
+  })
 })

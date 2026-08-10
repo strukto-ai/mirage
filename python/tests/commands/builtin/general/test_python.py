@@ -183,3 +183,36 @@ async def test_traceback_names_the_script_on_a_cpython_runtime(ws_cpython):
     io = await ws_cpython.execute("python3 /boom.py")
     assert io.exit_code == 1
     assert b'File "/boom.py"' in (await materialize(io.stderr))
+
+
+@pytest.mark.asyncio
+async def test_a_shadowing_function_receives_the_words_as_typed(ws):
+    # bash's own rule: a function of the same name takes the line. It
+    # has no CPython option table, so the `--` the interpreter's handoff
+    # would need must not be inserted into its arguments.
+    await ws.execute('python3() { echo "$@"; }')
+    io = await ws.execute('python3 -c payload -u x')
+    assert io.exit_code == 0
+    assert await materialize(io.stdout) == b"-c payload -u x\n"
+
+
+@pytest.mark.asyncio
+async def test_command_bypasses_the_function_and_restores_the_handoff(
+        ws_cpython):
+    # `command` masks the function for its inner run, so the interpreter
+    # is what runs and -u belongs to the program again.
+    await ws_cpython.execute('python3() { echo "$@"; }')
+    io = await ws_cpython.execute(
+        'command python3 -c "import sys; print(sys.argv)" -u x')
+    assert io.exit_code == 0
+    assert await materialize(io.stdout) == b"['-c', '-u', 'x']\n"
+
+
+@pytest.mark.asyncio
+async def test_unsetting_the_function_restores_the_handoff(ws_cpython):
+    await ws_cpython.execute('python3() { echo "$@"; }')
+    await ws_cpython.execute('unset -f python3')
+    io = await ws_cpython.execute(
+        'python3 -c "import sys; print(sys.argv)" -u x')
+    assert io.exit_code == 0
+    assert await materialize(io.stdout) == b"['-c', '-u', 'x']\n"

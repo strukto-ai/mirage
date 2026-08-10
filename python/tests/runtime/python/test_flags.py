@@ -69,3 +69,22 @@ def test_the_notice_names_the_runtime_once_per_switch():
 
 def test_the_notice_is_empty_when_the_line_carried_no_switch():
     assert unhonored_notice({}, "pyodide") == b""
+
+
+def test_a_known_x_name_is_reported_by_name():
+    # Populating sys._xoptions is all a warm interpreter can do for
+    # -X dev, whose real effect is read out of the read-only sys.flags.
+    assert unhonored({"X": ["dev"]}, ("X", )) == ["-X dev"]
+
+
+def test_a_known_x_name_with_a_value_is_reported_without_it():
+    assert unhonored({"X": ["tracemalloc=5"]}, ("X", )) == ["-X tracemalloc"]
+
+
+def test_an_arbitrary_x_name_stays_silent():
+    # On CPython it does nothing but land in sys._xoptions either.
+    assert unhonored({"X": ["nosuchopt"]}, ("X", )) == []
+
+
+def test_an_engine_that_acts_on_a_known_x_name_says_nothing():
+    assert unhonored({"X": ["dev"]}, ("X", "X:dev")) == []
