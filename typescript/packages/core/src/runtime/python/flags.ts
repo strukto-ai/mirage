@@ -18,38 +18,54 @@
 // and `-q` are deliberately absent: mirage buffers every stream and
 // prints no banner, so they are structural no-ops in every runtime
 // rather than something one engine honors and another does not.
-const BOOL_FLAGS: readonly string[] = ['B', 'E', 'I', 's', 'S']
+const BOOL_FLAGS: readonly string[] = ['B', 'E', 'I', 'P', 's', 'S']
+const COUNT_FLAGS: readonly string[] = ['O', 'b']
 const LIST_FLAGS: readonly string[] = ['W', 'X']
-const OPTIMIZE_FLAG = 'O'
+// The one init switch CPython spells long. Its key is the parser's
+// canonical spelling rather than a letter, since it has none.
+const VALUE_FLAGS: Readonly<Record<string, string>> = {
+  check_hash_based_pycs: '--check-hash-based-pycs',
+}
 
 /** One run's interpreter-init switches, as the command parsed them. */
 export interface InitFlags {
+  b?: number
   B?: boolean
   E?: boolean
   I?: boolean
+  P?: boolean
   s?: boolean
   S?: boolean
   O?: number
   W?: readonly string[]
   X?: readonly string[]
+  check_hash_based_pycs?: string | null
 }
 
 /**
- * The init switches present on a line, in CPython's spelling.
+ * The init switches present on a line that this engine did not act on.
  *
  * A runtime that cannot act on these reports them rather than dropping
  * them silently, so a line behaving differently across runtimes says so
- * instead of being discovered later.
+ * instead of being discovered later. `honored` is the engine's own
+ * subset, by CPython letter; the default is none, which is the honest
+ * answer for an engine that is not CPython at all.
  *
  * Args:
  *   flags: the run's RunArgs.flags bag.
+ *   honored: the letters this engine does act on.
  */
-function unhonored(flags: InitFlags): string[] {
+function unhonored(flags: InitFlags, honored: readonly string[]): string[] {
   const present: string[] = []
-  for (const key of [...BOOL_FLAGS, OPTIMIZE_FLAG, ...LIST_FLAGS]) {
+  for (const key of [...BOOL_FLAGS, ...COUNT_FLAGS, ...LIST_FLAGS]) {
+    if (honored.includes(key)) continue
     const value = flags[key as keyof InitFlags]
-    const set = Array.isArray(value) ? value.length > 0 : value === true || value === 1
+    const set = Array.isArray(value) ? value.length > 0 : value === true || Number(value) > 0
     if (set) present.push(`-${key}`)
+  }
+  for (const [key, spelling] of Object.entries(VALUE_FLAGS)) {
+    if (honored.includes(key)) continue
+    if (flags[key as keyof InitFlags]) present.push(spelling)
   }
   return present
 }
@@ -65,9 +81,14 @@ function unhonored(flags: InitFlags): string[] {
  * Args:
  *   flags: the run's RunArgs.flags bag.
  *   runtimeName: the engine's registry name, for the message.
+ *   honored: the letters this engine does act on.
  */
-export function unhonoredNotice(flags: InitFlags, runtimeName: string): Uint8Array {
-  const lines = unhonored(flags).map(
+export function unhonoredNotice(
+  flags: InitFlags,
+  runtimeName: string,
+  honored: readonly string[] = [],
+): Uint8Array {
+  const lines = unhonored(flags, honored).map(
     (spelling) => `python3: warning: ${spelling} is ignored by the '${runtimeName}' runtime\n`,
   )
   return new TextEncoder().encode(lines.join(''))

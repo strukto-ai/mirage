@@ -72,4 +72,52 @@ describe('endOptionsAfterProgram', () => {
   it('adds nothing when no words follow the value', () => {
     expect(rewrite(['-c', 'print(1)'])).toEqual(['-c', 'print(1)'])
   })
+
+  it('hands off from inside a cluster', () => {
+    // `python3 -uc 'p' -v` gives the program ['-c', '-v'] on CPython,
+    // so the carrier is found by walking letters, not by prefix.
+    expect(rewrite(['-uc', 'p', '-v', 'foo'])).toEqual(['-uc', 'p', '--', '-v', 'foo'])
+  })
+
+  it('hands off after a cluster carrying an attached value', () => {
+    expect(rewrite(['-ucp', '-v', 'foo'])).toEqual(['-ucp', '--', '-v', 'foo'])
+  })
+
+  it('leaves a clustered payload with no value alone', () => {
+    expect(rewrite(['-uc'])).toEqual(['-uc'])
+  })
+
+  it('steps over a long value option before the payload', () => {
+    expect(rewrite(['--check-hash-based-pycs', 'never', '-c', 'p', '-u', 'z'])).toEqual([
+      '--check-hash-based-pycs',
+      'never',
+      '-c',
+      'p',
+      '--',
+      '-u',
+      'z',
+    ])
+  })
+
+  it('consumes only its own word for an attached long value option', () => {
+    expect(rewrite(['--check-hash-based-pycs=never', '-c', 'p', '-u', 'z'])).toEqual([
+      '--check-hash-based-pycs=never',
+      '-c',
+      'p',
+      '--',
+      '-u',
+      'z',
+    ])
+  })
+
+  it('consumes only its own word for an attached short value option', () => {
+    expect(rewrite(['-Wignore', '-c', 'p', '-u', 'z'])).toEqual([
+      '-Wignore',
+      '-c',
+      'p',
+      '--',
+      '-u',
+      'z',
+    ])
+  })
 })

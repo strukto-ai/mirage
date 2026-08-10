@@ -32,6 +32,12 @@
       "type": "bool"
     },
     {
+      "count": true,
+      "description": "Warn on str(bytes) and on comparing bytes with str; -bb raises instead.",
+      "short": "-b",
+      "type": "bool"
+    },
+    {
       "description": "Do not write .pyc files on import.",
       "short": "-B",
       "type": "bool"
@@ -50,6 +56,11 @@
       "count": true,
       "description": "Remove assert and __debug__ blocks; -OO also strips docstrings.",
       "short": "-O",
+      "type": "bool"
+    },
+    {
+      "description": "Do not prepend the script's directory to sys.path.",
+      "short": "-P",
       "type": "bool"
     },
     {
@@ -74,9 +85,24 @@
       "type": "str"
     },
     {
+      "description": "Skip the script file's first line, for a non-Unix #! form.",
+      "short": "-x",
+      "type": "bool"
+    },
+    {
       "description": "Set an implementation-specific option.",
       "multiple": true,
       "short": "-X",
+      "type": "str"
+    },
+    {
+      "choices": [
+        "always",
+        "default",
+        "never"
+      ],
+      "description": "How to validate hash-based .pyc files.",
+      "long": "--check-hash-based-pycs",
       "type": "str"
     },
     {

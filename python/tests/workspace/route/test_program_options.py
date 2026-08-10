@@ -68,3 +68,35 @@ def test_a_payload_with_no_value_is_left_for_the_parser_to_refuse():
 
 def test_nothing_is_added_when_no_words_follow_the_value():
     assert rewrite(["-c", "print(1)"]) == ["-c", "print(1)"]
+
+
+def test_a_clustered_payload_hands_off_from_inside_the_cluster():
+    # `python3 -uc 'p' -v` gives the program ['-c', '-v'] on CPython,
+    # so the carrier is found by walking letters, not by prefix.
+    assert rewrite(["-uc", "p", "-v",
+                    "foo"]) == ["-uc", "p", "--", "-v", "foo"]
+
+
+def test_a_clustered_attached_payload_hands_off_after_its_own_word():
+    assert rewrite(["-ucp", "-v", "foo"]) == ["-ucp", "--", "-v", "foo"]
+
+
+def test_a_clustered_payload_with_no_value_is_left_alone():
+    assert rewrite(["-uc"]) == ["-uc"]
+
+
+def test_a_long_value_option_before_the_payload_is_stepped_over():
+    assert rewrite([
+        "--check-hash-based-pycs", "never", "-c", "p", "-u", "z"
+    ]) == ["--check-hash-based-pycs", "never", "-c", "p", "--", "-u", "z"]
+
+
+def test_an_attached_long_value_option_consumes_only_its_own_word():
+    assert rewrite([
+        "--check-hash-based-pycs=never", "-c", "p", "-u", "z"
+    ]) == ["--check-hash-based-pycs=never", "-c", "p", "--", "-u", "z"]
+
+
+def test_an_attached_short_value_option_consumes_only_its_own_word():
+    assert rewrite(["-Wignore", "-c", "p", "-u",
+                    "z"]) == ["-Wignore", "-c", "p", "--", "-u", "z"]

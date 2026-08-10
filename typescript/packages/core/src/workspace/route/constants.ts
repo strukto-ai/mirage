@@ -191,6 +191,45 @@ const PROGRAM_OPTIONS: Record<string, readonly string[]> = {
 }
 
 /**
+ * Where a short cluster's program value ends, or null if it has none.
+ *
+ * Args:
+ *   word: the option word, dash included.
+ *   index: the word's position in the command's words.
+ *   carriers: the spellings whose value is a program.
+ *   valueSpellings: every short spelling that takes a value.
+ */
+function clusterHandoff(
+  word: string,
+  index: number,
+  carriers: readonly string[],
+  valueSpellings: readonly string[],
+): number | null {
+  for (let j = 1; j < word.length; j++) {
+    const letter = `-${word[j] ?? ''}`
+    // Attached (`-cCODE`) carries its value in this word; the detached
+    // form takes the next one.
+    if (carriers.includes(letter)) return word.slice(j + 1) !== '' ? index + 1 : index + 2
+    if (valueSpellings.includes(letter)) return null
+  }
+  return null
+}
+
+/**
+ * How many words a short cluster with no program value consumes.
+ *
+ * Args:
+ *   word: the option word, dash included.
+ *   valueSpellings: every short spelling that takes a value.
+ */
+function clusterWords(word: string, valueSpellings: readonly string[]): number {
+  for (let j = 1; j < word.length; j++) {
+    if (valueSpellings.includes(`-${word[j] ?? ''}`)) return word.slice(j + 1) !== '' ? 1 : 2
+  }
+  return 1
+}
+
+/**
  * Insert POSIX's `--` after a program-carrying option's value.
  *
  * The handoff already has a spelling every parser honors, so the rule is
@@ -204,6 +243,11 @@ const PROGRAM_OPTIONS: Record<string, readonly string[]> = {
  * Only the option run before the first operand is scanned. A -c after an
  * operand belongs to the program (`python3 s.py -c x`), and the operand
  * already ended option parsing by itself.
+ *
+ * The scan walks a short cluster letter by letter rather than matching
+ * the word's prefix, because the carrier need not be first: CPython
+ * reads `python3 -uc 'p' -v` and `python3 -uc'p' -v` the same way it
+ * reads the unclustered forms, handing `-v` to the program.
  */
 export function endOptionsAfterProgram(name: string, words: string[]): string[] {
   const carriers = PROGRAM_OPTIONS[name]
@@ -212,31 +256,29 @@ export function endOptionsAfterProgram(name: string, words: string[]): string[] 
   // steps over `ignore` instead of reading it as the first operand.
   const spec = SPECS[name]
   if (spec === undefined) return words
-  const valueSpellings = compileSpec(spec).valueSpellings
+  const compiled = compileSpec(spec)
   let i = 0
   while (i < words.length) {
     const word = words[i] ?? ''
     if (word === '--') return words
-    const carrier = carriers.find((c) => word.startsWith(c))
-    if (carrier !== undefined) {
-      // Attached (`-cCODE`) carries its value in this word; the detached
-      // form takes the next one.
-      const after = word !== carrier ? i + 1 : i + 2
-      // Nothing to hand over, and a detached form with no value at all is
-      // the parser's refusal to report, not ours to turn into a program
-      // named `--`.
-      if (after >= words.length) return words
-      return [...words.slice(0, after), '--', ...words.slice(after)]
-    }
-    if (valueSpellings.includes(word)) {
-      i += 2
+    // The first operand, which ended option parsing by itself.
+    if (!word.startsWith('-') || word === '-') return words
+    if (word.startsWith('--')) {
+      const attached = word.includes('=')
+      const longName = word.split('=', 1)[0] ?? word
+      i += attached || !compiled.longValueSpellings.has(longName) ? 1 : 2
       continue
     }
-    if (word.startsWith('-') && word !== '-') {
-      i += 1
+    const after = clusterHandoff(word, i, carriers, compiled.valueSpellings)
+    if (after === null) {
+      i += clusterWords(word, compiled.valueSpellings)
       continue
     }
-    return words
+    // Nothing to hand over, and a detached form with no value at all is
+    // the parser's refusal to report, not ours to turn into a program
+    // named `--`.
+    if (after >= words.length) return words
+    return [...words.slice(0, after), '--', ...words.slice(after)]
   }
   return words
 }

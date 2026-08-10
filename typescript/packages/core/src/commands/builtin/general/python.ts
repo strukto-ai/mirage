@@ -34,20 +34,26 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 // Keyed by CPython's own letter, which is how runtime/python/flags reads
-// them; -u and -q are absent because mirage buffers every stream and
-// prints no banner, so no engine can differ on them.
+// them; the one long switch is keyed by its canonical spelling, having
+// no letter. -u and -q are absent because mirage buffers every stream
+// and prints no banner, so no engine can differ on them, and -x is
+// absent because it selects source rather than configuring an
+// interpreter, so handlePython answers it.
 function initFlags(fl: FlagView): InitFlags {
   return {
+    b: fl.asInt('b') ?? 0,
     B: fl.asBool('B'),
     E: fl.asBool('E'),
     // -I and -O canonicalize to args_I/args_O (AMBIGUOUS_NAMES), so the
     // spec-checked FlagView refuses the bare letters.
     I: fl.asBool('args_I'),
+    P: fl.asBool('P'),
     s: fl.asBool('s'),
     S: fl.asBool('S'),
     O: fl.asInt('args_O') ?? 0,
     W: fl.asList('W'),
     X: fl.asList('X'),
+    check_hash_based_pycs: fl.asStr('check_hash_based_pycs') ?? null,
   }
 }
 
@@ -151,6 +157,7 @@ async function pythonCommand(
       code: resolvedCode,
       prog: argv0,
       mode,
+      skipFirstLine: fl.asBool('x'),
       initFlags: initFlags(fl),
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
       ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),

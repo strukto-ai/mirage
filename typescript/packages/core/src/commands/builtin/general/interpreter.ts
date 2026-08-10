@@ -44,6 +44,22 @@ export const STDIN_ARGV0 = '-'
 export const STDIN_OPERAND = '-'
 
 /**
+ * Drop a script's first line the way CPython's `-x` does.
+ *
+ * The first line is emptied rather than removed, because CPython keeps
+ * the line numbering of the whole file: a raise on physical line 2
+ * still reports line 2 under `-x` (pinned on 3.12.11). A file with no
+ * newline at all is one line, so `-x` leaves nothing.
+ *
+ * Args:
+ *   code: the script's text as read.
+ */
+export function skipFirstLine(code: string): string {
+  const at = code.indexOf('\n')
+  return at === -1 ? '' : code.slice(at)
+}
+
+/**
  * The program that `-m mod` runs, on any engine that is real CPython.
  *
  * runpy does the work: run_module finds the module, runs it under

@@ -33,6 +33,7 @@ import { preloadInto } from './vfs/preload.ts'
 import { MirageFs } from './vfs/vfs.ts'
 import { MirageFsSeed } from './vfs/seed.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
+import { unhonoredNotice, type InitFlags } from './flags.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
@@ -41,6 +42,21 @@ function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
 function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null {
   const bytes = bridgeBytes(value)
   return bytes.length > 0 ? bytes : null
+}
+
+// The init switches this engine acts on, by CPython letter. The rest
+// (-E, -I, -s, -S) only change how an interpreter *starts*, and this
+// one is already running by the time a line is typed, so it reports
+// them instead of pretending. See PYTHON_WRAPPER for what honoring the
+// four below amounts to.
+const HONORED_FLAGS: readonly string[] = ['B', 'O', 'W', 'X']
+
+function decodeNoticeLines(notice: Uint8Array): string[] {
+  if (notice.length === 0) return []
+  return new TextDecoder()
+    .decode(notice)
+    .split('\n')
+    .filter((line) => line.length > 0)
 }
 
 function appendStderrLines(stderr: Uint8Array | null, lines: string[]): Uint8Array | null {
@@ -622,8 +638,14 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private async runOne(args: RunArgs): Promise<RunResult> {
     const pyodide = await this.ensureLoaded()
     // Seeding happened inside ensureLoaded; its notices ride out on
-    // this run's stderr, beside any flush failure.
-    const seedNotices = this.takeSeedNotices()
+    // this run's stderr, beside any flush failure and any init switch
+    // this engine could not act on.
+    const seedNotices = [
+      ...this.takeSeedNotices(),
+      ...decodeNoticeLines(
+        unhonoredNotice((args.flags ?? {}) as InitFlags, this.name, HONORED_FLAGS),
+      ),
+    ]
     await this.loadImports(pyodide, args.code)
     const mergedEnv = { ...runtimeEnv(), ...args.env }
     // sys.argv[0] is the program's own name when the caller has one (a

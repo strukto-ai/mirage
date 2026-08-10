@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import { runOutput, skipFirstLine } from '../../../commands/builtin/general/interpreter.ts'
 import type { SourceMode } from '../../../commands/builtin/general/interpreter.ts'
 import { PythonRuntime } from '../../../runtime/python/base.ts'
 import type { InitFlags } from '../../../runtime/python/flags.ts'
@@ -62,6 +62,9 @@ export async function handlePython(
     // runtime must not treat it as absent.
     prog?: string
     mode?: SourceMode
+    // CPython's -x. File mode only, which is CPython's own scope: -c,
+    // -m and stdin are unaffected.
+    skipFirstLine?: boolean
     initFlags?: InitFlags
     signal?: AbortSignal
     timeoutSeconds?: number
@@ -84,6 +87,7 @@ export async function handlePython(
       const [data] = await dispatch('read', toPathSpec(pathScope))
       const bytes = await readAllBytes(data)
       code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+      if (opts.skipFirstLine === true) code = skipFirstLine(code)
     } catch {
       const err = new TextEncoder().encode(`python3: ${pathScope.virtual}: No such file\n`)
       return [

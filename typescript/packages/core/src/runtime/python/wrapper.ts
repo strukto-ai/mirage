@@ -169,28 +169,31 @@ _err_text  = io.TextIOWrapper(_err_bytes, encoding='utf-8', errors='replace',
 _stdin_buf  = io.BytesIO(bytes(_stdin_bytes) if _stdin_bytes is not None else b'')
 _stdin_text = io.TextIOWrapper(_stdin_buf, encoding='utf-8', errors='replace')
 
-# The interpreter-init switches, honored here because this engine is
-# real CPython even though it is already running: -O is a compile()
-# argument, -B and -X are writable attributes, and -W is what the
-# warnings module does anyway. -E/-I/-s/-S reduce to dropping entries
-# from the env and sys.path, both of which this wrapper already
-# saves and restores. One divergence stands: sys.flags is read-only, so
-# introspecting code sees optimize == 0 even when -O was honored.
+# The interpreter-init switches this engine can act on, which is the
+# set that is still settable after startup: -O is a compile() argument,
+# -B and -X are writable attributes, and -W is what the warnings module
+# does anyway. -E, -I, -s and -S are NOT among them: they only change
+# how an interpreter starts up, and this one started long before the
+# line was typed, so the runtime reports them rather than faking them.
+# Deleting PYTHON* from os.environ was that fake, and it was wrong in
+# the other direction too: CPython's -E stops those variables
+# configuring startup, it does not hide them from the program, which
+# can still read PYTHONPATH out of os.environ. One divergence stands:
+# sys.flags is read-only, so introspecting code sees optimize == 0 even
+# when -O was honored.
 _flags     = dict(_init_flags) if _init_flags is not None else {}
-_optimize  = int(_flags.get('O') or 0)
-_isolated  = bool(_flags.get('I'))
-_no_env    = bool(_flags.get('E')) or _isolated
+# CPython counts -OOO as optimize 3 in sys.flags but compile() accepts
+# only -1..2 and raises ValueError above that, so the extra Os saturate
+# here rather than failing the run.
+_optimize  = min(int(_flags.get('O') or 0), 2)
 _saved_dwb = sys.dont_write_bytecode
 _saved_xop = dict(sys._xoptions)
+_saved_filters = None
 
 _exit_code = 0
 try:
     os.environ.clear()
-    _env = dict(_merged_env)
-    if _no_env:
-        for _key in [k for k in _env if k.startswith('PYTHON')]:
-            del _env[_key]
-    os.environ.update(_env)
+    os.environ.update(_merged_env)
     if _flags.get('B'):
         sys.dont_write_bytecode = True
     for _xopt in _flags.get('X') or []:
@@ -198,6 +201,10 @@ try:
         sys._xoptions[_name] = _value if _value else True
     if _flags.get('W'):
         import warnings as _warnings
+        # _setoption mutates a process-global list, and this interpreter
+        # outlives the run, so -W error would follow every later command
+        # that asked for nothing.
+        _saved_filters = _warnings.filters[:]
         for _spec in _flags.get('W') or []:
             _warnings._setoption(str(_spec))
     sys.stdin  = _stdin_text
@@ -230,6 +237,10 @@ finally:
     sys.dont_write_bytecode = _saved_dwb
     sys._xoptions.clear()
     sys._xoptions.update(_saved_xop)
+    if _saved_filters is not None:
+        import warnings as _warnings
+        _warnings.filters[:] = _saved_filters
+        _warnings._filters_mutated()
     sys.stdin    = _saved_stdin
     sys.stdout   = _saved_stdout
     sys.stderr   = _saved_stderr

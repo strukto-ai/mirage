@@ -49,10 +49,57 @@ def run_output(result: RunResult) -> CommandOutput:
 # stdin with no operand at all. Pinned on CPython 3.12.13.
 SourceMode: TypeAlias = Literal["payload", "module", "file", "stdin"]
 
-# argv[0] for the two modes that do not read it off the command line.
-PAYLOAD_ARGV0 = "-c"
-STDIN_ARGV0 = "-"
 STDIN_OPERAND = "-"
+
+
+def skip_first_line(code: str) -> str:
+    """Drop a script's first line the way CPython's ``-x`` does.
+
+    The first line is emptied rather than removed, because CPython
+    keeps the line numbering of the whole file: a raise on physical
+    line 2 still reports line 2 under ``-x`` (pinned on 3.12.11). A
+    file with no newline at all is one line, so ``-x`` leaves nothing.
+
+    Args:
+        code (str): the script's text as read.
+    """
+    _, sep, rest = code.partition("\n")
+    return sep + rest if sep else ""
+
+
+@dataclass(frozen=True, slots=True)
+class Argv0Rules:
+    """What an interpreter calls itself in the doors with no file name.
+
+    File mode is universal (the operand as typed), so only these three
+    differ, and they differ per interpreter rather than per language:
+    CPython puts "-c" in argv[0] for a payload, while qjs leaves
+    scriptArgs alone for `-e` and fills it only when it runs a file. An
+    interpreter that names none of them passes None, and its runtime
+    sees the unnamed program it saw before.
+
+    Args:
+        payload (str | None): argv[0] for a -c/-e payload.
+        stdin_operand (str | None): argv[0] for an explicit "-" operand.
+        bare_stdin (str | None): argv[0] for a program piped in with no
+            operand at all.
+        names_file (bool): file mode puts the operand in argv[0]. False
+            for qjs, whose scriptArgs start at the first argument even
+            when it runs a file, so prepending the path would shift
+            every index the program reads.
+    """
+
+    payload: str | None = None
+    stdin_operand: str | None = None
+    bare_stdin: str | None = None
+    names_file: bool = False
+
+
+# CPython's own four answers, pinned on 3.12.13/3.13.7.
+CPYTHON_ARGV0 = Argv0Rules(payload="-c",
+                           stdin_operand="-",
+                           bare_stdin="",
+                           names_file=True)
 
 # `-m` is runpy's job on any real CPython: run_module finds the module,
 # runs it under __main__, and alter_sys rewrites sys.argv[0] to the
@@ -95,9 +142,10 @@ class Source:
         script_path (PathSpec | None): the resolved script operand,
             None for payload/stdin sources.
         mode (SourceMode): which door the source came through.
-        argv0 (str): the program's own name for argv[0], derived from
-            the mode. Never None: "" is CPython's own answer for stdin
-            with no operand, so a runtime must not treat it as absent.
+        argv0 (str | None): the program's own name for argv[0],
+            derived from the mode and the interpreter's own rules. ""
+            is meaningful (CPython's answer for stdin with no operand);
+            None means this interpreter names no program here.
     """
 
     code: str
@@ -105,7 +153,7 @@ class Source:
     stdin: bytes | None = None
     script_path: PathSpec | None = None
     mode: SourceMode = "payload"
-    argv0: str = PAYLOAD_ARGV0
+    argv0: str | None = None
 
 
 async def resolve_source(
@@ -118,6 +166,8 @@ async def resolve_source(
     cwd: PathSpec | None,
     exec_allowed: bool,
     module: str | None = None,
+    argv0_rules: Argv0Rules = Argv0Rules(),
+    skip_line: bool = False,
 ) -> tuple[CommandOutput | None, Source | None]:
     """Resolve what an interpreter command should run, shared by all.
 
@@ -136,6 +186,12 @@ async def resolve_source(
             reading the script operand.
         cwd (PathSpec | None): the session cwd for script resolution.
         exec_allowed (bool): whether the root mount is in EXEC mode.
+        module (str | None): the -m module name, if given.
+        argv0_rules (Argv0Rules): what this interpreter calls itself in
+            the doors that carry no file name.
+        skip_line (bool): drop the script file's first line (CPython's
+            -x). File mode only, which is CPython's own scope: -c, -m
+            and stdin are unaffected.
 
     Returns:
         tuple[CommandOutput | None, Source | None]: an early
@@ -151,7 +207,7 @@ async def resolve_source(
     code = payload
     script_path: PathSpec | None = None
     mode: SourceMode = "payload"
-    argv0 = PAYLOAD_ARGV0
+    argv0: str | None = argv0_rules.payload
     if module is not None:
         # runpy's alter_sys overwrites argv[0] with the module's own
         # file, which no caller can know here; the module name stands
@@ -166,25 +222,25 @@ async def resolve_source(
         script_path = paths[0]
         arg_strs = [p.virtual for p in paths[1:]] + text_list
         mode = "file"
-        argv0 = paths[0].raw_path
+        argv0 = paths[0].raw_path if argv0_rules.names_file else None
     elif text_list and text_list[0] == STDIN_OPERAND:
         # The explicit stdin spelling. It is an operand, not a flag, so
         # it ends option parsing like any other, and the words after it
         # are the program's argv exactly as a script's would be.
         arg_strs = text_list[1:]
         mode = "stdin"
-        argv0 = STDIN_ARGV0
+        argv0 = argv0_rules.stdin_operand
     elif text_list:
         script_path = resolve_script(text_list[0], cwd)
         arg_strs = text_list[1:]
         mode = "file"
         # As typed, which is what CPython puts in argv[0]; the resolved
         # spelling is script_path's job.
-        argv0 = text_list[0]
+        argv0 = text_list[0] if argv0_rules.names_file else None
     else:
         arg_strs = []
         mode = "stdin"
-        argv0 = ""
+        argv0 = argv0_rules.bare_stdin
 
     if code is None and script_path is not None:
         if dispatch is None:
@@ -196,6 +252,8 @@ async def resolve_source(
             err = f"{label}: {script_path.virtual}: No such file\n".encode()
             return (None, IOResult(exit_code=1, stderr=err)), None
         code = data.decode(errors="replace") if isinstance(data, bytes) else ""
+        if skip_line:
+            code = skip_first_line(code)
 
     stdin_data = await _read_stdin_async(stdin)
     if code is None:

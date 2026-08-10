@@ -60,6 +60,44 @@ PROGRAM_OPTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _cluster_handoff(word: str, index: int, carriers: tuple[str, ...],
+                     value_spellings: tuple[str, ...]) -> int | None:
+    """Where a short cluster's program value ends, or None if it has one.
+
+    Args:
+        word (str): the option word, dash included.
+        index (int): the word's position in the command's words.
+        carriers (tuple[str, ...]): the spellings whose value is a
+            program.
+        value_spellings (tuple[str, ...]): every short spelling that
+            takes a value.
+    """
+    for j in range(1, len(word)):
+        letter = f"-{word[j]}"
+        rest = word[j + 1:]
+        if letter in carriers:
+            # Attached (`-cCODE`) carries its value in this word; the
+            # detached form takes the next one.
+            return index + 1 if rest else index + 2
+        if letter in value_spellings:
+            return None
+    return None
+
+
+def _cluster_words(word: str, value_spellings: tuple[str, ...]) -> int:
+    """How many words a short cluster with no program value consumes.
+
+    Args:
+        word (str): the option word, dash included.
+        value_spellings (tuple[str, ...]): every short spelling that
+            takes a value.
+    """
+    for j in range(1, len(word)):
+        if f"-{word[j]}" in value_spellings:
+            return 1 if word[j + 1:] else 2
+    return 1
+
+
 def end_options_after_program(name: str, words: list[str]) -> list[str]:
     """Insert POSIX's ``--`` after a program-carrying option's value.
 
@@ -76,6 +114,11 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
     after an operand belongs to the program (``python3 s.py -c x``), and
     the operand already ended option parsing by itself.
 
+    The scan walks a short cluster letter by letter rather than matching
+    the word's prefix, because the carrier need not be first: CPython
+    reads ``python3 -uc 'p' -v`` and ``python3 -uc'p' -v`` the same way
+    it reads the unclustered forms, handing ``-v`` to the program.
+
     Args:
         name (str): the command name as routed.
         words (list[str]): the command's words, argv[0] excluded.
@@ -85,30 +128,31 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
         return words
     # Value spellings say which words carry a value, so `-W ignore -c p`
     # steps over `ignore` instead of reading it as the first operand.
-    value_spellings = compile_spec(SPECS[name]).value_spellings
+    cs = compile_spec(SPECS[name])
     i = 0
     while i < len(words):
         word = words[i]
         if word == "--":
             return words
-        carrier = next((c for c in carriers if word.startswith(c)), None)
-        if carrier is not None:
-            # Attached (`-cCODE`) carries its value in this word; the
-            # detached form takes the next one.
-            after = i + 1 if word != carrier else i + 2
-            if after >= len(words):
-                # Nothing to hand over, and a detached form with no value
-                # at all is the parser's refusal to report, not ours to
-                # turn into a program named `--`.
-                return words
-            return words[:after] + ["--"] + words[after:]
-        if word in value_spellings:
-            i += 2
+        if not word.startswith("-") or word == "-":
+            # The first operand, which ended option parsing by itself.
+            return words
+        if word.startswith("--"):
+            long_name = word.split("=", 1)[0]
+            detached = ("=" not in word
+                        and long_name in cs.long_value_spellings)
+            i += 2 if detached else 1
             continue
-        if word.startswith("-") and word != "-":
-            i += 1
+        after = _cluster_handoff(word, i, carriers, cs.value_spellings)
+        if after is None:
+            i += _cluster_words(word, cs.value_spellings)
             continue
-        return words
+        if after >= len(words):
+            # Nothing to hand over, and a detached form with no value at
+            # all is the parser's refusal to report, not ours to turn
+            # into a program named `--`.
+            return words
+        return words[:after] + ["--"] + words[after:]
     return words
 
 
