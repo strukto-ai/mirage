@@ -59,6 +59,7 @@ async def _expand_string_with_array(
                            execute_fn=execute_fn,
                            call_stack=call_stack)
     fragments: list[str] = [""]
+    splat_yielded = False
     for child in node.children:
         if child.type == NT.DQUOTE:
             continue
@@ -71,6 +72,7 @@ async def _expand_string_with_array(
             fragments[-1] = fragments[-1] + _folded_whitespace(child)
             if not words:
                 continue
+            splat_yielded = True
             if len(words) == 1:
                 fragments[-1] = fragments[-1] + words[0]
             else:
@@ -80,9 +82,12 @@ async def _expand_string_with_array(
             continue
         text = await expand_node(child, session, execute_fn, call_stack)
         fragments[-1] = fragments[-1] + text
-    if fragments == [""]:
-        # Nothing but an empty splat: bash drops the word entirely rather
-        # than passing an empty one. Any literal at all keeps it.
+    if fragments == [""] and not splat_yielded:
+        # A splat that yielded nothing, with no text around it, is no word
+        # at all. One empty ELEMENT is a word though (set -- "" passes one
+        # empty argument), so the rendered text cannot decide this; only
+        # the element count can. An empty expansion beside it does not
+        # rescue the word either: with no parameters, "$u$@" is nothing.
         return []
     return fragments
 

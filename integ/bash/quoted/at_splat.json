@@ -475,6 +475,176 @@
         "stdout": "[pre ]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "at_splat_one_empty_positional_is_a_word",
+      "seq": 930314,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set -- \"\"; printf \"[%s]\\n\" A \"$@\" B",
+      "expect": {
+        "exit": 0,
+        "stdout": "[A]\n[]\n[B]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "at_splat_one_empty_array_element_is_a_word",
+      "seq": 930315,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "arr=(\"\"); printf \"[%s]\\n\" A \"${arr[@]}\" B",
+      "expect": {
+        "exit": 0,
+        "stdout": "[A]\n[]\n[B]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "at_splat_braced_one_empty_is_a_word",
+      "seq": 930316,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set -- \"\"; printf \"[%s]\\n\" A \"${@}\" B",
+      "expect": {
+        "exit": 0,
+        "stdout": "[A]\n[]\n[B]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "at_splat_empty_expansion_does_not_rescue_the_word",
+      "seq": 930317,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set --; printf \"[%s]\\n\" A \"$u$@\" B",
+      "expect": {
+        "exit": 0,
+        "stdout": "[A]\n[B]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "at_splat_a_literal_space_rescues_the_word",
+      "seq": 930318,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set --; printf \"[%s]\\n\" A \"$@ $@\" B",
+      "expect": {
+        "exit": 0,
+        "stdout": "[A]\n[ ]\n[B]\n",
+        "stderr": ""
+      }
     }
   ]
 }

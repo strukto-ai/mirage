@@ -598,3 +598,28 @@ describe('a quoted "$@" splices into the word around it', () => {
     await ws.close()
   })
 })
+
+describe('an empty splat element is still a word', () => {
+  it.each([
+    // One EMPTY element is still an element, so the word survives and is
+    // empty. Zero elements is what drops the word, and the two render the
+    // same text, so only the count can tell them apart.
+    ['set -- ""; printf "[%s]\\n" A "$@" B', '[A]\n[]\n[B]\n'],
+    ['set -- ""; printf "[%s]\\n" A "${@}" B', '[A]\n[]\n[B]\n'],
+    ['arr=(""); printf "[%s]\\n" A "${arr[@]}" B', '[A]\n[]\n[B]\n'],
+    ['set -- "" ""; printf "[%s]\\n" A "$@" B', '[A]\n[]\n[]\n[B]\n'],
+    ['set -- ""; printf "[%s]\\n" A "$@$@" B', '[A]\n[]\n[B]\n'],
+    // An expansion that renders empty does NOT rescue the word: with no
+    // parameters, "$u$@" is nothing at all, either way round.
+    ['set --; printf "[%s]\\n" A "$u$@" B', '[A]\n[B]\n'],
+    ['set --; printf "[%s]\\n" A "$@$u" B', '[A]\n[B]\n'],
+    ['arr=(); printf "[%s]\\n" A "$u${arr[@]}" B', '[A]\n[B]\n'],
+    // A literal does rescue it, even one space.
+    ['set --; printf "[%s]\\n" A "$@ $@" B', '[A]\n[ ]\n[B]\n'],
+  ])('prints %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})

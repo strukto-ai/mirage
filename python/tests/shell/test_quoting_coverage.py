@@ -589,3 +589,28 @@ def test_at_splat_splices_into_its_word(line, expected):
     ws = _ws_with_paths()
     io = _exec(ws, line)
     assert _stdout(io) == expected
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # One EMPTY element is still an element, so the word survives and
+        # is empty. Zero elements is what drops the word, and the two
+        # render the same text, so only the count can tell them apart.
+        ('set -- ""; printf "[%s]\\n" A "$@" B', b"[A]\n[]\n[B]\n"),
+        ('set -- ""; printf "[%s]\\n" A "${@}" B', b"[A]\n[]\n[B]\n"),
+        ('arr=(""); printf "[%s]\\n" A "${arr[@]}" B', b"[A]\n[]\n[B]\n"),
+        ('set -- "" ""; printf "[%s]\\n" A "$@" B', b"[A]\n[]\n[]\n[B]\n"),
+        ('set -- ""; printf "[%s]\\n" A "$@$@" B', b"[A]\n[]\n[B]\n"),
+        # An expansion that renders empty does NOT rescue the word: with
+        # no parameters, "$u$@" is nothing at all, either way round.
+        ('set --; printf "[%s]\\n" A "$u$@" B', b"[A]\n[B]\n"),
+        ('set --; printf "[%s]\\n" A "$@$u" B', b"[A]\n[B]\n"),
+        ('arr=(); printf "[%s]\\n" A "$u${arr[@]}" B', b"[A]\n[B]\n"),
+        # A literal does rescue it, even one space.
+        ('set --; printf "[%s]\\n" A "$@ $@" B', b"[A]\n[ ]\n[B]\n"),
+    ])
+def test_empty_element_splat_is_still_a_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected

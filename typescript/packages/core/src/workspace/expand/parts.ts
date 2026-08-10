@@ -71,6 +71,7 @@ async function expandStringWithArray(
 ): Promise<string[]> {
   const expandChild = (n: TSNodeLike) => expandNode(n, session, executeFn, callStack)
   const fragments: string[] = ['']
+  let splatYielded = false
   for (const child of node.children) {
     if (child.type === NT.DQUOTE) continue
     if (isMultiwordAt(child)) {
@@ -81,6 +82,7 @@ async function expandStringWithArray(
       const gap = fragments.length - 1
       fragments[gap] = (fragments[gap] ?? '') + foldedWhitespace(child)
       if (words.length === 0) continue
+      splatYielded = true
       const last = fragments.length - 1
       if (words.length === 1) {
         fragments[last] = (fragments[last] ?? '') + (words[0] ?? '')
@@ -95,9 +97,12 @@ async function expandStringWithArray(
     const last = fragments.length - 1
     fragments[last] = (fragments[last] ?? '') + text
   }
-  // Nothing but an empty splat: bash drops the word entirely rather than
-  // passing an empty one. Any literal at all keeps it.
-  if (fragments.length === 1 && fragments[0] === '') return []
+  // A splat that yielded nothing, with no text around it, is no word at
+  // all. One empty ELEMENT is a word though (set -- "" passes one empty
+  // argument), so the rendered text cannot decide this; only the element
+  // count can. An empty expansion beside it does not rescue the word
+  // either: with no parameters, "$u$@" is nothing.
+  if (!splatYielded && fragments.length === 1 && fragments[0] === '') return []
   return fragments
 }
 
