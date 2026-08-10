@@ -288,7 +288,14 @@ export async function runOnMount(
     })
     let stdout = initialStdout
     if (cmdName === 'find') {
-      const [newStdout, actionErr] = await applyFindActions(stdout, flags, registry, session.cwd)
+      const [newStdout, actionErr] = await applyFindActions(
+        stdout,
+        flags,
+        registry,
+        session.cwd,
+        childMounts,
+        statPath,
+      )
       stdout = newStdout
       if (actionErr.length > 0) {
         const existing = await materialize(io.stderr)

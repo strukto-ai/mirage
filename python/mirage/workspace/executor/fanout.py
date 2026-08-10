@@ -422,7 +422,12 @@ async def _fan_out_traversal(
 
     if cmd_name == "find":
         combined, action_err = await _apply_find_actions(
-            combined, flag_kwargs, registry, cwd)
+            combined,
+            flag_kwargs,
+            registry,
+            cwd,
+            child_mounts=child_mounts,
+            stat_path=stat_path)
         if action_err:
             existing = (await materialize(merged_io.stderr)
                         if merged_io.stderr else b"")

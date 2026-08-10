@@ -363,7 +363,14 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const [newCombined, actionErr] = await applyFindActions(combined, flagKwargs, registry, cwd)
+    const [newCombined, actionErr] = await applyFindActions(
+      combined,
+      flagKwargs,
+      registry,
+      cwd,
+      childMounts,
+      statPath,
+    )
     combined = newCombined
     if (actionErr.length > 0) {
       const existing = await materialize(mergedIo.stderr)

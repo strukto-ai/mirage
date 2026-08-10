@@ -395,8 +395,13 @@ async def run_on_mount(
                               stderr=format_fs_error(cmd_name, exc, paths))
 
     if cmd_name == "find":
-        stdout, action_err = await _apply_find_actions(stdout, flag_kwargs,
-                                                       registry, session.cwd)
+        stdout, action_err = await _apply_find_actions(
+            stdout,
+            flag_kwargs,
+            registry,
+            session.cwd,
+            child_mounts=child_mounts,
+            stat_path=stat_path)
         if action_err:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = existing + action_err
