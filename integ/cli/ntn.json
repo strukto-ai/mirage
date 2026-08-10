@@ -675,6 +675,58 @@
         "stdout": "new\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_archived_aliases_in_trash",
+      "seq": 566052,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/ffff2222-3333-4444-5555-666677778888 -X PATCH -d '{\"archived\":true}' | jq -r '.archived, .in_trash'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\ntrue\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_archived_row_leaves_query",
+      "seq": 566053,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 | cut -f5",
+      "expect": {
+        "exit": 0,
+        "stdout": "Write spec\nRow page\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_delete_block_trashes_a_row",
+      "seq": 566054,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/blocks/ffff1111-2222-3333-4444-555566667777 -X DELETE | jq -r '.object, .in_trash'",
+      "expect": {
+        "exit": 0,
+        "stdout": "block\ntrue\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_deleted_row_leaves_query",
+      "seq": 566055,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777",
+      "expect": {
+        "exit": 0,
+        "stdout": "a0000000-0000-4000-8000-000000000002\tRow page\n",
+        "stderr": ""
+      }
     }
   ]
 }

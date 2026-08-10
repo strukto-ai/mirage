@@ -297,3 +297,34 @@ async def test_body_infers_post_and_output_is_compact(monkeypatch):
     # Compact and key-sorted, the upstream serializer for `ntn api`,
     # with the trailing newline the real binary emits.
     assert (await materialize(out)) == b'{"a":2,"b":1}\n'
+
+
+@pytest.mark.asyncio
+async def test_delete_is_a_reachable_method(monkeypatch):
+    # `DELETE /v1/blocks/{id}` is the only delete verb the public API has,
+    # and it is the one the MCP tool surface exposes as
+    # API-delete-a-block, so a table without it leaves an agent no way to
+    # remove anything. It reached the user as `unsupported method: DELETE`
+    # (exit 2) where the real binary trashes the block.
+    seen: dict[str, Any] = {}
+
+    async def fake_delete(
+            config: NotionConfig,
+            path: str,
+            body: JsonValue = None,
+            extra_headers: dict[str, str] | None = None,
+            params: dict[str, Any] | None = None) -> dict[str, Any]:
+        seen["path"] = path
+        seen["body"] = body
+        return {"object": "block", "in_trash": True}
+
+    monkeypatch.setitem(METHODS, "DELETE", fake_delete)
+    out, io = await api(
+        CLIInvocation(CONFIG,
+                      texts=("v1/blocks/abc-123", ),
+                      flags={"method": "delete"}))
+    assert io.exit_code == 0
+    assert seen["path"] == "/blocks/abc-123"
+    # No body source on the line, so nothing is invented for one.
+    assert seen["body"] is None
+    assert (await materialize(out)) == b'{"in_trash":true,"object":"block"}\n'

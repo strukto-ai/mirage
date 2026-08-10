@@ -224,6 +224,37 @@ describe('ntn verbs', () => {
     RESPONSE = { id: 'P1' }
   })
 
+  // Upstream derives the columns from the page objects it got back, not from
+  // the data source's schema, so a result set that does not cover the schema
+  // prints narrower. A row created from Markdown alone holds only its title
+  // column, and on its own it prints as `<id>\t<title>` rather than as one
+  // title among blanks.
+  it('datasources query takes its columns from the returned rows', async () => {
+    CALLS.length = 0
+    RESPONSE = {
+      id: 'S1',
+      properties: { Priority: { type: 'number' }, Name: { type: 'title' } },
+      results: [
+        { id: 'R2', properties: { Name: { type: 'title', title: [{ plain_text: 'Row page' }] } } },
+      ],
+      has_more: false,
+    }
+    const [out] = unwrap(await query(makeInv({}, ['S1'])))
+    expect(DEC.decode(out as Uint8Array)).toBe('R2\tRow page\n')
+    RESPONSE = { id: 'P1' }
+  })
+
+  // `DELETE /v1/blocks/{id}` is the only delete verb the public API has, and
+  // it is the one the MCP tool surface exposes as API-delete-a-block, so a
+  // method table without it leaves an agent no way to remove anything.
+  it('api can issue the one delete verb the API has', async () => {
+    REQUESTS.length = 0
+    const [out] = unwrap(await api(makeInv({ method: 'delete' }, ['v1/blocks/B1'])))
+    // No body source on the line, so nothing is invented for one.
+    expect(REQUESTS[0]).toEqual({ method: 'DELETE', path: '/blocks/B1' })
+    expect(DEC.decode(out as Uint8Array)).toBe('{"id":"P1"}\n')
+  })
+
   it('api infers the method and strips the version prefix from the path', async () => {
     REQUESTS.length = 0
     await api(makeInv({}, ['v1/users/me']))

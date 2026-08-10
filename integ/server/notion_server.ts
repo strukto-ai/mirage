@@ -76,7 +76,12 @@ const DIR_A = `${MOUNT}/pages/Project_Roadmap__${PAGE_A}`
 const DIR_B = `${MOUNT}/pages/Notes__${PAGE_B}`
 const DIR_C = `${DIR_A}/Q1_Goals__${PAGE_C}`
 const DB_DIR = `${MOUNT}/databases/Tasks__${DB_TASKS}`
-const ROW_1_DIR = `${DB_DIR}/Write_spec__${ROW_1}`
+// Since 2025-09-03 the rows live under the data source, not the database, so a
+// row sits one level deeper than it used to. These paths feed the MCP/REST
+// parity battery, where a stale one costs nothing visible: both arms answer
+// the same error and the case passes while asserting nothing.
+const DS_DIR = `${DB_DIR}/Tasks__${dataSourceIdOf(DB_TASKS)}`
+const ROW_1_DIR = `${DS_DIR}/Write_spec__${ROW_1}`
 
 type Json = Record<string, unknown>
 
@@ -119,6 +124,7 @@ interface FixtureDatabase {
   last_edited_by?: string
   url?: string
   archived?: boolean
+  in_trash?: boolean
 }
 interface FixtureBlock {
   id: string
@@ -156,7 +162,6 @@ interface PageRow {
   propertiesJson: string
   iconJson: string | null
   coverJson: string | null
-  archived: boolean
   inTrash: boolean
   createdTime: string
   lastEditedTime: string
@@ -173,7 +178,6 @@ interface DatabaseRow {
   descriptionJson: string | null
   propertiesJson: string
   isInline: boolean
-  archived: boolean
   inTrash: boolean
   createdTime: string
   lastEditedTime: string
@@ -188,7 +192,6 @@ interface BlockRow {
   type: string
   payloadJson: string
   hasChildren: boolean
-  archived: boolean
   inTrash: boolean
   createdTime: string
   lastEditedTime: string
@@ -462,7 +465,7 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
         descriptionJson: d.description !== undefined ? JSON.stringify(d.description) : null,
         propertiesJson: JSON.stringify(d.properties),
         isInline: d.is_inline ?? false,
-        archived: d.archived ?? false,
+        inTrash: d.in_trash ?? d.archived ?? false,
         createdTime: d.created_time ?? fx.defaults.created_time,
         lastEditedTime: d.last_edited_time ?? fx.defaults.last_edited_time,
         createdBy: d.created_by ?? fx.defaults.created_by,
@@ -485,8 +488,7 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
         propertiesJson: JSON.stringify(properties),
         iconJson: p.icon !== undefined ? JSON.stringify(p.icon) : null,
         coverJson: p.cover !== undefined ? JSON.stringify(p.cover) : null,
-        archived: p.archived ?? false,
-        inTrash: p.in_trash ?? false,
+        inTrash: p.in_trash ?? p.archived ?? false,
         createdTime: p.created_time ?? fx.defaults.created_time,
         lastEditedTime: p.last_edited_time ?? fx.defaults.last_edited_time,
         createdBy: p.created_by ?? fx.defaults.created_by,
@@ -535,6 +537,9 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
   }
 }
 
+// `archived` is upstream's deprecated alias for `in_trash` and, in its own
+// words, "always returns the same value". So both names are read off the one
+// stored bit here rather than from two columns that can disagree.
 function pageJson(row: PageRow): Json {
   const out: Json = {
     object: 'page',
@@ -544,7 +549,7 @@ function pageJson(row: PageRow): Json {
     created_by: { object: 'user', id: row.createdBy },
     last_edited_by: { object: 'user', id: row.lastEditedBy },
     parent: pageParentJson(row.parentType, row.parentId),
-    archived: row.archived,
+    archived: row.inTrash,
     in_trash: row.inTrash,
     url: row.url,
     properties: JSON.parse(row.propertiesJson) as Json,
@@ -592,7 +597,7 @@ function dataSourceJson(row: DatabaseRow): Json {
     last_edited_time: row.lastEditedTime,
     parent: { type: 'database_id', database_id: row.id },
     database_parent: parentJson(row.parentType, row.parentId),
-    archived: row.archived,
+    archived: row.inTrash,
     in_trash: row.inTrash,
     title: JSON.parse(row.titleJson) as unknown[],
     description: [],
@@ -612,7 +617,7 @@ function databaseJson(row: DatabaseRow): Json {
     created_time: row.createdTime,
     last_edited_time: row.lastEditedTime,
     parent: parentJson(row.parentType, row.parentId),
-    archived: row.archived,
+    archived: row.inTrash,
     in_trash: row.inTrash,
     is_inline: row.isInline,
     url: row.url,
@@ -820,7 +825,7 @@ async function childrenOf(
   parentId: string,
 ): Promise<BlockRow[]> {
   return (await db.notionBlock.findMany({
-    where: { workspaceId, parentId, archived: false },
+    where: { workspaceId, parentId, inTrash: false },
     orderBy: { position: 'asc' },
   })) as BlockRow[]
 }
@@ -834,14 +839,14 @@ async function searchResults(db: PrismaClient, workspaceId: string, args: Json):
   // battery's client and the official CLI can share one server.
   if (filter.value === 'database' || filter.value === 'data_source') {
     const rows = (await db.notionDatabase.findMany({
-      where: { workspaceId, archived: false, inTrash: false },
+      where: { workspaceId, inTrash: false },
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
     })) as DatabaseRow[]
     const kept = rows.filter((r) => matches(r.titleText))
     return filter.value === 'data_source' ? kept.map(dataSourceJson) : kept.map(databaseJson)
   }
   const rows = (await db.notionPage.findMany({
-    where: { workspaceId, archived: false, inTrash: false },
+    where: { workspaceId, inTrash: false },
     orderBy: [{ position: 'asc' }, { id: 'asc' }],
   })) as PageRow[]
   return rows.filter((r) => matches(r.titleText)).map(pageJson)
@@ -1157,6 +1162,49 @@ async function createComment(
   return { status: 200, json: commentJson(row) }
 }
 
+// A child page is one object in two tables (see the schema's NotionPage note),
+// so trashing it has to move both rows: the NotionPage row is what /search and
+// a database query read, the NotionBlock row is what the parent's children
+// listing reads, and setting only one leaves the page gone from half the
+// surfaces and present in the other half.
+async function setTrashed(
+  db: PrismaClient,
+  workspaceId: string,
+  id: string,
+  trashed: boolean,
+): Promise<void> {
+  const where = { workspaceId_id: { workspaceId, id } }
+  if ((await db.notionPage.findFirst({ where: { workspaceId, id } })) !== null) {
+    await db.notionPage.update({ where, data: { inTrash: trashed } })
+  }
+  if ((await db.notionBlock.findFirst({ where: { workspaceId, id } })) !== null) {
+    await db.notionBlock.update({ where, data: { inTrash: trashed } })
+  }
+}
+
+// DELETE /v1/blocks/{id} is the only delete verb the public API has, and the
+// only one the MCP tool surface exposes (API-delete-a-block), so without it an
+// MCP client cannot remove anything. Upstream: "Sets a Block object, including
+// page blocks, to in_trash: true", which covers database rows, so this resolves
+// a block id first and falls back to a page of the same id.
+async function deleteBlock(db: PrismaClient, workspaceId: string, id: string): Promise<Reply> {
+  const block = (await db.notionBlock.findFirst({
+    where: { workspaceId, id },
+  })) as BlockRow | null
+  const page = (await db.notionPage.findFirst({
+    where: { workspaceId, id },
+  })) as PageRow | null
+  if (block === null && page === null) return notFound('block', id)
+  await setTrashed(db, workspaceId, id, true)
+  // A page that owns no block row (a top-level page, or a database row) still
+  // answers as a block, which is what "including page blocks" means.
+  const body =
+    block === null
+      ? { object: 'block', id, type: 'child_page', has_children: false, child_page: { title: (page as PageRow).titleText } }
+      : blockJson(block)
+  return { status: 200, json: { ...body, archived: true, in_trash: true } }
+}
+
 async function updatePage(
   db: PrismaClient,
   workspaceId: string,
@@ -1166,8 +1214,10 @@ async function updatePage(
   const row = (await db.notionPage.findFirst({ where: { workspaceId, id } })) as PageRow | null
   if (row === null) return notFound('page', id)
   const data: Record<string, unknown> = {}
-  if (typeof body.archived === 'boolean') data.archived = body.archived
-  if (typeof body.in_trash === 'boolean') data.inTrash = body.in_trash
+  // Two spellings of one bit, so `ntn pages trash` (in_trash) and an API or
+  // MCP client (archived) reach the same state rather than half of it.
+  const trash = typeof body.in_trash === 'boolean' ? body.in_trash : body.archived
+  if (typeof trash === 'boolean') await setTrashed(db, workspaceId, id, trash)
   if (body.properties !== undefined) {
     const owner =
       row.parentType === 'database_id' && row.parentId !== null
@@ -1361,6 +1411,10 @@ async function handle(
     return appendChildren(db, ws, fx, parts[2] ?? '', body)
   }
 
+  if (method === 'DELETE' && parts.length === 3 && parts[1] === 'blocks') {
+    return deleteBlock(db, ws, parts[2] ?? '')
+  }
+
   if (method === 'POST' && parts.length === 2 && parts[1] === 'comments') {
     return createComment(db, ws, fx, body)
   }
@@ -1515,6 +1569,14 @@ async function toolPayload(db: PrismaClient, name: string, args: Json): Promise<
     const size = intOr(args.page_size, MAX_PAGE_SIZE)
     return pageOf(rows.map(blockJson), cursorOf(args.start_cursor), size)
   }
+  // The one delete verb the tool surface has. It mutates, so it takes the same
+  // per-workspace queue every REST mutation takes rather than a second rule.
+  if (name === 'API-delete-a-block') {
+    const id = String(args.block_id)
+    const reply = await serialize(ws, () => deleteBlock(db, ws, id))
+    if (reply.status !== 200) throw new Error(`mock notion: unknown block ${id}`)
+    return reply.json
+  }
   throw new Error(`mock notion: unsupported tool ${name}`)
 }
 
@@ -1581,8 +1643,11 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['ls_databases', `ls ${MOUNT}/databases/`],
   ['ls_database_dir', `ls ${DB_DIR}/`],
   ['cat_database_json', `cat ${DB_DIR}/database.json`],
-  ['jq_db_props', `jq ".properties | keys" ${DB_DIR}/database.json`],
+  ['ls_data_source_dir', `ls ${DS_DIR}/`],
+  ['cat_data_source_json', `cat ${DS_DIR}/data_source.json`],
+  ['jq_data_source_props', `jq ".properties | keys" ${DS_DIR}/data_source.json`],
   ['cat_row', `cat ${ROW_1_DIR}/page.json`],
+  ['jq_row_cells', `jq ".properties.Priority.number" ${ROW_1_DIR}/page.json`],
   ['du_pages', `du ${MOUNT}/pages/`],
   ['du_page_a', `du ${DIR_A}/`],
 ]

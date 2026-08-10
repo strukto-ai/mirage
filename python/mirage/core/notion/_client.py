@@ -166,6 +166,32 @@ async def notion_put(
             return data
 
 
+# DELETE carries no body at all, which is why it does not take one: the only
+# route the public API exposes it on is /v1/blocks/{id}, whose whole payload is
+# the id in the path.
+async def notion_delete(
+    config: NotionConfig,
+    path: str,
+    body: JsonValue = None,
+    extra_headers: Mapping[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    url = f"{config.base_url}{path}"
+    headers = notion_headers(config, extra_headers)
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(url, headers=headers, params=params) as resp:
+            data = await resp.json()
+            if resp.status >= 400:
+                message = data.get(
+                    "message") or f"Notion API error: HTTP {resp.status}"
+                raise NotionAPIError(
+                    message,
+                    status=resp.status,
+                    code=data.get("code"),
+                )
+            return data
+
+
 async def paginate_list(
     config: NotionConfig,
     path: str,
