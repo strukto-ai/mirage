@@ -254,14 +254,22 @@ Both dataclasses are shared by every command in the repo, so a field
 added for one command is a field every other command's author has to
 read past, and a fourth one turns the grammar into a pile of per-command
 dialects. **Do not add a field to `CommandSpec`, `Operand` or `Option`
-unless POSIX or argparse already has the concept, and then name it after
-theirs, not after the mechanism it trips inside the parser.**
+unless POSIX *and* argparse both already have the concept, and then name
+it after theirs, not after the mechanism it trips inside the parser.**
 
-The test is literal, not a judgement call: write the equivalent line in
-argparse and run it. If argparse parses it, the concept is borrowed and
-the field is allowed. If argparse cannot express it, the behavior belongs
-to the one command that needs it and must be handled in that command,
-not in the shared grammar.
+Both, not either. The test is literal, not a judgement call: write the
+equivalent line in argparse and run it. If argparse parses it, the
+concept is borrowed and the field is allowed. If argparse cannot express
+it, the behavior belongs to the one command that needs it and must be
+handled in that command, not in the shared grammar.
+
+POSIX alone is not enough, and python3 is exactly why: POSIX specifies
+an option whose argument is a program (`sh -c command_string [command_name [argument...]]`, and python3's own synopsis
+`python [option] ... [-c cmd | -m mod | file | -] [arg] ...`), so an
+either-or rule would license the `Option` field this section exists to
+refuse. argparse is the narrower gate because it is the parser this
+spec layer is modelled on, so a concept it cannot express is one the
+grammar has no shape for.
 
 Both halves of python3's command line are the worked example, and they
 come out on opposite sides:
