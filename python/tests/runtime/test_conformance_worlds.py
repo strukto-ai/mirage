@@ -319,6 +319,9 @@ async def test_link_ancestors_synthesize_on_every_surface():
         code, out, _ = await _sh(ws, "ls /")
         assert code == 0
         assert "ghost" in out
+        code, out, _ = await _sh(ws, "ls /ghost")
+        assert code == 0
+        assert "deep" in out
         code, out, err = await _sh(
             ws, "python3 -c \"from pathlib import Path; "
             "print(sorted(str(p) for p in Path('/ghost').iterdir()))\"")

@@ -181,7 +181,17 @@ async function listDir(
   stat2: Stat,
   childMounts: ChildMounts | null,
 ): Promise<FileStat[]> {
-  const entries = await readdir(dir)
+  let entries: string[]
+  try {
+    entries = await readdir(dir)
+  } catch (err) {
+    if (!isWalkError(err) || (childMounts?.(dir.virtual) ?? []).length === 0) throw err
+    // No backend serves it, but the namespace owes it children (a
+    // nested mount, a link's ancestors), so the door lists it as a
+    // directory and ls must agree: the merge below renders those rows
+    // from an empty backend listing.
+    entries = []
+  }
   const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
   const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
   const stats: FileStat[] = []

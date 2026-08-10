@@ -297,4 +297,33 @@ describe('WorkspaceFS structure below an ungranted mount', () => {
     await expect(fs.readdir('/data/inner')).rejects.toThrow(MountNotAllowedError)
     await expect(fs.stat('/data/inner')).rejects.toThrow(MountNotAllowedError)
   })
+
+  it("gates the fallback with the synthetic '' prefix, not the ungranted mount's", async () => {
+    // prefixOf still resolves the real ungranted '/data/' here, but the
+    // namespace's own answer has no owning mount: the gates must see ''
+    // exactly as the dispatcher and both Python doors report it, or a
+    // mount-scoped policy diverges between ws.readdir and ws.dispatch.
+    const seen: string[] = []
+    class RecordPrefix implements Policy {
+      preOps(ctx: OpsContext): Action | null {
+        seen.push(ctx.prefix)
+        return null
+      }
+    }
+    const policies = new Policies()
+    policies.add(new RecordPrefix())
+    const fs = new WorkspaceFS(
+      () => Promise.reject(new MountNotAllowedError('agent', '/data')),
+      new OpsRegistry(),
+      null,
+      null,
+      null,
+      policies,
+      () => '/data/',
+      () => ['/data/inner/deep/'],
+    )
+    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+    await fs.stat('/data/inner')
+    expect(seen).toEqual(['', ''])
+  })
 })

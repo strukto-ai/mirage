@@ -170,4 +170,26 @@ describe('preloadInto', () => {
       /top-level boom/,
     )
   })
+
+  // A nested mount is served through its parent's walk (syncMounts
+  // collapses to maximal prefixes), but it keeps the failure boundary it
+  // had as a top-level prefix: degrading its root LIST failure to an
+  // empty directory would let syncMounts replace a healthy snapshot with
+  // one where the nested mount reads as empty.
+  it('lets a nested mount root LIST failure fail the whole collection', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'LIST' && path === '/ram/') {
+        return Promise.resolve([
+          { path: '/ram/ok.txt', size: 1, isDir: false },
+          { path: '/ram/inner', size: 0, isDir: true },
+        ])
+      }
+      if (op === 'READ' && path === '/ram/ok.txt') return Promise.resolve(new Uint8Array([7]))
+      if (op === 'LIST' && path === '/ram/inner/') return Promise.reject(new Error('inner boom'))
+      return Promise.reject(new Error(`unexpected ${op} ${path}`))
+    })
+    const fs = makeFakeFS()
+    const vfs = new RuntimeVFS(dispatch, () => ['/ram/', '/ram/inner/'])
+    await expect(preloadInto(fs, vfs, '/ram/')).rejects.toThrow(/inner boom/)
+  })
 })

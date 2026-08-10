@@ -165,6 +165,9 @@ describe('structure world', () => {
       const [code, out] = await run(ws, 'ls /')
       expect(code).toBe(0)
       expect(out).toContain('ghost')
+      const [ghostCode, ghostOut] = await run(ws, 'ls /ghost')
+      expect(ghostCode).toBe(0)
+      expect(ghostOut).toContain('deep')
       // No guest probe here: a ts guest serves only paths under a
       // visible mount, and /ghost (like / itself) is not one — the
       // documented root-anchor divergence from python, whose guests

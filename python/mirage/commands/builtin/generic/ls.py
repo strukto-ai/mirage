@@ -328,6 +328,7 @@ async def probe_operand(
             cross-mount fan-out's to assemble, one mount at a time.
     """
     warnings: list[LsWarning] = []
+    structure_only = False
     try:
         names = await readdir(path, index)
     except (OSError, ValueError) as exc:
@@ -337,13 +338,21 @@ async def probe_operand(
         link_row = _link_row(path, links)
         if link_row is not None:
             return Operand(path, link_row, []), warnings
-        warnings.append(
-            LsWarning(
-                f"ls: cannot access '{path.raw_path}': "
-                f"{fs_strerror(exc) or exc}", command_line_arg))
-        return Operand(path, None, []), warnings
+        if (recursive or child_mounts is None
+                or not child_mounts(path.virtual)):
+            warnings.append(
+                LsWarning(
+                    f"ls: cannot access '{path.raw_path}': "
+                    f"{fs_strerror(exc) or exc}", command_line_arg))
+            return Operand(path, None, []), warnings
+        # No backend serves it, but the namespace owes it children (a
+        # nested mount, a link's ancestors), so the door lists it as a
+        # directory and ls must agree: the merge below renders those
+        # rows from an empty backend listing.
+        names = []
+        structure_only = True
 
-    if not names:
+    if not names and not structure_only:
         row = await _file_entry(path, stat, index)
         if row is not None:
             return Operand(path, row, []), warnings

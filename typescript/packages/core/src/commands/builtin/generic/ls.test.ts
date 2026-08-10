@@ -416,6 +416,41 @@ describe('link operands on backends with different readdir shapes', () => {
   })
 })
 
+describe('structure-only directories', () => {
+  const missing = (p: PathSpec): Promise<never> => {
+    const err = new Error(p.virtual) as Error & { code: string }
+    err.code = 'ENOENT'
+    return Promise.reject(err)
+  }
+  const childMounts = (parent: string): string[] => (parent === '/ghost' ? ['deep'] : [])
+
+  // A directory no backend serves still lists when the namespace owes it
+  // children (a nested mount, a link's ancestors): the door already names
+  // it in the parent listing, so ls must agree instead of reporting it
+  // missing.
+  it('lists namespace children when no backend serves the directory', async () => {
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: {}, cwd: '/', childMounts } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep\n')
+  })
+
+  it('-R keeps the missing report (the fan-out owns cross-mount assembly)', async () => {
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: { R: true }, cwd: '/', childMounts } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_FAILURE)
+    expect(DEC.decode(result?.[1].stderr as Uint8Array)).toContain("cannot access '/ghost'")
+  })
+})
+
 describe('honest per-entry errors', () => {
   function enoent(p: string): Error {
     const e = new Error(p) as Error & { code: string }

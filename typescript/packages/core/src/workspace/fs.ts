@@ -95,15 +95,19 @@ export class WorkspaceFS {
     return this.links.follow(path)
   }
 
+  // `prefix` overrides the mount attribution; the structure fallbacks
+  // pass '' ("no owning mount"), matching how the dispatcher and both
+  // Python doors gate the same synthetic answer.
   private async firePreOps(
     op: string,
     path: string,
     pathSpec: PathSpec,
     write: boolean,
+    prefix?: string,
   ): Promise<void> {
     if (this.policies === null) return
-    const prefix = this.prefixOf !== null ? this.prefixOf(path) : ''
-    await preOpsGate(this.policies, op, pathSpec, write, prefix)
+    const p = prefix ?? (this.prefixOf !== null ? this.prefixOf(path) : '')
+    await preOpsGate(this.policies, op, pathSpec, write, p)
   }
 
   // Bookkeeping precedes this gate: a denied result is still a completed
@@ -115,10 +119,11 @@ export class WorkspaceFS {
     pathSpec: PathSpec,
     write: boolean,
     result: unknown,
+    prefix?: string,
   ): Promise<unknown> {
     if (this.policies === null) return result
-    const prefix = this.prefixOf !== null ? this.prefixOf(path) : ''
-    const bound = await postOpsGate(this.policies, op, pathSpec, write, prefix, result)
+    const p = prefix ?? (this.prefixOf !== null ? this.prefixOf(path) : '')
+    const bound = await postOpsGate(this.policies, op, pathSpec, write, p, result)
     if (bound !== null) return applyOpLimit(result, bound)
     return result
   }
@@ -196,18 +201,21 @@ export class WorkspaceFS {
       resolved = await this.resolver(path)
     } catch (err) {
       // No mount serves the path, or a real mount is ungranted; mirror
-      // the dispatcher and fire the gates anyway (prefixOf answers ''
-      // here) so a policy that bounds readdir by path covers the
-      // synthetic answer too. The merged names are session-filtered,
-      // so an ungranted mount's own content never leaks.
+      // the dispatcher and fire the gates anyway, with the synthetic ''
+      // prefix (a grant-miss resolves to the real ungranted prefix,
+      // which must not attribute the namespace's own answer), so a
+      // policy that bounds readdir by path covers the synthetic answer
+      // too. The merged names are session-filtered, so an ungranted
+      // mount's own content never leaks.
       const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
       const fallback = eligible ? this.structureResult('readdir', path) : null
       if (fallback === null) throw err
       const pathSpec = PathSpec.fromStrPath(path)
-      await this.firePreOps('readdir', path, pathSpec, false)
+      await this.firePreOps('readdir', path, pathSpec, false, '')
       return (
-        ((await this.firePostOps('readdir', path, pathSpec, false, fallback)) as string[] | null) ??
-        []
+        ((await this.firePostOps('readdir', path, pathSpec, false, fallback, '')) as
+          | string[]
+          | null) ?? []
       )
     }
     const [resource, pathSpec] = resolved
@@ -249,8 +257,8 @@ export class WorkspaceFS {
       const fallback = eligible ? this.structureResult('stat', path) : null
       if (fallback === null) throw err
       const pathSpec = PathSpec.fromStrPath(path)
-      await this.firePreOps('stat', path, pathSpec, false)
-      return (await this.firePostOps('stat', path, pathSpec, false, fallback)) as FileStat
+      await this.firePreOps('stat', path, pathSpec, false, '')
+      return (await this.firePostOps('stat', path, pathSpec, false, fallback, '')) as FileStat
     }
     const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
