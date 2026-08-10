@@ -20,7 +20,7 @@ import type { ErrnoCodes, FSHost } from './types.ts'
  * call failed names the condition, and the adapter turns the name into
  * whatever number its kernel interface uses.
  */
-export type FsErrorCode = 'ENOENT' | 'EPERM' | 'EINVAL' | 'EIO'
+export type FsErrorCode = 'ENOENT' | 'EPERM' | 'EINVAL' | 'EIO' | 'EXDEV'
 
 /**
  * Build an error naming a POSIX condition, for failures the host sees.

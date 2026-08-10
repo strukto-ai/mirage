@@ -418,7 +418,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       await preloadInto(seed, vfs, prefix)
       const mountpoint = mountpointOf(prefix)
       if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
-      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, this.journal, mountpoint)
+      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, this.journal, mountpoint, (p) =>
+        vfs.mountOf(p),
+      )
       pyodide.FS.mkdirTree(mountpoint)
       pyodide.FS.mount(fs.type, {}, mountpoint)
       // After the mount, never inside it: Emscripten assigns the root's

@@ -59,7 +59,12 @@ export function shouldFanOut(
   registry: MountRegistry,
 ): boolean {
   if (paths.length === 0 || paths[0] === undefined) return false
-  if (allowedDescendants(registry, paths[0].virtual).length === 0) return false
+  // Gated on the raw registry, not the session view: with every
+  // descendant ungranted, single-mount dispatch would serve the parent
+  // backend's keys shadowed under a hidden mount's prefix, and only the
+  // fan-out's shadow filter drops those. Execution still runs the
+  // allowed descendants only.
+  if (registry.descendantMounts(paths[0].virtual).length === 0) return false
   if (TRAVERSAL_CMDS.has(cmdName)) return true
   if (cmdName === 'grep') {
     return flagKwargs.r === true || flagKwargs.R === true || flagKwargs.recursive === true

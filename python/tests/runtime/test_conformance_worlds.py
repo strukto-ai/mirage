@@ -479,6 +479,62 @@ async def test_fanout_does_not_cross_boundary(line: str, needle: str):
         await ws.close()
 
 
+def shadowed_world(runtime: str) -> Workspace:
+    """A parent backend holding keys shadowed by an ungranted mount.
+
+    ``/base`` (granted to session ``agent``) is seeded with
+    ``inner/leftover.txt`` in its own backend; ``/base/inner`` is a
+    second, ungranted mount that shadows that key in the merged view.
+    The trap: with no *allowed* descendant the fan-out is tempting to
+    skip, and single-mount dispatch then serves the shadowed key that
+    path dispatch itself refuses.
+
+    Args:
+        runtime (str): registry name of the guest runtime to attach.
+    """
+    ws = Workspace(
+        {
+            "/base":
+            _seed({
+                "/a.txt": b"top",
+                "/inner/leftover.txt": b"SHADOWED-xyz",
+            }),
+            "/base/inner":
+            _seed({"/deep.txt": b"needle"}),
+        },
+        mode=MountMode.EXEC,
+        runtimes=[runtime, "vfs"],
+    )
+    ws.create_session("agent", mounts=["/base"])
+    return ws
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,needle", [
+    ("find /base", "leftover"),
+    ("grep -r SHADOWED /base", "SHADOWED-xyz"),
+])
+async def test_fanout_hides_shadowed_keys_when_no_descendant_is_granted(
+        line: str, needle: str):
+    """Fan-out still engages when every descendant mount is ungranted.
+
+    The parent backend's keys under the hidden mount's prefix are
+    shadowed in the merged view, so the walk must drop them even though
+    there is no granted descendant to descend into.
+
+    Args:
+        line (str): the recursive shell line rooted at the parent.
+        needle (str): the shadowed fact that must not appear.
+    """
+    ws = shadowed_world("monty")
+    try:
+        _, out, _ = await _sh(ws, line, session_id="agent")
+        assert needle not in out
+        assert "inner" not in out
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "runtime,line",

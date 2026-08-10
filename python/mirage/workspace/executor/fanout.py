@@ -79,7 +79,12 @@ def _should_fan_out(
     if not paths:
         return False
     target = paths[0].virtual
-    if not _allowed_descendants(registry, target):
+    # Gated on the raw registry, not the session view: with every
+    # descendant ungranted, single-mount dispatch would serve the parent
+    # backend's keys shadowed under a hidden mount's prefix, and only
+    # the fan-out's shadow filter drops those. Execution still runs the
+    # allowed descendants only.
+    if not registry.descendant_mounts(target):
         return False
     if cmd_name in _TRAVERSAL_CMDS:
         return True

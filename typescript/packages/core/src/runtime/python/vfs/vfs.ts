@@ -55,6 +55,7 @@ export class MirageFs {
   private readonly errno: ErrnoCodes
   private readonly journal: MutationJournal
   private readonly tree: NodeTree
+  private readonly mountOf: (path: string) => string | null
 
   /**
    * Args:
@@ -62,11 +63,22 @@ export class MirageFs {
    *   errno: Emscripten's errno table (`pyodide.ERRNO_CODES`).
    *   journal: the write-ahead log guest mutations are recorded on.
    *   prefix: the mount prefix this filesystem serves.
+   *   mountOf: the mirage mount owning a path (`RuntimeVFS.mountOf`).
+   *     One mountpoint serves every mirage mount nested under its
+   *     prefix, so this is the only boundary fact left to check ops
+   *     against; Emscripten's own cross-mount checks cannot see it.
    */
-  constructor(host: FSHost, errno: ErrnoCodes, journal: MutationJournal, prefix: string) {
+  constructor(
+    host: FSHost,
+    errno: ErrnoCodes,
+    journal: MutationJournal,
+    prefix: string,
+    mountOf: (path: string) => string | null,
+  ) {
     this.host = host
     this.errno = errno
     this.journal = journal
+    this.mountOf = mountOf
     const nodeOps: NodeOps = {
       getattr: this.getattr.bind(this),
       setattr: this.setattr.bind(this),
@@ -158,8 +170,16 @@ export class MirageFs {
 
   private rename(node: FSNode, newDir: FSNode, newName: string): void {
     const from = this.tree.pathOf(node)
+    const to = this.tree.pathOf(newDir) + '/' + newName
+    // A nested mirage mount is served through this same mountpoint, so
+    // Emscripten's kernel cannot see the boundary; refuse the crossing
+    // here, before the tree moves and the journal records a rename the
+    // post-run replay would reject anyway.
+    if (this.mountOf(from) !== this.mountOf(to)) {
+      throw errnoError(this.host, this.errno, 'EXDEV')
+    }
     this.tree.move(node, newDir, newName)
-    this.journal.markRename(from, this.tree.pathOf(node))
+    this.journal.markRename(from, to)
   }
 
   private unlink(parent: FSNode, name: string): void {

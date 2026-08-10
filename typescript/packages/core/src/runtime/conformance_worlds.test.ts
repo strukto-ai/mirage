@@ -262,6 +262,42 @@ describe('scoped world', () => {
     }
   })
 
+  it.each([
+    ['find /base', 'leftover'],
+    ['grep -r SHADOWED /base', 'SHADOWED-xyz'],
+  ])('a fan-out hides shadowed keys when no descendant is granted: %s', async (line, needle) => {
+    // The parent backend holds a key under the ungranted mount's
+    // prefix (seeded before that mount exists, so dispatch lands it
+    // in the parent). With no allowed descendant the fan-out must
+    // still engage: skipping it hands the walk to single-mount
+    // dispatch, which serves the shadowed key that path dispatch
+    // itself refuses.
+    const parser = await getTestParser()
+    const ops = new OpsRegistry()
+    const base = new RAMResource()
+    const inner = new RAMResource()
+    ops.registerResource(base)
+    ops.registerResource(inner)
+    const ws = new Workspace(
+      {},
+      { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'vfs'] },
+    )
+    ws.addMount('/base', base, MountMode.WRITE)
+    await ws.fs.writeFile('/base/a.txt', 'top')
+    await ws.fs.mkdir('/base/inner')
+    await ws.fs.writeFile('/base/inner/leftover.txt', 'SHADOWED-xyz')
+    ws.addMount('/base/inner', inner, MountMode.WRITE)
+    await ws.fs.writeFile('/base/inner/deep.txt', 'needle')
+    ws.createSession('agent', { mounts: ['/base'] })
+    try {
+      const [, out] = await run(ws, line, 'agent')
+      expect(out).not.toContain(needle)
+      expect(out).not.toContain('inner')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a confined guest cannot read an ungranted mount', async () => {
     const ws = await scopedWorld()
     try {
