@@ -260,6 +260,24 @@ function schemaOf(database: DatabaseRow | null): Json {
   return asObject(JSON.parse(database.propertiesJson))
 }
 
+// Normalizing a write can add a select option to its column, and the option id
+// the answer carries is only usable if that lands, so the schema goes back to
+// the row whenever normalization changed it.
+async function persistSchema(
+  db: PrismaClient,
+  workspaceId: string,
+  owner: DatabaseRow | null,
+  schema: Json,
+  before: string,
+): Promise<void> {
+  const next = JSON.stringify(schema)
+  if (owner === null || next === before) return
+  await db.notionDatabase.update({
+    where: { workspaceId_id: { workspaceId, id: owner.id } },
+    data: { propertiesJson: next },
+  })
+}
+
 function titleColumnOf(schema: Json): string {
   for (const [name, spec] of Object.entries(schema)) {
     if (asObject(spec).type === 'title') return name
@@ -340,12 +358,17 @@ function propertyKind(prop: Json, columnType: string | undefined): string | unde
 
 // A writer names a select option; Notion answers with the whole option off the
 // schema. A name the schema has never seen is minted rather than dropped,
-// which is what the real API does with a new select/multi_select value; its id
-// is the name so the fake stays reproducible across runs.
+// which is what the real API does with a new select/multi_select value, and it
+// is added to the column's options right here, because the id in the answer is
+// only usable if a later write naming it alone resolves back to the same
+// option. Its id is the name, so the fake stays reproducible across runs.
+// Deliberate divergence: a status option is minted the same way, where the
+// real API refuses one it does not already have.
 function selectOption(column: Json, kind: string, value: Json): Json {
   const name = typeof value.name === 'string' ? value.name : ''
   const id = typeof value.id === 'string' ? value.id : ''
-  const options = asObject(column[kind]).options
+  const config = asObject(column[kind])
+  const options = config.options
   if (Array.isArray(options)) {
     for (const one of options) {
       const option = asObject(one)
@@ -354,7 +377,9 @@ function selectOption(column: Json, kind: string, value: Json): Json {
       }
     }
   }
-  return { id: id !== '' ? id : name, name, color: 'default' }
+  const minted: Json = { id: id !== '' ? id : name, name, color: 'default' }
+  if (Array.isArray(options)) options.push({ ...minted })
+  return minted
 }
 
 function normalizeValue(column: Json, kind: string, value: unknown): unknown {
@@ -986,7 +1011,9 @@ async function createPage(
     if (owner === null) return notFound('database', parentId)
   }
   const schema = schemaOf(owner)
+  const schemaBefore = JSON.stringify(schema)
   const properties = normalizeProperties(asObject(body.properties), schema)
+  await persistSchema(db, workspaceId, owner, schema, schemaBefore)
   const id = mintId(workspaceId, 'a0000000')
   // `ntn pages create --content` sends Markdown rather than properties; the
   // first heading becomes the title, exactly as the official CLI documents.
@@ -1148,7 +1175,10 @@ async function updatePage(
             where: { workspaceId, id: row.parentId },
           })) as DatabaseRow | null)
         : null
-    const patch = normalizeProperties(asObject(body.properties), schemaOf(owner))
+    const schema = schemaOf(owner)
+    const schemaBefore = JSON.stringify(schema)
+    const patch = normalizeProperties(asObject(body.properties), schema)
+    await persistSchema(db, workspaceId, owner, schema, schemaBefore)
     const merged = { ...(JSON.parse(row.propertiesJson) as Json), ...patch }
     data.propertiesJson = JSON.stringify(merged)
     data.titleText = titleOfProperties(merged)

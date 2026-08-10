@@ -649,6 +649,32 @@
         "stdout": "tg\nyellow\nnew\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_minted_option_joins_the_schema",
+      "seq": 566050,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/data_sources/d5000000-2222-3333-4444-555566667777 | jq -r '.properties.Tags.multi_select.options[-1] | .id, .name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "new\nnew\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_minted_option_resolves_by_id",
+      "seq": 566051,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/ffff2222-3333-4444-5555-666677778888 -X PATCH -d '{\"properties\":{\"Tags\":{\"multi_select\":[{\"id\":\"new\"}]}}}' | jq -r '.properties.Tags.multi_select[0].name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "new\n",
+        "stderr": ""
+      }
     }
   ]
 }
