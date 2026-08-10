@@ -323,9 +323,11 @@ async def probe_operand(
         index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
         child_mounts (ChildMounts | None): session-filtered child-mount
-            names. Withheld under ``-R``: the walk cannot descend into
-            another mount's backend, so the recursive listing is the
-            cross-mount fan-out's to assemble, one mount at a time.
+            names. Under ``-R`` a backend-served listing withholds the
+            merge and a child-mount root is never descended (the walk
+            cannot read another mount's backend, so the cross-mount
+            fan-out assembles those groups); a directory only the
+            namespace serves still renders its own group from it.
     """
     warnings: list[LsWarning] = []
     structure_only = False
@@ -338,8 +340,7 @@ async def probe_operand(
         link_row = _link_row(path, links)
         if link_row is not None:
             return Operand(path, link_row, []), warnings
-        if (recursive or child_mounts is None
-                or not child_mounts(path.virtual)):
+        if child_mounts is None or not child_mounts(path.virtual):
             warnings.append(
                 LsWarning(
                     f"ls: cannot access '{path.raw_path}': "
@@ -348,7 +349,10 @@ async def probe_operand(
         # No backend serves it, but the namespace owes it children (a
         # nested mount, a link's ancestors), so the door lists it as a
         # directory and ls must agree: the merge below renders those
-        # rows from an empty backend listing.
+        # rows from an empty backend listing. Under -R this group still
+        # renders; only descent into a child-mount root is withheld,
+        # because that listing is another backend's and the cross-mount
+        # fan-out assembles it.
         names = []
         structure_only = True
 
@@ -371,7 +375,8 @@ async def probe_operand(
         index=index,
         links=links,
         deref=deref,
-        child_mounts=None if recursive else child_mounts)
+        child_mounts=child_mounts if structure_only else
+        (None if recursive else child_mounts))
     warnings.extend(entry_ws)
     entries = sort_stats(entries, sort_by, reverse)
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
@@ -379,8 +384,13 @@ async def probe_operand(
         for entry in entries:
             if entry.type != FileType.DIRECTORY:
                 continue
-            child, child_ws = await probe_operand(_child_spec(
-                path, entry.name),
+            child_path = _child_spec(path, entry.name)
+            if structure_only and (child_mounts is None
+                                   or not child_mounts(child_path.virtual)):
+                # A child-mount root: its listing is another backend's,
+                # so the cross-mount fan-out renders that group.
+                continue
+            child, child_ws = await probe_operand(child_path,
                                                   readdir=readdir,
                                                   stat=stat,
                                                   all_files=all_files,
@@ -390,7 +400,8 @@ async def probe_operand(
                                                   command_line_arg=False,
                                                   index=index,
                                                   links=links,
-                                                  deref=deref)
+                                                  deref=deref,
+                                                  child_mounts=child_mounts)
             groups.extend(child.groups)
             warnings.extend(child_ws)
     return Operand(path, None, groups), warnings
@@ -439,6 +450,12 @@ async def walk(
         try:
             listed = await stat(path, index)
         except (OSError, ValueError) as exc:
+            if child_mounts is not None and child_mounts(path.virtual):
+                # No backend serves it, but the namespace owes it
+                # children, so the door stats it as a directory and -d
+                # must print the same row.
+                return WalkResult(
+                    [FileStat(name=path.raw_path, type=FileType.DIRECTORY)])
             detail = fs_strerror(exc) or exc
             return WalkResult(warnings=[
                 LsWarning(f"ls: cannot access '{path.raw_path}': {detail}",
@@ -557,7 +574,8 @@ async def ls(
                                 list_dir=True,
                                 index=index,
                                 links=links,
-                                deref=deref)
+                                deref=deref,
+                                child_mounts=child_mounts)
             rows.extend(result.entries)
             warnings.extend(result.warnings)
         if len(rows) > 1:

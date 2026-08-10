@@ -751,9 +751,10 @@ async def test_structure_only_directory_lists_its_children():
 
 
 @pytest.mark.asyncio
-async def test_structure_only_directory_stays_missing_under_recursive():
-    """-R withholds child_mounts (the fan-out owns cross-mount
-    assembly), so the rescue must not fire there either."""
+async def test_structure_only_directory_renders_group_under_recursive():
+    """Under -R the group still renders from the namespace fact; only
+    descent into the child-mount root is withheld, because that listing
+    is another backend's and the cross-mount fan-out assembles it."""
 
     async def readdir(p, index=None):
         raise FileNotFoundError(p.virtual)
@@ -769,8 +770,59 @@ async def test_structure_only_directory_stays_missing_under_recursive():
                        stat=stat,
                        recursive=True,
                        child_mounts=child_mounts)
-    assert io.exit_code == LS_FAILURE
-    assert b"cannot access '/ghost'" in io.stderr
+    assert io.exit_code == 0
+    assert out.decode() == "/ghost:\ndeep\n"
+
+
+@pytest.mark.asyncio
+async def test_structure_only_chain_descends_under_recursive():
+    """A structure chain (a link's ancestors) continues below the first
+    level, so -R descends it: only a child-mount root stops the walk."""
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    def child_mounts(parent: str) -> list[str]:
+        if parent == "/ghost":
+            return ["deep"]
+        if parent == "/ghost/deep":
+            return ["lnk"]
+        return []
+
+    out, io = await ls([PathSpec.from_str_path("/ghost")],
+                       readdir=readdir,
+                       stat=stat,
+                       recursive=True,
+                       child_mounts=child_mounts)
+    assert io.exit_code == 0
+    assert out.decode() == "/ghost:\ndeep\n\n/ghost/deep:\nlnk\n"
+
+
+@pytest.mark.asyncio
+async def test_list_dir_itself_on_structure_only_directory():
+    """-d stats the operand itself; the namespace fact is what says the
+    directory exists, so the row must come from it when no backend
+    does."""
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    def child_mounts(parent: str) -> list[str]:
+        return ["deep"] if parent == "/ghost" else []
+
+    out, io = await ls([PathSpec.from_str_path("/ghost")],
+                       readdir=readdir,
+                       stat=stat,
+                       list_dir=True,
+                       child_mounts=child_mounts)
+    assert io.exit_code == 0
+    assert out.decode() == "/ghost\n"
 
 
 @pytest.mark.asyncio

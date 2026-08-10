@@ -439,15 +439,46 @@ describe('structure-only directories', () => {
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep\n')
   })
 
-  it('-R keeps the missing report (the fan-out owns cross-mount assembly)', async () => {
+  // Under -R the group still renders from the namespace fact; only
+  // descent into the child-mount root is withheld, because that listing
+  // is another backend's and the cross-mount fan-out assembles it.
+  it('-R renders the namespace-only group and leaves descent to fan-out', async () => {
     const result = await lsGeneric(
       [PathSpec.fromStrPath('/ghost')],
       { flags: { R: true }, cwd: '/', childMounts } as never,
       missing,
       missing,
     )
-    expect(result?.[1].exitCode).toBe(LS_FAILURE)
-    expect(DEC.decode(result?.[1].stderr as Uint8Array)).toContain("cannot access '/ghost'")
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n')
+  })
+
+  // A structure chain (a link's ancestors) continues below the first
+  // level, so -R descends it: only a child-mount root stops the walk.
+  it('-R descends structure that continues below', async () => {
+    const chain = (parent: string): string[] =>
+      parent === '/ghost' ? ['deep'] : parent === '/ghost/deep' ? ['lnk'] : []
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: { R: true }, cwd: '/', childMounts: chain } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
+  })
+
+  // -d stats the operand itself; the namespace fact is what says the
+  // directory exists, so the row must come from it when no backend does.
+  it('-d prints the namespace-only directory row', async () => {
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: { d: true }, cwd: '/', childMounts } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost\n')
   })
 })
 

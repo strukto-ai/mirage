@@ -20,6 +20,7 @@ from mirage.context import mount_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.ops.types import ChildMounts
 from mirage.types import PathSpec, Producer
 from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
@@ -280,6 +281,7 @@ async def _fan_out_traversal(
     cwd: str,
     cmd_str: str,
     stdin: ByteSource | None,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a traversal command across the parent mount + descendant mounts.
 
@@ -341,7 +343,8 @@ async def _fan_out_traversal(
                                              sub_texts,
                                              sub_flags,
                                              stdin=stdin,
-                                             cwd=cwd)
+                                             cwd=cwd,
+                                             child_mounts=child_mounts)
 
         if mount is not primary_mount and io.exit_code == 127:
             # A descendant that does not serve this command contributes

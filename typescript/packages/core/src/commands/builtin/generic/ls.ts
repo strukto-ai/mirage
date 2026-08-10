@@ -55,9 +55,11 @@ interface WalkOpts {
   // is what makes -R descend it.
   deref: boolean
   // Session-filtered child-mount names: the other half of namespace
-  // structure beside links, merged as directory rows. Withheld under
-  // -R, where the cross-mount fan-out assembles the recursive listing
-  // one mount at a time.
+  // structure beside links, merged as directory rows. Under -R a
+  // backend-served listing withholds the merge and a child-mount root
+  // is never descended (the cross-mount fan-out assembles those
+  // groups); a directory only the namespace serves still renders its
+  // own group from it.
   childMounts: ChildMounts | null
 }
 
@@ -180,8 +182,10 @@ async function listDir(
   deref: boolean,
   stat2: Stat,
   childMounts: ChildMounts | null,
-): Promise<FileStat[]> {
+  recursive: boolean,
+): Promise<{ stats: FileStat[]; structureOnly: boolean }> {
   let entries: string[]
+  let structureOnly = false
   try {
     entries = await readdir(dir)
   } catch (err) {
@@ -189,8 +193,12 @@ async function listDir(
     // No backend serves it, but the namespace owes it children (a
     // nested mount, a link's ancestors), so the door lists it as a
     // directory and ls must agree: the merge below renders those rows
-    // from an empty backend listing.
+    // from an empty backend listing. Under -R this group still renders;
+    // only descent into a child-mount root is withheld, because that
+    // listing is another backend's and the cross-mount fan-out
+    // assembles it.
     entries = []
+    structureOnly = true
   }
   const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
   const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
@@ -217,12 +225,17 @@ async function listDir(
     const resolved = deref && links !== null ? await derefEntry(dir, link, links, stat2) : null
     stats.push(resolved ?? link)
   }
-  for (const name of childMounts?.(dir.virtual) ?? []) {
-    if (seen.has(name)) continue
-    seen.add(name)
-    stats.push(new FileStat({ name, type: FileType.DIRECTORY }))
+  if (!recursive || structureOnly) {
+    for (const name of childMounts?.(dir.virtual) ?? []) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      stats.push(new FileStat({ name, type: FileType.DIRECTORY }))
+    }
   }
-  return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
+  return {
+    stats: all ? stats : stats.filter((s) => !s.name.startsWith('.')),
+    structureOnly,
+  }
 }
 
 // The row for an operand that is itself a symlink, else null.
@@ -277,8 +290,9 @@ async function probeOperand(
   commandLineArg: boolean,
 ): Promise<Operand> {
   let stats: FileStat[]
+  let structureOnly = false
   try {
-    stats = await listDir(
+    const listed = await listDir(
       readdir,
       stat,
       path,
@@ -287,8 +301,11 @@ async function probeOperand(
       opts.links,
       opts.deref,
       stat,
-      opts.recursive ? null : opts.childMounts,
+      opts.childMounts,
+      opts.recursive,
     )
+    stats = listed.stats
+    structureOnly = listed.structureOnly
   } catch (err) {
     if (!isWalkError(err)) throw err
     const row = await fileEntry(stat, path)
@@ -316,6 +333,11 @@ async function probeOperand(
     for (const s of entries) {
       if (s.type !== FileType.DIRECTORY) continue
       const childPath = `${rstripSlash(path.virtual)}/${s.name}`
+      if (structureOnly && (opts.childMounts?.(childPath) ?? []).length === 0) {
+        // A child-mount root: its listing is another backend's, so the
+        // cross-mount fan-out renders that group.
+        continue
+      }
       const child = await probeOperand(
         readdir,
         stat,
@@ -421,6 +443,13 @@ export async function lsGeneric(
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
         if (!isWalkError(err)) throw err
+        if ((opts.childMounts?.(p.virtual) ?? []).length > 0) {
+          // No backend serves it, but the namespace owes it children,
+          // so the door stats it as a directory and -d must print the
+          // same row.
+          collected.push(new FileStat({ name: p.rawPath, type: FileType.DIRECTORY }))
+          continue
+        }
         warnings.push({
           message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
           serious: true,

@@ -331,6 +331,32 @@ async def test_link_ancestors_synthesize_on_every_surface():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_namespace_only_ancestor_serves_every_ls_variant():
+    """A mount at ``/ghost/deep`` gives ``/ghost`` no backend, so the
+    door alone says it exists; plain ls, ls -R (whose walk runs through
+    the cross-mount fan-out) and ls -d must all agree instead of
+    reporting the operand missing.
+    """
+    ws = Workspace(
+        {
+            "/base": _seed({"/a.txt": b"top"}),
+            "/ghost/deep": _seed({"/x.txt": b"inside"}),
+        },
+        mode=MountMode.EXEC,
+        runtimes=["monty", "vfs"],
+    )
+    try:
+        code, out, _ = await _sh(ws, "ls -R /ghost")
+        assert code == 0
+        assert "/ghost:" in out and "deep" in out and "x.txt" in out
+        code, out, _ = await _sh(ws, "ls -d /ghost")
+        assert code == 0
+        assert out.strip() == "/ghost"
+    finally:
+        await ws.close()
+
+
 # ── Group 3: a scoped session confines every surface ──
 #
 # Explicit operands and the headless FUSE core are confined today. The

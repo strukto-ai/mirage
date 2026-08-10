@@ -177,6 +177,39 @@ describe('structure world', () => {
     }
   })
 
+  it('a namespace-only ancestor serves every ls variant', async () => {
+    // A mount at /ghost/deep gives /ghost no backend, so the door alone
+    // says it exists; plain ls, ls -R (whose walk runs through the
+    // cross-mount fan-out) and ls -d must all agree instead of
+    // reporting the operand missing.
+    const parser = await getTestParser()
+    const ops = new OpsRegistry()
+    const base = new RAMResource()
+    const deep = new RAMResource()
+    ops.registerResource(base)
+    ops.registerResource(deep)
+    const ws = new Workspace(
+      {},
+      { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'vfs'] },
+    )
+    ws.addMount('/base', base, MountMode.WRITE)
+    ws.addMount('/ghost/deep', deep, MountMode.WRITE)
+    await ws.fs.writeFile('/base/a.txt', 'top')
+    await ws.fs.writeFile('/ghost/deep/x.txt', 'inside')
+    try {
+      const [rCode, rOut] = await run(ws, 'ls -R /ghost')
+      expect(rCode).toBe(0)
+      expect(rOut).toContain('/ghost:')
+      expect(rOut).toContain('deep')
+      expect(rOut).toContain('x.txt')
+      const [dCode, dOut] = await run(ws, 'ls -d /ghost')
+      expect(dCode).toBe(0)
+      expect(dOut.trim()).toBe('/ghost')
+    } finally {
+      await ws.close()
+    }
+  })
+
   // ── Group 2: a structure-only directory stats as a directory ──
 
   it('the door stats a structure-only directory', async () => {

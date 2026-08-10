@@ -30,6 +30,7 @@ import {
   type FindExpr,
 } from '../../commands/builtin/findParse.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
+import type { ChildMounts } from '../../ops/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -213,6 +214,7 @@ export async function fanOutTraversal(
   cmdStr: string,
   stdin: ByteSource | null,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+  childMounts: ChildMounts | null = null,
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
   const descendants = allowedDescendants(registry, targetPath)
@@ -266,9 +268,15 @@ export async function fanOutTraversal(
     if (ensureOpen !== undefined) {
       await ensureOpen(mount.resource)
     }
+    // The one fact threaded into the per-mount runs: a start point only
+    // the namespace serves (a nested mount's ancestor) has no backend
+    // listing, so without it the primary run reports the operand
+    // missing. Links and stat overlays are still dropped here, a known
+    // seam of the fan-out.
     const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
       stdin,
       cwd,
+      ...(childMounts !== null ? { childMounts } : {}),
     })
     let stdout: ByteSource | null = stdout0
     if (mount !== primaryMount && io.exitCode === 127) {

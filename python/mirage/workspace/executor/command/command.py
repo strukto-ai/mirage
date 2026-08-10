@@ -42,6 +42,7 @@ from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
                                                        path_flag_scopes)
 from mirage.workspace.executor.command.run import (drop_service_caches,
                                                    exec_node, mount_root_of,
+                                                   registry_child_mounts,
                                                    run_on_mount,
                                                    scalar_find_flags)
 from mirage.workspace.executor.command.types import ExecuteNodeFn
@@ -323,10 +324,23 @@ async def handle_command(
         for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        stdout, io, node = await _fan_out_traversal(cmd_name, paths, texts,
-                                                    flag_kwargs, registry,
-                                                    mount, session.cwd,
-                                                    cmd_str, stdin)
+        # The one fact threaded into the fan-out's per-mount runs: a
+        # start point only the namespace serves (a nested mount's
+        # ancestor) has no backend listing, so without it the primary
+        # run reports the operand missing. Links and stat overlays are
+        # still dropped here, a known seam of the fan-out.
+        child_mounts = functools.partial(registry_child_mounts, registry,
+                                         namespace)
+        stdout, io, node = await _fan_out_traversal(cmd_name,
+                                                    paths,
+                                                    texts,
+                                                    flag_kwargs,
+                                                    registry,
+                                                    mount,
+                                                    session.cwd,
+                                                    cmd_str,
+                                                    stdin,
+                                                    child_mounts=child_mounts)
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing
