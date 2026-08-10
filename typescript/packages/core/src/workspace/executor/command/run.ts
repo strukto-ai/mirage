@@ -20,7 +20,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { ChildMounts, LinkView, MountView, StatOverlay, StatPath } from '../../../ops/types.ts'
-import { structureNames } from '../../../ops/structure.ts'
+import { namespaceNames } from '../../../ops/namespace_view.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { linkTargetStat, pathExists, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
@@ -259,7 +259,7 @@ export async function runOnMount(
   // links: the same session-filtered names the door merges into its own
   // readdir, offered to listing commands as rows.
   const childMounts: ChildMounts = (parent: string) =>
-    structureNames(registry.mountPrefixes(), namespace ?? null, parent)
+    namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,

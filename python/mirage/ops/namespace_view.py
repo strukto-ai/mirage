@@ -17,11 +17,7 @@ from collections.abc import Iterable
 from mirage.context import mount_allowed
 from mirage.ops.config import NamespaceLinks
 from mirage.types import FileStat, FileType
-
-
-def _norm_dir(path: str) -> str:
-    stripped = path.strip("/")
-    return "/" + stripped + "/" if stripped else "/"
+from mirage.utils.path import norm_dir
 
 
 def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
@@ -37,10 +33,10 @@ def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
         prefixes (Iterable[str]): the mount prefixes to derive from.
         parent (str): directory whose child mounts to enumerate.
     """
-    norm = _norm_dir(parent)
+    norm = norm_dir(parent)
     out: set[str] = set()
     for prefix in prefixes:
-        p = _norm_dir(prefix)
+        p = norm_dir(prefix)
         if p == norm or not p.startswith(norm):
             continue
         name = p[len(norm):].split("/", 1)[0]
@@ -66,7 +62,7 @@ def _link_allowed(prefixes: Iterable[str], link: str) -> bool:
     """
     owner = ""
     for prefix in prefixes:
-        p = _norm_dir(prefix)
+        p = norm_dir(prefix)
         if (link + "/").startswith(p) and len(p) > len(owner):
             owner = p
     return owner == "" or mount_allowed(owner)
@@ -91,7 +87,7 @@ def _link_names(prefixes: Iterable[str], links: NamespaceLinks | None,
     """
     if links is None:
         return []
-    norm = _norm_dir(parent)
+    norm = norm_dir(parent)
     out: set[str] = set()
     for link in links.symlink_targets():
         if not link.startswith(norm):
@@ -102,7 +98,7 @@ def _link_names(prefixes: Iterable[str], links: NamespaceLinks | None,
     return sorted(out)
 
 
-def structure_names(prefixes: Iterable[str], links: NamespaceLinks | None,
+def namespace_names(prefixes: Iterable[str], links: NamespaceLinks | None,
                     parent: str) -> list[str]:
     """Every child segment the namespace owes ``parent``: mounts + links.
 
@@ -141,7 +137,7 @@ def merge_readdir(entries: list[str], prefixes: Iterable[str],
     present = {e.rstrip("/").rsplit("/", 1)[-1] for e in entries}
     base = parent.rstrip("/")
     merged = list(entries)
-    for name in structure_names(prefixes, links, parent):
+    for name in namespace_names(prefixes, links, parent):
         if name in present:
             continue
         present.add(name)
@@ -149,7 +145,7 @@ def merge_readdir(entries: list[str], prefixes: Iterable[str],
     return merged
 
 
-def structure_listing(prefixes: Iterable[str], links: NamespaceLinks | None,
+def namespace_listing(prefixes: Iterable[str], links: NamespaceLinks | None,
                       parent: str) -> list[str] | None:
     """A listing for a directory that exists only as namespace structure.
 
@@ -163,12 +159,12 @@ def structure_listing(prefixes: Iterable[str], links: NamespaceLinks | None,
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): the directory that was listed, as a virtual path.
     """
-    if not structure_names(prefixes, links, parent):
+    if not namespace_names(prefixes, links, parent):
         return None
     return merge_readdir([], prefixes, links, parent)
 
 
-def structure_stat(prefixes: Iterable[str], links: NamespaceLinks | None,
+def namespace_stat(prefixes: Iterable[str], links: NamespaceLinks | None,
                    path: str) -> FileStat | None:
     """A directory stat for a path that exists only as namespace structure.
 
@@ -181,7 +177,7 @@ def structure_stat(prefixes: Iterable[str], links: NamespaceLinks | None,
         links (NamespaceLinks | None): the namespace symlink table.
         path (str): the path that was statted, as a virtual path.
     """
-    if structure_listing(prefixes, links, path) is None:
+    if namespace_listing(prefixes, links, path) is None:
         return None
     name = path.rstrip("/").rsplit("/", 1)[-1] or "/"
     return FileStat(name=name, type=FileType.DIRECTORY)

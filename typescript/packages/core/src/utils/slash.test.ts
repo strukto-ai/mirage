@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { lstripSlash, rstripSlash, stripSlash } from './slash.ts'
+import { lstripSlash, normDir, rstripSlash, stripSlash } from './slash.ts'
 
 const SAMPLES = ['', '/', '//', '///', 'a', '/a', 'a/', '/a/', '//a//', 'a/b/c', '/a/b/c/', 'a//b']
 
@@ -35,5 +35,13 @@ describe('slash helpers match Python str strip and the prior regex', () => {
     expect(lstripSlash('///a')).toBe('a')
     expect(stripSlash('///a///')).toBe('a')
     expect(stripSlash('///')).toBe('')
+  })
+
+  it('normDir yields the trailing-slash directory form', () => {
+    expect(normDir('a/b')).toBe('/a/b/')
+    expect(normDir('/a/b/')).toBe('/a/b/')
+    expect(normDir('///a///')).toBe('/a/')
+    expect(normDir('')).toBe('/')
+    expect(normDir('/')).toBe('/')
   })
 })

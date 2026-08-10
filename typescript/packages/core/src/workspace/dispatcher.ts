@@ -27,7 +27,7 @@ import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
-import { mergeReaddir, structureListing, structureStat } from '../ops/structure.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
 import { isMissingPath } from '../utils/errors.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
@@ -86,12 +86,12 @@ export class Dispatcher {
    * still lists and stats. Null for any other op, or when the
    * namespace knows nothing at `virtual`.
    */
-  private structureResult(opName: string, virtual: string): string[] | FileStat | null {
+  private namespaceResult(opName: string, virtual: string): string[] | FileStat | null {
     if (opName === 'readdir') {
-      return structureListing(this.namespace.mountPrefixes(), this.namespace, virtual)
+      return namespaceListing(this.namespace.mountPrefixes(), this.namespace, virtual)
     }
     if (opName === 'stat') {
-      return structureStat(this.namespace.mountPrefixes(), this.namespace, virtual)
+      return namespaceStat(this.namespace.mountPrefixes(), this.namespace, virtual)
     }
     return null
   }
@@ -117,7 +117,7 @@ export class Dispatcher {
       // session-filtered individually, so nothing of the mount's own
       // content leaks.
       const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
-      const fallback = eligible ? this.structureResult(opName, p.virtual) : null
+      const fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
       if (fallback === null) throw err
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
       await preOpsGate(this.policies, opName, p, fallbackWrite, '')
@@ -211,7 +211,7 @@ export class Dispatcher {
         ),
       )
     } catch (err) {
-      const fallback = isMissingPath(err) ? this.structureResult(opName, p.virtual) : null
+      const fallback = isMissingPath(err) ? this.namespaceResult(opName, p.virtual) : null
       if (fallback === null) {
         await this.reconciler.onOpMissing(opName, p.virtual, err)
         throw err

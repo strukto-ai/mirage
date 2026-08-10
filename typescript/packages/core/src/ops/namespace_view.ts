@@ -13,14 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountAllowed } from '../context/session_context.ts'
-import { rstripSlash, stripSlash } from '../utils/slash.ts'
+import { normDir, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType } from '../types.ts'
 import type { NamespaceLinks } from './config.ts'
-
-function normDir(path: string): string {
-  const stripped = stripSlash(path)
-  return stripped === '' ? '/' : '/' + stripped + '/'
-}
 
 /**
  * Immediate child segments of mounts strictly under `parent`.
@@ -98,7 +93,7 @@ function linkNames(
  * listing commands, so the shell and the ops surface cannot disagree
  * about what a directory holds.
  */
-export function structureNames(
+export function namespaceNames(
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   parent: string,
@@ -127,7 +122,7 @@ export function mergeReaddir(
   const present = new Set(entries.map((e) => stripEntry(e)))
   const base = rstripSlash(parent)
   const merged = [...entries]
-  for (const name of structureNames(prefixes, links, parent)) {
+  for (const name of namespaceNames(prefixes, links, parent)) {
     if (present.has(name)) continue
     present.add(name)
     merged.push(`${base}/${name}`)
@@ -149,12 +144,12 @@ function stripEntry(entry: string): string {
  * `/x`. Null when the namespace knows nothing there either, so a caller
  * re-throws the backend's miss.
  */
-export function structureListing(
+export function namespaceListing(
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   parent: string,
 ): string[] | null {
-  if (structureNames(prefixes, links, parent).length === 0) {
+  if (namespaceNames(prefixes, links, parent).length === 0) {
     return null
   }
   return mergeReaddir([], prefixes, links, parent)
@@ -167,12 +162,12 @@ export function structureListing(
  * (because a mount or a link sits below it) must stat as a directory,
  * or `os.walk` and `Path.is_dir` break on it.
  */
-export function structureStat(
+export function namespaceStat(
   prefixes: readonly string[],
   links: NamespaceLinks | null,
   path: string,
 ): FileStat | null {
-  if (structureListing(prefixes, links, path) === null) return null
+  if (namespaceListing(prefixes, links, path) === null) return null
   const name = stripEntry(path)
   return new FileStat({ name: name === '' ? '/' : name, type: FileType.DIRECTORY })
 }

@@ -16,7 +16,7 @@ import errno as host_errno
 
 import pytest
 
-from mirage.ops.structure import merge_readdir
+from mirage.ops.namespace_view import merge_readdir
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
 from mirage.runtime.wasm.config import WasmFsConfig

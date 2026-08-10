@@ -31,3 +31,10 @@ export function stripSlash(s: string): string {
   while (end > start && s.charCodeAt(end - 1) === 47) end--
   return s.slice(start, end)
 }
+
+// The trailing-slash directory form prefix comparisons need, so '/a/'
+// cannot match '/ab' ('foo/bar' -> '/foo/bar/', '' -> '/').
+export function normDir(s: string): string {
+  const stripped = stripSlash(s)
+  return stripped === '' ? '/' : '/' + stripped + '/'
+}

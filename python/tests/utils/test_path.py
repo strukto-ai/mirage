@@ -16,7 +16,8 @@ import pytest
 
 from mirage.utils.path import (ancestors, drop_trailing_segments, expand_tilde,
                                glob_prefix_match, gnu_basename, gnu_dirname,
-                               norm, parent, resolve_path, respell_one)
+                               norm, norm_dir, parent, resolve_path,
+                               respell_one)
 
 
 def test_norm_strips_and_adds_leading_slash():
@@ -25,6 +26,14 @@ def test_norm_strips_and_adds_leading_slash():
     assert norm("///a///") == "/a"
     assert norm("") == "/"
     assert norm("/") == "/"
+
+
+def test_norm_dir_yields_trailing_slash_form():
+    assert norm_dir("a/b") == "/a/b/"
+    assert norm_dir("/a/b/") == "/a/b/"
+    assert norm_dir("///a///") == "/a/"
+    assert norm_dir("") == "/"
+    assert norm_dir("/") == "/"
 
 
 def test_parent_of_normalized_key():

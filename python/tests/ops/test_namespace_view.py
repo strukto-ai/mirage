@@ -15,9 +15,9 @@
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
-from mirage.ops.structure import (child_mount_names, merge_readdir,
-                                  structure_listing, structure_names,
-                                  structure_stat)
+from mirage.ops.namespace_view import (child_mount_names, merge_readdir,
+                                       namespace_listing, namespace_names,
+                                       namespace_stat)
 from mirage.types import FileType, MountMode
 from mirage.workspace.session import Session
 
@@ -84,10 +84,10 @@ def test_merge_readdir_without_links_or_mounts_is_identity():
 
 
 def test_structure_listing_answers_only_when_something_is_below():
-    assert structure_listing(PREFIXES, None, "/base/ghost") is None
-    assert structure_listing(PREFIXES, None, "/base") == ["/base/inner"]
+    assert namespace_listing(PREFIXES, None, "/base/ghost") is None
+    assert namespace_listing(PREFIXES, None, "/base") == ["/base/inner"]
     links = _Links({"/base/ghost/lnk": "/base"})
-    assert structure_listing(PREFIXES, links,
+    assert namespace_listing(PREFIXES, links,
                              "/base/ghost") == ["/base/ghost/lnk"]
 
 
@@ -96,29 +96,29 @@ def test_link_ancestors_synthesize_like_mount_prefixes():
     # ancestor of the link must list and stat, or the link is reachable
     # by exact path yet invisible to any walk from above.
     links = _Links({"/ghost/deep/lnk": "/base"})
-    assert structure_listing([], links, "/") == ["/ghost"]
-    assert structure_listing([], links, "/ghost") == ["/ghost/deep"]
-    assert structure_listing([], links, "/ghost/deep") == ["/ghost/deep/lnk"]
-    st = structure_stat([], links, "/ghost")
+    assert namespace_listing([], links, "/") == ["/ghost"]
+    assert namespace_listing([], links, "/ghost") == ["/ghost/deep"]
+    assert namespace_listing([], links, "/ghost/deep") == ["/ghost/deep/lnk"]
+    st = namespace_stat([], links, "/ghost")
     assert st is not None and st.type is FileType.DIRECTORY
     # The link itself is not structure: its stat is the lstat surface's.
-    assert structure_stat([], links, "/ghost/deep/lnk") is None
+    assert namespace_stat([], links, "/ghost/deep/lnk") is None
 
 
 def test_structure_stat_agrees_with_the_listing():
-    st = structure_stat(PREFIXES, None, "/base")
+    st = namespace_stat(PREFIXES, None, "/base")
     assert st is not None and st.type is FileType.DIRECTORY
     assert st.name == "base"
-    assert structure_stat(PREFIXES, None, "/base/ghost") is None
+    assert namespace_stat(PREFIXES, None, "/base/ghost") is None
 
 
 def test_structure_answers_hide_ungranted_mounts(scoped_session):
     # /top exists only because an ungranted mount sits below it: to
     # this session the namespace must deny knowing anything there.
-    assert structure_listing(["/top/secret/"], None, "/top") is None
-    assert structure_stat(["/top/secret/"], None, "/top") is None
+    assert namespace_listing(["/top/secret/"], None, "/top") is None
+    assert namespace_stat(["/top/secret/"], None, "/top") is None
     # The granted mount keeps answering through the same session.
-    assert structure_stat(PREFIXES, None, "/base") is not None
+    assert namespace_stat(PREFIXES, None, "/base") is not None
 
 
 def test_link_names_filter_by_owning_mount(scoped_session):
@@ -127,8 +127,8 @@ def test_link_names_filter_by_owning_mount(scoped_session):
     # inside the granted mount keeps answering. Ownership is
     # longest-match, the same rule dispatch resolves the path by.
     links = _Links({"/other/leak": "/tgt", "/base/inner/ok": "/tgt"})
-    assert structure_names(PREFIXES, links, "/") == ["base"]
-    assert structure_listing(PREFIXES, links,
+    assert namespace_names(PREFIXES, links, "/") == ["base"]
+    assert namespace_listing(PREFIXES, links,
                              "/base/inner") == ["/base/inner/ok"]
 
 
@@ -137,5 +137,5 @@ def test_link_above_every_mount_stays_visible(scoped_session):
     # mount, so a scoped session still sees the chain (it may have
     # created the link itself at a structure-only path).
     links = _Links({"/ghost/deep/lnk": "/base/inner"})
-    assert structure_listing(["/base/inner/"], links,
+    assert namespace_listing(["/base/inner/"], links,
                              "/") == ["/base", "/ghost"]

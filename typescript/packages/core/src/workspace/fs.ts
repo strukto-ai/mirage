@@ -18,7 +18,7 @@ import { getExtension } from '../commands/resolve.ts'
 import { MountNotAllowedError } from '../context/session_context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
-import { mergeReaddir, structureListing, structureStat } from '../ops/structure.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
 import type { StatOverlay } from '../ops/types.ts'
 import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { type Policies, postOpsGate, preOpsGate } from '../policy/policies.ts'
@@ -83,10 +83,10 @@ export class WorkspaceFS {
    * link sits below it still lists and stats. Null for any other op,
    * or when the namespace knows nothing at `path`.
    */
-  private structureResult(op: string, path: string): string[] | FileStat | null {
+  private namespaceResult(op: string, path: string): string[] | FileStat | null {
     if (this.prefixes === null) return null
-    if (op === 'readdir') return structureListing(this.prefixes(), this.links, path)
-    if (op === 'stat') return structureStat(this.prefixes(), this.links, path)
+    if (op === 'readdir') return namespaceListing(this.prefixes(), this.links, path)
+    if (op === 'stat') return namespaceStat(this.prefixes(), this.links, path)
     return null
   }
 
@@ -208,7 +208,7 @@ export class WorkspaceFS {
       // too. The merged names are session-filtered, so an ungranted
       // mount's own content never leaks.
       const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
-      const fallback = eligible ? this.structureResult('readdir', path) : null
+      const fallback = eligible ? this.namespaceResult('readdir', path) : null
       if (fallback === null) throw err
       const pathSpec = PathSpec.fromStrPath(path)
       await this.firePreOps('readdir', path, pathSpec, false, '')
@@ -232,7 +232,7 @@ export class WorkspaceFS {
         kwargs,
       )) as string[] | null
     } catch (err) {
-      const fallback = isMissingPath(err) ? this.structureResult('readdir', path) : null
+      const fallback = isMissingPath(err) ? this.namespaceResult('readdir', path) : null
       if (fallback === null) throw err
       result = fallback as string[]
     }
@@ -254,7 +254,7 @@ export class WorkspaceFS {
     } catch (err) {
       // Same gate routing as the readdir resolver miss above.
       const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
-      const fallback = eligible ? this.structureResult('stat', path) : null
+      const fallback = eligible ? this.namespaceResult('stat', path) : null
       if (fallback === null) throw err
       const pathSpec = PathSpec.fromStrPath(path)
       await this.firePreOps('stat', path, pathSpec, false, '')
@@ -274,7 +274,7 @@ export class WorkspaceFS {
         kwargs,
       )) as FileStat
     } catch (err) {
-      const fallback = isMissingPath(err) ? this.structureResult('stat', path) : null
+      const fallback = isMissingPath(err) ? this.namespaceResult('stat', path) : null
       if (fallback === null) throw err
       result = fallback as FileStat
     }

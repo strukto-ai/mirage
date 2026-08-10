@@ -22,7 +22,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.ops.config import NamespaceLinks
-from mirage.ops.structure import structure_names
+from mirage.ops.namespace_view import namespace_names
 from mirage.ops.types import LinkView, MountView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
@@ -131,7 +131,7 @@ def registry_child_mounts(registry: MountRegistry,
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): directory whose child segments to enumerate.
     """
-    return structure_names([m.prefix for m in registry.mounts()], links,
+    return namespace_names([m.prefix for m in registry.mounts()], links,
                            parent)
 
 

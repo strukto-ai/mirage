@@ -56,6 +56,21 @@ def norm(path: str) -> str:
     return "/" + path.strip("/")
 
 
+def norm_dir(path: str) -> str:
+    """Normalize a virtual path to its trailing-slash directory form.
+
+    Args:
+        path: A virtual path string.
+
+    Returns:
+        The path with one leading and one trailing slash
+        (``"foo/bar"`` -> ``"/foo/bar/"``, ``""`` -> ``"/"``), the form
+        prefix comparisons need so ``/a/`` cannot match ``/ab``.
+    """
+    stripped = path.strip("/")
+    return "/" + stripped + "/" if stripped else "/"
+
+
 def parent(path: str) -> str:
     """Return the parent directory of a normalized virtual key.
 
