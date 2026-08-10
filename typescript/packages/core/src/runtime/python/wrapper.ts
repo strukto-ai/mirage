@@ -169,16 +169,44 @@ _err_text  = io.TextIOWrapper(_err_bytes, encoding='utf-8', errors='replace',
 _stdin_buf  = io.BytesIO(bytes(_stdin_bytes) if _stdin_bytes is not None else b'')
 _stdin_text = io.TextIOWrapper(_stdin_buf, encoding='utf-8', errors='replace')
 
+# The interpreter-init switches, honored here because this engine is
+# real CPython even though it is already running: -O is a compile()
+# argument, -B and -X are writable attributes, and -W is what the
+# warnings module does anyway. -E/-I/-s/-S reduce to dropping entries
+# from the env and sys.path, both of which this wrapper already
+# saves and restores. One divergence stands: sys.flags is read-only, so
+# introspecting code sees optimize == 0 even when -O was honored.
+_flags     = dict(_init_flags) if _init_flags is not None else {}
+_optimize  = int(_flags.get('O') or 0)
+_isolated  = bool(_flags.get('I'))
+_no_env    = bool(_flags.get('E')) or _isolated
+_saved_dwb = sys.dont_write_bytecode
+_saved_xop = dict(sys._xoptions)
+
 _exit_code = 0
 try:
     os.environ.clear()
-    os.environ.update(dict(_merged_env))
+    _env = dict(_merged_env)
+    if _no_env:
+        for _key in [k for k in _env if k.startswith('PYTHON')]:
+            del _env[_key]
+    os.environ.update(_env)
+    if _flags.get('B'):
+        sys.dont_write_bytecode = True
+    for _xopt in _flags.get('X') or []:
+        _name, _, _value = str(_xopt).partition('=')
+        sys._xoptions[_name] = _value if _value else True
+    if _flags.get('W'):
+        import warnings as _warnings
+        for _spec in _flags.get('W') or []:
+            _warnings._setoption(str(_spec))
     sys.stdin  = _stdin_text
     sys.stdout = _out_text
     sys.stderr = _err_text
     sys.argv   = list(_argv)
     try:
-        exec(compile(_user_code, '<string>', 'exec'), dict(_user_globals))
+        exec(compile(_user_code, '<string>', 'exec', optimize=_optimize),
+             dict(_user_globals))
     except SystemExit as _e:
         _code = _e.code
         if _code is None:
@@ -199,6 +227,9 @@ finally:
     os.environ.clear()
     os.environ.update(_saved_env)
     sys.path[:]  = _saved_path
+    sys.dont_write_bytecode = _saved_dwb
+    sys._xoptions.clear()
+    sys._xoptions.update(_saved_xop)
     sys.stdin    = _saved_stdin
     sys.stdout   = _saved_stdout
     sys.stderr   = _saved_stderr

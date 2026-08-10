@@ -391,7 +391,7 @@ describe('parseCommand — unknown dash tokens warn and drop', () => {
   })
 
   it('keeps dash tokens for TEXT-rest commands', () => {
-    const p = parseCommand(specOf('python'), ['-x', 'hello'], '/')
+    const p = parseCommand(specOf('expr'), ['-x', 'hello'], '/')
     expect(p.texts()).toEqual(['-x', 'hello'])
     expect(p.warnings).toEqual([])
   })
@@ -1109,5 +1109,48 @@ describe('options an environment variable supplies', () => {
     const parsed = parseCommand(versioned, [], '/', { X_VERSION: '9' })
     expect(parsed.flags['--version']).toBe('9')
     expect(parsed.typedDests).toEqual([])
+  })
+})
+
+describe('parseCommand — stopAtOperand (python3 rule)', () => {
+  const PYTHON_LIKE = new CommandSpec({
+    options: [
+      new Option({ short: '-c', type: 'str', endsOptions: true }),
+      new Option({ short: '-u' }),
+    ],
+    rest: new Operand({ type: 'str' }),
+    stopAtOperand: true,
+  })
+
+  it('rejects an unknown flag before the operand', () => {
+    const p = parseCommand(PYTHON_LIKE, ['-z', '-c', 'print(1)'], '/')
+    expect(p.invalidOptions).toEqual(['z'])
+  })
+
+  it('keeps dash words after the operand verbatim', () => {
+    const p = parseCommand(PYTHON_LIKE, ['s.py', '--foo', '-z'], '/')
+    expect(p.texts()).toEqual(['s.py', '--foo', '-z'])
+    expect(p.invalidOptions).toEqual([])
+  })
+
+  it('ends option parsing after a payload value', () => {
+    const p = parseCommand(PYTHON_LIKE, ['-c', 'print(1)', '-u', 'x'], '/')
+    expect(p.flags['-c']).toBe('print(1)')
+    expect(p.flags['-u']).not.toBe(true)
+    expect(p.texts()).toEqual(['-u', 'x'])
+  })
+
+  it('refuses endsOptions on a boolean option', () => {
+    expect(() =>
+      parseCommand(
+        new CommandSpec({
+          options: [new Option({ short: '-b', endsOptions: true })],
+          rest: new Operand({ type: 'str' }),
+          stopAtOperand: true,
+        }),
+        [],
+        '/',
+      ),
+    ).toThrow(/endsOptions requires a value flag/)
   })
 })

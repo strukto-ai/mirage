@@ -30,3 +30,9 @@ class PythonRuntime(LanguageRuntime):
 
     language: ClassVar[Language] = "python"
     captures = ("python3", "python")
+    # Whether `python3 -m mod` can run at all. True for every engine
+    # that is real CPython, since runpy does the work; False for an
+    # engine implementing a subset of the language with no import
+    # system to find a module with. A capability of the tier, declared
+    # here rather than probed, so a refusal can name the runtime.
+    runs_modules: ClassVar[bool] = True

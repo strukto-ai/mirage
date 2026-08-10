@@ -581,6 +581,12 @@ export {
   type Policy,
 } from './policy/index.ts'
 export { buildRuntime, candidates, registerRuntime, RUNTIMES } from './runtime/table.ts'
+// The concrete runtime classes stay unexported on purpose: buildRuntime
+// is the one construction door, and a config block reaches it as a plain
+// object. Exporting the config TYPE is what makes that object checkable,
+// so `buildRuntime('pyodide', { config: cfg })` refuses a misspelled key
+// at compile time instead of at first run.
+export type { PyodideConfig } from './runtime/python/pyodide.ts'
 export { RemoteSandbox } from './runtime/sandbox/base.ts'
 export { type NormalizedSandboxConfig, type SandboxConfig } from './runtime/sandbox/config.ts'
 export { stdinPath, stdinRedirect } from './runtime/sandbox/constants.ts'

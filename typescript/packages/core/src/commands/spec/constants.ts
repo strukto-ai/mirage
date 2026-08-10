@@ -71,4 +71,21 @@ export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   awk: 2,
   jq: 2,
   tar: 64,
+  python: 2,
+  python3: 2,
 })
+
+// The interpreter commands answer option errors in CPython's words, not
+// GNU's: python3 is not a GNU tool, and its refusal names the
+// source-selecting options a reader needs.
+export const PYTHON_NAMES: ReadonlySet<string> = new Set(['python', 'python3'])
+
+// Pinned on CPython 3.12.13, including two quirks worth keeping: the
+// hint always spells the program `python` (never `python3`, whichever
+// way it was invoked), and it quotes with a backquote/quote pair.
+export function pythonUsage(name: string): string {
+  return (
+    `usage: ${name} [option] ... [-c cmd | -m mod | file | -] [arg] ...\n` +
+    "Try `python -h' for more information.\n"
+  )
+}

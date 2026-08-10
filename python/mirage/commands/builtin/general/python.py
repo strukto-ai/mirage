@@ -30,6 +30,17 @@ async def _python3(
     paths: list[PathSpec] | None = None,
     *texts: str,
     c: str | None = None,
+    m: str | None = None,
+    u: bool = False,
+    q: bool = False,
+    B: bool = False,
+    E: bool = False,
+    s: bool = False,
+    S: bool = False,
+    args_I: bool = False,
+    args_O: int = 0,
+    W: list[str] | None = None,
+    X: list[str] | None = None,
     stdin: ByteSource | None = None,
     dispatch: Callable[..., Any] | None = None,
     cwd: PathSpec | None = None,
@@ -40,11 +51,25 @@ async def _python3(
     **_extra: FlagValue,
 ) -> CommandOutput:
     error, prepared = await resolve_source("python3", paths, texts, c, stdin,
-                                           dispatch, cwd, exec_allowed)
+                                           dispatch, cwd, exec_allowed, m)
     if error is not None or prepared is None:
         assert error is not None
         return error
-    return await run_code("python3", prepared, env, {}, runtime,
+    # Keyed by CPython's own letter, which is how mirage.runtime.python
+    # .flags reads them; -u and -q are absent because mirage buffers
+    # every stream and prints no banner, so no engine can differ on
+    # them.
+    init_flags: dict[str, Any] = {
+        "B": B,
+        "E": E,
+        "I": args_I,
+        "O": args_O,
+        "s": s,
+        "S": S,
+        "W": W or [],
+        "X": X or [],
+    }
+    return await run_code("python3", prepared, env, init_flags, runtime,
                           runtime_unavailable)
 
 

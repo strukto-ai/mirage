@@ -179,11 +179,21 @@ class Option:
             frozen into the spec. Declaring it here is what keeps one
             fact in one place, since both the leaf that sends the value
             and the renderer that reports the line need it.
+        ends_options (bool): the option's value is the last thing parsed
+            as the command's own; every later word is an operand. This is
+            python3's ``-c``/``-m``, whose argument is a program and
+            whose trailing words are that program's argv, so
+            ``python3 -c 'code' -u`` passes ``-u`` to the code rather
+            than honoring it. Only meaningful under
+            ``CommandSpec.stop_at_operand``, and only on the options that
+            carry a program: ``-X dev -c 'code'`` still parses ``-c``,
+            because ``-X`` takes a value without carrying one.
         description (str | None): help text.
     """
     short: str | None = None
     long: str | None = None
     type: ValueType = "bool"
+    ends_options: bool = False
     numeric_shorthand: bool = False
     count: bool = False
     multiple: bool = False
@@ -255,6 +265,13 @@ class CommandSpec:
     # every other path-valued flag keeps resolving against the session
     # cwd, which is what GNU does with -f.
     operand_base: str | None = None
+    # python3's rule: parse options strictly until the first operand,
+    # then take every remaining word verbatim. An interpreter needs both
+    # halves at once -- an unknown flag before the script is a usage
+    # error, while `python3 s.py --foo` must hand `--foo` to the script
+    # -- and the free-text leniency that serves echo/bash can only
+    # express the second.
+    stop_at_operand: bool = False
 
 
 class FlagView:

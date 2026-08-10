@@ -193,7 +193,7 @@ def test_missing_value_reported_short_and_long():
 
 
 def test_text_rest_keeps_unknown_dash_tokens():
-    parsed = parse_command(SPECS["python"], ["-x", "hello"], "/")
+    parsed = parse_command(SPECS["expr"], ["-x", "hello"], "/")
     assert parsed.texts() == ["-x", "hello"]
     assert parsed.warnings == []
 
@@ -758,3 +758,29 @@ def test_operand_base_survives_the_old_style_cluster():
 def test_word_bases_are_empty_without_an_operand_base():
     parsed = parse_command(SPECS["cat"], ["a.txt"], cwd="/work")
     assert parsed.word_bases == [None]
+
+
+PYTHON_LIKE = CommandSpec(
+    options=(Option(short="-c", type="str",
+                    ends_options=True), Option(short="-u")),
+    rest=Operand(type="str"),
+    stop_at_operand=True,
+)
+
+
+def test_stop_at_operand_rejects_an_unknown_flag_before_the_operand():
+    parsed = parse_command(PYTHON_LIKE, ["-z", "-c", "print(1)"], "/")
+    assert parsed.invalid_options == ["z"]
+
+
+def test_stop_at_operand_keeps_dash_words_after_the_operand_verbatim():
+    parsed = parse_command(PYTHON_LIKE, ["s.py", "--foo", "-z"], "/")
+    assert parsed.texts() == ["s.py", "--foo", "-z"]
+    assert parsed.invalid_options == []
+
+
+def test_stop_at_operand_ends_option_parsing_after_a_payload_value():
+    parsed = parse_command(PYTHON_LIKE, ["-c", "print(1)", "-u", "x"], "/")
+    assert parsed.flags["-c"] == "print(1)"
+    assert parsed.flags.get("-u") is not True
+    assert parsed.texts() == ["-u", "x"]

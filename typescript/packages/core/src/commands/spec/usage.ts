@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { UsageError } from '../errors.ts'
-import { OLD_OPTION_EXIT, USAGE_EXIT, USAGE_HINT_PREFIX } from './constants'
+import {
+  OLD_OPTION_EXIT,
+  PYTHON_NAMES,
+  pythonUsage,
+  USAGE_EXIT,
+  USAGE_HINT_PREFIX,
+} from './constants'
 import { CommandName } from './types.ts'
 
 /** GNU usage-error exit code for a command. */
@@ -31,6 +37,10 @@ export function usageExitCode(cmdName: string): number {
  * are deliberately omitted; the `--help` hint line is kept because every
  * registered command serves `--help`.
  */
+function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] {
+  return [new TextEncoder().encode(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
+}
+
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
   if (cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
@@ -38,6 +48,16 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
       new TextEncoder().encode(`find: unknown predicate \`${dashed}'\n`),
       usageExitCode(cmdName),
     ]
+  }
+  if (PYTHON_NAMES.has(cmdName)) {
+    // CPython's own two shapes, which do not match each other: the short
+    // form capitalizes and takes a colon, the long form does neither.
+    // Both pinned on 3.12.13.
+    if (token.startsWith('--')) {
+      return pythonOptionError(cmdName, `unknown option ${token}\n`)
+    }
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return pythonOptionError(cmdName, `Unknown option: ${dashed}\n`)
   }
   const line = token.startsWith('--')
     ? `${cmdName}: unrecognized option '${token}'\n`
@@ -100,6 +120,10 @@ export function invalidFloatError(
 
 /** GNU-shaped error for a declared value flag with no argument left. */
 export function missingValueError(cmdName: string, token: string): [Uint8Array, number] {
+  if (PYTHON_NAMES.has(cmdName)) {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return pythonOptionError(cmdName, `Argument expected for the ${dashed} option\n`)
+  }
   const line = token.startsWith('--')
     ? `${cmdName}: option '${token}' requires an argument\n`
     : `${cmdName}: option requires an argument -- '${token}'\n`

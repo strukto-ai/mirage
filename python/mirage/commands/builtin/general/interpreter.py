@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Literal, TypeAlias
 
 from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
 
@@ -41,6 +42,46 @@ def run_output(result: RunResult) -> CommandOutput:
     )
 
 
+# Which of an interpreter's four doors the source came through. The
+# mode is what decides argv[0], so the two travel together: CPython
+# spells it "-c" for a payload, the module's file for -m, the file as
+# typed for a script, "-" for the explicit stdin operand, and "" for
+# stdin with no operand at all. Pinned on CPython 3.12.13.
+SourceMode: TypeAlias = Literal["payload", "module", "file", "stdin"]
+
+# argv[0] for the two modes that do not read it off the command line.
+PAYLOAD_ARGV0 = "-c"
+STDIN_ARGV0 = "-"
+STDIN_OPERAND = "-"
+
+# `-m` is runpy's job on any real CPython: run_module finds the module,
+# runs it under __main__, and alter_sys rewrites sys.argv[0] to the
+# module's own file, which is what CPython puts there. Engines that are
+# not CPython declare runs_modules False and never see this.
+#
+# The existence probe is not redundant with run_module: CPython answers
+# a missing module with one line and exit 1, while bare run_module
+# raises, which would reach the user as a runpy traceback. Probing
+# first also keeps an ImportError raised INSIDE the module distinct
+# from the module itself being absent, which a try around run_module
+# could not tell apart.
+MODULE_SOURCE = (
+    "import importlib.util, runpy, sys\n"
+    "_name = {name!r}\n"
+    "_label = {label!r}\n"
+    "try:\n"
+    "    _found = importlib.util.find_spec(_name) is not None\n"
+    "except (ImportError, TypeError, ValueError):\n"
+    # find_spec raises rather than returning None when an ancestor of a
+    # dotted name is missing or is not a package; either way the module
+    # cannot be found, and the message below reports it.
+    "    _found = False\n"
+    "if not _found:\n"
+    "    sys.stderr.write(_label + ': No module named ' + _name + chr(10))\n"
+    "    raise SystemExit(1)\n"
+    "runpy.run_module(_name, run_name='__main__', alter_sys=True)\n")
+
+
 @dataclass(frozen=True, slots=True)
 class Source:
     """An interpreter command's inputs, resolved from the command line.
@@ -48,17 +89,23 @@ class Source:
     Args:
         code (str): the source to run (script content, payload flag,
             or piped stdin).
-        args (list[str]): argv exposed to the script.
+        args (list[str]): argv exposed to the script, argv[0] excluded.
         stdin (bytes | None): remaining stdin after any consumed as
             source.
         script_path (PathSpec | None): the resolved script operand,
             None for payload/stdin sources.
+        mode (SourceMode): which door the source came through.
+        argv0 (str): the program's own name for argv[0], derived from
+            the mode. Never None: "" is CPython's own answer for stdin
+            with no operand, so a runtime must not treat it as absent.
     """
 
     code: str
     args: list[str] = field(default_factory=list)
     stdin: bytes | None = None
     script_path: PathSpec | None = None
+    mode: SourceMode = "payload"
+    argv0: str = PAYLOAD_ARGV0
 
 
 async def resolve_source(
@@ -70,6 +117,7 @@ async def resolve_source(
     dispatch: Callable[..., Any] | None,
     cwd: PathSpec | None,
     exec_allowed: bool,
+    module: str | None = None,
 ) -> tuple[CommandOutput | None, Source | None]:
     """Resolve what an interpreter command should run, shared by all.
 
@@ -102,16 +150,41 @@ async def resolve_source(
     text_list = list(texts)
     code = payload
     script_path: PathSpec | None = None
-    if code is not None:
+    mode: SourceMode = "payload"
+    argv0 = PAYLOAD_ARGV0
+    if module is not None:
+        # runpy's alter_sys overwrites argv[0] with the module's own
+        # file, which no caller can know here; the module name stands
+        # in for the runtimes that never reach runpy.
+        code = MODULE_SOURCE.format(name=module, label=label)
+        arg_strs = [p.virtual for p in paths] + text_list
+        mode = "module"
+        argv0 = module
+    elif code is not None:
         arg_strs = [p.virtual for p in paths] + text_list
     elif paths:
         script_path = paths[0]
         arg_strs = [p.virtual for p in paths[1:]] + text_list
+        mode = "file"
+        argv0 = paths[0].raw_path
+    elif text_list and text_list[0] == STDIN_OPERAND:
+        # The explicit stdin spelling. It is an operand, not a flag, so
+        # it ends option parsing like any other, and the words after it
+        # are the program's argv exactly as a script's would be.
+        arg_strs = text_list[1:]
+        mode = "stdin"
+        argv0 = STDIN_ARGV0
     elif text_list:
         script_path = resolve_script(text_list[0], cwd)
         arg_strs = text_list[1:]
+        mode = "file"
+        # As typed, which is what CPython puts in argv[0]; the resolved
+        # spelling is script_path's job.
+        argv0 = text_list[0]
     else:
         arg_strs = []
+        mode = "stdin"
+        argv0 = ""
 
     if code is None and script_path is not None:
         if dispatch is None:
@@ -136,7 +209,9 @@ async def resolve_source(
     return None, Source(code=code,
                         args=arg_strs,
                         stdin=stdin_data,
-                        script_path=script_path)
+                        script_path=script_path,
+                        mode=mode,
+                        argv0=argv0)
 
 
 async def run_code(
@@ -178,9 +253,18 @@ async def run_code(
         hint = unavailable or "command not found"
         return None, IOResult(exit_code=127,
                               stderr=f"{label}: {hint}\n".encode())
+    if (prepared.mode == "module" and isinstance(runtime, PythonRuntime)
+            and not runtime.runs_modules):
+        # Exit 1, CPython's code for a `-m` that could not run, but not
+        # its "No module named" wording: nothing was searched for, so
+        # naming the runtime is the honest report.
+        err = (f"{label}: -m is not supported by the {runtime.name!r} "
+               f"runtime\n").encode()
+        return None, IOResult(exit_code=1, stderr=err)
     result = await runtime.run(
         RunArgs(code=prepared.code,
                 args=prepared.args,
+                prog=prepared.argv0,
                 env=env or {},
                 stdin=prepared.stdin,
                 flags=flags))
