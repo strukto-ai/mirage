@@ -566,7 +566,7 @@ async function runArgv(
 
   if (name === SB.EVAL) return handleEval(executeFn, args, session)
   if (name === SB.BASH || name === SB.SH) {
-    return handleBash(executeFn, args, session, stdin)
+    return handleBash(dispatch, executeFn, args, session, stdin, name)
   }
   if (name === SB.EXPORT) return handleExport(args, session)
   if (name === SB.UNSET) return handleUnset(args, session)

@@ -39,6 +39,10 @@ class Session:
     pipeline_timeout_seconds: float | None = None
     last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
+    # What `$0` expands to. None is the shell itself; a nested `bash`/`sh`
+    # sets it to the script file it is running, or to the name given after
+    # `-c`, and restores it afterwards.
+    script_name: str | None = None
     # Transient `set -e` marker: True when the failure just returned
     # came from a short-circuited &&/|| branch or a `!`-negated command,
     # which bash exempts from errexit. Reset on every node execution.

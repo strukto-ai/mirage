@@ -15,11 +15,15 @@
 import { resolvePath } from '../../../utils/path.ts'
 import { materialize, IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
+import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
+import { FileType } from '../../../types.ts'
 import type { PathSpec } from '../../../types.ts'
+import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import type { Session } from '../../session/session.ts'
 import { sleep } from '../../abort.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
+import { resolvePathStat } from './links.ts'
 import { toScope, scopePath } from './scope.ts'
 import type { Result, ExecuteStringFn } from './scope.ts'
 
@@ -33,37 +37,73 @@ export async function handleEval(
   return [io.stdout, io, new ExecutionNode({ command: 'eval', exitCode: io.exitCode })]
 }
 
-const BASH_NOOP_SHORT_FLAGS = new Set(['l', 'i', 'e', 'u', 'x'])
+// Startup flags with nothing to configure in an embedded shell: there is no
+// login profile, no rc file and no tty. Flags that name a `set` option
+// (-e -u -x -f) are not here; they are applied through SET_FLAG_TO_OPTION.
+const BASH_NOOP_SHORT_FLAGS = new Set(['l', 'i'])
 const BASH_NOOP_LONG_FLAGS = new Set(['--login', '--norc', '--noprofile', '--posix', '--rcfile'])
 
-function bashCError(): Result {
-  const err = new TextEncoder().encode('bash: -c: option requires an argument\n')
+function bashError(name: string, message: string, code: number): Result {
+  const err = new TextEncoder().encode(`${name}: ${message}\n`)
   return [
     null,
-    new IOResult({ exitCode: 2, stderr: err }),
-    new ExecutionNode({ command: 'bash', exitCode: 2, stderr: err }),
+    new IOResult({ exitCode: code, stderr: err }),
+    new ExecutionNode({ command: name, exitCode: code, stderr: err }),
   ]
 }
 
-export async function handleBash(
-  executeFn: ExecuteStringFn,
-  args: string[],
-  session: Session,
-  stdin: ByteSource | null = null,
-): Promise<Result> {
-  let script: string | null = null
+export interface BashArgs {
+  // Inline program text from `-c`.
+  script: string | null
+  // Script file operand, as typed.
+  path: string | null
+  // Words after the program: `$0` first for the `-c` form, all
+  // positional for the file form.
+  argv: string[]
+  // Shell options the startup flags turn on.
+  options: string[]
+  // Whether `-s` was given.
+  readStdin: boolean
+  // A ready usage failure, when parsing failed.
+  error: Result | null
+}
+
+function bashArgs(partial: Partial<BashArgs>): BashArgs {
+  return {
+    script: null,
+    path: null,
+    argv: [],
+    options: [],
+    readStdin: false,
+    error: null,
+    ...partial,
+  }
+}
+
+function setOptions(chars: string): string[] {
+  const options: string[] = []
+  for (let j = 0; j < chars.length; j++) {
+    const option = SET_FLAG_TO_OPTION[chars.charAt(j)]
+    if (option !== undefined) options.push(option)
+  }
+  return options
+}
+
+/**
+ * Split a `bash`/`sh` argument list into flags, program and argv.
+ *
+ * Option parsing stops at the first operand, so everything after a script
+ * file (or after `-c`'s program text) is positional, even when it looks
+ * like a flag: `bash run.sh -c foo` passes `-c foo` to the script.
+ */
+export function parseBashArgs(name: string, args: string[]): BashArgs {
+  const options: string[] = []
   let readStdin = false
   let i = 0
   while (i < args.length) {
     const tok = args[i] ?? ''
     if (tok === '--') {
       i += 1
-      break
-    }
-    if (tok === '-c') {
-      const next = args[i + 1]
-      if (next === undefined) return bashCError()
-      script = next
       break
     }
     if (tok === '-s') {
@@ -79,38 +119,103 @@ export async function handleBash(
       i += 1
       continue
     }
-    if (tok.startsWith('-') && tok.length > 1 && !tok.startsWith('--')) {
-      const chars = tok.slice(1)
-      if (chars.includes('c')) {
-        const next = args[i + 1]
-        if (next === undefined) return bashCError()
-        script = next
-        break
+    if (!(tok.startsWith('-') && tok.length > 1 && !tok.startsWith('--'))) break
+    const chars = tok.slice(1)
+    if (chars.includes('c')) {
+      const next = args[i + 1]
+      if (next === undefined) {
+        return bashArgs({ error: bashError(name, '-c: option requires an argument', 2) })
       }
-      let allNoop = true
-      for (let j = 0; j < chars.length; j++) {
-        const ch = chars.charAt(j)
-        if (!BASH_NOOP_SHORT_FLAGS.has(ch) && ch !== 's') {
-          allNoop = false
-          break
-        }
-      }
-      if (allNoop) {
-        if (chars.includes('s')) readStdin = true
-        i += 1
+      options.push(...setOptions(chars))
+      return bashArgs({ script: next, argv: args.slice(i + 2), options, readStdin })
+    }
+    let known = true
+    for (let j = 0; j < chars.length; j++) {
+      const ch = chars.charAt(j)
+      if (BASH_NOOP_SHORT_FLAGS.has(ch) || ch === 's' || SET_FLAG_TO_OPTION[ch] !== undefined) {
         continue
       }
-      const err = new TextEncoder().encode(`bash: ${tok}: unsupported option\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: err }),
-        new ExecutionNode({ command: 'bash', exitCode: 2, stderr: err }),
-      ]
+      known = false
+      break
     }
-    script = tok
-    break
+    if (!known) return bashArgs({ error: bashError(name, `${tok}: unsupported option`, 2) })
+    options.push(...setOptions(chars))
+    readStdin = readStdin || chars.includes('s')
+    i += 1
   }
-  if (script === null && readStdin && stdin !== null) {
+  if (i < args.length) {
+    return bashArgs({ path: args[i] ?? '', argv: args.slice(i + 1), options, readStdin })
+  }
+  return bashArgs({ options, readStdin })
+}
+
+/**
+ * Read a script file operand, or the failure bash reports for it.
+ *
+ * GNU splits the diagnostics by how far startup got. A file it cannot open
+ * is blamed on the shell (`bash: run.sh: No such file or directory`, exit
+ * 127; `Permission denied`, exit 126), while a directory opens fine and
+ * only fails on the first read, by which point `$0` is already the operand,
+ * so bash prints it twice (`/tmp: /tmp: Is a directory`, exit 126).
+ * Reproduced rather than tidied up: it is what an agent copying a message
+ * into a search box will find.
+ *
+ * A backend that cannot tell a missing path from an unreadable one raises
+ * ENOENT for a directory too, so the stat probe runs on the failure path to
+ * recover the distinction.
+ */
+async function readScriptFile(
+  dispatch: DispatchFn,
+  name: string,
+  path: string,
+  session: Session,
+): Promise<[string, null] | [null, Result]> {
+  const scope = toScope(resolvePath(path, session.cwd))
+  let data: unknown
+  try {
+    ;[data] = await dispatch('read', scope)
+  } catch (exc) {
+    if (!isFsError(exc)) throw exc
+    const stat = await resolvePathStat(dispatch, scope)
+    if (stat !== null && stat.type === FileType.DIRECTORY) {
+      return [null, bashError(path, `${path}: Is a directory`, 126)]
+    }
+    const strerror = fsStrerror(exc) ?? 'No such file or directory'
+    const code = (exc as { code?: string }).code === 'EACCES' ? 126 : 127
+    return [null, bashError(name, `${path}: ${strerror}`, code)]
+  }
+  if (data instanceof Uint8Array) return [new TextDecoder().decode(data), null]
+  if (data === null || data === undefined) return ['', null]
+  const collected = await materialize(data as ByteSource)
+  return [new TextDecoder().decode(collected), null]
+}
+
+/**
+ * Run a nested shell: inline text from `-c`, or a script file.
+ *
+ * `name` is the head word (`bash` or `sh`). bash reports itself by
+ * `argv[0]`, so the diagnostics follow the spelling the caller used.
+ */
+export async function handleBash(
+  dispatch: DispatchFn,
+  executeFn: ExecuteStringFn,
+  args: string[],
+  session: Session,
+  stdin: ByteSource | null = null,
+  name = 'bash',
+): Promise<Result> {
+  const parsed = parseBashArgs(name, args)
+  if (parsed.error !== null) return parsed.error
+  let script = parsed.script
+  let scriptName = script !== null && parsed.argv.length > 0 ? (parsed.argv[0] ?? name) : name
+  const positional = script !== null ? parsed.argv.slice(1) : parsed.argv
+  if (script === null && parsed.path !== null) {
+    scriptName = parsed.path
+    const [text, failure] = await readScriptFile(dispatch, name, parsed.path, session)
+    if (failure !== null) return failure
+    script = text
+  }
+  if (script === null && parsed.readStdin && stdin !== null) {
     const data = await materialize(stdin)
     if (data.length > 0) {
       script = new TextDecoder().decode(data)
@@ -118,10 +223,24 @@ export async function handleBash(
     }
   }
   if (script === null) {
-    return [null, new IOResult(), new ExecutionNode({ command: 'bash', exitCode: 0 })]
+    return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  const io = await executeFn(script, { sessionId: session.sessionId, stdin })
-  return [io.stdout, io, new ExecutionNode({ command: `bash -c ${script}`, exitCode: io.exitCode })]
+  const savedPositional = session.positionalArgs
+  const savedScriptName = session.scriptName
+  const savedOptions = { ...session.shellOptions }
+  session.positionalArgs = positional
+  session.scriptName = scriptName
+  for (const option of parsed.options) session.shellOptions[option] = true
+  let io
+  try {
+    io = await executeFn(script, { sessionId: session.sessionId, stdin })
+  } finally {
+    session.positionalArgs = savedPositional
+    session.scriptName = savedScriptName
+    session.shellOptions = savedOptions
+  }
+  const label = parsed.path !== null ? `${name} ${parsed.path}` : `${name} -c ${script}`
+  return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]
 }
 
 export async function handleSource(

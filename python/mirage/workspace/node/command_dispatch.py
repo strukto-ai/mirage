@@ -399,7 +399,8 @@ async def _run_argv(
         return await handle_eval(execute_fn, args, session)
 
     if name in (SB.BASH, SB.SH):
-        return await handle_bash(execute_fn, args, session, stdin)
+        return await handle_bash(dispatch, execute_fn, args, session, stdin,
+                                 str(name))
 
     if name == SB.EXPORT:
         return await handle_export(args, session)

@@ -63,6 +63,7 @@ export interface SessionInit {
   functions?: Record<string, unknown>
   lastExitCode?: number
   positionalArgs?: string[]
+  scriptName?: string | null
   shellOptions?: Record<string, boolean>
   readonlyVars?: Set<string>
   arrays?: Record<string, ShellArray>
@@ -89,6 +90,10 @@ export class Session {
   functions: Record<string, unknown>
   lastExitCode: number
   positionalArgs: string[]
+  // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
+  // sets it to the script file it is running, or to the name given after
+  // `-c`, and restores it afterwards.
+  scriptName: string | null
   shellOptions: Record<string, boolean>
   readonlyVars: Set<string>
   arrays: Record<string, ShellArray>
@@ -140,6 +145,7 @@ export class Session {
     this.functions = ownRecord(init.functions)
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
+    this.scriptName = init.scriptName ?? null
     this.shellOptions = init.shellOptions ?? {}
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = ownRecord(init.arrays)
@@ -166,6 +172,7 @@ export class Session {
       functions: overrides.functions ?? { ...this.functions },
       lastExitCode: overrides.lastExitCode ?? this.lastExitCode,
       positionalArgs: overrides.positionalArgs ?? [...this.positionalArgs],
+      scriptName: overrides.scriptName ?? this.scriptName,
       shellOptions: overrides.shellOptions ?? { ...this.shellOptions },
       readonlyVars: overrides.readonlyVars ?? new Set(this.readonlyVars),
       arrays:

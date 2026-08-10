@@ -116,7 +116,7 @@ def _lookup_var(var: str,
     if var.isdigit():
         idx = int(var)
         if idx == 0:
-            return SHELL_ARGV0
+            return session.script_name or SHELL_ARGV0
         if call_stack and call_stack.get_positional(idx):
             return call_stack.get_positional(idx)
         if positional and 0 < idx <= len(positional):
@@ -692,9 +692,10 @@ def _slice_array(arr: ShellArray, groups: list[str],
     return array_slice(arr, offset, length)
 
 
-# What the shell calls itself, bash's "bash". It is a value of "$@"
-# only through a slice, where bash numbers the positional parameters
-# from 1 and index 0 is this.
+# What the shell calls itself, bash's "bash", when no script is running:
+# a nested `bash`/`sh` overrides it through Session.script_name. It is a
+# value of "$@" only through a slice, where bash numbers the positional
+# parameters from 1 and index 0 is this.
 SHELL_ARGV0 = "mirage"
 
 
@@ -781,7 +782,8 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         # it ahead of $1. Pinned on bash 5.2.37; macOS bash 3.2 drops
         # it, so probe this one in docker, not locally.
         params: list[str | None] = [*_positional_args(session, call_stack)]
-        arr = [SHELL_ARGV0, *params] if p.op == ":" else params
+        argv0 = session.script_name or SHELL_ARGV0
+        arr = [argv0, *params] if p.op == ":" else params
     else:
         arrays = getattr(session, "arrays", {})
         arr = arrays.get(p.var_name)

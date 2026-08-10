@@ -16,7 +16,53 @@ import time
 
 import pytest
 
-from mirage.workspace.executor.builtins.script import handle_sleep
+from mirage.workspace.executor.builtins.script import (handle_sleep,
+                                                       parse_bash_args)
+
+
+def test_parse_bash_args_file_operand_ends_option_parsing():
+    parsed = parse_bash_args("sh", ["run.sh", "-x", "a"])
+    assert parsed.path == "run.sh"
+    assert parsed.argv == ["-x", "a"]
+    assert parsed.options == []
+
+
+def test_parse_bash_args_double_dash_protects_a_flag_shaped_file():
+    parsed = parse_bash_args("sh", ["--", "-weird.sh", "a"])
+    assert parsed.path == "-weird.sh"
+    assert parsed.argv == ["a"]
+
+
+def test_parse_bash_args_clustered_c_keeps_set_options():
+    parsed = parse_bash_args("bash", ["-xc", "echo hi", "name", "a"])
+    assert parsed.script == "echo hi"
+    assert parsed.argv == ["name", "a"]
+    assert parsed.options == ["xtrace"]
+
+
+def test_parse_bash_args_maps_set_flags_to_options():
+    parsed = parse_bash_args("bash", ["-eux", "run.sh"])
+    assert parsed.path == "run.sh"
+    assert parsed.options == ["errexit", "nounset", "xtrace"]
+
+
+def test_parse_bash_args_dash_s_reads_stdin():
+    parsed = parse_bash_args("bash", ["-s"])
+    assert parsed.read_stdin is True
+    assert parsed.path is None and parsed.script is None
+
+
+def test_parse_bash_args_skips_o_and_its_value():
+    parsed = parse_bash_args("bash", ["-o", "pipefail", "run.sh"])
+    assert parsed.path == "run.sh"
+
+
+def test_parse_bash_args_unsupported_option_is_a_usage_error():
+    parsed = parse_bash_args("sh", ["-Z"])
+    assert parsed.error is not None
+    _, io, _ = parsed.error
+    assert io.exit_code == 2
+    assert io.stderr == b"sh: -Z: unsupported option\n"
 
 
 @pytest.mark.asyncio
