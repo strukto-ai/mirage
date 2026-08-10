@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from mirage.context import mount_allowed
 from mirage.ops.config import NamespaceLinks
 from mirage.types import FileStat, FileType
-from mirage.utils.path import norm_dir
+from mirage.utils.path import norm_dir, owner_prefix
 
 
 def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
@@ -60,12 +60,8 @@ def _link_allowed(prefixes: Iterable[str], link: str) -> bool:
         prefixes (Iterable[str]): the mount prefixes to derive from.
         link (str): the link's virtual path.
     """
-    owner = ""
-    for prefix in prefixes:
-        p = norm_dir(prefix)
-        if (link + "/").startswith(p) and len(p) > len(owner):
-            owner = p
-    return owner == "" or mount_allowed(owner)
+    owner = owner_prefix(prefixes, link)
+    return owner is None or mount_allowed(norm_dir(owner))
 
 
 def _link_names(prefixes: Iterable[str], links: NamespaceLinks | None,

@@ -35,6 +35,7 @@ from mirage.provision import ProvisionResult
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision, PolicyFn
+from mirage.runtime.resolver import PrefixResolver
 from mirage.shell.job_table import JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
@@ -178,7 +179,8 @@ class Workspace:
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
 
         self._runtimes, self._policy_router = wire_runtime_world(
-            self._registry, self.dispatch, self._ops.mount_prefixes, runtimes)
+            self._registry, self.dispatch,
+            PrefixResolver(self._ops.mount_prefixes), runtimes)
         reject_config_script("policy", policy)
         self._policy = policy
 

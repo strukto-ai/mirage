@@ -23,6 +23,7 @@ from mirage.runtime.python.monty.binding import (MemoryFile, MontyFileHandle,
 from mirage.runtime.python.monty.constants import (EXDEV_MESSAGE,
                                                    FILE_EXISTS_MESSAGE)
 from mirage.runtime.python.monty.vfs import MontyVFS
+from mirage.runtime.resolver import MountResolver
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -49,18 +50,17 @@ class MirageOSAccess(OSAccess):
         dispatch (Callable | None): the workspace dispatch coroutine
             function, None outside a workspace.
         environ (dict[str, str]): the guest's environment.
-        mount_prefixes (Callable | None): live view of the workspace
-            mount prefixes.
+        resolver (MountResolver | None): the workspace mount routing
+            table, None outside a workspace.
     """
 
-    def __init__(
-            self,
-            loop: asyncio.AbstractEventLoop,
-            dispatch: Callable[..., Any] | None,
-            environ: dict[str, str],
-            mount_prefixes: Callable[[], list[str]] | None = None) -> None:
+    def __init__(self,
+                 loop: asyncio.AbstractEventLoop,
+                 dispatch: Callable[..., Any] | None,
+                 environ: dict[str, str],
+                 resolver: MountResolver | None = None) -> None:
         super().__init__([], environ=dict(environ))
-        core = (RuntimeVFS(dispatch, loop, mount_prefixes)
+        core = (RuntimeVFS(dispatch, loop, resolver)
                 if dispatch is not None else None)
         self._vfs = MontyVFS(core)
 

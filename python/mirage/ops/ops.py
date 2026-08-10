@@ -34,6 +34,7 @@ from mirage.ops.types import StatOverlay
 from mirage.policy import Policies, post_ops_gate, pre_ops_gate
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import owner_prefix
 
 
 class Ops:
@@ -173,6 +174,13 @@ class Ops:
             self._locks[path] = asyncio.Lock()
         return self._locks[path]
 
+    def _owner(self, path: str) -> OpsMount | None:
+        """The mount owning ``path`` by longest prefix, or None."""
+        owner = owner_prefix((m.prefix for m in self._mounts), path)
+        if owner is None:
+            return None
+        return next(m for m in self._mounts if m.prefix == owner)
+
     def _resolve(
             self, path: str
     ) -> tuple[str, str, Accessor, IndexCacheStore, MountMode]:
@@ -184,19 +192,16 @@ class Ops:
         Returns:
             tuple: resource_type, rel_path, accessor, index, mode.
         """
+        m = self._owner(path)
+        if m is None:
+            raise ValueError(f"no mount matches path: {path!r}")
         norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
-                rel_path = "/" + norm[len(m.prefix):]
-                return m.resource_type, rel_path, m.accessor, m.index, m.mode
-        raise ValueError(f"no mount matches path: {path!r}")
+        rel_path = "/" + norm[len(m.prefix):]
+        return m.resource_type, rel_path, m.accessor, m.index, m.mode
 
     def _mount_prefix(self, path: str) -> str:
-        norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
-                return m.prefix.rstrip("/")
-        return ""
+        m = self._owner(path)
+        return "" if m is None else m.prefix.rstrip("/")
 
     async def _invalidate(self,
                           path: str,
@@ -465,10 +470,6 @@ class Ops:
         Returns:
             bool: True if path is under a mount other than the virtual root.
         """
-        norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if m.prefix == "/":
-                continue
-            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
-                return True
-        return False
+        return owner_prefix(
+            (m.prefix for m in self._mounts if m.prefix != "/"),
+            path) is not None

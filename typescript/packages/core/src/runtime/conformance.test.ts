@@ -22,6 +22,7 @@ import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
 import type { BridgeDispatchFn, RunArgs } from './types.ts'
+import { PrefixResolver } from './resolver.ts'
 
 // The runtime conformance suite: one capability table, executed against
 // every runtime in that runtime's own idiom, with the outcome verified
@@ -603,7 +604,7 @@ describe('append ships only the deltas', () => {
     async () => {
       const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
       const rt = new MontyRuntime()
-      rt.attach(counting.dispatch, () => ['/data/'])
+      rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
       const result = await rt.run(runArgs(APPEND_LOOP_PY))
       await rt.close()
       expect(result.exitCode).toBe(0)
@@ -615,7 +616,7 @@ describe('append ships only the deltas', () => {
   it('pyodide', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new PyodideRuntime()
-    rt.attach(counting.dispatch, () => ['/data/'])
+    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
     const result = await rt.run(runArgs(APPEND_LOOP_PY))
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -627,7 +628,7 @@ describe('append ships only the deltas', () => {
   it('quickjs', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new QuickJsRuntime()
-    rt.attach(counting.dispatch, () => ['/data/'])
+    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
     const result = await rt.run(runArgs(APPEND_LOOP_JS))
     await rt.close()
     expect(result.exitCode).toBe(0)

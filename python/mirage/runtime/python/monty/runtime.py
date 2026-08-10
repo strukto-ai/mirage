@@ -29,9 +29,9 @@ from mirage.runtime.python.monty.constants import (DEFAULT_PROG,
                                                    INCOMPLETE_MARKERS,
                                                    MISSING_EXTRA_HINT)
 from mirage.runtime.python.monty.osaccess import MirageOSAccess
-from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue,
-                                  PrefixSource, RunArgs, RunResult,
-                                  ScriptSource)
+from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
+                                  RunResult, ScriptSource)
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +63,15 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
             raise ImportError(MISSING_EXTRA_HINT)
         super().__init__(captures, config, script)
         self._workspace_dispatch: DispatchFn | None = None
-        self._mount_prefixes: PrefixSource | None = None
+        self._resolver: MountResolver | None = None
         self._eval_sessions: dict[str, Any] = {}
         self._pool: Any = None
         self._pool_task: asyncio.Task[Any] | None = None
 
-    def attach(self, dispatch: DispatchFn,
-               mount_prefixes: PrefixSource) -> None:
+    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         if self._workspace_dispatch is None:
             self._workspace_dispatch = dispatch
-            self._mount_prefixes = mount_prefixes
+            self._resolver = resolver
 
     async def _ensure_pool(self) -> Any:
         """The runtime's worker pool, spawned on first use.
@@ -111,7 +110,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
         bridge = MirageOSAccess(loop, self._workspace_dispatch, args.env,
-                                self._mount_prefixes)
+                                self._resolver)
         pool = await self._ensure_pool()
         # argv[0] is the program's own name when the caller has one (a
         # CLI install's head word), else the interpreter's placeholder.
@@ -185,7 +184,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
         bridge = MirageOSAccess(loop, self._workspace_dispatch, {},
-                                self._mount_prefixes)
+                                self._resolver)
         pool = await self._ensure_pool()
         repl = self._eval_sessions.get(session) if session is not None \
             else None

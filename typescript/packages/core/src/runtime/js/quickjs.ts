@@ -19,6 +19,7 @@ import { JsRuntime } from './base.ts'
 import { EVALUATOR, type Evaluator } from '../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../types.ts'
 import { RuntimeVFS } from '../vfs.ts'
+import { PrefixResolver, type MountResolver } from '../resolver.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './vfs.ts'
 import { QuickJsUnavailableError } from './types.ts'
@@ -163,16 +164,16 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
   readonly [EVALUATOR] = true as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null
-  private listMounts: () => string[] = () => []
+  private resolver: MountResolver = new PrefixResolver(() => [])
 
   constructor(options: RuntimeOptions = {}) {
     super(options, HOME_CONFIG_KEYS)
   }
 
-  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, resolver: MountResolver): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
-      this.listMounts = listMounts
+      this.resolver = resolver
     }
   }
 
@@ -193,7 +194,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     try {
       this.installGlobals(ctx, args, out, err, exit)
       const vfs =
-        this.workspaceBridge !== null ? new RuntimeVFS(this.workspaceBridge, this.listMounts) : null
+        this.workspaceBridge !== null ? new RuntimeVFS(this.workspaceBridge, this.resolver) : null
       installMirageFs(ctx, vfs)
 
       const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
@@ -277,7 +278,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       // std.open/os.readdir, so a JS policy script can read mounted
       // content (the python evaluator gets this via run()'s RuntimeVFS).
       const vfs =
-        this.workspaceBridge !== null ? new RuntimeVFS(this.workspaceBridge, this.listMounts) : null
+        this.workspaceBridge !== null ? new RuntimeVFS(this.workspaceBridge, this.resolver) : null
       installMirageFs(ctx, vfs)
       const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {

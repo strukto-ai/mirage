@@ -16,8 +16,8 @@ import pytest
 
 from mirage.utils.path import (ancestors, drop_trailing_segments, expand_tilde,
                                glob_prefix_match, gnu_basename, gnu_dirname,
-                               norm, norm_dir, parent, resolve_path,
-                               respell_one)
+                               norm, norm_dir, owner_prefix, parent,
+                               resolve_path, respell_one)
 
 
 def test_norm_strips_and_adds_leading_slash():
@@ -34,6 +34,28 @@ def test_norm_dir_yields_trailing_slash_form():
     assert norm_dir("///a///") == "/a/"
     assert norm_dir("") == "/"
     assert norm_dir("/") == "/"
+
+
+def test_owner_prefix_takes_the_longest_boundary_match():
+    prefixes = ["/", "/data/", "/data/inner/"]
+    assert owner_prefix(prefixes, "/data/inner/x") == "/data/inner/"
+    assert owner_prefix(prefixes, "/data/x") == "/data/"
+    assert owner_prefix(prefixes, "/data") == "/data/"
+    assert owner_prefix(prefixes, "/other") == "/"
+    assert owner_prefix(prefixes, "/") == "/"
+
+
+def test_owner_prefix_respects_path_boundaries():
+    assert owner_prefix(["/data/"], "/database") is None
+    assert owner_prefix(["/data"], "/data/x") == "/data"
+    assert owner_prefix(["/data/"], "/data/") == "/data/"
+    assert owner_prefix([], "/data") is None
+
+
+def test_owner_prefix_keeps_the_input_spelling():
+    assert owner_prefix(["/data"], "/data/x") == "/data"
+    assert owner_prefix(["/data/"], "/data/x") == "/data/"
+    assert owner_prefix(["data/"], "/data/x") == "data/"
 
 
 def test_parent_of_normalized_key():

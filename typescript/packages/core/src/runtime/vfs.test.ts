@@ -17,6 +17,7 @@ import { enotsup } from '../utils/errors.ts'
 import { CrossMountError } from './errors.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import { planFlush, RuntimeVFS } from './vfs.ts'
+import { PrefixResolver } from './resolver.ts'
 
 const enc = new TextEncoder()
 
@@ -113,12 +114,12 @@ describe('RuntimeVFS routing', () => {
   const noop = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
 
   it('normalizes prefixes to a trailing slash, longest first', () => {
-    const vfs = new RuntimeVFS(noop, () => ['/a', '/a/deep/', '/b'])
+    const vfs = new RuntimeVFS(noop, new PrefixResolver(() => ['/a', '/a/deep/', '/b']))
     expect(vfs.prefixes()).toEqual(['/a/deep/', '/a/', '/b/'])
   })
 
   it('picks the longest matching mount, and the prefix itself counts', () => {
-    const vfs = new RuntimeVFS(noop, () => ['/a', '/a/deep'])
+    const vfs = new RuntimeVFS(noop, new PrefixResolver(() => ['/a', '/a/deep']))
     expect(vfs.mountOf('/a/deep/x')).toBe('/a/deep/')
     expect(vfs.mountOf('/a/deep')).toBe('/a/deep/')
     expect(vfs.mountOf('/a/x')).toBe('/a/')
@@ -131,14 +132,14 @@ describe('RuntimeVFS routing', () => {
 
   it('refuses a rename whose ends are on different mounts', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    const vfs = new RuntimeVFS(dispatch, () => ['/a', '/b'])
+    const vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a', '/b']))
     await expect(vfs.rename('/a/x', '/b/x')).rejects.toThrow(CrossMountError)
     expect(dispatch).not.toHaveBeenCalled()
   })
 
   it('dispatches a rename within one mount', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, () => ['/a']).rename('/a/x', '/a/y')
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).rename('/a/x', '/a/y')
     expect(dispatch).toHaveBeenCalledWith('RENAME', '/a/x', undefined, '/a/y')
   })
 })
@@ -146,7 +147,10 @@ describe('RuntimeVFS routing', () => {
 describe('RuntimeVFS append', () => {
   it('ships only the tail when the mount takes an append', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, () => ['/a']).append('/a/x', enc.encode('tail'))
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
+      '/a/x',
+      enc.encode('tail'),
+    )
     expect(dispatch.mock.calls.map((c) => c[0])).toEqual(['APPEND'])
   })
 
@@ -155,7 +159,7 @@ describe('RuntimeVFS append', () => {
       if (op === 'APPEND') return Promise.reject(enotsup('s3', 'append', '/a/x'))
       return Promise.resolve(undefined)
     })
-    await new RuntimeVFS(dispatch, () => ['/a']).append(
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
       '/a/x',
       enc.encode('tail'),
       enc.encode('headtail'),
@@ -171,7 +175,10 @@ describe('RuntimeVFS append', () => {
       if (op === 'READ') return Promise.resolve(enc.encode('head'))
       return Promise.resolve(undefined)
     })
-    await new RuntimeVFS(dispatch, () => ['/a']).append('/a/x', enc.encode('tail'))
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
+      '/a/x',
+      enc.encode('tail'),
+    )
     const write = dispatch.mock.calls.find((c) => c[0] === 'WRITE')
     if (write?.[2] === undefined) throw new Error('unreachable')
     expect(new TextDecoder().decode(write[2])).toBe('headtail')
@@ -184,7 +191,10 @@ describe('RuntimeVFS append', () => {
       if (op === 'READ') return Promise.reject(missing)
       return Promise.resolve(undefined)
     })
-    await new RuntimeVFS(dispatch, () => ['/a']).append('/a/x', enc.encode('tail'))
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
+      '/a/x',
+      enc.encode('tail'),
+    )
     const write = dispatch.mock.calls.find((c) => c[0] === 'WRITE')
     if (write?.[2] === undefined) throw new Error('unreachable')
     expect(new TextDecoder().decode(write[2])).toBe('tail')
@@ -197,7 +207,7 @@ describe('RuntimeVFS append', () => {
       return Promise.resolve(undefined)
     })
     await expect(
-      new RuntimeVFS(dispatch, () => ['/a']).append('/a/x', enc.encode('tail')),
+      new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append('/a/x', enc.encode('tail')),
     ).rejects.toThrow(/transport down/)
     expect(dispatch.mock.calls.some((c) => c[0] === 'WRITE')).toBe(false)
   })
@@ -207,7 +217,7 @@ describe('RuntimeVFS append', () => {
       if (op === 'APPEND') return Promise.reject(enotsup('s3', 'append', '/a/x'))
       return Promise.resolve(undefined)
     })
-    const vfs = new RuntimeVFS(dispatch, () => ['/a'])
+    const vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a']))
     await vfs.append('/a/x', enc.encode('1'), enc.encode('1'))
     await vfs.append('/a/y', enc.encode('2'), enc.encode('2'))
     expect(dispatch.mock.calls.filter((c) => c[0] === 'APPEND')).toHaveLength(1)
@@ -219,7 +229,11 @@ describe('RuntimeVFS append', () => {
       return Promise.resolve(undefined)
     })
     await expect(
-      new RuntimeVFS(dispatch, () => ['/a']).append('/a/x', enc.encode('t'), enc.encode('t')),
+      new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).append(
+        '/a/x',
+        enc.encode('t'),
+        enc.encode('t'),
+      ),
     ).rejects.toThrow(/read-only/)
     expect(dispatch.mock.calls.some((c) => c[0] === 'WRITE')).toBe(false)
   })
@@ -228,7 +242,12 @@ describe('RuntimeVFS append', () => {
 describe('RuntimeVFS flush', () => {
   it('sends a pure extension as an append', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, () => ['/a']).flush('/a/x', 3, 3, enc.encode('abcXYZ'))
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush(
+      '/a/x',
+      3,
+      3,
+      enc.encode('abcXYZ'),
+    )
     const call = dispatch.mock.calls[0]
     if (call?.[2] === undefined) throw new Error('unreachable')
     expect(call[0]).toBe('APPEND')
@@ -237,7 +256,12 @@ describe('RuntimeVFS flush', () => {
 
   it('sends a rewrite as a whole-file write', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeVFS(dispatch, () => ['/a']).flush('/a/x', 3, 0, enc.encode('ZZZdef'))
+    await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/a'])).flush(
+      '/a/x',
+      3,
+      0,
+      enc.encode('ZZZdef'),
+    )
     const call = dispatch.mock.calls[0]
     if (call?.[2] === undefined) throw new Error('unreachable')
     expect(call[0]).toBe('WRITE')

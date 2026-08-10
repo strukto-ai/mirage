@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { preloadInto } from './preload.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
+import { PrefixResolver } from '../../resolver.ts'
 
 interface FakeFS {
   mkdirTree(path: string): void
@@ -189,7 +190,7 @@ describe('preloadInto', () => {
       return Promise.reject(new Error(`unexpected ${op} ${path}`))
     })
     const fs = makeFakeFS()
-    const vfs = new RuntimeVFS(dispatch, () => ['/ram/', '/ram/inner/'])
+    const vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => ['/ram/', '/ram/inner/']))
     await expect(preloadInto(fs, vfs, '/ram/')).rejects.toThrow(/inner boom/)
   })
 })

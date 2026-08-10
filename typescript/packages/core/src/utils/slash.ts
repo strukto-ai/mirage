@@ -38,3 +38,27 @@ export function normDir(s: string): string {
   const stripped = stripSlash(s)
   return stripped === '' ? '/' : '/' + stripped + '/'
 }
+
+/**
+ * The longest mount prefix owning `path`, or null.
+ *
+ * The one longest-prefix rule dispatch resolves a path by, shared so a
+ * registry, a runtime routing table and a link filter cannot drift: a
+ * prefix owns its own root (with or without a trailing slash) and
+ * everything at a path boundary below it, so '/a/' owns '/a' and '/a/b'
+ * but never '/ab'. The winner is returned in its input spelling,
+ * letting each caller keep its own convention.
+ */
+export function ownerPrefix(prefixes: Iterable<string>, path: string): string | null {
+  const target = normDir(path)
+  let best: string | null = null
+  let bestLen = -1
+  for (const prefix of prefixes) {
+    const p = normDir(prefix)
+    if (target.startsWith(p) && p.length > bestLen) {
+      best = prefix
+      bestLen = p.length
+    }
+  }
+  return best
+}

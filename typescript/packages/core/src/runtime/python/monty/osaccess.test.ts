@@ -17,6 +17,7 @@ import type { BridgeDispatchFn } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { MirageOSAccess } from './index.ts'
 import { MontyVFS } from './vfs.ts'
+import { PrefixResolver } from '../../resolver.ts'
 
 const NOT_HANDLED = Symbol('NOT_HANDLED')
 
@@ -25,7 +26,11 @@ function accessOn(
   env: Record<string, string> = {},
   mounts: string[] = ['/ram'],
 ): MirageOSAccess {
-  return new MirageOSAccess(NOT_HANDLED, env, new MontyVFS(new RuntimeVFS(dispatch, () => mounts)))
+  return new MirageOSAccess(
+    NOT_HANDLED,
+    env,
+    new MontyVFS(new RuntimeVFS(dispatch, new PrefixResolver(() => mounts))),
+  )
 }
 
 const noop = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))

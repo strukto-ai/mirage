@@ -23,6 +23,7 @@ from mirage.io.types import materialize
 from mirage.resource.ram import RAMResource
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi import WASI_HOME_ENV
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import RunArgs
 from mirage.types import FileStat, FileType
@@ -537,7 +538,7 @@ async def test_append_ships_only_the_deltas(runtime: str):
     """
     dispatch = CountingDispatch({"/data/log.txt": b"S" * 64})
     rt = build_runtime(runtime)
-    rt.attach(dispatch, lambda: ["/data/"])
+    rt.attach(dispatch, PrefixResolver(lambda: ["/data/"]))
     code = APPEND_LOOP_JS if runtime == "quickjs" else APPEND_LOOP_PY
     result = await rt.run(RunArgs(code=code))
     await rt.close()

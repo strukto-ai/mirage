@@ -84,7 +84,21 @@ def test_synthesize_type_dir_includes_mount_dirs():
 def test_synthesize_maxdepth_window():
     desc = _mounts("/ram/", "/a/b/")
     assert _synthesize_find_mount_entries("/", desc, ["-maxdepth", "1"],
-                                          "/") == "/ram"
+                                          "/") == "/ram\n/a"
+
+
+def test_synthesize_namespace_ancestors():
+    desc = _mounts("/ghost/very/deep/")
+    assert _synthesize_find_mount_entries(
+        "/", desc, [], "/") == "/ghost\n/ghost/very\n/ghost/very/deep"
+    assert _synthesize_find_mount_entries(
+        "/ghost", desc, [], "/ghost") == "/ghost/very\n/ghost/very/deep"
+
+
+def test_synthesize_shared_ancestor_once():
+    desc = _mounts("/a/b/", "/a/c/")
+    assert _synthesize_find_mount_entries("/", desc, [],
+                                          "/") == "/a\n/a/b\n/a/c"
 
 
 def test_adjust_depth_texts_reduces_maxdepth_by_delta():

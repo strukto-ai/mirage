@@ -324,23 +324,27 @@ async def handle_command(
         for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        # The one fact threaded into the fan-out's per-mount runs: a
-        # start point only the namespace serves (a nested mount's
-        # ancestor) has no backend listing, so without it the primary
+        # Two facts threaded into the fan-out's per-mount runs: the
+        # child-mount names and the dispatcher-backed start-point stat.
+        # A start point only the namespace serves (a nested mount's
+        # ancestor) has no backend listing, so without them the primary
         # run reports the operand missing. Links and stat overlays are
         # still dropped here, a known seam of the fan-out.
         child_mounts = functools.partial(registry_child_mounts, registry,
                                          namespace)
-        stdout, io, node = await _fan_out_traversal(cmd_name,
-                                                    paths,
-                                                    texts,
-                                                    flag_kwargs,
-                                                    registry,
-                                                    mount,
-                                                    session.cwd,
-                                                    cmd_str,
-                                                    stdin,
-                                                    child_mounts=child_mounts)
+        stdout, io, node = await _fan_out_traversal(
+            cmd_name,
+            paths,
+            texts,
+            flag_kwargs,
+            registry,
+            mount,
+            session.cwd,
+            cmd_str,
+            stdin,
+            child_mounts=child_mounts,
+            stat_path=(functools.partial(path_stat, dispatch)
+                       if dispatch is not None else None))
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing

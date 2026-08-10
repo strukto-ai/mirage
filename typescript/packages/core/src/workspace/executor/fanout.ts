@@ -30,7 +30,7 @@ import {
   type FindExpr,
 } from '../../commands/builtin/findParse.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
-import type { ChildMounts } from '../../ops/types.ts'
+import type { ChildMounts, StatPath } from '../../ops/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -131,7 +131,10 @@ function adjustDepthTexts(
 }
 
 // Entries print in the operand's typed spelling (`raw`) like every
-// other line of the walk.
+// other line of the walk. The namespace-only ancestors between the
+// start and each mount root (`/ghost` above a mount at `/ghost/deep`)
+// get a row too: no backend walk covers them, yet `ls` lists them
+// through the door's structure merge, so find must agree.
 function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
@@ -149,15 +152,27 @@ function synthesizeFindMountEntries(
   const maxDepth = expr.maxDepth
   const minDepth = expr.minDepth ?? 0
   const parentDepth = pathSegments(targetPath).length
+  const parentBase = rstripSlash(targetPath)
+  const seen = new Set<string>()
   const out: string[] = []
   for (const m of descendants) {
     const prefixNoSlash = rstripSlash(m.prefix)
-    const depth = pathSegments(prefixNoSlash).length - parentDepth
-    if (maxDepth !== null && depth > maxDepth) continue
-    const segs = prefixNoSlash.split('/').filter((s) => s !== '')
-    const base = segs[segs.length - 1] ?? prefixNoSlash
-    if (!keep({ key: prefixNoSlash, name: base, kind: 'd', depth }, tree, minDepth)) continue
-    out.push(respellOne(prefixNoSlash, targetPath, raw))
+    const ancestors: string[] = []
+    let parent = prefixNoSlash.slice(0, prefixNoSlash.lastIndexOf('/'))
+    while (parent !== '' && parent !== parentBase) {
+      ancestors.push(parent)
+      parent = parent.slice(0, parent.lastIndexOf('/'))
+    }
+    for (const candidate of [...ancestors.reverse(), prefixNoSlash]) {
+      if (seen.has(candidate)) continue
+      seen.add(candidate)
+      const depth = pathSegments(candidate).length - parentDepth
+      if (maxDepth !== null && depth > maxDepth) continue
+      const segs = pathSegments(candidate)
+      const base = segs[segs.length - 1] ?? candidate
+      if (!keep({ key: candidate, name: base, kind: 'd', depth }, tree, minDepth)) continue
+      out.push(respellOne(candidate, targetPath, raw))
+    }
   }
   return out.join('\n')
 }
@@ -215,6 +230,7 @@ export async function fanOutTraversal(
   stdin: ByteSource | null,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
   childMounts: ChildMounts | null = null,
+  statPath: StatPath | null = null,
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
   const descendants = allowedDescendants(registry, targetPath)
@@ -268,15 +284,17 @@ export async function fanOutTraversal(
     if (ensureOpen !== undefined) {
       await ensureOpen(mount.resource)
     }
-    // The one fact threaded into the per-mount runs: a start point only
+    // Two facts threaded into the per-mount runs: the child-mount names
+    // and the dispatcher-backed start-point stat. A start point only
     // the namespace serves (a nested mount's ancestor) has no backend
-    // listing, so without it the primary run reports the operand
+    // listing, so without them the primary run reports the operand
     // missing. Links and stat overlays are still dropped here, a known
     // seam of the fan-out.
     const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
       stdin,
       cwd,
       ...(childMounts !== null ? { childMounts } : {}),
+      ...(statPath !== null ? { statPath } : {}),
     })
     let stdout: ByteSource | null = stdout0
     if (mount !== primaryMount && io.exitCode === 127) {
@@ -316,7 +334,27 @@ export async function fanOutTraversal(
 
   let finalIoExit = successSeen ? 0 : finalExit
   let combined: ByteSource | null = null
-  if (allStdout.length > 0) {
+  if (allStdout.length > 0 && cmdName === 'find' && paths.length === 1) {
+    // GNU lists a directory before its contents, and the per-mount
+    // blocks land here as separate chunks, so plain concatenation
+    // printed a mount root after its own descendants. Every find line
+    // is a bare path at this stage (actions render later), and a path
+    // always sorts before its extensions, so one path sort restores
+    // GNU's invariant and matches the per-mount emit order. A
+    // single-operand walk never visits a path twice, so the set
+    // collapses a synthesized ancestor row against a primary backend
+    // that happens to hold a real directory at the same path. Multiple
+    // operands keep the concatenation: GNU walks operands in
+    // command-line order, which a global sort would not honor.
+    const lines = [
+      ...new Set(
+        allStdout
+          .flatMap((d) => new TextDecoder().decode(d).split('\n'))
+          .filter((line) => line !== ''),
+      ),
+    ].sort()
+    combined = new TextEncoder().encode(lines.join('\n') + '\n')
+  } else if (allStdout.length > 0) {
     const parts = allStdout.map((d) => {
       const s = new TextDecoder().decode(d).replace(/\n+$/, '')
       return s

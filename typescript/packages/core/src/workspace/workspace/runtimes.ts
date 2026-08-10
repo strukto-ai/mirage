@@ -23,6 +23,7 @@ import {
   VFSRuntime,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
+import type { MountResolver } from '../../runtime/resolver.ts'
 import type { BridgeDispatchFn } from '../../runtime/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -34,7 +35,7 @@ export interface RuntimesInit {
   /** `options.python`, forwarded into the default pyodide build. */
   pythonConfig: Record<string, unknown>
   bridge: () => BridgeDispatchFn
-  visibleMounts: () => string[]
+  resolver: MountResolver
   registerCloser: (fn: () => Promise<void>) => void
 }
 
@@ -52,13 +53,13 @@ export class Runtimes {
   bindings: Record<string, Runtime>
   private readonly registry: MountRegistry
   private readonly bridge: () => BridgeDispatchFn
-  private readonly visibleMounts: () => string[]
+  private readonly resolver: MountResolver
   private readonly registerCloser: (fn: () => Promise<void>) => void
 
   constructor(init: RuntimesInit) {
     this.registry = init.registry
     this.bridge = init.bridge
-    this.visibleMounts = init.visibleMounts
+    this.resolver = init.resolver
     this.registerCloser = init.registerCloser
     if (init.entries === undefined) {
       for (const name of DEFAULT_ENTRIES) {
@@ -82,7 +83,7 @@ export class Runtimes {
     for (const entry of this.entries) {
       if (typeof entry.script === 'string')
         throw scriptStringError(`runtime '${entry.name}' script`)
-      if (entry instanceof LanguageRuntime) entry.attach(this.bridge(), this.visibleMounts)
+      if (entry instanceof LanguageRuntime) entry.attach(this.bridge(), this.resolver)
       this.registerCloser(() => entry.close())
     }
     this.bindings = bindCommands(this.entries)
@@ -101,7 +102,7 @@ export class Runtimes {
     if (typeof entry.script === 'string') throw scriptStringError(`runtime '${entry.name}' script`)
     const candidate = [...this.entries, entry]
     const bindings = bindCommands(candidate)
-    if (entry instanceof LanguageRuntime) entry.attach(this.bridge(), this.visibleMounts)
+    if (entry instanceof LanguageRuntime) entry.attach(this.bridge(), this.resolver)
     this.registerCloser(() => entry.close())
     this.entries.push(entry)
     this.bindings = bindings

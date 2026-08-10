@@ -25,7 +25,7 @@ import { MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.t
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { MountEntry } from './mount.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 // The one thing the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -330,14 +330,12 @@ export class MountRegistry {
   }
 
   mountFor(path: string): MountEntry | null {
-    const norm = `/${stripSlash(path)}`
-    for (const m of this.mountList) {
-      const prefixNoTrail = rstripSlash(m.prefix) || '/'
-      if (norm === prefixNoTrail || norm.startsWith(m.prefix)) {
-        return m
-      }
-    }
-    return null
+    const owner = ownerPrefix(
+      this.mountList.map((m) => m.prefix),
+      path,
+    )
+    if (owner === null) return null
+    return this.mountList.find((m) => m.prefix === owner) ?? null
   }
 
   allMounts(): readonly MountEntry[] {

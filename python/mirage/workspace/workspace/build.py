@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from mirage.observe.store import ObserverStore
 from mirage.runtime.base import Runtime
+from mirage.runtime.resolver import MountResolver
 from mirage.runtime.table import VFSRuntime, bind_commands
 from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount import MountRegistry
@@ -77,8 +77,7 @@ def resolve_control_stores(
 
 
 def wire_runtime_world(
-        registry: MountRegistry, dispatch: DispatchFn,
-        mount_prefixes: Callable[[], list[str]],
+        registry: MountRegistry, dispatch: DispatchFn, resolver: MountResolver,
         entries: list[Runtime | str] | None) -> tuple[Runtimes, PolicyRouter]:
     """Build the ordered runtime world and its policy router.
 
@@ -91,13 +90,13 @@ def wire_runtime_world(
     Args:
         registry (MountRegistry): mount table the bindings install on.
         dispatch (DispatchFn): the workspace's op dispatch.
-        mount_prefixes (Callable[[], list[str]]): live prefix listing.
+        resolver (MountResolver): the live mount routing table.
         entries (list[Runtime | str] | None): explicit runtime world;
             None builds the default.
     """
-    runtimes = Runtimes(registry, dispatch, mount_prefixes)
+    runtimes = Runtimes(registry, dispatch, resolver)
     runtimes.resolve(entries)
-    router = PolicyRouter(registry, runtimes, mount_prefixes)
+    router = PolicyRouter(registry, runtimes, resolver)
     registry.runtime_bindings = bind_commands(runtimes.entries)
     registry.runtime_entries = runtimes.entries
     registry.vfs_runtime = next(

@@ -21,6 +21,7 @@ import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { PrefixResolver } from '../../resolver.ts'
 
 function makeBridge(seed: Record<string, Uint8Array>): {
   dispatch: BridgeDispatchFn
@@ -93,7 +94,7 @@ describe('MontyRuntime', () => {
     listMounts: () => string[] = () => [],
   ): MontyRuntime => {
     const rt = new MontyRuntime()
-    if (dispatch !== undefined) rt.attach(dispatch, listMounts)
+    if (dispatch !== undefined) rt.attach(dispatch, new PrefixResolver(listMounts))
     runtimes.push(rt)
     return rt
   }

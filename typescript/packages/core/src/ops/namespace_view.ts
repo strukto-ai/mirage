@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountAllowed } from '../context/session_context.ts'
-import { normDir, rstripSlash } from '../utils/slash.ts'
+import { normDir, ownerPrefix, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType } from '../types.ts'
 import type { NamespaceLinks } from './config.ts'
 
@@ -50,12 +50,8 @@ function childMountNames(prefixes: readonly string[], parent: string): string[] 
  * every mount is bare namespace structure and stays visible.
  */
 function linkAllowed(prefixes: readonly string[], link: string): boolean {
-  let owner = ''
-  for (const prefix of prefixes) {
-    const p = normDir(prefix)
-    if ((link + '/').startsWith(p) && p.length > owner.length) owner = p
-  }
-  return owner === '' || mountAllowed(owner)
+  const owner = ownerPrefix(prefixes, link)
+  return owner === null || mountAllowed(normDir(owner))
 }
 
 /**

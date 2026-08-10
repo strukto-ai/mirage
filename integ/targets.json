@@ -127,6 +127,30 @@
       ]
     },
     {
+      "id": "ram-nested",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/data/inner",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/ghost/deep",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "ram-history",
       "hosts": [
         "python",

@@ -14,6 +14,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
+import { PrefixResolver } from '../../resolver.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { applyMutation, createJournal, type MutationJournal } from './journal.ts'
 import { preloadInto } from './preload.ts'
@@ -96,7 +97,7 @@ describe('MirageFs', () => {
       }
       return Promise.resolve(undefined)
     }
-    vfs = new RuntimeVFS(dispatch, () => mounts)
+    vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => mounts))
     journal = createJournal()
   }, 60_000)
 

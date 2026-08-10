@@ -17,7 +17,8 @@ import { PythonRuntime } from '../base.ts'
 import { EvalError } from '../../errors.ts'
 import { EVALUATOR, type Evaluator } from '../../mixin.ts'
 import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeOptions } from '../../types.ts'
-import type { BridgeDispatchFn, PrefixSource } from '../../types.ts'
+import type { MountResolver } from '../../resolver.ts'
+import type { BridgeDispatchFn } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import {
   loadMontyModule,
@@ -95,7 +96,6 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'monty'
   readonly [EVALUATOR] = true as const
   private workspaceBridge: BridgeDispatchFn | null = null
-  private listMounts: PrefixSource = () => []
   private vfs: MontyVFS | null = null
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
@@ -106,11 +106,10 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     super(options)
   }
 
-  override attach(dispatch: BridgeDispatchFn, listMounts: PrefixSource): void {
+  override attach(dispatch: BridgeDispatchFn, resolver: MountResolver): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
-      this.listMounts = listMounts
-      this.vfs = new MontyVFS(new RuntimeVFS(dispatch, listMounts))
+      this.vfs = new MontyVFS(new RuntimeVFS(dispatch, resolver))
     }
   }
 

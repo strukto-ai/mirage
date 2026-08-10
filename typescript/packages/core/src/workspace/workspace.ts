@@ -56,6 +56,7 @@ import { WorkspaceFS } from './fs.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import type { VFSEntry } from '../runtime/vfs.ts'
+import { PrefixResolver } from '../runtime/resolver.ts'
 import type { BridgeDispatchFn } from '../runtime/types.ts'
 import { MontyUnavailableError } from '../runtime/python/monty/index.ts'
 import { scriptStringError, type Runtime, type RuntimeEntry } from '../runtime/base.ts'
@@ -156,12 +157,13 @@ export class Workspace {
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? null
     this.watchManager = new WatchManager(this.registry)
+    const sandboxResolver = new PrefixResolver(() => this.sandboxVisibleMounts())
     this.runtimes = new Runtimes({
       registry: this.registry,
       entries: options.runtimes,
       pythonConfig: options.python ?? {},
       bridge: () => this.buildWorkspaceBridge(),
-      visibleMounts: () => this.sandboxVisibleMounts(),
+      resolver: sandboxResolver,
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
@@ -188,7 +190,7 @@ export class Workspace {
       this.policy,
       this.sessionManager,
       this.agentId,
-      () => this.sandboxVisibleMounts(),
+      sandboxResolver,
     )
     this.observer = new Observer(stores.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)

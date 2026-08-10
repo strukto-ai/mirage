@@ -17,6 +17,7 @@ import errno as host_errno
 import pytest
 
 from mirage.ops.namespace_view import merge_readdir
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
 from mirage.runtime.wasm.config import WasmFsConfig
@@ -35,7 +36,7 @@ class FakeVFS(RuntimeVFS):
     def __init__(self, files=None, dirs=None, prefixes=()):
         super().__init__(dispatch=None,
                          loop=None,
-                         mount_prefixes=lambda: list(prefixes))
+                         resolver=PrefixResolver(lambda: list(prefixes)))
         self.files = dict(files or {})
         self.dirs = set(dirs or ())
         self.calls = []

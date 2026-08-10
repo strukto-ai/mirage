@@ -426,6 +426,7 @@ export async function handleCommand(
       stdin,
       ensureOpen,
       fanChildMounts,
+      (path: string) => pathStat(dispatch, path, null),
     )
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)
