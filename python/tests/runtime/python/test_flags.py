@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.python.flags import (init_argv, unhonored,
-                                         unhonored_notice)
+from mirage.runtime.python.flags import init_argv, unhonored, unhonored_notice
 
 
 def test_an_empty_bag_asks_for_nothing():
@@ -30,21 +29,24 @@ def test_a_count_switch_repeats_because_cpython_counts_occurrences():
 
 
 def test_a_list_switch_repeats_the_spelling_per_value():
-    assert init_argv({"W": ["ignore", "error::UserWarning"]}) == [
-        "-W", "ignore", "-W", "error::UserWarning"
-    ]
+    assert init_argv({"W": ["ignore", "error::UserWarning"]
+                      }) == ["-W", "ignore", "-W", "error::UserWarning"]
 
 
 def test_the_long_switch_goes_back_as_two_words():
     # CPython parses --check-hash-based-pycs by hand and rejects the
     # --opt=value spelling, so it can only be handed back detached.
-    assert init_argv({"check_hash_based_pycs": "never"}) == [
-        "--check-hash-based-pycs", "never"
-    ]
+    assert init_argv({"check_hash_based_pycs":
+                      "never"}) == ["--check-hash-based-pycs", "never"]
 
 
 def test_an_engine_that_honors_nothing_reports_every_switch_present():
-    flags = {"B": True, "O": 2, "W": ["ignore"], "check_hash_based_pycs": "never"}
+    flags = {
+        "B": True,
+        "O": 2,
+        "W": ["ignore"],
+        "check_hash_based_pycs": "never"
+    }
     assert unhonored(flags) == ["-B", "-O", "-W", "--check-hash-based-pycs"]
 
 
