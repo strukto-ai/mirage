@@ -1377,6 +1377,50 @@ async function createStore(label: string): Promise<{ db: PrismaClient; fx: Fixtu
   return { db, fx }
 }
 
+// The fake answers every request from one event loop, so two writes to the
+// same workspace interleave at any await: both read the schema (or a page's
+// properties, or the row count that becomes a position), both write it back,
+// and the later one silently drops the earlier one's change. A minted select
+// option lost that way is the worst of them, because the page that minted it
+// still stores the id the schema no longer has. Every mutating route is a
+// read-modify-write from end to end, so they queue per workspace at the door
+// rather than step by step: one rule, and the only place that cannot fall out
+// of step when a route is added. Reads over GET stay concurrent, and a POST
+// query waiting behind a pending write is what makes its answer a consistent
+// one.
+const writeQueue = new Map<string, Promise<unknown>>()
+
+function serialize<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const prior = writeQueue.get(key) ?? Promise.resolve()
+  const next = prior.then(run)
+  writeQueue.set(
+    key,
+    next.catch(() => null),
+  )
+  return next
+}
+
+// /reset carries no bearer, so its workspace comes from the body; every other
+// route is scoped by the token, which is the workspace id.
+function workspaceKey(req: IncomingMessage, url: URL, body: Json): string {
+  if (url.pathname === '/reset') {
+    return typeof body.workspace === 'string' ? body.workspace : DEFAULT_TOKEN
+  }
+  return bearer(req)
+}
+
+function dispatch(
+  db: PrismaClient,
+  fx: Fixture,
+  method: string,
+  req: IncomingMessage,
+  url: URL,
+  body: Json,
+): Promise<Reply> {
+  if (method === 'GET' || method === 'HEAD') return handle(db, fx, method, req, url, body)
+  return serialize(workspaceKey(req, url, body), () => handle(db, fx, method, req, url, body))
+}
+
 function serve(db: PrismaClient, fx: Fixture): Server {
   return createServer((req, res) => {
     const host = req.headers.host ?? '127.0.0.1'
@@ -1396,7 +1440,7 @@ function serve(db: PrismaClient, fx: Fixture): Server {
           return
         }
       }
-      void handle(db, fx, req.method ?? 'GET', req, url, body)
+      void dispatch(db, fx, req.method ?? 'GET', req, url, body)
         .then((reply) => {
           res.writeHead(reply.status, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(reply.json))
