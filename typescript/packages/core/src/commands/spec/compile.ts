@@ -86,10 +86,9 @@ export class CompiledSpec {
   readonly numericDest: string | null
   /** Kind of the rest operand. */
   readonly restKind: ValueType | null
-  // python3's rule, carried through from CommandSpec.stopAtOperand.
-  readonly stopAtOperand: boolean
-  // Spellings whose value ends option parsing (Option.endsOptions).
-  readonly endsOptionsSpellings: ReadonlySet<string>
+  // The rest operand gathers every word from the first operand on,
+  // options included (Operand.remainder, argparse nargs=REMAINDER).
+  readonly remainder: boolean
   // Canonical spelling of the option that re-bases the path operands
   // after it (CommandSpec.operandBase, tar's -C).
   readonly baseDest: string | null
@@ -118,8 +117,7 @@ export class CompiledSpec {
     numericDest: string | null
     restKind: ValueType | null
     baseDest: string | null
-    stopAtOperand: boolean
-    endsOptionsSpellings: ReadonlySet<string>
+    remainder: boolean
   }) {
     this.boolSpellings = fields.boolSpellings
     this.valueSpellings = fields.valueSpellings
@@ -144,8 +142,7 @@ export class CompiledSpec {
     this.numericDest = fields.numericDest
     this.restKind = fields.restKind
     this.baseDest = fields.baseDest
-    this.stopAtOperand = fields.stopAtOperand
-    this.endsOptionsSpellings = fields.endsOptionsSpellings
+    this.remainder = fields.remainder
   }
 
   /** Canonical spelling for a typed spelling. */
@@ -163,7 +160,6 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
 
   const boolSpellings = new Set<string>()
   const valueSpellings: string[] = []
-  const endsOptionsSpellings = new Set<string>()
   const attachSpellings: string[] = []
   const longBoolSpellings = new Set<string>()
   const longValueSpellings = new Set<string>()
@@ -197,17 +193,6 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     }
     if (opt.pair && opt.valueOptional) {
       throw new Error(`option '${canonical}': pair and valueOptional are mutually exclusive`)
-    }
-    if (opt.endsOptions) {
-      if (opt.type === 'bool') {
-        throw new Error(
-          `option '${canonical}': endsOptions requires a value flag ` +
-            `(it ends parsing after the value it carries)`,
-        )
-      }
-      for (const spelling of [opt.short, opt.long]) {
-        if (spelling !== null) endsOptionsSpellings.add(spelling)
-      }
     }
     if (opt.pair && opt.short !== null) {
       // A short spelling clusters and takes an attached value, both of
@@ -331,8 +316,7 @@ export function compileSpec(spec: CommandSpec): CompiledSpec {
     numericDest,
     restKind: spec.rest !== null ? spec.rest.type : null,
     baseDest,
-    stopAtOperand: spec.stopAtOperand,
-    endsOptionsSpellings,
+    remainder: spec.rest?.remainder ?? false,
   })
   CACHE.set(spec, compiled)
   return compiled

@@ -1112,14 +1112,10 @@ describe('options an environment variable supplies', () => {
   })
 })
 
-describe('parseCommand — stopAtOperand (python3 rule)', () => {
+describe('parseCommand — remainder (argparse nargs=REMAINDER)', () => {
   const PYTHON_LIKE = new CommandSpec({
-    options: [
-      new Option({ short: '-c', type: 'str', endsOptions: true }),
-      new Option({ short: '-u' }),
-    ],
-    rest: new Operand({ type: 'str' }),
-    stopAtOperand: true,
+    options: [new Option({ short: '-c', type: 'str' }), new Option({ short: '-u' })],
+    rest: new Operand({ type: 'str', remainder: true }),
   })
 
   it('rejects an unknown flag before the operand', () => {
@@ -1133,24 +1129,12 @@ describe('parseCommand — stopAtOperand (python3 rule)', () => {
     expect(p.invalidOptions).toEqual([])
   })
 
-  it('ends option parsing after a payload value', () => {
-    const p = parseCommand(PYTHON_LIKE, ['-c', 'print(1)', '-u', 'x'], '/')
+  it('consumes the marker that hands off the line', () => {
+    // The router writes the `--`; the parser eats exactly that one, so
+    // the words after it are the program's argv.
+    const p = parseCommand(PYTHON_LIKE, ['-c', 'print(1)', '--', '-u', 'x'], '/')
     expect(p.flags['-c']).toBe('print(1)')
     expect(p.flags['-u']).not.toBe(true)
     expect(p.texts()).toEqual(['-u', 'x'])
-  })
-
-  it('refuses endsOptions on a boolean option', () => {
-    expect(() =>
-      parseCommand(
-        new CommandSpec({
-          options: [new Option({ short: '-b', endsOptions: true })],
-          rest: new Operand({ type: 'str' }),
-          stopAtOperand: true,
-        }),
-        [],
-        '/',
-      ),
-    ).toThrow(/endsOptions requires a value flag/)
   })
 })

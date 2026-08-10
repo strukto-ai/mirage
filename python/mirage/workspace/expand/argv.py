@@ -29,7 +29,8 @@ from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_bases,
                                                 spec_word_kinds)
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.route import WordPolicy, route, word_policy
+from mirage.workspace.route import (WordPolicy, end_options_after_program,
+                                    route, word_policy)
 from mirage.workspace.session import Session
 
 
@@ -104,12 +105,21 @@ async def expand_argv(
     consumed = registry.match_command_prefix(expanded)
     name = " ".join(expanded[:consumed])
 
+    # Before anything reads the line: an option carrying a program hands
+    # the words after it to that program, and POSIX's own `--` is how
+    # that handoff is spelled.
+    expanded = expanded[:consumed] + end_options_after_program(
+        name, expanded[consumed:])
+
     policy = word_policy(route(name, session, registry))
     word_kinds: list[ValueType | None] | None = None
     word_bases: list[str | None] | None = None
     if policy is WordPolicy.MOUNT:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
+            # Before anything reads the line: an option carrying a
+            # program hands the words after it to that program, and
+            # POSIX's own `--` is how that is said.
             extra: list[ValueType | None] = ["str"] * (consumed - 1)
             word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
             bases = spec_word_bases(spec, expanded[consumed:], session.cwd)

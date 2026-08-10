@@ -25,13 +25,13 @@ const PYTHON_OPTIONS: readonly Option[] = [
   new Option({
     short: '-c',
     type: 'str',
-    endsOptions: true,
+
     description: 'Run the next argument as a program.',
   }),
   new Option({
     short: '-m',
     type: 'str',
-    endsOptions: true,
+
     description: 'Run the named module as __main__.',
   }),
   new Option({
@@ -205,14 +205,12 @@ export const SPECS: Record<string, CommandSpec> = {
   python: new CommandSpec({
     description: "Run Python on the workspace's bound runtime.",
     options: PYTHON_OPTIONS,
-    rest: new Operand({ type: 'str' }),
-    stopAtOperand: true,
+    rest: new Operand({ type: 'str', remainder: true }),
   }),
   python3: new CommandSpec({
     description: "Run Python on the workspace's bound runtime.",
     options: PYTHON_OPTIONS,
-    rest: new Operand({ type: 'str' }),
-    stopAtOperand: true,
+    rest: new Operand({ type: 'str', remainder: true }),
   }),
   sleep: new CommandSpec({
     description: 'Delay for a specified amount of time.',

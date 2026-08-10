@@ -24,11 +24,9 @@ from mirage.commands.spec.types import CommandSpec, Operand, Option
 _PYTHON_OPTIONS: tuple[Option, ...] = (
     Option(short="-c",
            type="str",
-           ends_options=True,
            description="Run the next argument as a program."),
     Option(short="-m",
            type="str",
-           ends_options=True,
            description="Run the named module as __main__."),
     Option(short="-u",
            description=("(Ignored) Unbuffered output. Mirage buffers "
@@ -74,15 +72,13 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         description="Run Python on the workspace's bound runtime.",
         options=_PYTHON_OPTIONS,
-        rest=Operand(type="str"),
-        stop_at_operand=True,
+        rest=Operand(type="str", remainder=True),
     ),
     'python3':
     CommandSpec(
         description="Run Python on the workspace's bound runtime.",
         options=_PYTHON_OPTIONS,
-        rest=Operand(type="str"),
-        stop_at_operand=True,
+        rest=Operand(type="str", remainder=True),
     ),
     'js':
     CommandSpec(

@@ -191,7 +191,7 @@ export function parseCommand(
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
   // flag never corrupts pattern/path classification.
-  const lenientDashOperands = cs.restKind !== null && cs.restKind !== 'path' && !cs.stopAtOperand
+  const lenientDashOperands = cs.restKind !== null && cs.restKind !== 'path' && !cs.remainder
   i = 0
   let endOfFlags = false
 
@@ -310,7 +310,6 @@ export function parseCommand(
       }
       if (matchedOptional) continue
       let matchedValue = false
-      let matchedSpelling = ''
       for (const vf of cs.valueSpellings) {
         if (tok === vf && i + 1 < filteredArgv.length) {
           setValueFlag(flags, cs, vf, filteredArgv[i + 1] ?? '')
@@ -319,7 +318,6 @@ export function parseCommand(
           base = rebase(flags, cs, vf, filteredArgv[i + 1] ?? '', base)
           i += 2
           matchedValue = true
-          matchedSpelling = vf
           break
         }
         if (tok.startsWith(vf) && tok.length > vf.length) {
@@ -327,14 +325,10 @@ export function parseCommand(
           base = rebase(flags, cs, vf, tok.slice(vf.length), base)
           i += 1
           matchedValue = true
-          matchedSpelling = vf
           break
         }
       }
       if (matchedValue) {
-        if (cs.stopAtOperand && cs.endsOptionsSpellings.has(matchedSpelling)) {
-          endOfFlags = true
-        }
         continue
       }
 
@@ -409,9 +403,9 @@ export function parseCommand(
     rawIndices.push(origIndices[i] ?? -1)
     rawBases.push(base)
     // The first operand ends option parsing outright under
-    // stopAtOperand, so a script's own flags reach the script instead
+    // argparse's REMAINDER, so a script's own flags reach the script
     // of being read as the interpreter's.
-    if (cs.stopAtOperand) endOfFlags = true
+    if (cs.remainder) endOfFlags = true
     i += 1
   }
 

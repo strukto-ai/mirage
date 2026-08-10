@@ -761,26 +761,27 @@ def test_word_bases_are_empty_without_an_operand_base():
 
 
 PYTHON_LIKE = CommandSpec(
-    options=(Option(short="-c", type="str",
-                    ends_options=True), Option(short="-u")),
-    rest=Operand(type="str"),
-    stop_at_operand=True,
+    options=(Option(short="-c", type="str"), Option(short="-u")),
+    rest=Operand(type="str", remainder=True),
 )
 
 
-def test_stop_at_operand_rejects_an_unknown_flag_before_the_operand():
+def test_remainder_rejects_an_unknown_flag_before_the_operand():
     parsed = parse_command(PYTHON_LIKE, ["-z", "-c", "print(1)"], "/")
     assert parsed.invalid_options == ["z"]
 
 
-def test_stop_at_operand_keeps_dash_words_after_the_operand_verbatim():
+def test_remainder_keeps_dash_words_after_the_operand_verbatim():
     parsed = parse_command(PYTHON_LIKE, ["s.py", "--foo", "-z"], "/")
     assert parsed.texts() == ["s.py", "--foo", "-z"]
     assert parsed.invalid_options == []
 
 
-def test_stop_at_operand_ends_option_parsing_after_a_payload_value():
-    parsed = parse_command(PYTHON_LIKE, ["-c", "print(1)", "-u", "x"], "/")
+def test_remainder_consumes_the_marker_that_hands_off_the_line():
+    # The router writes the `--`; the parser eats exactly that one, so
+    # the words after it are the program's argv.
+    parsed = parse_command(PYTHON_LIKE, ["-c", "print(1)", "--", "-u", "x"],
+                           "/")
     assert parsed.flags["-c"] == "print(1)"
     assert parsed.flags.get("-u") is not True
     assert parsed.texts() == ["-u", "x"]

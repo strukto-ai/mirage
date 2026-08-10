@@ -168,16 +168,6 @@ export interface OptionInit {
    * leaf that sends the value and the renderer that reports the line need it.
    */
   env?: string
-  /**
-   * The option's value is the last thing parsed as the command's own;
-   * every later word is an operand. This is python3's `-c`/`-m`, whose
-   * argument is a program and whose trailing words are that program's
-   * argv, so `python3 -c 'code' -u` passes `-u` to the code rather than
-   * honoring it. Only meaningful under CommandSpec.stopAtOperand, and
-   * only on the options that carry a program: `-X dev -c 'code'` still
-   * parses `-c`, because `-X` takes a value without carrying one.
-   */
-  endsOptions?: boolean
   description?: string
 }
 
@@ -196,7 +186,6 @@ export class Option {
   readonly default: string | null
   readonly metavar: string | null
   readonly env: string | null
-  readonly endsOptions: boolean
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -214,7 +203,6 @@ export class Option {
     this.default = init.default ?? null
     this.metavar = init.metavar ?? null
     this.env = init.env ?? null
-    this.endsOptions = init.endsOptions ?? false
     this.description = init.description ?? null
     Object.freeze(this)
   }
@@ -231,6 +219,18 @@ export interface OperandInit {
    * line, not of the slot, so it cannot be spelled in the type alone.
    */
   textWhen?: readonly string[]
+  /**
+   * Every word from this slot on is gathered verbatim, options included.
+   * This is argparse's `nargs=argparse.REMAINDER` and POSIX's own option
+   * order: the first operand ends option parsing, where GNU's default
+   * permutes instead (`ls a -1` reads -1 as a flag, `POSIXLY_CORRECT=1
+   * ls a -1` reads it as a filename). Set it for a command that
+   * dispatches to another program, which is the case argparse documents
+   * it for: python3's script and the words after it are the script's
+   * argv, so `python3 s.py --foo` must hand --foo over untouched while
+   * `python3 -zz s.py` must still refuse -zz as python3's own.
+   */
+  remainder?: boolean
   /**
    * Flags that supply this operand's value. When any is present the slot is
    * skipped and remaining args classify as rest (e.g. grep's pattern with
@@ -262,6 +262,7 @@ export class Operand {
   readonly textWhen: readonly string[]
   readonly name: string
   readonly required: boolean
+  readonly remainder: boolean
 
   constructor(init: OperandInit = {}) {
     this.type = init.type ?? 'path'
@@ -269,6 +270,7 @@ export class Operand {
     this.textWhen = init.textWhen ?? []
     this.name = init.name ?? ''
     this.required = init.required ?? false
+    this.remainder = init.remainder ?? false
     Object.freeze(this)
   }
 }
@@ -289,7 +291,6 @@ export interface CommandSpecInit {
   epilog?: string | null
   oldOptionStyle?: boolean
   operandBase?: string | null
-  stopAtOperand?: boolean
 }
 
 export class CommandSpec {
@@ -317,7 +318,6 @@ export class CommandSpec {
   // error, while `python3 s.py --foo` must hand `--foo` to the script
   // -- and the free-text leniency that serves echo/bash can only
   // express the second.
-  readonly stopAtOperand: boolean
 
   constructor(init: CommandSpecInit = {}) {
     this.options = init.options ?? []
@@ -328,7 +328,6 @@ export class CommandSpec {
     this.epilog = init.epilog ?? null
     this.oldOptionStyle = init.oldOptionStyle ?? false
     this.operandBase = init.operandBase ?? null
-    this.stopAtOperand = init.stopAtOperand ?? false
     // A subclass (CLISpec) still has its own fields to assign, so only
     // freeze here when constructed directly; subclasses freeze themselves.
     if (new.target === CommandSpec) Object.freeze(this)

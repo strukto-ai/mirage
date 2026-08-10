@@ -15,7 +15,7 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { WordPolicy, route, wordPolicy } from '../route/index.ts'
+import { WordPolicy, endOptionsAfterProgram, route, wordPolicy } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
 import { resolveGlobs } from './globs.ts'
@@ -85,6 +85,13 @@ export async function expandArgv(
   // `gws docs documents get`); the registry says how many.
   const consumed = registry.matchCommandPrefix(expanded)
   const name = expanded.slice(0, consumed).join(' ')
+  // Before anything reads the line: an option carrying a program hands
+  // the words after it to that program, and POSIX's own `--` is how that
+  // handoff is spelled.
+  const lineWords = [
+    ...expanded.slice(0, consumed),
+    ...endOptionsAfterProgram(name, expanded.slice(consumed)),
+  ]
 
   const policy = wordPolicy(route(name, session, registry))
   let wordKinds: (ValueType | null)[] | null = null
@@ -93,15 +100,15 @@ export async function expandArgv(
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-      wordKinds = [...extra, ...specWordKinds(spec, expanded.slice(consumed))]
-      const bases = specWordBases(spec, expanded.slice(consumed), session.cwd)
+      wordKinds = [...extra, ...specWordKinds(spec, lineWords.slice(consumed))]
+      const bases = specWordBases(spec, lineWords.slice(consumed), session.cwd)
       if (bases !== null) {
         wordBases = [...new Array<string | null>(consumed - 1).fill(null), ...bases]
       }
     }
   }
 
-  let classified = classifyParts(expanded, registry, session.cwd, wordKinds, wordBases)
+  let classified = classifyParts(lineWords, registry, session.cwd, wordKinds, wordBases)
   // set -f: glob words become literal paths for every consumer,
   // including backend pushdown, so `cat *.txt` looks up a file
   // literally named `*.txt` like bash with noglob.

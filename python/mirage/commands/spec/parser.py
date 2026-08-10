@@ -148,16 +148,6 @@ def _match_mixed_cluster(
     return None
 
 
-def _ends_options(cs: CompiledSpec, spelling: str) -> bool:
-    """Whether this spelling's value is the last word parsed as ours.
-
-    Args:
-        cs (CompiledSpec): the compiled spec being parsed against.
-        spelling (str): the option spelling as matched on the line.
-    """
-    return cs.stop_at_operand and spelling in cs.ends_options_spellings
-
-
 def parse_command(
     spec: CommandSpec,
     argv: list[str],
@@ -226,8 +216,7 @@ def parse_command(
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
     # stray flag never corrupts pattern/path classification.
     lenient_dash_operands = (cs.rest_kind is not None
-                             and cs.rest_kind != "path"
-                             and not cs.stop_at_operand)
+                             and cs.rest_kind != "path" and not cs.remainder)
     i = 0
     end_of_flags = False
 
@@ -330,7 +319,6 @@ def parse_command(
             if matched_optional:
                 continue
             matched_value = False
-            matched_spelling = ""
             for vf in cs.value_spellings:
                 if tok == vf and i + 1 < len(filtered_argv):
                     _set_value_flag(flags, cs, vf, filtered_argv[i + 1])
@@ -340,18 +328,14 @@ def parse_command(
                     base = _rebase(flags, cs, vf, filtered_argv[i + 1], base)
                     i += 2
                     matched_value = True
-                    matched_spelling = vf
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
                     _set_value_flag(flags, cs, vf, tok[len(vf):])
                     base = _rebase(flags, cs, vf, tok[len(vf):], base)
                     i += 1
                     matched_value = True
-                    matched_spelling = vf
                     break
             if matched_value:
-                if _ends_options(cs, matched_spelling):
-                    end_of_flags = True
                 continue
 
             if tok in cs.bool_spellings:
@@ -422,10 +406,10 @@ def parse_command(
         raw_args.append(tok)
         raw_indices.append(orig_indices[i])
         raw_bases.append(base)
-        # The first operand ends option parsing outright under
-        # stop_at_operand, so a script's own flags reach the script
-        # instead of being read as the interpreter's.
-        if cs.stop_at_operand:
+        # argparse's REMAINDER: the first operand ends option parsing,
+        # so a script's own flags reach the script instead of being read
+        # as the interpreter's.
+        if cs.remainder:
             end_of_flags = True
         i += 1
 

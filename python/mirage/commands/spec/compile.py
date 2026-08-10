@@ -79,12 +79,9 @@ class CompiledSpec:
         numeric_dest (str | None): canonical spelling fed by the
             ``-<digits>`` shorthand, when one option declares it.
         rest_kind (ValueType | None): kind of the rest operand.
-        stop_at_operand (bool): parse options strictly until the first
-            operand, then take every remaining word verbatim
-            (``CommandSpec.stop_at_operand``, python3's rule).
-        ends_options_spellings (frozenset[str]): spellings whose value
-            ends option parsing (``Option.ends_options``, python3's
-            ``-c``/``-m``).
+        remainder (bool): the rest operand gathers every word from the
+            first operand on, options included (``Operand.remainder``,
+            argparse's ``nargs=REMAINDER``).
         base_dest (str | None): canonical spelling of the option that
             re-bases the path operands after it (``CommandSpec.
             operand_base``, tar's -C).
@@ -113,8 +110,7 @@ class CompiledSpec:
     numeric_dest: str | None = None
     rest_kind: ValueType | None = None
     base_dest: str | None = None
-    stop_at_operand: bool = False
-    ends_options_spellings: frozenset[str] = frozenset()
+    remainder: bool = False
 
     def dest_of(self, spelling: str) -> str:
         """Canonical spelling for a typed spelling.
@@ -167,7 +163,6 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     bool_spellings: set[str] = set()
     value_spellings: list[str] = []
     attach_spellings: list[str] = []
-    ends_options_spellings: set[str] = set()
     long_bool_spellings: set[str] = set()
     long_value_spellings: set[str] = set()
     long_optional_spellings: set[str] = set()
@@ -244,15 +239,6 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         if opt.env is not None:
             env_by_dest[canonical] = opt.env
 
-        if opt.ends_options:
-            if opt.type == "bool":
-                raise ValueError(f"option {canonical!r}: ends_options "
-                                 "requires a value flag (it ends parsing "
-                                 "after the value it carries)")
-            for spelling in (opt.short, opt.long):
-                if spelling is not None:
-                    ends_options_spellings.add(spelling)
-
         if opt.short:
             if opt.type == "bool":
                 bool_spellings.add(opt.short)
@@ -327,6 +313,5 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         numeric_dest=numeric_dest,
         rest_kind=spec.rest.type if spec.rest is not None else None,
         base_dest=base_dest,
-        stop_at_operand=spec.stop_at_operand,
-        ends_options_spellings=frozenset(ends_options_spellings),
+        remainder=spec.rest is not None and spec.rest.remainder,
     )

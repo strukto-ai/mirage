@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SPECS } from '../../commands/spec/index.ts'
+import { compileSpec } from '../../commands/spec/compile.ts'
 import { ShellBuiltin } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 
@@ -173,6 +175,70 @@ export function reportsLink(name: string, words: readonly (string | PathSpec)[])
   if (dereferences(name, words)) return false
   const spec = NO_FOLLOW_FLAGS[name]
   return spec !== undefined && hasOption(words, spec[0], spec[1])
+}
+
+// Options whose argument is a program, so the words after it are that
+// program's argv rather than the command's own: python3's -c and -m
+// (`python3 -c 'code' -u x` hands -u to the code). This is a table
+// rather than a spec field on purpose. argparse cannot express it at
+// all (`add_argument("-c")` beside `nargs=REMAINDER` answers
+// `unrecognized arguments: -u`), and CPython parses its own command
+// line in C for the same reason, so it is one command's rule and not
+// part of the shared grammar.
+const PROGRAM_OPTIONS: Record<string, readonly string[]> = {
+  python: ['-c', '-m'],
+  python3: ['-c', '-m'],
+}
+
+/**
+ * Insert POSIX's `--` after a program-carrying option's value.
+ *
+ * The handoff already has a spelling every parser honors, so the rule is
+ * applied by writing one down rather than by teaching the parser a new
+ * kind of option. The marker is inserted unconditionally, never skipped
+ * because the line already carries one: CPython stops parsing at -c and
+ * passes a later `--` through as data (`python3 -c p -- -u` gives the
+ * program `['-c', '--', '-u']`), so the parser must consume exactly the
+ * one added here and leave any typed one alone.
+ *
+ * Only the option run before the first operand is scanned. A -c after an
+ * operand belongs to the program (`python3 s.py -c x`), and the operand
+ * already ended option parsing by itself.
+ */
+export function endOptionsAfterProgram(name: string, words: string[]): string[] {
+  const carriers = PROGRAM_OPTIONS[name]
+  if (carriers === undefined) return words
+  // Value spellings say which words carry a value, so `-W ignore -c p`
+  // steps over `ignore` instead of reading it as the first operand.
+  const spec = SPECS[name]
+  if (spec === undefined) return words
+  const valueSpellings = compileSpec(spec).valueSpellings
+  let i = 0
+  while (i < words.length) {
+    const word = words[i] ?? ''
+    if (word === '--') return words
+    const carrier = carriers.find((c) => word.startsWith(c))
+    if (carrier !== undefined) {
+      // Attached (`-cCODE`) carries its value in this word; the detached
+      // form takes the next one.
+      const after = word !== carrier ? i + 1 : i + 2
+      // Nothing to hand over, and a detached form with no value at all is
+      // the parser's refusal to report, not ours to turn into a program
+      // named `--`.
+      if (after >= words.length) return words
+      return [...words.slice(0, after), '--', ...words.slice(after)]
+    }
+    if (valueSpellings.includes(word)) {
+      i += 2
+      continue
+    }
+    if (word.startsWith('-') && word !== '-') {
+      i += 1
+      continue
+    }
+    return words
+  }
+  return words
 }
 
 export const SHELL_NAMES: ReadonlySet<string> = new Set([

@@ -170,6 +170,7 @@ function operandFields(op: Operand): Record<string, unknown> {
   return {
     name: op.name,
     provided_by: [...op.providedBy],
+    remainder: op.remainder,
     required: op.required,
     text_when: [...op.textWhen],
     type: op.type,
