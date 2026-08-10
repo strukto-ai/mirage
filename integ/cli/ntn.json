@@ -610,6 +610,45 @@
         "stdout": "page_markdown\nfalse\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_patch_untyped_select_reads_back",
+      "seq": 566047,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/ffff2222-3333-4444-5555-666677778888 -X PATCH -d '{\"properties\":{\"Stage\":{\"select\":{\"name\":\"Draft\"}}}}' > /dev/null && ntn datasources query d5000000-2222-3333-4444-555566667777 | head -n 2 | cut -f8",
+      "expect": {
+        "exit": 0,
+        "stdout": "Review\nDraft\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_patched_property_carries_id_type_option",
+      "seq": 566048,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/ffff2222-3333-4444-5555-666677778888 | jq -r '.properties.Stage.id, .properties.Stage.type, .properties.Stage.select.id, .properties.Stage.select.color'",
+      "expect": {
+        "exit": 0,
+        "stdout": "st\nselect\ns1\ngray\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_patch_multi_select_resolves_options",
+      "seq": 566049,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/pages/ffff2222-3333-4444-5555-666677778888 -X PATCH -d '{\"properties\":{\"Tags\":{\"multi_select\":[{\"name\":\"docs\"},{\"name\":\"new\"}]}}}' | jq -r '.properties.Tags.id, .properties.Tags.multi_select[0].color, .properties.Tags.multi_select[1].name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "tg\nyellow\nnew\n",
+        "stderr": ""
+      }
     }
   ]
 }
