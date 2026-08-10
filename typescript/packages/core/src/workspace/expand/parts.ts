@@ -56,20 +56,6 @@ async function expandBraceWord(
   return words.map((w) => substitute(expandTilde(unescapeUnquoted(w), home), values))
 }
 
-function hasAtExpansion(node: TSNodeLike): boolean {
-  for (const child of node.children) {
-    if (child.type === NT.SIMPLE_EXPANSION && child.text === '$@') return true
-  }
-  return false
-}
-
-function getPositionalArgs(session: Session, callStack: CallStack | null): string[] {
-  if (callStack && callStack.getAllPositional().length > 0) {
-    return callStack.getAllPositional()
-  }
-  return session.positionalArgs
-}
-
 function stringHasArrayAt(node: TSNodeLike): boolean {
   for (const c of node.children) {
     if (isMultiwordAt(c)) return true
@@ -109,6 +95,9 @@ async function expandStringWithArray(
     const last = fragments.length - 1
     fragments[last] = (fragments[last] ?? '') + text
   }
+  // Nothing but an empty splat: bash drops the word entirely rather than
+  // passing an empty one. Any literal at all keeps it.
+  if (fragments.length === 1 && fragments[0] === '') return []
   return fragments
 }
 
@@ -120,13 +109,6 @@ export async function expandParts(
 ): Promise<string[]> {
   const result: string[] = []
   for (const p of parts) {
-    if (p.type === NT.STRING && hasAtExpansion(p)) {
-      const positional = getPositionalArgs(session, callStack)
-      if (positional.length > 0) {
-        result.push(...positional)
-        continue
-      }
-    }
     if (p.type === NT.STRING && stringHasArrayAt(p)) {
       const words = await expandStringWithArray(p, session, executeFn, callStack)
       result.push(...words)
@@ -156,7 +138,10 @@ export async function expandParts(
     } else if (p.type === NT.STRING) {
       // A quoted word stays a word even when it expands to "" (echo ""
       // or "$EMPTY"), except "$@"/"${a[@]}" which yield zero words.
-      if (expanded !== '' || !hasAtExpansion(p)) result.push(expanded)
+      // A quoted word stays a word even when it expands to '' (echo ""
+      // or "$EMPTY"). The splats that yield zero words instead ("$@",
+      // "${a[@]}") never reach here; they took the branch above.
+      result.push(expanded)
     } else if (
       p.type === NT.RAW_STRING ||
       p.type === NT.ANSI_C_STRING ||
