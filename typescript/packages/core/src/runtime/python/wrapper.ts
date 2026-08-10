@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const PYTHON_REPL_WRAPPER = `
+export const PYTHON_REPL_WRAPPER = String.raw`
 import codeop, sys, io, traceback
 
 try:
@@ -72,7 +72,7 @@ elif _codeobj is not False:
         elif isinstance(_code, int):
             _exit_code = _code
         else:
-            _err_text.write(str(_code) + '\\n')
+            _err_text.write(str(_code) + '\n')
             _exit_code = 1
         _status = 'exit'
     except BaseException:
@@ -93,7 +93,7 @@ _repl_result = (_out_bytes.getvalue(), _err_bytes.getvalue(), _exit_code, _statu
 // JS/WASM boundary as JSON, which is the Evaluator contract's honest
 // transport for pyodide; bytes values ride as a tagged base64 object
 // that the JS side restores to Uint8Array (see EVAL_BYTES_TAG).
-export const PYTHON_EVAL_WRAPPER = `
+export const PYTHON_EVAL_WRAPPER = String.raw`
 import ast, base64, io, json, sys, traceback
 
 def _eval_enc(_o):
@@ -136,7 +136,7 @@ else:
             _value_json = json.dumps(_value, default=_eval_enc)
         except TypeError:
             _ok = False
-            _err_text.write('eval: result of type %s is not JSON-serializable\\n'
+            _err_text.write('eval: result of type %s is not JSON-serializable\n'
                             % type(_value).__name__)
     except BaseException:
         _ok = False
@@ -149,7 +149,7 @@ else:
 _eval_result = (_value_json, _out_bytes.getvalue(), _err_bytes.getvalue(), _ok, _syntax)
 `
 
-export const PYTHON_WRAPPER = `
+export const PYTHON_WRAPPER = String.raw`
 import os, sys, io, traceback
 
 _saved_env    = dict(os.environ)
@@ -224,7 +224,7 @@ try:
                 # program anyway; raising here would kill a line every
                 # other runtime completes. The message is _OptionError's
                 # own, which is what CPython prints after the colon.
-                _err_text.write('Invalid -W option ignored: %s\\n' % (_werr,))
+                _err_text.write('Invalid -W option ignored: %s\n' % (_werr,))
     sys.stdin  = _stdin_text
     sys.stdout = _out_text
     sys.stderr = _err_text
@@ -241,7 +241,7 @@ try:
         elif isinstance(_code, int):
             _exit_code = _code
         else:
-            _err_text.write(str(_code) + '\\n')
+            _err_text.write(str(_code) + '\n')
             _exit_code = 1
     except BaseException:
         traceback.print_exc(file=_err_text)

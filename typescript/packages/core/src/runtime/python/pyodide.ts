@@ -228,7 +228,7 @@ const PYODIDE_CONFIG_KEYS: readonly string[] = [
 // syncMounts remounts every prefix on every run: zipimport's archive
 // table of contents is keyed by path rather than mtime, so a remounted
 // wheel would otherwise keep serving the previous run's contents.
-const SYS_PATH_SEED_PY = `
+const SYS_PATH_SEED_PY = String.raw`
 import sys, glob, importlib
 
 _seed_misses = []
