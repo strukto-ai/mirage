@@ -28,12 +28,29 @@ def test_uuid7_is_canonical_and_version_7():
 
 
 def test_uuid7_embeds_current_timestamp():
-    # uuid6 smooths its clock for monotonicity, so allow a little skew.
+    # No skew allowance: the stamp is a clock reading taken between
+    # these two, never a value derived from the previous id.
     before_ms = time.time_ns() // 1_000_000
     parsed = uuid.UUID(uuid7())
     after_ms = time.time_ns() // 1_000_000
     embedded_ms = parsed.int >> 80
-    assert before_ms - 10 <= embedded_ms <= after_ms + 10
+    assert before_ms <= embedded_ms <= after_ms
+
+
+def test_uuid7_timestamp_never_runs_ahead_of_the_clock():
+    # Minting faster than one id per millisecond must not borrow from
+    # the future: these ids are database keys, and a timestamp ahead of
+    # the clock is wrong data that never corrects itself.
+    for _ in range(5000):
+        uuid7()
+    after_ms = time.time_ns() // 1_000_000
+    embedded_ms = uuid.UUID(uuid7()).int >> 80
+    assert embedded_ms <= after_ms
+
+
+def test_uuid7_orders_within_one_millisecond():
+    values = [uuid7() for _ in range(200)]
+    assert values == sorted(values)
 
 
 def test_uuid7_orders_across_milliseconds():
