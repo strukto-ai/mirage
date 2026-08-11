@@ -37,6 +37,12 @@
         "has_provision": false,
         "has_write": false
       },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
+      },
       "gdocs": {
         "filetypes": [],
         "has_aggregate": false,
@@ -187,6 +193,7 @@
       "dify",
       "discord",
       "dropbox",
+      "gcal",
       "gdocs",
       "gdrive",
       "github",

@@ -1,0 +1,160 @@
+{
+  "cases": [
+    {
+      "id": "gc_root_lists_one_dir_per_calendar",
+      "seq": 570000,
+      "targets": [
+        "gcal"
+      ],
+      "command": "ls /cal",
+      "expect": {
+        "exit": 0,
+        "stdout": "Holidays_in_United_States__en.usa#holiday@group.v.calendar.google.com\nTeam_Roadmap__team@group.calendar.google.com\nprimary\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_calendar_lists_days_holding_events",
+      "seq": 570001,
+      "targets": [
+        "gcal"
+      ],
+      "command": "ls /cal/primary",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-02-10\n2026-02-11\n2026-02-12\n2026-02-13\ncalendar.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_day_lists_one_file_per_event",
+      "seq": 570002,
+      "targets": [
+        "gcal"
+      ],
+      "command": "ls /cal/primary/2026-02-11 | sed 's/^[a-z0-9]*__/ID__/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "ID__0900-1030_PhD_Dissertation_Defense.gcal.json\nID__1500-1600_Academic_Committee_Meeting.gcal.json\nID__0000-2400_Conference_Offsite.gcal.json\nID__0000-2400_Public_Holiday.gcal.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_calendar_json_reports_the_bucket_zone",
+      "seq": 570003,
+      "targets": [
+        "gcal"
+      ],
+      "command": "cat /cal/primary/calendar.json | jq -r '.accessRole + \" \" + .bucketTimeZone'",
+      "expect": {
+        "exit": 0,
+        "stdout": "owner Asia/Hong_Kong\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_event_payload_is_the_api_item",
+      "seq": 570004,
+      "targets": [
+        "gcal"
+      ],
+      "command": "cat /cal/primary/2026-02-11/*PhD*.gcal.json | jq -r '.summary + \" \" + .start.dateTime'",
+      "expect": {
+        "exit": 0,
+        "stdout": "PhD Dissertation Defense 2026-02-11T09:00:00+08:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_multi_day_event_appears_under_every_day",
+      "seq": 570005,
+      "targets": [
+        "gcal"
+      ],
+      "command": "ls /cal/primary/2026-02-10 /cal/primary/2026-02-12 | grep -c Conference_Offsite",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_an_event_free_day_is_an_empty_directory",
+      "seq": 570006,
+      "targets": [
+        "gcal"
+      ],
+      "command": "ls /cal/primary/2027-03-04; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_a_calendar_id_with_a_fragment_is_browsable",
+      "seq": 570007,
+      "targets": [
+        "gcal"
+      ],
+      "command": "ls '/cal/Holidays_in_United_States__en.usa#holiday@group.v.calendar.google.com'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-02-16\ncalendar.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_free_busy_is_not_claimed_for_a_reader_calendar",
+      "seq": 570008,
+      "targets": [
+        "gcal"
+      ],
+      "command": "cat '/cal/Team_Roadmap__team@group.calendar.google.com/calendar.json' | jq -r .accessRole",
+      "expect": {
+        "exit": 0,
+        "stdout": "writer\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_find_type_f_reports_events_not_directories",
+      "seq": 570009,
+      "targets": [
+        "gcal"
+      ],
+      "command": "find /cal/primary/2026-02-11 -type f | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_rm_deletes_the_event",
+      "seq": 570010,
+      "targets": [
+        "gcal"
+      ],
+      "command": "rm /cal/primary/2026-02-11/*Committee*.gcal.json && ls /cal/primary/2026-02-11 | grep -c Committee; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gc_rm_refuses_a_calendar_the_account_cannot_write",
+      "seq": 570011,
+      "targets": [
+        "gcal"
+      ],
+      "command": "rm '/cal/Holidays_in_United_States__en.usa#holiday@group.v.calendar.google.com/2026-02-16/'*.gcal.json > /dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

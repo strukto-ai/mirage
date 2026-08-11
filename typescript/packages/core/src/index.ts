@@ -1008,6 +1008,33 @@ export {
   listAllFiles as googleDriveListAllFiles,
   listFiles as googleDriveListFiles,
 } from './core/google/drive.ts'
+export { GCalAccessor } from './accessor/gcal.ts'
+export { GCAL_COMMANDS } from './commands/builtin/gcal/index.ts'
+export { GCAL_OPS } from './ops/gcal/index.ts'
+export { read as gcalRead } from './core/gcal/read.ts'
+export { readdir as gcalReaddir } from './core/gcal/readdir.ts'
+export { stat as gcalStat } from './core/gcal/stat.ts'
+export { unlink as gcalUnlink } from './core/gcal/unlink.ts'
+export {
+  deleteEvent as gcalDeleteEvent,
+  listCalendars as gcalListCalendars,
+  listEvents as gcalListEvents,
+} from './core/gcal/client.ts'
+export {
+  clampedHhmm as gcalClampedHhmm,
+  dayBounds as gcalDayBounds,
+  daysCovered as gcalDaysCovered,
+  eventSpan as gcalEventSpan,
+  validDay as gcalValidDay,
+  windowBounds as gcalWindowBounds,
+} from './core/gcal/day.ts'
+export { GCAL_PROMPT, GCAL_WRITE_PROMPT } from './resource/gcal/prompt.ts'
+export {
+  makeCalendarDirname as gcalMakeCalendarDirname,
+  makeEventFilename as gcalMakeEventFilename,
+  parseCalendarDirname as gcalParseCalendarDirname,
+  parseEventFilename as gcalParseEventFilename,
+} from './resource/gcal/event_entry.ts'
 export { GDocsAccessor } from './accessor/gdocs.ts'
 export { GDOCS_COMMANDS } from './commands/builtin/gdocs/index.ts'
 export { GDOCS_OPS } from './ops/gdocs/index.ts'

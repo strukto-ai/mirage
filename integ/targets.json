@@ -1209,6 +1209,32 @@
       ]
     },
     {
+      "id": "gcal",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "epoch": "2026-02-01T00:00:00Z",
+      "calendar": "calendar/v1",
+      "mounts": [
+        {
+          "path": "/cal",
+          "resource": "gcal",
+          "backend": "gcal"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ],
+      "clis": [
+        "gws"
+      ]
+    },
+    {
       "id": "gmail",
       "hosts": [
         "python",

@@ -269,6 +269,13 @@ export {
   type GmailConfig,
   type GmailConfigRedacted,
 } from './resource/gmail/config.ts'
+export { GCalResource, type GCalResourceState } from './resource/gcal/gcal.ts'
+export {
+  normalizeGCalConfig,
+  redactGCalConfig,
+  type GCalConfig,
+  type GCalConfigRedacted,
+} from './resource/gcal/config.ts'
 export {
   buildResource,
   knownResources,

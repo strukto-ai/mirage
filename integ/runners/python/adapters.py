@@ -65,6 +65,8 @@ from mirage.resource.discord.discord import DiscordResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
 from mirage.resource.email.email import EmailResource
+from mirage.resource.gcal.config import GCalConfig
+from mirage.resource.gcal.gcal import GCalResource
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
@@ -674,6 +676,15 @@ class GwsService:
             GSlidesConfig(client_id="integ",
                           refresh_token="integ",
                           api_base=self.url))
+
+    def gcal_resource(self) -> GCalResource:
+        # today is pinned so the rolling window is the same on both hosts
+        # and lands on the seeded events.
+        return GCalResource(
+            GCalConfig(client_id="integ",
+                       refresh_token="integ",
+                       api_base=self.url,
+                       today="2026-02-11"))
 
     def gmail_resource(self) -> GmailResource:
         return GmailResource(
@@ -1909,6 +1920,13 @@ def build_email(
     return service.resource(mount), _noop
 
 
+def build_gcal(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gcal_resource(), _noop
+
+
 def build_gmail(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -2062,6 +2080,7 @@ BUILDERS = {
     "gdocs": build_gdocs,
     "gsheets": build_gsheets,
     "gslides": build_gslides,
+    "gcal": build_gcal,
     "gmail": build_gmail,
     "email": build_email,
     "hf": build_hf,

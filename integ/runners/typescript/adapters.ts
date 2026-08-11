@@ -40,6 +40,7 @@ import {
   GDocsResource,
   GDriveResource,
   GmailResource,
+  GCalResource,
   GCSResource,
   GitHubResource,
   GitHubCIResource,
@@ -1229,13 +1230,16 @@ async function seedGwsCalendar(base: string, entries: CalendarEntry[]): Promise<
 function gwsNativeResource(
   resource: string,
   base: string,
-): GDocsResource | GSheetsResource | GSlidesResource | GmailResource {
+): GDocsResource | GSheetsResource | GSlidesResource | GmailResource | GCalResource {
   // apiBase points the backend at the fake server through the same
   // config field a real embedder uses; nothing is monkey-patched.
   const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
   if (resource === 'gdocs') return new GDocsResource(config)
   if (resource === 'gsheets') return new GSheetsResource(config)
   if (resource === 'gmail') return new GmailResource(config)
+  // today is pinned so the rolling window is the same on both hosts and
+  // lands on the seeded events.
+  if (resource === 'gcal') return new GCalResource({ ...config, today: '2026-02-11' })
   return new GSlidesResource(config)
 }
 
@@ -1612,6 +1616,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   nextcloud: openNextcloud,
   gridfs: openGridfs,
   ssh: openSsh,
+  gcal: openGws,
   gdrive: openGws,
   gdocs: openGws,
   gsheets: openGws,

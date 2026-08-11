@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from urllib.parse import quote
+
 from mirage.core.google._client import (CALENDAR_API_BASE, TokenManager,
                                         calendar_base, google_delete,
                                         google_get)
@@ -98,8 +100,12 @@ async def list_events(
     Returns:
         list[dict]: events.list items.
     """
+    # The id is one path segment and several real ones are not URL-safe: a
+    # holiday calendar is "en.usa#holiday@group.v.calendar.google.com", and
+    # an unencoded "#" opens a fragment, so the request would reach
+    # /calendars/en.usa instead.
     url = (f"{calendar_base(token_manager)}/calendars/"
-           f"{calendar_id}/events")
+           f"{quote(calendar_id, safe='')}/events")
     params = {
         "timeMin": time_min,
         "timeMax": time_max,
@@ -138,5 +144,6 @@ async def delete_event(token_manager: TokenManager, calendar_id: str,
         event_id (str): the event id.
     """
     url = (f"{calendar_base(token_manager)}/calendars/"
-           f"{calendar_id}/events/{event_id}")
+           f"{quote(calendar_id, safe='')}/events/"
+           f"{quote(event_id, safe='')}")
     await google_delete(token_manager, url)

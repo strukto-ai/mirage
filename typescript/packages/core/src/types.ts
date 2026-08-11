@@ -16,6 +16,11 @@ import type { IndexCacheStore } from './cache/index/store.ts'
 import type { FindOptions } from './resource/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 
+// Any value that survives a JSON round trip: what a decoded payload holds,
+// what jq evaluates over, what an API field hands back. The mirror of
+// python's mirage.types.JsonValue.
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue }
+
 export const MountMode = Object.freeze({
   READ: 'read',
   WRITE: 'write',
@@ -225,6 +230,7 @@ export const ResourceName = Object.freeze({
   RAM: 'ram',
   GITHUB: 'github',
   LINEAR: 'linear',
+  GCAL: 'gcal',
   GDOCS: 'gdocs',
   GSHEETS: 'gsheets',
   GSLIDES: 'gslides',

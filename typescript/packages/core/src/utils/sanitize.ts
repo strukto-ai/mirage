@@ -16,6 +16,28 @@
 const UNSAFE_CHARS = /[^\p{L}\p{N}_\s\-.]/gu
 const MULTI_UNDERSCORE = /_+/g
 const MAX_LEN = 100
+// POSIX NAME_MAX on ext4 and APFS alike, and it counts BYTES. Truncating by
+// characters is the same number only for ASCII: a 100-character CJK title is
+// 300 bytes.
+export const NAME_MAX_BYTES = 255
+
+const UTF8 = new TextEncoder()
+const UTF8_LOSSY = new TextDecoder('utf-8')
+
+/**
+ * Trim a string to fit a byte budget without splitting a character.
+ *
+ * Returns `text` unchanged when it already fits, else the longest prefix
+ * whose UTF-8 encoding is at most `budget` bytes.
+ */
+export function truncateBytes(text: string, budget: number): string {
+  if (budget <= 0) return ''
+  const raw = UTF8.encode(text)
+  if (raw.length <= budget) return text
+  // The decoder replaces the partial sequence the cut may have left with
+  // U+FFFD, which is exactly the trailing character that did not fit.
+  return UTF8_LOSSY.decode(raw.slice(0, budget)).replace(/�+$/u, '')
+}
 
 export function stripUnderscores(value: string): string {
   let start = 0
