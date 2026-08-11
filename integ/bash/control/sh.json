@@ -163,10 +163,44 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'cd /\\n' > /data/cd.sh && cd /data && sh /data/cd.sh && pwd && rm /data/cd.sh",
+      "command": "printf 'cd /\\n' > /data/cd.sh && ( cd /data && sh /data/cd.sh && pwd ) && rm /data/cd.sh",
       "expect": {
         "exit": 0,
         "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_sh_script_file_symlink",
+      "seq": 502162,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/shl && printf 'echo linked\\n' > /data/shl/run.sh && ln -s /data/shl/run.sh /data/shl/link.sh && sh /data/shl/link.sh && rm -r /data/shl",
+      "expect": {
+        "exit": 0,
+        "stdout": "linked\n",
         "stderr": ""
       }
     }

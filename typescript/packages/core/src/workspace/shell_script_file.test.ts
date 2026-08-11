@@ -314,4 +314,36 @@ describe('sh/bash script file', () => {
       await ws.close()
     }
   })
+
+  it.each(['sh', 'bash', 'source'])('%s follows a symlinked script operand', async (head) => {
+    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    try {
+      expect(await run(ws, `ln -s /data/run.sh /data/link.sh; ${head} /data/link.sh`)).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('follows a relative symlinked script operand', async () => {
+    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    try {
+      expect(await run(ws, 'ln -s run.sh /data/rel.sh; sh /data/rel.sh')).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports the link for a broken symlinked script operand', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [code, , err] = await runResult(
+        ws,
+        'ln -s /data/gone.sh /data/dead.sh; sh /data/dead.sh',
+      )
+      expect(err).toBe('sh: /data/dead.sh: No such file or directory\n')
+      expect(code).toBe(127)
+    } finally {
+      await ws.close()
+    }
+  })
 })

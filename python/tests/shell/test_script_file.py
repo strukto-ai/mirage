@@ -194,3 +194,23 @@ def test_source_with_no_operand_is_a_usage_error(shell):
                    "source: usage: source filename [arguments]\n")
     assert out == "after=2\n"
     assert code == 0
+
+
+@pytest.mark.parametrize("head", ["sh", "bash", "source"])
+def test_script_operand_follows_a_symlink(shell, head):
+    shell.create_file("run.sh", b"echo hi\n")
+    out = shell.mirage(
+        f"ln -s /data/run.sh /data/link.sh; {head} /data/link.sh")
+    assert out == "hi\n"
+
+
+def test_script_operand_follows_a_relative_symlink(shell):
+    shell.create_file("run.sh", b"echo hi\n")
+    assert shell.mirage("ln -s run.sh /data/rel.sh; sh /data/rel.sh") == "hi\n"
+
+
+def test_broken_symlink_operand_reports_the_link(shell):
+    code, _, err = shell.mirage_result(
+        "ln -s /data/gone.sh /data/dead.sh; sh /data/dead.sh")
+    assert err == "sh: /data/dead.sh: No such file or directory\n"
+    assert code == 127
