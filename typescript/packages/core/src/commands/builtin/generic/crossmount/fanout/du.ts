@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { humanSize } from '../../../utils/formatting.ts'
+import { rollup } from '../../du.ts'
+import { respellRaw } from '../../../../../utils/path.ts'
 import type { OperandRun } from '../types.ts'
 
 const ENC = new TextEncoder()
@@ -58,6 +60,92 @@ export function mergeDuTotals(blocks: readonly Uint8Array[], human: boolean): Ui
   }
   kept.push(`${formatSize(total, human)}\ttotal`)
   return ENC.encode(kept.join('\n') + '\n')
+}
+
+function parseRows(blocks: readonly Uint8Array[]): [string, number][] {
+  const rows: [string, number][] = []
+  for (const data of blocks) {
+    for (const line of DEC.decode(data).split('\n')) {
+      const tab = line.indexOf('\t')
+      if (tab < 0) continue
+      const sizeText = line.slice(0, tab)
+      if (!/^\d+$/.test(sizeText)) continue
+      rows.push([line.slice(tab + 1), Number(sizeText)])
+    }
+  }
+  return rows
+}
+
+// Keep the rows nothing else sits under.
+//
+// The blocks are rendered text, which does not say which row is a file and
+// which is a directory, but the shape does: a directory row is an ancestor of
+// some other row. mirage never emits a row for an empty directory (no leaf
+// points at one, the documented divergence), so a row with no descendants is a
+// file. The one exception is a mount root, which is a directory even when the
+// mount is empty, so those are named rather than inferred.
+function leavesOf(
+  rows: readonly [string, number][],
+  mountRoots: readonly string[],
+): [string, number][] {
+  const paths = new Set(rows.map(([p]) => rstrip(p)))
+  const known = new Set(mountRoots.map(rstrip))
+  return rows.filter(
+    ([p]) => !known.has(rstrip(p)) && ![...paths].some((o) => o.startsWith(rstrip(p) + '/')),
+  )
+}
+
+function rstrip(path: string): string {
+  return path.endsWith('/') && path !== '/' ? path.replace(/\/+$/, '') : path
+}
+
+// Fold per-mount du blocks into one tree, GNU's way.
+//
+// A nested mount's bytes belong to every directory above it, so the blocks
+// cannot simply be concatenated: pinned on coreutils 9.7 over a real mount,
+// `du base` prints `7 base/inner` then `17 base`, and `du -s base` prints the
+// single row `17 base`, where concatenation reported the parent's own `10`.
+// Only `-x`, which mirage does not implement, gives the unfolded number.
+//
+// The per-mount runs are asked for every row (`-a`, no `-s`, no depth limit) so
+// the leaves survive the round trip; the tree is then derived once by the same
+// `rollup` a single-mount run uses, so ordering, `--max-depth` pruning and the
+// `-a` file rows all come out of one implementation rather than two.
+export function mergeDuBlocks(
+  blocks: readonly Uint8Array[],
+  root: string,
+  label: string,
+  opts: {
+    all: boolean
+    summarize: boolean
+    total: boolean
+    human: boolean
+    maxDepth: number | null
+    mountRoots?: readonly string[]
+  },
+): Uint8Array {
+  const mountRoots = opts.mountRoots ?? []
+  const leaves = leavesOf(parseRows(blocks), mountRoots)
+  const sum = leaves.reduce((acc, [, size]) => acc + size, 0)
+  const lines: string[] = []
+  if (!opts.summarize) {
+    const rows = rollup(leaves, root, {
+      all: opts.all,
+      maxDepth: opts.maxDepth,
+      dirs: mountRoots,
+    })
+    const shown = respellRaw(
+      rows.map(([node]) => node),
+      root,
+      label,
+    )
+    rows.forEach(([, size], i) => {
+      lines.push(`${formatSize(size, opts.human)}\t${shown[i] ?? ''}`)
+    })
+  }
+  lines.push(`${formatSize(sum, opts.human)}\t${label}`)
+  if (opts.total) lines.push(`${formatSize(sum, opts.human)}\ttotal`)
+  return ENC.encode(lines.join('\n') + '\n')
 }
 
 // Re-total a per-operand fan-out, one native run per operand. Every native run

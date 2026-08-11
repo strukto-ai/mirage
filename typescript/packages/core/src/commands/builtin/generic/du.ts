@@ -257,7 +257,10 @@ export function toVirtual(entries: [string, number][], path: PathSpec): [string,
 export function rollup(
   entries: [string, number][],
   root: string,
-  opts: { all: boolean; maxDepth: number | null },
+  // `dirs`: paths that are directories even though no leaf points at
+  // them. mirage cannot otherwise see an empty directory, so this is the
+  // one case it can: an empty mount still gets GNU's `0` row.
+  opts: { all: boolean; maxDepth: number | null; dirs?: readonly string[] },
 ): [string, number][] {
   const rootKey = norm(root)
   const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
@@ -271,6 +274,16 @@ export function rollup(
     while (parent !== rootKey && parent.startsWith(prefix)) {
       sizes.set(parent, (sizes.get(parent) ?? 0) + size)
       parent = parentOf(parent)
+    }
+  }
+
+  // Set only when absent: a hinted directory that does hold leaves
+  // already carries their total.
+  for (const hinted of opts.dirs ?? []) {
+    let node = norm(hinted)
+    while (node !== rootKey && node.startsWith(prefix)) {
+      if (!sizes.has(node)) sizes.set(node, 0)
+      node = parentOf(node)
     }
   }
 

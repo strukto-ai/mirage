@@ -18,7 +18,8 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { isWalkError } from '../../../utils/errors.ts'
+import { enoent, isWalkError } from '../../../utils/errors.ts'
+import { mountAllowed } from '../../../context/session_context.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import type { MountView } from '../../../ops/types.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
@@ -44,12 +45,21 @@ interface TreeOpts {
 // not exist in the parent backend at all, and when it does the parent
 // lists a directory whose contents belong to somebody else. Either way
 // the name has to come from the mount table, as `ls` injects it.
+//
+// Session-filtered, because a crossing entry is drawn from the mount
+// table alone: its row is synthesized as a directory without asking any
+// backend, so the dispatcher never gets the chance to refuse it and an
+// ungranted mount's name would reach the drawing. `ls` filters the same
+// fact through `childMountNames`. Note this is the opposite of what `du`
+// wants from the same view: there an ungranted mount still shadows the
+// parent's keys, so its prefix must stay in the list even though the
+// walk never enters it.
 function childMounts(mounts: MountView | null, directory: string): string[] {
   if (mounts === null) return []
   const base = rstripSlash(directory) || '/'
   return mounts.descendants(directory).filter((root) => {
     const parent = root.slice(0, root.lastIndexOf('/')) || '/'
-    return parent === base
+    return parent === base && mountAllowed(root)
   })
 }
 
@@ -183,7 +193,12 @@ export async function treeGeneric(
         ? null
         : async (p: PathSpec) => {
             const s = await statPath(p.virtual)
-            if (s === null) throw new Error(`tree: ${p.virtual}: No such file or directory`)
+            // Stamped, not a bare Error: `isWalkError` keys on the code,
+            // so an unstamped throw escapes the walk's catch and rejects
+            // the whole run instead of skipping one vanished entry. The
+            // python twin raises FileNotFoundError, which `WALK_ERRORS`
+            // already covers.
+            if (s === null) throw enoent(p)
             return s
           },
   }

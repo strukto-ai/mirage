@@ -261,33 +261,38 @@ describe('fanOutTraversal du at a descendant mount boundary', () => {
     return runLines([cmd])
   }
 
-  // One row per directory: the parent reports only what is reachable
-  // (GNU du -x), the child mount appends its own block.
-  it('excludes keys shadowed by the descendant mount', async () => {
-    expect(await runLine('du /base')).toBe('10\t/base\n7\t/base/inner\n')
+  // A nested mount's bytes belong to every directory above it. Pinned on
+  // coreutils 9.7 over a tmpfs mounted at the same spot: `du
+  // --apparent-size -B1 base` prints `7 base/inner` then `17 base`,
+  // children before parents. Only `-x`, which mirage does not implement,
+  // reports the parent's own 10. The 1000 shadowed bytes under the mount
+  // point count nowhere, in GNU or here.
+  it('folds the child mount into its ancestors', async () => {
+    expect(await runLine('du /base')).toBe('7\t/base/inner\n17\t/base\n')
   })
 
   it('hides shadowed leaves under -a', async () => {
     expect(await runLine('du -a /base')).toBe(
-      '10\t/base/top.txt\n10\t/base\n7\t/base/inner/real.txt\n7\t/base/inner\n',
+      '7\t/base/inner/real.txt\n7\t/base/inner\n10\t/base/top.txt\n17\t/base\n',
     )
   })
 
-  it('excludes shadowed bytes under -s', async () => {
-    expect(await runLine('du -s /base')).toBe('10\t/base\n7\t/base/inner\n')
+  // `-s` is one total per argument, mount boundary or not (GNU 9.7 prints
+  // the single row `17 base`).
+  it('is one row per operand under -s', async () => {
+    expect(await runLine('du -s /base')).toBe('17\t/base\n')
   })
 
   // GNU `du -c` prints exactly one grand total covering everything it
   // walked. Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
-  // `du -c --apparent-size -B1 /base` reports `17 total`, the reachable 10
-  // bytes plus the mounted filesystem's 7, which is what concatenating the
-  // two per-mount runs adds up to.
+  // `du -c --apparent-size -B1 base` reports `7 base/inner`, `17 base`,
+  // `17 total`.
   it('prints one total across the mounts under -c', async () => {
-    expect(await runLine('du -c /base')).toBe('10\t/base\n7\t/base/inner\n17\ttotal\n')
+    expect(await runLine('du -c /base')).toBe('7\t/base/inner\n17\t/base\n17\ttotal\n')
   })
 
   it('prints one total under -sc', async () => {
-    expect(await runLine('du -sc /base')).toBe('10\t/base\n7\t/base/inner\n17\ttotal\n')
+    expect(await runLine('du -sc /base')).toBe('17\t/base\n17\ttotal\n')
   })
 
   // Summing each mount's already-humanized total would round twice and
@@ -295,8 +300,14 @@ describe('fanOutTraversal du at a descendant mount boundary', () => {
   // humanizes.
   it('humanizes the total once under -ch', async () => {
     expect(await runLines(['du -ch /base'], 1500, 1500)).toBe(
-      '1.5K\t/base\n1.5K\t/base/inner\n2.9K\ttotal\n',
+      '1.5K\t/base/inner\n2.9K\t/base\n2.9K\ttotal\n',
     )
+  })
+
+  // `--max-depth` prunes only what is printed: the mount's bytes still
+  // reach the operand row.
+  it('prunes printing not accounting under --max-depth', async () => {
+    expect(await runLine('du --max-depth=0 /base')).toBe('17\t/base\n')
   })
 
   // `tree` is not fanned out at all: one root line, one drawing, one
@@ -321,8 +332,10 @@ describe('fanOutTraversal du at a descendant mount boundary', () => {
     const found = await runLines(['ln -s /base/top.txt /base/link.txt', 'find /base'])
     expect(found).toContain('/base/link.txt')
     const sized = await runLines(['ln -s /base/top.txt /base/link.txt', 'du -a /base'])
+    // Post-order, siblings sorted: inner, link.txt, top.txt, then the
+    // operand carrying all three (7 + 13 + 10).
     expect(sized).toBe(
-      '13\t/base/link.txt\n10\t/base/top.txt\n23\t/base\n7\t/base/inner/real.txt\n7\t/base/inner\n',
+      '7\t/base/inner/real.txt\n7\t/base/inner\n13\t/base/link.txt\n10\t/base/top.txt\n30\t/base\n',
     )
   })
 })
@@ -359,7 +372,7 @@ describe('fanOutTraversal operands spanning mounts', () => {
   // same tree. GNU counts a mounted filesystem in the same run either way.
   it('fans out inside each operand for du -c', async () => {
     expect(await runLine('du -c /base /other')).toBe(
-      '10\t/base\n9\t/base/inner\n10\t/other\n29\ttotal\n',
+      '9\t/base/inner\n19\t/base\n10\t/other\n29\ttotal\n',
     )
   })
 

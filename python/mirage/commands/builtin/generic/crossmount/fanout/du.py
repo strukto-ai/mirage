@@ -15,11 +15,111 @@
 from collections.abc import Sequence
 
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
+from mirage.commands.builtin.generic.du import rollup
 from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.utils.path import respell_raw
 
 
 def _format_size(size: int, human: bool) -> str:
     return _human_size(size) if human else str(size)
+
+
+def _parse_rows(blocks: Sequence[bytes]) -> list[tuple[str, int]]:
+    """Every ``SIZE\\tPATH`` row across the per-mount blocks.
+
+    Args:
+        blocks (Sequence[bytes]): rendered du output, one per mount.
+    """
+    rows: list[tuple[str, int]] = []
+    for data in blocks:
+        for line in data.decode(errors="replace").splitlines():
+            size_text, tab, label = line.partition("\t")
+            if not tab or not size_text.isdigit():
+                continue
+            rows.append((label, int(size_text)))
+    return rows
+
+
+def _leaves(
+    rows: Sequence[tuple[str, int]], mount_roots: Sequence[str] = ()
+) -> list[tuple[str, int]]:
+    """Keep the rows nothing else sits under.
+
+    The blocks are rendered text, which does not say which row is a file
+    and which is a directory, but the shape does: a directory row is an
+    ancestor of some other row. mirage never emits a row for an empty
+    directory (no leaf points at one, the documented divergence), so a
+    row with no descendants is a file. The one exception is a mount root,
+    which is a directory even when the mount is empty, so those are named
+    rather than inferred.
+
+    Args:
+        rows (Sequence[tuple[str, int]]): every parsed row.
+        mount_roots (Sequence[str]): paths that are directories whatever
+            their shape.
+    """
+    paths = {path.rstrip("/") for path, _ in rows}
+    known = {root.rstrip("/") for root in mount_roots}
+    return [(path, size) for path, size in rows
+            if path.rstrip("/") not in known and not any(
+                other.startswith(path.rstrip("/") + "/") for other in paths)]
+
+
+def merge_du_blocks(
+        blocks: Sequence[bytes],
+        root: str,
+        label: str,
+        *,
+        a: bool,
+        s: bool,
+        c: bool,
+        human: bool,
+        max_depth: int | None,
+        mount_roots: Sequence[str] = (),
+) -> bytes:
+    """Fold per-mount du blocks into one tree, GNU's way.
+
+    A nested mount's bytes belong to every directory above it, so the
+    blocks cannot simply be concatenated: pinned on coreutils 9.7 over a
+    real mount, ``du base`` prints ``7 base/inner`` then ``17 base``, and
+    ``du -s base`` prints the single row ``17 base``, where concatenation
+    reported the parent's own ``10``. Only ``-x``, which mirage does not
+    implement, gives the unfolded number.
+
+    The per-mount runs are asked for every row (``-a``, no ``-s``, no
+    depth limit) so the leaves survive the round trip; the tree is then
+    derived once by the same ``rollup`` a single-mount run uses, so
+    ordering, ``--max-depth`` pruning and the ``-a`` file rows all come
+    out of one implementation rather than two.
+
+    Args:
+        blocks (Sequence[bytes]): rendered du output, one per mount.
+        root (str): the operand's absolute virtual path.
+        label (str): the operand as the user typed it.
+        a (bool): -a, keep the file rows too.
+        s (bool): -s, one row for the operand and nothing else.
+        c (bool): -c, append the grand total row.
+        human (bool): format the sizes like ``du -h`` does.
+        max_depth (int | None): --max-depth, prune what is printed.
+        mount_roots (Sequence[str]): the descendant mount roots, which
+            are directories whether or not they hold anything. An empty
+            mount contributes only its own row, which the leaf inference
+            would otherwise read as a zero-byte file and hide.
+    """
+    leaves = _leaves(_parse_rows(blocks), mount_roots)
+    total = sum(size for _, size in leaves)
+    lines: list[str] = []
+    if not s:
+        rows = rollup(leaves, root, a=a, max_depth=max_depth, dirs=mount_roots)
+        shown = respell_raw([node for node, _ in rows], root, label)
+        lines = [
+            _format_size(size, human) + "\t" + name
+            for name, (_, size) in zip(shown, rows)
+        ]
+    lines.append(_format_size(total, human) + "\t" + label)
+    if c:
+        lines.append(_format_size(total, human) + "\ttotal")
+    return ("\n".join(lines) + "\n").encode()
 
 
 def _humanize_row(line: str) -> str:

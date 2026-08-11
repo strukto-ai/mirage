@@ -4,6 +4,7 @@ from functools import partial
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_records
+from mirage.context import mount_allowed
 from mirage.io.types import IOResult
 from mirage.ops.types import MountView, ReaddirPath, StatPath
 from mirage.types import FileStat, FileType, PathSpec
@@ -58,6 +59,15 @@ def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
     somebody else. Either way the name has to come from the mount table,
     the same way `ls` injects it.
 
+    Session-filtered, because a crossing entry is drawn from the mount
+    table alone: its row is synthesized as a directory without asking
+    any backend, so the dispatcher never gets the chance to refuse it
+    and an ungranted mount's name would reach the drawing. `ls` filters
+    the same fact through `child_mount_names`. Note this is the opposite
+    of what `du` wants from the same view: there an ungranted mount
+    still shadows the parent's keys, so its prefix must stay in the
+    list even though the walk never enters it.
+
     Args:
         mounts (MountView | None): the boundary facts.
         directory (str): absolute virtual path being listed.
@@ -67,7 +77,7 @@ def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
     base = directory.rstrip("/")
     return [
         root for root in mounts.descendants(directory)
-        if posixpath.dirname(root) == (base or "/")
+        if posixpath.dirname(root) == (base or "/") and mount_allowed(root)
     ]
 
 

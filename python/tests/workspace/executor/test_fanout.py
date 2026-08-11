@@ -243,44 +243,51 @@ def _stdout(io) -> str:
     return (io.stdout if isinstance(io.stdout, bytes) else b"").decode()
 
 
-def test_du_fanout_excludes_keys_shadowed_by_a_descendant_mount():
-    """One row per directory: the parent reports only what is reachable
-    (GNU du -x), the child mount appends its own block."""
+def test_du_fanout_folds_the_child_mount_into_its_ancestors():
+    """A nested mount's bytes belong to every directory above it.
+
+    Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
+    ``du --apparent-size -B1 base`` prints ``7 base/inner`` then
+    ``17 base``, children before parents. Only ``-x``, which mirage does
+    not implement, reports the parent's own 10. The 1000 shadowed bytes
+    under the mount point count nowhere, in GNU or here.
+    """
     ws = _shadowed_workspace()
     io = asyncio.run(ws.execute("du /base"))
-    assert _stdout(io) == "10\t/base\n7\t/base/inner\n"
+    assert _stdout(io) == "7\t/base/inner\n17\t/base\n"
 
 
 def test_du_a_fanout_hides_shadowed_leaves():
     ws = _shadowed_workspace()
     io = asyncio.run(ws.execute("du -a /base"))
-    assert _stdout(io) == ("10\t/base/top.txt\n"
-                           "10\t/base\n"
-                           "7\t/base/inner/real.txt\n"
-                           "7\t/base/inner\n")
+    assert _stdout(io) == ("7\t/base/inner/real.txt\n"
+                           "7\t/base/inner\n"
+                           "10\t/base/top.txt\n"
+                           "17\t/base\n")
 
 
-def test_du_s_fanout_excludes_shadowed_bytes():
+def test_du_s_fanout_is_one_row_per_operand():
+    """``-s`` is one total per argument, mount boundary or not (GNU 9.7
+    prints the single row ``17 base``)."""
     ws = _shadowed_workspace()
     io = asyncio.run(ws.execute("du -s /base"))
-    assert _stdout(io) == "10\t/base\n7\t/base/inner\n"
+    assert _stdout(io) == "17\t/base\n"
 
 
 def test_du_c_fanout_prints_one_total_across_the_mounts():
     """GNU ``du -c`` prints exactly one grand total covering everything it
     walked. Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
-    ``du -c --apparent-size -B1 /base`` reports ``17 total``, the reachable
-    10 bytes plus the mounted filesystem's 7, which is what concatenating
-    the two per-mount runs adds up to."""
+    ``du -c --apparent-size -B1 base`` reports ``7 base/inner``,
+    ``17 base``, ``17 total``."""
     ws = _shadowed_workspace()
     io = asyncio.run(ws.execute("du -c /base"))
-    assert _stdout(io) == "10\t/base\n7\t/base/inner\n17\ttotal\n"
+    assert _stdout(io) == "7\t/base/inner\n17\t/base\n17\ttotal\n"
 
 
 def test_du_sc_fanout_prints_one_total():
     ws = _shadowed_workspace()
     io = asyncio.run(ws.execute("du -sc /base"))
-    assert _stdout(io) == "10\t/base\n7\t/base/inner\n17\ttotal\n"
+    assert _stdout(io) == "17\t/base\n17\ttotal\n"
 
 
 def test_du_ch_fanout_humanizes_the_total_once():
@@ -289,7 +296,16 @@ def test_du_ch_fanout_humanizes_the_total_once():
     # humanizes.
     ws = _shadowed_workspace(top=1500, real=1500)
     io = asyncio.run(ws.execute("du -ch /base"))
-    assert _stdout(io) == "1.5K\t/base\n1.5K\t/base/inner\n2.9K\ttotal\n"
+    assert _stdout(io) == "1.5K\t/base/inner\n2.9K\t/base\n2.9K\ttotal\n"
+
+
+def test_du_max_depth_prunes_printing_not_accounting():
+    """``--max-depth`` prunes only what is printed: the mount's bytes
+    still reach the operand row (GNU 9.7 prints ``10 base/sub`` and
+    ``20 base`` for a mount two levels down)."""
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du --max-depth=0 /base"))
+    assert _stdout(io) == "17\t/base\n"
 
 
 def test_fanout_offers_links_and_mounts_to_every_sub_run():
@@ -335,8 +351,13 @@ def test_fanout_sub_runs_still_see_symlinks():
     assert "/base/link.txt" in found
     sized = _stdout(asyncio.run(ws.execute("du -a /base")))
     assert "13\t/base/link.txt\n" in sized
-    assert sized.startswith(
-        "13\t/base/link.txt\n10\t/base/top.txt\n23\t/base\n")
+    # Post-order, siblings sorted: inner, link.txt, top.txt, then the
+    # operand carrying all three (7 + 13 + 10).
+    assert sized == ("7\t/base/inner/real.txt\n"
+                     "7\t/base/inner\n"
+                     "13\t/base/link.txt\n"
+                     "10\t/base/top.txt\n"
+                     "30\t/base\n")
 
 
 def test_fanout_link_rows_match_the_unmounted_tree():
@@ -369,8 +390,8 @@ def test_operands_spanning_mounts_still_fan_out_inside_each_operand():
     tree. GNU counts a mounted filesystem in the same run either way."""
     ws = _spanning_workspace()
     io = asyncio.run(ws.execute("du -c /base /other"))
-    assert _stdout(io) == ("10\t/base\n"
-                           "9\t/base/inner\n"
+    assert _stdout(io) == ("9\t/base/inner\n"
+                           "19\t/base\n"
                            "10\t/other\n"
                            "29\ttotal\n")
 

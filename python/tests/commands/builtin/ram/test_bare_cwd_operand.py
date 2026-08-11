@@ -69,10 +69,13 @@ async def test_du_bare_measures_the_cwd_dot_spelled(workspace):
     seeded = await _seed(workspace)
     # GNU du with no operand prints ./-spelled rows ending in `.`
     # (sizes are bytes, mirage's documented divergence from blocks);
-    # the implicit /dev child mount rides along as ./dev.
+    # the implicit /dev child mount rides along as ./dev, in its
+    # post-order position rather than appended, and keeps GNU's `0` row
+    # even though it holds nothing. Pinned on coreutils 9.7 with a tmpfs
+    # at ./dev: `0 ./dev`, `6 ./sub`, `12 .`.
     io = await seeded.execute("du", cwd="/")
     assert io.exit_code == 0
-    assert (io.stdout or b"") == b"6\t./sub\n12\t.\n0\t./dev\n"
+    assert (io.stdout or b"") == b"0\t./dev\n6\t./sub\n12\t.\n"
 
 
 @pytest.mark.asyncio

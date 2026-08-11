@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from mirage.commands.builtin.find_eval import FindEntry, keep
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.generic.crossmount.fanout.du import \
-    merge_du_totals
+    merge_du_blocks
 from mirage.commands.builtin.generic.crossmount.types import RunSingle
 from mirage.commands.errors import FindParseError
 from mirage.commands.spec.types import FlagValue
@@ -24,7 +28,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
-from mirage.types import PathSpec, Producer
+from mirage.types import FileType, PathSpec, Producer
 from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
@@ -37,8 +41,43 @@ from mirage.workspace.types import ExecutionNode
 _TRAVERSAL_CMDS = frozenset({"find", "du"})
 
 
+@dataclass(frozen=True, slots=True)
+class _DuFanFlags:
+    a: bool
+    s: bool
+    c: bool
+    human: bool
+    max_depth: int | None
+
+
 def _path_segments(path: str) -> list[str]:
     return [s for s in path.strip("/").split("/") if s]
+
+
+async def _mount_dirs(descendants: Sequence[MountEntry],
+                      stat_path: StatPath | None) -> list[str]:
+    """The descendant mount roots that are directories.
+
+    A mount root is not always one: `/.bash_history` is a whole mount
+    serving a single file. du's merge has to tell them apart because a
+    directory with no content still earns GNU's ``0`` row while a file
+    only shows under ``-a``, and rendered du output cannot say which it
+    was looking at. Without a dispatcher the question cannot be asked,
+    and the merge falls back to inferring from the row shape.
+
+    Args:
+        descendants (Sequence[MountEntry]): the mounts under the operand.
+        stat_path (StatPath | None): dispatcher-backed stat.
+    """
+    if stat_path is None:
+        return []
+    out: list[str] = []
+    for m in descendants:
+        root = m.prefix.rstrip("/") or "/"
+        stat = await stat_path(root)
+        if stat is not None and stat.type is FileType.DIRECTORY:
+            out.append(root)
+    return out
 
 
 def _allowed_descendants(registry: MountRegistry,
@@ -380,13 +419,28 @@ async def _fan_out_traversal(
         m.prefix.rstrip("/") for m in registry.descendant_mounts(target_path)
     ]
 
-    # -c is one grand total however many mounts answered, so the per-mount
-    # totals are re-summed below. Under -h the sub-runs are forced back to
-    # exact bytes and the sizes humanized once, at the end (`merge_du_totals`).
-    du_c = cmd_name == "du" and flag_kwargs.get("c") is True
-    du_human = du_c and flag_kwargs.get("h") is True
-    if du_human:
-        flag_kwargs = {**flag_kwargs, "h": False}
+    # A nested mount's bytes belong to every directory above it, so du's
+    # blocks are folded into one tree rather than concatenated
+    # (`merge_du_blocks`). The runs are asked for every row in absolute
+    # spelling and exact bytes, because the merge needs the leaves back:
+    # -a keeps the file rows, -s would collapse them, a depth limit would
+    # prune them, and humanized sizes cannot be re-summed. Every one of
+    # those is then applied once, centrally.
+    du_merge = cmd_name == "du"
+    du_flags = _DuFanFlags(a=flag_kwargs.get("a") is True,
+                           s=flag_kwargs.get("s") is True,
+                           c=flag_kwargs.get("c") is True,
+                           human=flag_kwargs.get("h") is True,
+                           max_depth=_depth_flag_value(
+                               flag_kwargs.get("max_depth")))
+    if du_merge:
+        flag_kwargs = {
+            **flag_kwargs, "a": True,
+            "s": False,
+            "c": False,
+            "h": False
+        }
+        flag_kwargs.pop("max_depth", None)
 
     all_stdout: list[bytes] = []
     merged_io = IOResult()
@@ -394,7 +448,13 @@ async def _fan_out_traversal(
     success_seen = False
     for mount in [primary_mount] + list(descendants):
         if mount is primary_mount:
-            sub_paths = list(paths)
+            # The du merge re-spells centrally, so the runs answer in
+            # absolute virtual paths: a relative operand would otherwise
+            # come back already spelled and could not be rebased onto the
+            # tree the rollup builds.
+            sub_paths = [
+                dataclasses.replace(paths[0], raw_path=target_path), *paths[1:]
+            ] if du_merge else list(paths)
             sub_flags = dict(flag_kwargs)
             sub_texts = list(texts)
         else:
@@ -419,8 +479,8 @@ async def _fan_out_traversal(
                          directory=mount_root,
                          resource_path="",
                          resolved=True,
-                         raw_path=respell_one(mount_root, target_path,
-                                              paths[0].raw_path))
+                         raw_path=mount_root if du_merge else respell_one(
+                             mount_root, target_path, paths[0].raw_path))
             ]
         stdout, io = await mount.execute_cmd(cmd_name,
                                              sub_paths,
@@ -464,8 +524,17 @@ async def _fan_out_traversal(
             all_stdout.append(synthetic.encode("utf-8"))
 
     combined: ByteSource | None
-    if du_c:
-        combined = merge_du_totals(all_stdout, du_human)
+    if du_merge and all_stdout:
+        combined = merge_du_blocks(all_stdout,
+                                   target_path,
+                                   paths[0].raw_path,
+                                   a=du_flags.a,
+                                   s=du_flags.s,
+                                   c=du_flags.c,
+                                   human=du_flags.human,
+                                   max_depth=du_flags.max_depth,
+                                   mount_roots=await
+                                   _mount_dirs(descendants, stat_path))
     elif all_stdout and cmd_name == "find" and len(paths) == 1:
         # GNU lists a directory before its contents, and the per-mount
         # blocks land here as separate chunks, so plain concatenation

@@ -269,8 +269,14 @@ def to_virtual(entries: Sequence[tuple[str, int]],
             for entry, size in entries]
 
 
-def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
-           max_depth: int | None) -> list[tuple[str, int]]:
+def rollup(
+        entries: Sequence[tuple[str, int]],
+        root: str,
+        *,
+        a: bool,
+        max_depth: int | None,
+        dirs: Sequence[str] = (),
+) -> list[tuple[str, int]]:
     """Derive GNU's per-directory lines from a flat list of leaf files.
 
     Backends report only files, but GNU ``du`` prints a line per
@@ -289,6 +295,10 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
         root (str): the operand's absolute virtual path.
         a (bool): -a, keep the file lines as well as the directories.
         max_depth (int | None): drop nodes deeper than this many levels.
+        dirs (Sequence[str]): paths that are directories even though no
+            leaf points at them. mirage cannot otherwise see an empty
+            directory, so this is the one case it can: an empty mount
+            still gets GNU's ``0`` row.
 
     Returns:
         list[tuple[str, int]]: (virtual path, size) in GNU's print order.
@@ -306,6 +316,14 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
         while parent != root_key and parent.startswith(prefix):
             sizes[parent] = sizes.get(parent, 0) + size
             parent = _parent(parent)
+
+    # setdefault, never assignment: a hinted directory that does hold
+    # leaves already carries their total.
+    for hinted in dirs:
+        node = _norm(hinted)
+        while node != root_key and node.startswith(prefix):
+            sizes.setdefault(node, 0)
+            node = _parent(node)
 
     # Keyed backends (S3, GridFS) carry a zero-byte marker object for a
     # directory, which arrives here as a leaf. Under -a it must not

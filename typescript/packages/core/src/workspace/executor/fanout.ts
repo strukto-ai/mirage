@@ -16,7 +16,7 @@ import { mountAllowed } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { PathSpec } from '../../types.ts'
+import { FileType, PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
@@ -32,7 +32,7 @@ import {
 import type { FlagValue } from '../../commands/spec/types.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
 import type { ChildMounts, LinkView, MountView, StatPath } from '../../ops/types.ts'
-import { mergeDuTotals } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
+import { mergeDuBlocks } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -43,6 +43,35 @@ const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
 function pathSegments(path: string): string[] {
   return path.split('/').filter((s) => s !== '')
+}
+
+function depthFlagValue(raw: FlagValue | null): number | null {
+  const one = Array.isArray(raw) ? (raw[0] ?? null) : raw
+  if (one === null || typeof one === 'boolean') return null
+  const n = Number(one)
+  return Number.isNaN(n) ? null : n
+}
+
+// The descendant mount roots that are directories.
+//
+// A mount root is not always one: `/.bash_history` is a whole mount serving a
+// single file. du's merge has to tell them apart because a directory with no
+// content still earns GNU's `0` row while a file only shows under `-a`, and
+// rendered du output cannot say which it was looking at. Without a dispatcher
+// the question cannot be asked, and the merge falls back to inferring from the
+// row shape.
+async function mountDirs(
+  descendants: readonly MountEntry[],
+  statPath: StatPath | null,
+): Promise<string[]> {
+  if (statPath === null) return []
+  const out: string[] = []
+  for (const m of descendants) {
+    const root = rstripSlash(m.prefix) || '/'
+    const stat = await statPath(root)
+    if (stat !== null && stat.type === FileType.DIRECTORY) out.push(root)
+  }
+  return out
 }
 
 /**
@@ -300,12 +329,27 @@ export async function fanOutTraversal(
   // its prefix, the walk just never descends into it.
   const descendantPrefixes = registry.descendantMounts(targetPath).map((m) => rstripSlash(m.prefix))
 
-  // -c is one grand total however many mounts answered, so the per-mount
-  // totals are re-summed below. Under -h the sub-runs are forced back to
-  // exact bytes and the sizes humanized once, at the end (`mergeDuTotals`).
-  const duC = cmdName === 'du' && flagKwargs.c === true
-  const duHuman = duC && flagKwargs.h === true
-  const flags = duHuman ? { ...flagKwargs, h: false } : flagKwargs
+  // A nested mount's bytes belong to every directory above it, so du's
+  // blocks are folded into one tree rather than concatenated
+  // (`mergeDuBlocks`). The runs are asked for every row in absolute
+  // spelling and exact bytes, because the merge needs the leaves back: -a
+  // keeps the file rows, -s would collapse them, a depth limit would prune
+  // them, and humanized sizes cannot be re-summed. Every one of those is
+  // then applied once, centrally.
+  const duMerge = cmdName === 'du'
+  const duOpts = {
+    all: flagKwargs.a === true,
+    summarize: flagKwargs.s === true,
+    total: flagKwargs.c === true,
+    human: flagKwargs.h === true,
+    maxDepth: depthFlagValue(flagKwargs.max_depth ?? null),
+  }
+  let flags = flagKwargs
+  if (duMerge) {
+    const rest = { ...flagKwargs }
+    delete rest.max_depth
+    flags = { ...rest, a: true, s: false, c: false, h: false }
+  }
 
   const allStdout: Uint8Array[] = []
   let mergedIo = new IOResult()
@@ -318,7 +362,24 @@ export async function fanOutTraversal(
     let subFlags: Record<string, FlagValue>
     let subTexts: string[]
     if (mount === primaryMount) {
-      subPaths = [...paths]
+      // The du merge re-spells centrally, so the runs answer in absolute
+      // virtual paths: a relative operand would otherwise come back
+      // already spelled and could not be rebased onto the tree the
+      // rollup builds.
+      const head = paths[0]
+      subPaths =
+        duMerge && head !== undefined
+          ? [
+              new PathSpec({
+                virtual: head.virtual,
+                directory: head.directory,
+                resourcePath: head.resourcePath,
+                resolved: head.resolved,
+                rawPath: targetPath,
+              }),
+              ...paths.slice(1),
+            ]
+          : [...paths]
       subFlags = { ...flags }
       subTexts = [...texts]
     } else {
@@ -342,7 +403,9 @@ export async function fanOutTraversal(
           virtual: mountRoot,
           directory: mountRoot,
           resourcePath: mountKey(mountRoot, rstripSlash(mount.prefix)),
-          rawPath: respellOne(mountRoot, targetPath, paths[0]?.rawPath ?? targetPath),
+          rawPath: duMerge
+            ? mountRoot
+            : respellOne(mountRoot, targetPath, paths[0]?.rawPath ?? targetPath),
         }),
       ]
     }
@@ -403,8 +466,11 @@ export async function fanOutTraversal(
 
   let finalIoExit = successSeen ? 0 : finalExit
   let combined: ByteSource | null = null
-  if (duC) {
-    combined = mergeDuTotals(allStdout, duHuman)
+  if (duMerge && allStdout.length > 0) {
+    combined = mergeDuBlocks(allStdout, targetPath, paths[0]?.rawPath ?? targetPath, {
+      ...duOpts,
+      mountRoots: await mountDirs(descendants, statPath),
+    })
   } else if (allStdout.length > 0 && cmdName === 'find' && paths.length === 1) {
     // GNU lists a directory before its contents, and the per-mount
     // blocks land here as separate chunks, so plain concatenation

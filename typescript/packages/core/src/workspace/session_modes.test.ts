@@ -261,3 +261,49 @@ describe('sessions on a shared SessionStore', () => {
     expect(denied.exitCode).not.toBe(0)
   })
 })
+
+describe('nested mount disclosure', () => {
+  // `tree` crosses a boundary from the mount table alone: a crossing
+  // entry's row is synthesized as a directory without asking any
+  // backend, so the dispatcher never sees it and cannot refuse it.
+  // Before the session filter, `tree /base` drew `private` and counted
+  // it, while `ls`, `find` and `du` on the same tree all hid it.
+  async function makeNested(): Promise<Workspace> {
+    const parser = await getTestParser()
+    const base = new RAMResource()
+    const priv = new RAMResource()
+    base.store.files.set('/top.txt', ENC.encode('public\n'))
+    priv.store.files.set('/secret.txt', ENC.encode('SECRET\n'))
+    const registry = new OpsRegistry()
+    for (const r of [base, priv]) registry.registerResource(r)
+    const ws = new Workspace(
+      { '/base': base, '/base/private': priv },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    open.push(ws)
+    return ws
+  }
+
+  it('tree does not disclose an ungranted nested mount', async () => {
+    const ws = await makeNested()
+    ws.createSession('agent', { mounts: { '/base': MountMode.READ } })
+
+    const io = await ws.execute('tree /base', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).not.toContain('private')
+    expect(stdoutStr(io)).toBe('/base\n`-- top.txt\n\n1 directory, 1 file\n')
+  })
+
+  it('tree still crosses a granted nested mount', async () => {
+    const ws = await makeNested()
+    ws.createSession('agent', {
+      mounts: { '/base': MountMode.READ, '/base/private': MountMode.READ },
+    })
+
+    const io = await ws.execute('tree /base', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe(
+      '/base\n|-- private\n|   `-- secret.txt\n`-- top.txt\n\n2 directories, 2 files\n',
+    )
+  })
+})
