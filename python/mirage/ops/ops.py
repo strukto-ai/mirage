@@ -21,16 +21,20 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
-from mirage.context import assert_mount_allowed, effective_mount_mode
+from mirage.context import (assert_mount_allowed, effective_mount_mode,
+                            mount_allowed)
 from mirage.observe import OpRecord
 from mirage.observe.context import push_mount_prefix
 from mirage.ops.config import (NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks,
                                OpsMount)
+from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
+                                       namespace_stat)
 from mirage.ops.registry import OpsRegistry, RegisteredOp
 from mirage.ops.types import StatOverlay
 from mirage.policy import Policies, post_ops_gate, pre_ops_gate
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import owner_prefix
 
 
 class Ops:
@@ -170,6 +174,13 @@ class Ops:
             self._locks[path] = asyncio.Lock()
         return self._locks[path]
 
+    def _owner(self, path: str) -> OpsMount | None:
+        """The mount owning ``path`` by longest prefix, or None."""
+        owner = owner_prefix((m.prefix for m in self._mounts), path)
+        if owner is None:
+            return None
+        return next(m for m in self._mounts if m.prefix == owner)
+
     def _resolve(
             self, path: str
     ) -> tuple[str, str, Accessor, IndexCacheStore, MountMode]:
@@ -181,25 +192,67 @@ class Ops:
         Returns:
             tuple: resource_type, rel_path, accessor, index, mode.
         """
+        m = self._owner(path)
+        if m is None:
+            raise ValueError(f"no mount matches path: {path!r}")
         norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
-                rel_path = "/" + norm[len(m.prefix):]
-                return m.resource_type, rel_path, m.accessor, m.index, m.mode
-        raise ValueError(f"no mount matches path: {path!r}")
+        rel_path = "/" + norm[len(m.prefix):]
+        return m.resource_type, rel_path, m.accessor, m.index, m.mode
 
     def _mount_prefix(self, path: str) -> str:
-        norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
-                return m.prefix.rstrip("/")
-        return ""
+        m = self._owner(path)
+        return "" if m is None else m.prefix.rstrip("/")
 
     async def _invalidate(self,
                           path: str,
                           observed: float | None = None) -> None:
         if self._on_write is not None:
             await self._on_write(path, observed)
+
+    def _namespace_result(self, op: str,
+                          path: str) -> "list[str] | FileStat | None":
+        """The namespace's own answer for a path no backend serves.
+
+        Mirrors the workspace dispatcher: a directory that exists only
+        because a mount or a link sits below it still lists and stats,
+        so FUSE and programmatic callers agree with the shell. None for
+        any other op, or when the namespace knows nothing at ``path``.
+
+        Args:
+            op (str): the op name.
+            path (str): the virtual path being answered.
+        """
+        if op == "readdir":
+            return namespace_listing(self.mount_prefixes(), self._links, path)
+        if op == "stat":
+            return namespace_stat(self.mount_prefixes(), self._links, path)
+        return None
+
+    async def _gated_namespace(self, op: str, path: str, write: bool,
+                               fallback: "list[str] | FileStat"):
+        """Gate a namespace-served answer exactly like a backend one.
+
+        Mirrors the workspace dispatcher: no owning prefix (the gates
+        see ""), but admission still fires so a policy that bounds
+        readdir or stat by path covers the synthetic answer too.
+
+        Args:
+            op (str): the op name.
+            path (str): the virtual path being answered.
+            write (bool): whether the op is a write for policy admission.
+            fallback (list[str] | FileStat): the namespace's answer.
+        """
+        if self._policies is None:
+            return fallback
+        scope = PathSpec(virtual=path,
+                         directory=path.rsplit("/", 1)[0] or "/",
+                         resource_path="")
+        await pre_ops_gate(self._policies, op, scope, write, "")
+        bound = await post_ops_gate(self._policies, op, scope, write, "",
+                                    fallback)
+        if bound is not None:
+            return await apply_op_limit(fallback, bound)
+        return fallback
 
     async def _call(self,
                     op: str,
@@ -210,8 +263,26 @@ class Ops:
         start = int(time.monotonic() * 1000)
         if self._links is not None and op not in NO_FOLLOW_OPS:
             path = self._links.follow(path)
-        resource_type, rel_path, accessor, index, mode = self._resolve(path)
+        try:
+            resource_type, rel_path, accessor, index, mode = self._resolve(
+                path)
+        except ValueError:
+            fallback = self._namespace_result(op, path)
+            if fallback is None:
+                raise
+            return await self._gated_namespace(op, path, write, fallback)
         mount_prefix = self._mount_prefix(path)
+        if not mount_allowed(mount_prefix):
+            # The mount is real but ungranted, and the namespace may
+            # still owe the session a directory here: a granted mount
+            # below it already put this path's name in a listing, so
+            # walking down to the grant must answer. The names are
+            # session-filtered, so nothing of the mount's own content
+            # leaks; a path the structure does not owe falls through to
+            # the canonical denial below.
+            fallback = self._namespace_result(op, path)
+            if fallback is not None:
+                return await self._gated_namespace(op, path, write, fallback)
         assert_mount_allowed(mount_prefix)
         if write and effective_mount_mode(mount_prefix,
                                           mode) == MountMode.READ:
@@ -234,8 +305,15 @@ class Ops:
                                                filetype=filetype,
                                                index=index,
                                                **kwargs)
+        except FileNotFoundError:
+            result = self._namespace_result(op, path)
+            if result is None:
+                raise
         finally:
             push_mount_prefix(prev_prefix)
+        if op == "readdir":
+            result = merge_readdir(result, self.mount_prefixes(), self._links,
+                                   path)
         if isinstance(result, (bytes, bytearray)):
             nbytes = len(result)
         else:
@@ -392,10 +470,6 @@ class Ops:
         Returns:
             bool: True if path is under a mount other than the virtual root.
         """
-        norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if m.prefix == "/":
-                continue
-            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
-                return True
-        return False
+        return owner_prefix(
+            (m.prefix for m in self._mounts if m.prefix != "/"),
+            path) is not None

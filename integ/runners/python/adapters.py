@@ -18,6 +18,7 @@ import functools
 import gzip
 import imaplib
 import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -996,10 +997,13 @@ class GitHubService:
     """Points github mounts at the fake api.github.com server.
 
     The server (integ/server/github_server.py) runs out of process on
-    GITHUB_URL, mirroring the fake Slack and Google Workspace servers.
-    In-process is not an option here: GitHubResource fetches the repo tree
-    with a blocking urlopen from its constructor, which would starve an
-    aiohttp fake sharing the runner's event loop.
+    GITHUB_URL, mirroring the fake Slack and Google Workspace servers and
+    shared with the typescript host. It used to be out of process by
+    necessity — GitHubResource fetched the repo tree with a blocking
+    urlopen from its constructor, which would starve an aiohttp fake on
+    the runner's loop. That constraint is gone now that the fetch is
+    awaited in `GitHubResource.build`; sharing one fake across both hosts
+    is why it stays external.
 
     Args:
         url (str): GITHUB_URL origin the fake is listening on.
@@ -1012,9 +1016,9 @@ class GitHubService:
     async def create(cls) -> "GitHubService":
         return cls(os.environ["GITHUB_URL"].rstrip("/"))
 
-    def resource(self, mount: dict) -> GitHubResource:
+    async def resource(self, mount: dict) -> GitHubResource:
         owner, _, repo = mount["repo"].partition("/")
-        return GitHubResource(
+        return await GitHubResource.build(
             GitHubConfig(token="ghp-integ",
                          owner=owner,
                          repo=repo,
@@ -1886,11 +1890,11 @@ def build_nextcloud(
     return service.resource(mount), _noop
 
 
-def build_github(
+async def build_github(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GitHubService)
-    return service.resource(mount), _noop
+    return await service.resource(mount), _noop
 
 
 def build_github_ci(
@@ -2107,7 +2111,7 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
     return None
 
 
-def build_mounts(
+async def build_mounts(
     target: dict, run_id: str, service: "Service | None"
 ) -> tuple[dict[str, object], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, object] = {}
@@ -2124,7 +2128,13 @@ def build_mounts(
             cleanup = _noop
         else:
             builder = BUILDERS[mount["resource"]]
-            resource, cleanup = builder(mount, run_id, service)
+            # A builder is async only when its resource needs I/O to come
+            # up — github fetches the repo tree. Awaiting whatever the
+            # table returns keeps the other forty builders plain.
+            pair = builder(mount, run_id, service)
+            if inspect.isawaitable(pair):
+                pair = await pair
+            resource, cleanup = pair
         built[mount["path"]] = resource
         if mount.get("mode") == "read":
             mounts[mount["path"]] = (resource, MountMode.READ)
@@ -2182,7 +2192,7 @@ async def open_target(
 ) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
-    mounts, cleanups = build_mounts(target, run_id, service)
+    mounts, cleanups = await build_mounts(target, run_id, service)
     agent_id = target.get("agentId")
     if consistency is not None:
         ws = Workspace(mounts,
@@ -2211,8 +2221,9 @@ async def open_consistency(
 ]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
-    read_mounts, read_cleanups = build_mounts(target, run_id, service)
-    shadow_mounts, shadow_cleanups = build_mounts(target, run_id, service)
+    read_mounts, read_cleanups = await build_mounts(target, run_id, service)
+    shadow_mounts, shadow_cleanups = await build_mounts(
+        target, run_id, service)
     read_ws = Workspace(read_mounts,
                         mode=MountMode.WRITE,
                         consistency=consistency)

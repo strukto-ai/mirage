@@ -20,6 +20,7 @@ import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { assertMountAllowed } from '../context/session_context.ts'
+import { isMissingPath } from '../utils/errors.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
@@ -55,6 +56,7 @@ import { WorkspaceFS } from './fs.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import type { VFSEntry } from '../runtime/vfs.ts'
+import { PrefixResolver } from '../runtime/resolver.ts'
 import type { BridgeDispatchFn } from '../runtime/types.ts'
 import { MontyUnavailableError } from '../runtime/python/monty/index.ts'
 import { scriptStringError, type Runtime, type RuntimeEntry } from '../runtime/base.ts'
@@ -155,12 +157,13 @@ export class Workspace {
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? null
     this.watchManager = new WatchManager(this.registry)
+    const sandboxResolver = new PrefixResolver(() => this.sandboxVisibleMounts())
     this.runtimes = new Runtimes({
       registry: this.registry,
       entries: options.runtimes,
       pythonConfig: options.python ?? {},
       bridge: () => this.buildWorkspaceBridge(),
-      visibleMounts: () => this.sandboxVisibleMounts(),
+      resolver: sandboxResolver,
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
@@ -187,7 +190,7 @@ export class Workspace {
       this.policy,
       this.sessionManager,
       this.agentId,
-      () => this.sandboxVisibleMounts(),
+      sandboxResolver,
     )
     this.observer = new Observer(stores.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
@@ -261,6 +264,7 @@ export class Workspace {
       (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
       this.registry.policies,
       (path) => this.registry.mountFor(path)?.prefix ?? '',
+      () => this.registry.mountPrefixes(),
     )
   }
 
@@ -382,9 +386,27 @@ export class Workspace {
               // skip the stat; unmarked entries (e.g. RAM) need one to
               // learn dir-ness.
               if (entry.endsWith('/')) return { path: entry, size: 0, isDir: true }
-              const stat = (await this.dispatch('stat', entry)) as FileStat
+              const isLink = this.namespace.isLink(entry)
+              let stat: FileStat
+              try {
+                stat = (await this.dispatch('stat', entry)) as FileStat
+              } catch (err) {
+                // A dangling link, or an entry that vanished between
+                // list and stat, must not fail the whole listing; the
+                // guest's own open reports the miss. Anything else
+                // (authorization, a timeout, a backend bug) propagates,
+                // or pyodide's syncMounts would replace a healthy
+                // snapshot with a silently degraded one.
+                if (!isMissingPath(err)) throw err
+                return { path: entry, size: 0, isDir: false, ...(isLink ? { isLink } : {}) }
+              }
               const isDir = stat.type === FileType.DIRECTORY
-              return { path: entry, size: isDir ? 0 : (stat.size ?? 0), isDir }
+              return {
+                path: entry,
+                size: isDir ? 0 : (stat.size ?? 0),
+                isDir,
+                ...(isLink ? { isLink } : {}),
+              }
             }),
           )
         }

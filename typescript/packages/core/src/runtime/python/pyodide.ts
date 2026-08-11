@@ -26,6 +26,7 @@ import type {
 } from '../types.ts'
 import { createPyodideInterrupter, type PyodideInterrupter } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
+import { PrefixResolver, type MountResolver } from '../resolver.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 import { RuntimeVFS } from '../vfs.ts'
 import { applyMutation, createJournal, type MutationJournal } from './vfs/journal.ts'
@@ -33,6 +34,7 @@ import { preloadInto } from './vfs/preload.ts'
 import { MirageFs } from './vfs/vfs.ts'
 import { MirageFsSeed } from './vfs/seed.ts'
 import { PYTHON_EVAL_WRAPPER, PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
+import { unhonoredNotice, type InitFlags } from './flags.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
@@ -41,6 +43,21 @@ function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
 function bridgeStderr(value: Uint8Array | ArrayLike<number>): Uint8Array | null {
   const bytes = bridgeBytes(value)
   return bytes.length > 0 ? bytes : null
+}
+
+// The init switches this engine acts on, by CPython letter. The rest
+// (-E, -I, -s, -S) only change how an interpreter *starts*, and this
+// one is already running by the time a line is typed, so it reports
+// them instead of pretending. See PYTHON_WRAPPER for what honoring the
+// four below amounts to.
+const HONORED_FLAGS: readonly string[] = ['B', 'O', 'W', 'X']
+
+function decodeNoticeLines(notice: Uint8Array): string[] {
+  if (notice.length === 0) return []
+  return new TextDecoder()
+    .decode(notice)
+    .split('\n')
+    .filter((line) => line.length > 0)
 }
 
 function appendStderrLines(stderr: Uint8Array | null, lines: string[]): Uint8Array | null {
@@ -95,6 +112,24 @@ function servable(prefix: string): boolean {
   return mountpointOf(prefix) !== ''
 }
 
+/**
+ * Drop every prefix nested inside another: only the shallowest of a
+ * nested pair earns an Emscripten mountpoint, and its preload descends
+ * into the child through the door's merged readdir.
+ *
+ * Args:
+ *   prefixes: slash-terminated mount prefixes.
+ */
+function maximalPrefixes(prefixes: readonly string[]): string[] {
+  const shallowFirst = [...prefixes].sort((a, b) => a.length - b.length)
+  const out: string[] = []
+  for (const p of shallowFirst) {
+    if (out.some((kept) => p.startsWith(kept))) continue
+    out.push(p)
+  }
+  return out
+}
+
 function runtimeEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
@@ -135,6 +170,36 @@ export interface PyodideConfig {
   autoLoadFromImports?: boolean
   bootstrapCode?: string
   denyPackages?: readonly string[]
+  /**
+   * Virtual paths prepended to sys.path once the mounts are in place, so
+   * an agent can `import openpyxl` without writing sys.path.append
+   * itself. Entries are MOUNT paths, not host paths: the glob runs
+   * inside the interpreter against the mounted tree. A `.whl` may be
+   * named directly (zipimport reads a pure-python wheel in place), and a
+   * pattern may contain `*`, `?` or `[`.
+   *
+   * Prepended, not appended: a vendored package of the same name must
+   * win over a bundled one, which is also CPython's own PYTHONPATH
+   * precedence.
+   */
+  sysPath?: readonly string[]
+  /**
+   * Packages loaded once at init from the pyodide distribution, before
+   * the first run. Composes with autoLoadFromImports rather than
+   * replacing it: the per-run import scan is a no-op for anything
+   * already resident.
+   */
+  packages?: readonly string[]
+  /**
+   * Where package wheels are fetched from. Distinct from `home`, which
+   * only sets indexURL: the npm pyodide package ships the lock file and
+   * NO wheels, so a deployment that wants `packages` working offline
+   * points this at its own prebuilt distribution. A `://` value makes
+   * package loading a network fetch; a local path keeps it on disk.
+   */
+  packageBaseUrl?: string
+  /** A custom pyodide-lock.json, for a prebuilt distribution. */
+  lockFileURL?: string
   // Where the pyodide distribution loads from; falls back to
   // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
   // pinned CDN in the browser. Override for self-hosted assets.
@@ -146,7 +211,44 @@ const PYODIDE_CONFIG_KEYS: readonly string[] = [
   'bootstrapCode',
   'denyPackages',
   'home',
+  'sysPath',
+  'packages',
+  'packageBaseUrl',
+  'lockFileURL',
 ]
+
+// Prepend, glob-expand, and invalidate. Three things are load-bearing.
+// Prepending (not appending) lets a vendored package beat a bundled one
+// of the same name, which is CPython's own PYTHONPATH precedence. A
+// pattern that expands to nothing is collected into `_seed_misses` for
+// the host to report, because a silent [] shows up much later as a bare
+// ModuleNotFoundError with nothing pointing at the config; the seed
+// cannot report it itself, since this runs inside syncMounts, where
+// nothing is capturing sys.stderr yet. And invalidate_caches() runs
+// UNCONDITIONALLY, because
+// syncMounts remounts every prefix on every run: zipimport's archive
+// table of contents is keyed by path rather than mtime, so a remounted
+// wheel would otherwise keep serving the previous run's contents.
+const SYS_PATH_SEED_PY = String.raw`
+import sys, glob, importlib
+
+_seed_misses = []
+_expanded = []
+for _p in _seed_paths:
+    if any(c in _p for c in '*?['):
+        _hits = sorted(glob.glob(_p))
+        if not _hits:
+            _seed_misses.append(_p)
+        _expanded.extend(_hits)
+    else:
+        _expanded.append(_p)
+
+_new = [p for p in _expanded if p not in sys.path]
+if _new:
+    sys.path[:0] = _new
+
+importlib.invalidate_caches()
+`
 
 // One-shot eval is bounded like quickjs's: nothing above the runtime
 // can stop a hung guest on this thread, so the runtime owns its own
@@ -164,14 +266,25 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private readonly bootstrapCode: string | null
   private workspaceBridge: BridgeDispatchFn | null = null
   private readonly denyPackages: ReadonlySet<string>
-  private listMounts: () => string[] = () => []
+  private resolver: MountResolver = new PrefixResolver(() => [])
   private readonly home: string | null
+  private readonly sysPath: readonly string[]
+  private readonly packages: readonly string[]
+  private readonly packageBaseUrl: string | null
+  private readonly lockFileURL: string | null
   private vfs: RuntimeVFS | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
   // Prefixes this runtime cannot mount, remembered so the refusal is
   // reported once rather than on every run.
   private readonly refused = new Set<string>()
+  // Same rule for a sysPath glob that expanded to nothing. Seeding runs
+  // on every syncMounts pass, so without this a misconfigured pattern
+  // would warn on every line the agent types; and a pattern can start
+  // matching later (the wheels are written to the mount after boot),
+  // which is why the miss is reported rather than refused.
+  private readonly seedMissesReported = new Set<string>()
+  private seedNotices: string[] = []
   // The guest executes on this event loop, so only the watchdog-backed
   // interrupt buffer can stop a busy loop (see interrupt.ts); null
   // where SharedArrayBuffer/workers are unavailable (runs unbounded).
@@ -185,12 +298,24 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     this.bootstrapCode = config.bootstrapCode ?? null
     this.denyPackages = new Set(config.denyPackages ?? [])
     this.home = config.home ?? null
+    this.sysPath = config.sysPath ?? []
+    this.packages = config.packages ?? []
+    this.packageBaseUrl = config.packageBaseUrl ?? null
+    this.lockFileURL = config.lockFileURL ?? null
+    const denied = new Set(this.denyPackages)
+    const contradictory = this.packages.filter((name) => denied.has(name))
+    if (contradictory.length > 0) {
+      throw new Error(
+        `pyodide config: ${contradictory.map((n) => `'${n}'`).join(', ')} ` +
+          `appears in both packages and denyPackages`,
+      )
+    }
   }
 
-  override attach(dispatch: BridgeDispatchFn, listMounts: () => string[]): void {
+  override attach(dispatch: BridgeDispatchFn, resolver: MountResolver): void {
     if (this.workspaceBridge === null) {
       this.workspaceBridge = dispatch
-      this.listMounts = listMounts
+      this.resolver = resolver
     }
   }
 
@@ -320,7 +445,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       await this.wireInterruptIfNeeded(this.pyodide)
       return this.pyodide
     }
-    this.initPromise ??= loadPyodideRuntime(this.home ?? undefined)
+    this.initPromise ??= loadPyodideRuntime({
+      ...(this.home !== null ? { home: this.home } : {}),
+      ...(this.packageBaseUrl !== null ? { packageBaseUrl: this.packageBaseUrl } : {}),
+      ...(this.lockFileURL !== null ? { lockFileURL: this.lockFileURL } : {}),
+      ...(this.packages.length > 0 ? { packages: this.packages } : {}),
+    })
     this.pyodide = await this.initPromise
     if (this.bootstrapCode !== null) {
       const code = this.bootstrapCode
@@ -345,7 +475,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   private wireBridgeIfNeeded(): void {
     if (this.workspaceBridge === null || this.vfs !== null) return
-    this.vfs = new RuntimeVFS(this.workspaceBridge, this.listMounts)
+    this.vfs = new RuntimeVFS(this.workspaceBridge, this.resolver)
   }
 
   /**
@@ -381,11 +511,12 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
           `root; python will not see it`,
       )
     }
-    // `prefixes()` is longest-first, which is the order routing wants
-    // and the reverse of the order the mount table wants: mounting
-    // /data over an existing /data/inner orphans the child. So unmount
-    // deepest-first and mount shallowest-first.
-    const wanted = new Set(all.filter(servable))
+    // Only maximal prefixes become Emscripten mounts: the bridge routes
+    // every op by full path and the door's readdir lists a nested
+    // mount's name under its parent, so a child mount is served through
+    // the parent's mountpoint. A second Emscripten mount inside the
+    // first would be orphaned when the parent remounts.
+    const wanted = new Set(maximalPrefixes(all.filter(servable)))
     for (const prefix of [...this.mounted].sort((a, b) => b.length - a.length)) {
       if (wanted.has(prefix)) continue
       pyodide.FS.unmount(mountpointOf(prefix))
@@ -399,7 +530,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       await preloadInto(seed, vfs, prefix)
       const mountpoint = mountpointOf(prefix)
       if (this.mounted.has(prefix)) pyodide.FS.unmount(mountpoint)
-      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, this.journal, mountpoint)
+      const fs = new MirageFs(pyodide.FS, pyodide.ERRNO_CODES, this.journal, mountpoint, (p) =>
+        vfs.mountOf(p),
+      )
       pyodide.FS.mkdirTree(mountpoint)
       pyodide.FS.mount(fs.type, {}, mountpoint)
       // After the mount, never inside it: Emscripten assigns the root's
@@ -408,6 +541,73 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       fs.seed(seed)
       this.mounted.add(prefix)
     }
+    await this.seedSysPath(pyodide)
+  }
+
+  /**
+   * Put the configured paths on sys.path, after every mount is in place.
+   *
+   * Runs on EVERY syncMounts pass rather than once at load: each pass
+   * unmounts and remounts the prefixes, and zipimport caches an
+   * archive's table of contents by path, so a `.whl` served from a
+   * remounted tree would keep answering from the previous run. Both
+   * guards inside are idempotent, so repeating is cheap.
+   *
+   * Args:
+   *   pyodide: the loaded interpreter.
+   */
+  private async seedSysPath(pyodide: PyodideInterface): Promise<void> {
+    if (this.sysPath.length === 0) return
+    const seedPy = pyodide.toPy([...this.sysPath])
+    pyodide.globals.set('_seed_paths', seedPy)
+    try {
+      await pyodide.runPythonAsync(SYS_PATH_SEED_PY)
+      this.recordSeedMisses(pyodide)
+    } finally {
+      pyodide.globals.delete?.('_seed_paths')
+      if (seedPy !== null && typeof seedPy === 'object' && 'destroy' in seedPy) {
+        try {
+          ;(seedPy as { destroy: () => void }).destroy()
+        } catch {
+          // destroy is best-effort; ignore double-destroy errors
+        }
+      }
+    }
+  }
+
+  /**
+   * Queue a notice for each glob that expanded to nothing this pass.
+   *
+   * The seed cannot report these itself: it runs inside syncMounts,
+   * before the run's stdout/stderr are captured, so anything it wrote
+   * to sys.stderr reached nobody. Queuing here and draining onto the
+   * run's stderr puts the warning in front of the same agent whose
+   * import is about to fail.
+   *
+   * Args:
+   *   pyodide: the loaded interpreter, holding the seed's `_seed_misses`.
+   */
+  private recordSeedMisses(pyodide: PyodideInterface): void {
+    const proxy = pyodide.globals.get('_seed_misses') as
+      | { toJs?: () => unknown; destroy?: () => void }
+      | null
+      | undefined
+    const misses = proxy?.toJs?.()
+    proxy?.destroy?.()
+    pyodide.globals.delete?.('_seed_misses')
+    if (!Array.isArray(misses)) return
+    for (const miss of misses as unknown[]) {
+      const pattern = String(miss)
+      if (this.seedMissesReported.has(pattern)) continue
+      this.seedMissesReported.add(pattern)
+      this.seedNotices.push(`python3: sysPath: '${pattern}' matched nothing`)
+    }
+  }
+
+  private takeSeedNotices(): string[] {
+    const notices = this.seedNotices
+    this.seedNotices = []
+    return notices
   }
 
   /**
@@ -459,6 +659,15 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
 
   private async runOne(args: RunArgs): Promise<RunResult> {
     const pyodide = await this.ensureLoaded()
+    // Seeding happened inside ensureLoaded; its notices ride out on
+    // this run's stderr, beside any flush failure and any init switch
+    // this engine could not act on.
+    const seedNotices = [
+      ...this.takeSeedNotices(),
+      ...decodeNoticeLines(
+        unhonoredNotice((args.flags ?? {}) as InitFlags, this.name, HONORED_FLAGS),
+      ),
+    ]
     await this.loadImports(pyodide, args.code)
     const mergedEnv = { ...runtimeEnv(), ...args.env }
     // sys.argv[0] is the program's own name when the caller has one (a
@@ -470,7 +679,9 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const argvPy = pyodide.toPy(argv)
     const userGlobalsPy = pyodide.toPy({})
 
+    const initFlagsPy = pyodide.toPy(args.flags ?? {})
     pyodide.globals.set('_user_code', args.code)
+    pyodide.globals.set('_init_flags', initFlagsPy)
     pyodide.globals.set('_argv', argvPy)
     pyodide.globals.set('_merged_env', mergedEnvPy)
     pyodide.globals.set('_stdin_bytes', stdinBytes)
@@ -505,14 +716,17 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
           stdout: new Uint8Array(),
           stderr: appendStderrLines(
             new TextEncoder().encode('python3: runtime returned no result\n'),
-            flushFailures,
+            [...seedNotices, ...flushFailures],
           ),
           exitCode: 1,
         }
       }
       return {
         stdout: bridgeBytes(arr[0]),
-        stderr: appendStderrLines(bridgeStderr(arr[1]), flushFailures),
+        // A seed notice rides on stderr but never on the exit code: an
+        // unmatched glob is a warning about the environment, not a
+        // failure of the program that just ran.
+        stderr: appendStderrLines(bridgeStderr(arr[1]), [...seedNotices, ...flushFailures]),
         exitCode: flushFailures.length > 0 && arr[2] === 0 ? 1 : arr[2],
       }
     } catch (err) {
@@ -521,7 +735,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       // Files closed before the failure are complete in MEMFS, so their
       // marks still flush; failures can only be warned here.
       const deadline = armed?.disarm() === 'deadline'
-      for (const failure of await this.drainMutations()) console.warn(failure)
+      for (const notice of [...seedNotices, ...(await this.drainMutations())]) console.warn(notice)
       if (deadline && args.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, args.timeoutSeconds)
       }
@@ -529,6 +743,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     } finally {
       armed?.disarm()
       pyodide.globals.delete?.('_user_code')
+      pyodide.globals.delete?.('_init_flags')
       pyodide.globals.delete?.('_argv')
       pyodide.globals.delete?.('_merged_env')
       pyodide.globals.delete?.('_stdin_bytes')
@@ -544,6 +759,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
         }
       }
       maybeDestroy(mergedEnvPy)
+      maybeDestroy(initFlagsPy)
       maybeDestroy(argvPy)
       maybeDestroy(userGlobalsPy)
     }

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
+import pytest_asyncio
 
 from mirage.resource.github.github import GitHubResource
 from tests.fixtures.github_mock import github_config, mock_github_api
@@ -24,9 +24,9 @@ REPO = "test-repo"
 REF = "main"
 
 
-@pytest.fixture
-def github_env(mock_github_api, github_config):
-    resource = GitHubResource(
+@pytest_asyncio.fixture()
+async def github_env(mock_github_api, github_config):
+    resource = await GitHubResource.build(
         config=github_config,
         owner=OWNER,
         repo=REPO,

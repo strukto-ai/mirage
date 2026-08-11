@@ -22,6 +22,15 @@ import * as Node from '@struktoai/mirage-node'
 
 import type { CommandSpec, Operand, Option, RegisteredCommand } from '@struktoai/mirage-core'
 
+import {
+  type Capabilities,
+  type CommandIoFacts,
+  capabilitiesOf,
+  collectClasses,
+  commandIoFacts,
+  registryClasses,
+} from './resource_facts.ts'
+
 const { CommandSpec: SpecClass, Operand: OperandClass, Option: OptionClass } = Core
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..')
@@ -170,6 +179,7 @@ function operandFields(op: Operand): Record<string, unknown> {
   return {
     name: op.name,
     provided_by: [...op.providedBy],
+    remainder: op.remainder,
     required: op.required,
     text_when: [...op.textWhen],
     type: op.type,
@@ -246,10 +256,19 @@ function sortedStringify(value: unknown): string {
 // command. A name in the second but not the first registers commands yet
 // cannot be mounted by name, which is how chroma/dify/lancedb/qdrant stayed
 // unconstructible in typescript while appearing in every command's `_meta`.
+//
+// `capabilities` and `command_io` carry the values behind those names.
+// Registry membership only says a backend can be built; how it behaves is
+// a second hand-maintained surface that drifted just as quietly — Python
+// served ten-minute-stale listings of a live postgres schema because its
+// `index_ttl` kept the 600 s default where typescript pinned 0, and box's
+// `du` slot is wired on one side and absent on the other.
 function emitResources(
   name: string,
   knownResources: string[],
   registry: Record<string, RegisteredCommand[]>,
+  capabilities: Record<string, Capabilities | null>,
+  commandIo: Record<string, CommandIoFacts>,
 ): void {
   const commandResources = new Set<string>()
   for (const rcs of Object.values(registry)) {
@@ -258,10 +277,28 @@ function emitResources(
   const payload = {
     registry: [...knownResources].sort(),
     command_resources: [...commandResources].sort(),
+    capabilities,
+    command_io: commandIo,
   }
   const path = resolve(SPEC_ROOT, name, 'resources.json')
   writeFileSync(path, sortedStringify(payload) + '\n')
   console.log(`emitted ${payload.registry.length} registry names to ${path}`)
+}
+
+// Every registry name's capability values, read from the class the entry
+// constructs. A name whose class cannot be resolved is a hard error: a
+// missing row would read as "no divergence here" in the parity gate.
+function capabilitiesFor(
+  pkgs: readonly string[],
+  variantPkg: string,
+): Record<string, Capabilities | null> {
+  const classes = collectClasses(PACKAGES, pkgs)
+  const names = registryClasses(resolve(PACKAGES, variantPkg, 'src', 'resource', 'registry.ts'))
+  const out: Record<string, Capabilities | null> = {}
+  for (const [resource, className] of [...names].sort(([a], [b]) => a.localeCompare(b))) {
+    out[resource] = className === null ? null : capabilitiesOf(className, classes)
+  }
+  return out
 }
 
 function emitVariant(
@@ -282,7 +319,16 @@ function emitVariant(
     writeFileSync(resolve(outDir, `${cmd}.json`), sortedStringify(payload) + '\n')
   }
   console.log(`emitted ${cmdNames.length} specs to ${outDir}`)
-  emitResources(name, knownResources, registry)
+  emitResources(
+    name,
+    knownResources,
+    registry,
+    capabilitiesFor(pkgs, pkgs[pkgs.length - 1] as string),
+    commandIoFacts(PACKAGES, pkgs, {
+      maxGlobMatches: Core.DEFAULT_MAX_GLOB_MATCHES,
+      maxDuEntries: Core.DEFAULT_MAX_DU_ENTRIES,
+    }),
+  )
 }
 
 function main(): void {

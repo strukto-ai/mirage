@@ -22,6 +22,21 @@ from mirage.ops.generic import make_generic_ops
 from mirage.ops.registry import OpsRegistry
 from mirage.types import PathSpec
 
+
+class _S3Error(Exception):
+
+    def __init__(self, code: str, status: int) -> None:
+        super().__init__(code)
+        self.response = {
+            "Error": {
+                "Code": code
+            },
+            "ResponseMetadata": {
+                "HTTPStatusCode": status
+            },
+        }
+
+
 PATH = PathSpec.from_str_path("/x/a.txt", "a.txt")
 
 
@@ -201,6 +216,28 @@ async def test_a_native_range_is_bypassed_for_a_whole_file_read():
     table = make_table(read_range=native)
     assert await read_op(table).fn(NOOPAccessor(), PATH) == b"data"
     native.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_window_past_the_end_reads_empty_not_416():
+    # A POSIX read at or past EOF is short, not an error, and that is
+    # what the slice fallback gives. An HTTP store refuses instead, so
+    # wiring a native range used to change the answer for the same call;
+    # normalizing here keeps the op meaning one thing either way.
+    refused = _S3Error("InvalidRange", 416)
+    native = AsyncMock(side_effect=refused)
+    table = make_table(read_range=native)
+    assert await read_op(table).fn(NOOPAccessor(), PATH, offset=99,
+                                   size=2) == b""
+    native.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_range_read_that_failed_for_a_real_reason_propagates():
+    native = AsyncMock(side_effect=_S3Error("AccessDenied", 403))
+    table = make_table(read_range=native)
+    with pytest.raises(_S3Error):
+        await read_op(table).fn(NOOPAccessor(), PATH, offset=1, size=2)
 
 
 @pytest.mark.asyncio

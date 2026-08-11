@@ -285,6 +285,7 @@ OPS_INVENTORY = {
         ("stat", "slack", "", False),
     ],
     "ssh": [
+        ("append", "ssh", "", True),
         ("create", "ssh", "", True),
         ("mkdir", "ssh", "", True),
         ("read", "ssh", "", False),

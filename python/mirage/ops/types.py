@@ -53,6 +53,12 @@ LinkResolve = Callable[[str], str]
 LinkExists = Callable[[str], Awaitable[bool]]
 # The stat of what a link points at, None when it dangles or loops.
 LinkTargetStat = Callable[[str], Awaitable["FileStat | None"]]
+# Immediate child-mount names under a directory, session-filtered. The
+# other half of namespace structure beside links: a nested mount is
+# invisible to the parent mount's backend, so a listing command is
+# handed the names from above, the same names the door merges into its
+# own readdir.
+ChildMounts = Callable[[str], list[str]]
 
 
 @dataclass(frozen=True)

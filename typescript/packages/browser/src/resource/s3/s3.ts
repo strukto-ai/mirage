@@ -37,6 +37,7 @@ import {
   type Resource,
   ResourceName,
   S3_SCOPE_ERROR,
+  s3StorageId,
   rmR as rmRCore,
   rmdir as rmdirCore,
   S3_OPS,
@@ -66,6 +67,10 @@ export class S3Resource implements Resource {
   readonly supportsSnapshot: boolean = true
   readonly kind: string = ResourceName.S3
   readonly cachesReads: boolean = true
+  // A HEAD carries ContentLength, so a size is always knowable without
+  // fetching. Every sibling browser resource says so; s3 was the one that
+  // did not, and its node twin has always declared it.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 600
   readonly prompt: string = S3_BROWSER_PROMPT
   readonly config: S3Config
@@ -76,6 +81,14 @@ export class S3Resource implements Resource {
     this.config = config
     this.accessor = new S3Accessor(this.config)
     this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
+  }
+
+  // Without this, two mounts of one bucket at different prefixes are two
+  // storages, so `mv` between them copies an object over itself and then
+  // unlinks the source. Node has always declared it; the shared helper keeps
+  // the two runtimes from computing different identities for one bucket.
+  storageId(): string {
+    return s3StorageId(this.kind, this.config)
   }
 
   open(): Promise<void> {

@@ -131,6 +131,58 @@ describe('fanOutTraversal mount-entry synthesis honors the expression tree', () 
   })
 })
 
+describe('find actions on structural rows', () => {
+  function nestedGhostRegistry(): MountRegistry {
+    const parent = new RAMResource()
+    parent.store.files.set('/top.txt', new TextEncoder().encode('hello\n'))
+    const deep = new RAMResource()
+    deep.store.files.set('/leaf.txt', new TextEncoder().encode('deep\n'))
+    const reg = new MountRegistry({ '/': parent, '/ghost/very/deep/': deep }, MountMode.WRITE)
+    wireRegistry(reg)
+    return reg
+  }
+
+  it('-ls renders namespace-only ancestor rows', async () => {
+    const reg = nestedGhostRegistry()
+    const s = new Session({ sessionId: 'test', cwd: '/' })
+    const [out, io] = await handleCommand(
+      NEVER_EXECUTE,
+      STAT_ONLY_DISPATCH,
+      reg,
+      ['find', '/', '-ls'],
+      s,
+    )
+    expect(io.exitCode).toBe(0)
+    const text = out === null ? '' : new TextDecoder().decode(await materialize(out))
+    const rows = text
+      .split('\n')
+      .filter((l) => l !== '')
+      .map((l) => l.split(/[\t ]+/).at(-1))
+    expect(rows).toContain('/ghost')
+    expect(rows).toContain('/ghost/very')
+    expect(rows).toContain('/ghost/very/deep')
+  })
+
+  it('-delete skips structural rows and exits 0', async () => {
+    const reg = nestedGhostRegistry()
+    const s = new Session({ sessionId: 'test', cwd: '/' })
+    const [, io] = await handleCommand(
+      NEVER_EXECUTE,
+      STAT_ONLY_DISPATCH,
+      reg,
+      ['find', '/', '-delete'],
+      s,
+    )
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toBe('')
+    const [after] = await handleCommand(NEVER_EXECUTE, STAT_ONLY_DISPATCH, reg, ['find', '/'], s)
+    const text = after === null ? '' : new TextDecoder().decode(await materialize(after))
+    expect(text).toContain('/ghost/very/deep')
+    expect(text).not.toContain('/top.txt')
+    expect(text).not.toContain('leaf.txt')
+  })
+})
+
 describe('fanOutTraversal -maxdepth applies to child-mount depth', () => {
   it('a deeper child entry beyond the budget is excluded', async () => {
     const child = new RAMResource()

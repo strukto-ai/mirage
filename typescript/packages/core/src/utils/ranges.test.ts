@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { rangeHeader, sliceWindow } from './ranges.js'
+import { isUnsatisfiableRange, rangeHeader, sliceWindow } from './ranges.js'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -73,5 +73,46 @@ describe('sliceWindow', () => {
 
   it('is empty from past the end', () => {
     expect(sliceWindow(DATA, 99, 4)).toEqual(new Uint8Array(0))
+  })
+})
+
+describe('isUnsatisfiableRange', () => {
+  // The point of the predicate: a POSIX read at or past EOF is empty, an HTTP
+  // store answers 416, and no two clients spell the refusal the same way.
+  it('recognizes the aws sdk shape', () => {
+    const err = Object.assign(new Error('InvalidRange'), {
+      name: 'InvalidRange',
+      $metadata: { httpStatusCode: 416 },
+    })
+    expect(isUnsatisfiableRange(err)).toBe(true)
+  })
+
+  it('recognizes a bare status, with no code at all', () => {
+    expect(isUnsatisfiableRange({ status: 416 })).toBe(true)
+    expect(isUnsatisfiableRange({ statusCode: 416 })).toBe(true)
+  })
+
+  it('recognizes the code without a status', () => {
+    expect(isUnsatisfiableRange(Object.assign(new Error('nope'), { Code: 'InvalidRange' }))).toBe(
+      true,
+    )
+  })
+
+  it('falls back to the status line a plain http store leaves', () => {
+    expect(isUnsatisfiableRange(new Error('416 Range Not Satisfiable'))).toBe(true)
+  })
+
+  it('does not swallow a real failure', () => {
+    // Anything broader here would turn a missing object or a denied request
+    // into a silent empty read, which is the bug this guards against.
+    const notFound = Object.assign(new Error('NoSuchKey'), {
+      name: 'NoSuchKey',
+      $metadata: { httpStatusCode: 404 },
+    })
+    expect(isUnsatisfiableRange(notFound)).toBe(false)
+    expect(isUnsatisfiableRange(new Error('AccessDenied'))).toBe(false)
+    expect(isUnsatisfiableRange({ status: 500 })).toBe(false)
+    expect(isUnsatisfiableRange(null)).toBe(false)
+    expect(isUnsatisfiableRange(undefined)).toBe(false)
   })
 })

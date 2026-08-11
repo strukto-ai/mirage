@@ -19,6 +19,7 @@ export {
   type DuOps,
   makeResolveGlob,
   overlaidStat,
+  rangeOf,
   resolveGlobOf,
 } from './adapter.ts'
 export { type MakeGenericCommandsOptions, makeGenericCommands } from './factory.ts'

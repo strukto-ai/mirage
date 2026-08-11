@@ -238,6 +238,7 @@ export {
   metadataProvision,
   overlaidStat,
   pureProvision,
+  rangeOf,
   resolveGlobOf,
   withDefaultProvisions,
   writeMetadataProvision,
@@ -295,7 +296,13 @@ export {
 export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
-export { duGeneric, parseDepth, parseDuFlags, runDu } from './commands/builtin/generic/du.ts'
+export {
+  DEFAULT_MAX_DU_ENTRIES,
+  duGeneric,
+  parseDepth,
+  parseDuFlags,
+  runDu,
+} from './commands/builtin/generic/du.ts'
 export { treeGeneric } from './commands/builtin/generic/tree.ts'
 export { lsGeneric } from './commands/builtin/generic/ls.ts'
 export { fileGeneric } from './commands/builtin/generic/file.ts'
@@ -581,6 +588,12 @@ export {
   type Policy,
 } from './policy/index.ts'
 export { buildRuntime, candidates, registerRuntime, RUNTIMES } from './runtime/table.ts'
+// The concrete runtime classes stay unexported on purpose: buildRuntime
+// is the one construction door, and a config block reaches it as a plain
+// object. Exporting the config TYPE is what makes that object checkable,
+// so `buildRuntime('pyodide', { config: cfg })` refuses a misspelled key
+// at compile time instead of at first run.
+export type { PyodideConfig } from './runtime/python/pyodide.ts'
 export { RemoteSandbox } from './runtime/sandbox/base.ts'
 export { type NormalizedSandboxConfig, type SandboxConfig } from './runtime/sandbox/config.ts'
 export { stdinPath, stdinRedirect } from './runtime/sandbox/constants.ts'
@@ -726,6 +739,7 @@ export {
   type S3HttpAgents,
 } from './resource/s3/config.ts'
 export { remapCommandsResource, remapOpsResource } from './resource/s3/remap.ts'
+export { s3StorageId } from './resource/s3/storage_id.ts'
 export { S3_PROMPT } from './resource/s3/prompt.ts'
 export { SCOPE_ERROR as S3_SCOPE_ERROR } from './core/s3/constants.ts'
 export { copy } from './core/s3/copy.ts'

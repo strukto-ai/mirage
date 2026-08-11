@@ -53,7 +53,21 @@ USAGE_EXIT = {
     "awk": 2,
     "jq": 2,
     "tar": 64,
+    "python": 2,
+    "python3": 2,
 }
+
+# The interpreter commands answer option errors in CPython's words, not
+# GNU's: python3 is not a GNU tool, and its refusal names the
+# source-selecting options a reader needs. Plain strings for the same
+# no-cycle reason as USAGE_EXIT above.
+PYTHON_NAMES = frozenset({"python", "python3"})
+
+# Pinned on CPython 3.12.13, including two quirks worth keeping: the
+# hint always spells the program `python` (never `python3`, whichever
+# way it was invoked), and it quotes with a backquote/quote pair.
+PYTHON_USAGE = ("usage: {name} [option] ... [-c cmd | -m mod | file | -] "
+                "[arg] ...\nTry `python -h' for more information.\n")
 
 # An old-style cluster letter left without its argument exits 2, not
 # USAGE_EXIT's 64: tar reads the cluster itself and raises its own fatal

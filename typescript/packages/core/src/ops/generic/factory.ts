@@ -15,7 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { extractWriteData } from '../write_args.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
+import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { PathSpec } from '../../types.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,6 +131,12 @@ export function makeGenericOps<A extends Accessor>(
   // backend that renders its content rather than storing it, since there is no
   // remote range to ask for. A zero-length read is answered here rather than
   // sent anywhere: no store can express an empty range, and the answer is known.
+  //
+  // A window starting at or past EOF is the one case where the two paths do not
+  // agree on their own: slicing yields empty, the POSIX answer, while an HTTP
+  // store refuses with 416. Normalizing here rather than in each reader keeps
+  // the op's contract one thing, and keeps a backend from becoming the odd one
+  // out the day it grows a native range.
   emit(
     'read',
     async (accessor, path, _args, kwargs) => {
@@ -140,7 +146,12 @@ export function makeGenericOps<A extends Accessor>(
       const whole = offset === 0 && size === null
       const native = table.readRange
       if (native !== undefined && !whole) {
-        return native(asA(accessor), path, pickIndex(kwargs), offset, size)
+        try {
+          return await native(asA(accessor), path, pickIndex(kwargs), offset, size)
+        } catch (err) {
+          if (!isUnsatisfiableRange(err)) throw err
+          return new Uint8Array(0)
+        }
       }
       const data = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
       return whole ? data : sliceWindow(data, offset, size)

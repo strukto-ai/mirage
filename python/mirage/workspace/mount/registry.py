@@ -24,6 +24,7 @@ from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import VFSRuntime
 from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
+from mirage.utils.path import owner_prefix
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -192,15 +193,13 @@ class MountRegistry:
         path: str,
     ) -> tuple[BaseResource, str, MountMode]:
         """Returns (resource, resource_path, mode)."""
+        m = self.mount_for(path)
         had_trailing = path.endswith("/")
         norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if (norm == m.prefix.rstrip("/") or norm.startswith(m.prefix)):
-                resource_path = "/" + norm[len(m.prefix):]
-                if (had_trailing and not resource_path.endswith("/")):
-                    resource_path += "/"
-                return m.resource, resource_path, m.mode
-        raise ValueError(f"no mount matches path: {path!r}")
+        resource_path = "/" + norm[len(m.prefix):]
+        if had_trailing and not resource_path.endswith("/"):
+            resource_path += "/"
+        return m.resource, resource_path, m.mode
 
     def mount_for_prefix(self, prefix: str) -> MountEntry:
         for m in self._mounts:
@@ -251,47 +250,12 @@ class MountRegistry:
         out.sort(key=lambda m: m.prefix)
         return out
 
-    def child_mount_names(
-        self,
-        parent_path: str,
-        include_hidden: bool = False,
-    ) -> list[str]:
-        """Names of immediate child mounts under parent_path.
-
-        Args:
-            parent_path (str): directory whose child mounts to enumerate.
-            include_hidden (bool): include names starting with '.'.
-        """
-        stripped = parent_path.strip("/")
-        norm = "/" + stripped + "/" if stripped else "/"
-        seen: set[str] = set()
-        out: list[str] = []
-        for m in self._mounts:
-            if m.prefix == norm:
-                continue
-            if not m.prefix.startswith(norm):
-                continue
-            rest = m.prefix[len(norm):]
-            slash = rest.find("/")
-            name = rest if slash == -1 else rest[:slash]
-            if name == "":
-                continue
-            if not include_hidden and name.startswith("."):
-                continue
-            if name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
-        out.sort()
-        return out
-
     def mount_for(self, path: str) -> MountEntry:
         """Find the mount that handles this path."""
-        norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if (norm == m.prefix.rstrip("/") or norm.startswith(m.prefix)):
-                return m
-        raise ValueError(f"no mount matches path: {path!r}")
+        owner = owner_prefix((m.prefix for m in self._mounts), path)
+        if owner is None:
+            raise ValueError(f"no mount matches path: {path!r}")
+        return self.mount_for_prefix(owner)
 
     def is_exec_allowed(self) -> bool:
         for m in self._mounts:

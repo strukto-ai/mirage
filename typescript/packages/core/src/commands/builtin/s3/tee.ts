@@ -13,17 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { exists as s3Exists } from '../../../core/s3/exists.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { parseTeeFlags, writeOutput } from '../generic/tee.ts'
+import { teeGeneric } from '../generic/tee.ts'
 import { S3_IO } from './io.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { readStdinAsync } from '../utils/stream.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
 
@@ -38,31 +36,18 @@ async function teeCommand(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
-  const parsed = parseTeeFlags(opts.flags)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
-  }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const first = resolved[0]
-  if (first === undefined) return [null, new IOResult()]
-  const stdinData = await readStdinAsync(opts.stdin)
-  const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
-  let writeData = raw
-  if (parsed.append) {
-    let existingFound = false
-    try {
-      existingFound = await s3Exists(accessor, first)
-    } catch {
-      existingFound = false
-    }
-    if (existingFound) {
-      const existing = await materialize(s3Stream(accessor, first))
-      writeData = new Uint8Array(existing.byteLength + raw.byteLength)
-      writeData.set(existing, 0)
-      writeData.set(raw, existing.byteLength)
-    }
-  }
-  return writeOutput((p, d) => s3Write(accessor, p, d), first, writeData, raw)
+  // Wiring only: every flag semantic, the write to each operand and the append
+  // fallback live in the generic. This file used to restate them, wrote only
+  // resolved[0], and carried an exists() pre-check to work around the
+  // generic's broken not-found test.
+  return teeGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => s3Stream(accessor, p),
+    (p, d) => s3Write(accessor, p, d),
+  )
 }
 
 export const S3_TEE = command({

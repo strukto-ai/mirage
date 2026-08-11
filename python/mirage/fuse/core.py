@@ -73,12 +73,6 @@ class MountCore:
         self._session = session
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
-        # When scoped to a single mount, the root maps onto that mount and
-        # there are no virtual intermediate directories to synthesize.
-        if self._root:
-            self._prefixes: list[str] = []
-        else:
-            self._prefixes = self._ops.mount_prefixes()
         self._handles: dict[int, Handle] = {}
         # Prefetched content for size-unknown files: path -> (data, expiry).
         self._prefetch: dict[str, tuple[bytes, float]] = {}
@@ -242,24 +236,6 @@ class MountCore:
         entry["st_mode"] = stat.S_IFLNK | 0o777
         return entry
 
-    def _is_virtual_dir(self, path: str) -> bool:
-        normalized = path.rstrip("/") + "/"
-        for p in self._prefixes:
-            if p.startswith(normalized) or p.rstrip("/") == path.rstrip("/"):
-                return True
-        return False
-
-    def _virtual_children(self, path: str) -> list[str]:
-        normalized = path.rstrip("/") + "/" if path != "/" else "/"
-        children = set()
-        for p in self._prefixes:
-            if p.startswith(normalized) and p != normalized:
-                rest = p[len(normalized):]
-                child = rest.split("/")[0]
-                if child:
-                    children.add(child)
-        return sorted(children)
-
     def drain_ops(self) -> list[dict[str, Any]]:
         records = [asdict(r) for r in self._ops.records]
         self._ops.records.clear()
@@ -355,8 +331,6 @@ class MountCore:
         target = self.link_target(path)
         if target is not None:
             return self.link_stat(target)
-        if self._is_virtual_dir(path):
-            return self.dir_stat()
         s = self._run(self._ops.stat(self.resolve(path)))
         if s.type == FileType.DIRECTORY:
             return self._apply_stat_attrs(self.dir_stat(), s)
@@ -385,21 +359,16 @@ class MountCore:
         Raises:
             FileNotFoundError: no such directory and nothing virtual there.
         """
-        names = set(self._virtual_children(path))
-        links = self._ops.links
-        if links is not None:
-            for link_name in links.links_under(self.resolve(path)):
-                if link_name and not is_macos_metadata(link_name):
-                    names.add(link_name)
-        try:
-            entries = self._run(self._ops.readdir(self.resolve(path)))
-            for e in entries:
-                part = e.rstrip("/").rsplit("/", 1)[-1]
-                if part and not is_macos_metadata(part):
-                    names.add(part)
-        except (FileNotFoundError, ValueError, NotADirectoryError):
-            if not names:
-                raise
+        # The ops facade merges namespace structure (child mounts and
+        # symlinks) into readdir and answers structure-only directories
+        # itself, so the core only normalizes entry shapes and drops
+        # macOS metadata names.
+        names = set()
+        entries = self._run(self._ops.readdir(self.resolve(path)))
+        for e in entries:
+            part = e.rstrip("/").rsplit("/", 1)[-1]
+            if part and not is_macos_metadata(part):
+                names.add(part)
         return [".", ".."] + sorted(names)
 
     def read(self, path: str, size: int, offset: int, fh: int | None) -> bytes:

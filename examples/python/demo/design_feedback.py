@@ -47,7 +47,7 @@ async def main() -> None:
         token=os.environ["SLACK_BOT_TOKEN"],
         search_token=os.environ.get("SLACK_USER_TOKEN"),
     ))
-    github = GitHubResource(
+    github = await GitHubResource.build(
         config=GitHubConfig(token=os.environ["GITHUB_TOKEN"]),
         owner=GITHUB_OWNER,
         repo=GITHUB_REPO,

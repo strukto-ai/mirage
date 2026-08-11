@@ -16,10 +16,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (Action, Deny, GuardSpec, OpsContext, Policies,
                            Policy, PolicyDenied)
-from mirage.types import ConsistencyPolicy, PathSpec
+from mirage.types import ConsistencyPolicy, FileType, MountMode, PathSpec
 from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.session import Session
 
 
 class DenyLocked(Policy):
@@ -109,3 +111,104 @@ async def test_spec_op_twin_holds_on_the_dispatch_door():
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
     assert "frozen" in str(excinfo.value)
+
+
+def _structure_only(dispatcher) -> None:
+    """Point the mocks at a path no mount serves but structure knows:
+    mount_for misses, while a mount deeper down makes the namespace
+    answer readdir/stat for its parent."""
+    namespace = dispatcher._namespace
+    namespace.mount_for = MagicMock(side_effect=ValueError("no mount"))
+    deep = MagicMock()
+    deep.prefix = "/data/locked/inner/deep/"
+    namespace.registry.mounts = MagicMock(return_value=[deep])
+    namespace.symlink_targets = MagicMock(return_value={})
+
+
+@pytest.mark.asyncio
+async def test_structure_fallback_still_clears_admission():
+    # A path with no owning mount can still answer readdir/stat from
+    # namespace structure. That synthetic answer must pass the same
+    # gates as a backend one, or "no mount here" is a policy bypass.
+    policies = Policies()
+    policies.add(DenyLocked())
+    dispatcher, _ = _dispatcher(policies)
+    _structure_only(dispatcher)
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("readdir", _path("/data/locked/inner"))
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("stat", _path("/data/locked/inner"))
+
+
+@pytest.mark.asyncio
+async def test_structure_fallback_serves_when_no_policy_objects():
+    dispatcher, _ = _dispatcher(Policies())
+    _structure_only(dispatcher)
+    result, _ = await dispatcher.dispatch("readdir",
+                                          _path("/data/locked/inner"))
+    assert result == ["/data/locked/inner/deep"]
+
+
+@pytest.fixture
+def scoped_session():
+    """Bind a session granted only the deep nested mount."""
+    session = Session(session_id="agent",
+                      mount_modes={"/data/locked/inner/deep": MountMode.EXEC})
+    token = set_current_session(session)
+    yield session
+    reset_current_session(token)
+
+
+def _ungranted_parent(dispatcher) -> None:
+    """Point the mocks at a real but ungranted mount whose subtree holds
+    a granted one: mount_for resolves the parent for every path, while
+    only the deep mount is in the session's grants."""
+    namespace = dispatcher._namespace
+    mount = MagicMock()
+    mount.prefix = "/data/locked/"
+    mount.execute_op = AsyncMock(return_value=b"cold")
+    namespace.mount_for = MagicMock(return_value=mount)
+    deep = MagicMock()
+    deep.prefix = "/data/locked/inner/deep/"
+    namespace.registry.mounts = MagicMock(return_value=[mount, deep])
+    namespace.symlink_targets = MagicMock(return_value={})
+
+
+@pytest.mark.asyncio
+async def test_ungranted_parent_serves_granted_structure(scoped_session):
+    # A granted mount below an ungranted one already put the parent's
+    # name in a listing, so walking down to the grant must answer; the
+    # backend never runs, so nothing of the parent's content leaks.
+    dispatcher, _ = _dispatcher(Policies())
+    _ungranted_parent(dispatcher)
+    result, _ = await dispatcher.dispatch("readdir", _path("/data/locked"))
+    assert result == ["/data/locked/inner"]
+    st, _ = await dispatcher.dispatch("stat", _path("/data/locked"))
+    assert st.type is FileType.DIRECTORY
+    mount = dispatcher._namespace.mount_for.return_value
+    mount.execute_op.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ungranted_parent_structure_still_clears_admission(
+        scoped_session):
+    policies = Policies()
+    policies.add(DenyLocked())
+    dispatcher, _ = _dispatcher(policies)
+    _ungranted_parent(dispatcher)
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("readdir", _path("/data/locked/inner"))
+
+
+@pytest.mark.asyncio
+async def test_ungranted_mount_without_structure_still_denies(scoped_session):
+    # A path the structure does not owe raises the canonical denial,
+    # and a write can never be served synthetically.
+    dispatcher, _ = _dispatcher(Policies())
+    _ungranted_parent(dispatcher)
+    with pytest.raises(PermissionError):
+        await dispatcher.dispatch("readdir", _path("/data/locked/other"))
+    with pytest.raises(PermissionError):
+        await dispatcher.dispatch("write",
+                                  _path("/data/locked/f.txt"),
+                                  data=b"x")

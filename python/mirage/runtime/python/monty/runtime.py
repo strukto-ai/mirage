@@ -18,20 +18,22 @@ import logging
 import os
 import signal
 from collections.abc import Sequence
-from typing import Any, Callable
+from dataclasses import replace
+from typing import Any, Callable, ClassVar
 
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.python.flags import unhonored_notice
 from mirage.runtime.python.monty.binding import pydantic_monty
 from mirage.runtime.python.monty.constants import (DEFAULT_PROG,
                                                    INCOMPLETE_MARKERS,
                                                    MISSING_EXTRA_HINT)
 from mirage.runtime.python.monty.osaccess import MirageOSAccess
-from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue,
-                                  PrefixSource, RunArgs, RunResult,
-                                  ScriptSource)
+from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
+                                  RunResult, ScriptSource)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,10 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     """
 
     name = "monty"
+    # No import system to resolve a module with, so `-m` has nothing to
+    # run; the refusal names this runtime rather than inventing a
+    # "No module named" that would imply a search happened.
+    runs_modules: ClassVar[bool] = False
 
     def __init__(
             self,
@@ -63,16 +69,15 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
             raise ImportError(MISSING_EXTRA_HINT)
         super().__init__(captures, config, script)
         self._workspace_dispatch: DispatchFn | None = None
-        self._mount_prefixes: PrefixSource | None = None
+        self._resolver: MountResolver | None = None
         self._eval_sessions: dict[str, Any] = {}
         self._pool: Any = None
         self._pool_task: asyncio.Task[Any] | None = None
 
-    def attach(self, dispatch: DispatchFn,
-               mount_prefixes: PrefixSource) -> None:
+    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         if self._workspace_dispatch is None:
             self._workspace_dispatch = dispatch
-            self._mount_prefixes = mount_prefixes
+            self._resolver = resolver
 
     async def _ensure_pool(self) -> Any:
         """The runtime's worker pool, spawned on first use.
@@ -103,6 +108,24 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         return pool
 
     async def run(self, args: RunArgs) -> RunResult:
+        """Run one program, reporting any switch this engine cannot honor.
+
+        Monty implements a Python subset with no ``compile``, no
+        ``warnings`` and no ``sys.path``, so the interpreter-init
+        switches have nothing to act on here even though every
+        real-CPython engine honors them. The notice rides on stderr and
+        the program's own exit code stands.
+
+        Args:
+            args (RunArgs): the execution request.
+        """
+        notice = unhonored_notice(args.flags, self.name)
+        result = await self._run(args)
+        if not notice:
+            return result
+        return replace(result, stderr=notice + (result.stderr or b""))
+
+    async def _run(self, args: RunArgs) -> RunResult:
         # Execution lives in a monty worker subprocess (0.0.19 moved it
         # out of process so an interpreter crash cannot take the host
         # with it). feed_run awaits off the event loop, so the loop
@@ -111,11 +134,15 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
         bridge = MirageOSAccess(loop, self._workspace_dispatch, args.env,
-                                self._mount_prefixes)
+                                self._resolver)
         pool = await self._ensure_pool()
         # argv[0] is the program's own name when the caller has one (a
         # CLI install's head word), else the interpreter's placeholder.
-        argv = [args.prog or DEFAULT_PROG, *args.args]
+        # `is None`, not falsy: "" is CPython's own argv[0] for a
+        # program piped in with no operand, so an empty prog is an
+        # answer rather than an absent one.
+        prog = args.prog if args.prog is not None else DEFAULT_PROG
+        argv = [prog, *args.args]
         # Monty has no `sys.stdin`, so piped bytes ride in as a global
         # the same way argv does: raw bytes, None when nothing was piped.
         inputs = {"argv": argv, "stdin": args.stdin}
@@ -185,7 +212,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         loop = asyncio.get_running_loop()
         collector = pydantic_monty.CollectStreams()
         bridge = MirageOSAccess(loop, self._workspace_dispatch, {},
-                                self._mount_prefixes)
+                                self._resolver)
         pool = await self._ensure_pool()
         repl = self._eval_sessions.get(session) if session is not None \
             else None

@@ -19,10 +19,11 @@ from mirage.commands.builtin.generic.crossmount.fanout.du import \
 from mirage.commands.builtin.generic.crossmount.types import RunSingle
 from mirage.commands.errors import FindParseError
 from mirage.commands.spec.types import FlagValue
+from mirage.context import mount_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
 from mirage.types import PathSpec, Producer
 from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
@@ -38,6 +39,25 @@ _TRAVERSAL_CMDS = frozenset({"find", "du"})
 
 def _path_segments(path: str) -> list[str]:
     return [s for s in path.strip("/").split("/") if s]
+
+
+def _allowed_descendants(registry: MountRegistry,
+                         path: str) -> list[MountEntry]:
+    """Descendant mounts the current session may see.
+
+    A fan-out rooted above a session boundary must not walk into an
+    ungranted mount: enumerating it through the raw registry is exactly
+    how `grep -r x /` leaked a walled-off mount's contents. The filter
+    matches the door's structure merge, so the fan-out stays an
+    unobservable optimization.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        path (str): parent path to scan beneath.
+    """
+    return [
+        m for m in registry.descendant_mounts(path) if mount_allowed(m.prefix)
+    ]
 
 
 def _depth_flag_value(raw: FlagValue | None) -> int | None:
@@ -67,6 +87,11 @@ def _should_fan_out(
     if not paths:
         return False
     target = paths[0].virtual
+    # Gated on the raw registry, not the session view: with every
+    # descendant ungranted, single-mount dispatch would serve the parent
+    # backend's keys shadowed under a hidden mount's prefix, and only
+    # the fan-out's shadow filter drops those. Execution still runs the
+    # allowed descendants only.
     if not registry.descendant_mounts(target):
         return False
     if cmd_name in _TRAVERSAL_CMDS:
@@ -161,12 +186,15 @@ def _synthesize_find_mount_entries(
     """Return synthetic find lines for descendant mount roots.
 
     `find /` and friends should list mount prefixes as directory
-    entries even though no per-mount find emits its own root. The find
-    expression is parsed into a predicate tree and evaluated per mount
-    root (kind "d"), mirroring the per-backend cores, so -not / -o /
-    -path / -type and the -maxdepth / -mindepth window all apply.
-    Entries print in the operand's typed spelling like every other
-    line of the walk.
+    entries even though no per-mount find emits its own root. The
+    namespace-only ancestors between the start and each mount root
+    (`/ghost` above a mount at `/ghost/deep`) get a row too: no
+    backend walk covers them, yet `ls` lists them through the door's
+    structure merge, so find must agree. The find expression is parsed
+    into a predicate tree and evaluated per entry (kind "d"),
+    mirroring the per-backend cores, so -not / -o / -path / -type and
+    the -maxdepth / -mindepth window all apply. Entries print in the
+    operand's typed spelling like every other line of the walk.
 
     Args:
         target_path (str): the find start path the fan-out runs from.
@@ -182,20 +210,28 @@ def _synthesize_find_mount_entries(
     max_depth = expr.maxdepth
     min_depth = expr.mindepth if expr.mindepth is not None else 0
     parent_depth = len(_path_segments(target_path))
+    parent_base = target_path.rstrip("/")
+    seen: set[str] = set()
     out: list[str] = []
     for m in descendants:
         prefix_no_slash = m.prefix.rstrip("/")
-        depth = len(_path_segments(prefix_no_slash)) - parent_depth
-        if max_depth is not None and depth > max_depth:
-            continue
-        base = prefix_no_slash.rsplit("/", 1)[-1] or prefix_no_slash
-        entry = FindEntry(key=prefix_no_slash,
-                          name=base,
-                          kind="d",
-                          depth=depth)
-        if not keep(entry, tree, min_depth):
-            continue
-        out.append(respell_one(prefix_no_slash, target_path, raw))
+        ancestors: list[str] = []
+        parent = prefix_no_slash.rsplit("/", 1)[0]
+        while parent and parent != parent_base:
+            ancestors.append(parent)
+            parent = parent.rsplit("/", 1)[0]
+        for candidate in [*reversed(ancestors), prefix_no_slash]:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            depth = len(_path_segments(candidate)) - parent_depth
+            if max_depth is not None and depth > max_depth:
+                continue
+            base = candidate.rsplit("/", 1)[-1] or candidate
+            entry = FindEntry(key=candidate, name=base, kind="d", depth=depth)
+            if not keep(entry, tree, min_depth):
+                continue
+            out.append(respell_one(candidate, target_path, raw))
     return "\n".join(out)
 
 
@@ -311,14 +347,17 @@ async def _fan_out_traversal(
     stdin: ByteSource | None,
     mounts: MountView | None = None,
     links: LinkView | None = None,
+    child_mounts: ChildMounts | None = None,
+    stat_path: StatPath | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a traversal command across the parent mount + descendant mounts.
 
     Each mount runs the command with its own root as the path argument
     (depth flags adjusted for find/tree). Outputs are concatenated in
-    mount-prefix-sorted order. The parent mount's output is filtered to
-    drop lines that fall under any descendant mount (avoids duplicates
-    when the parent's resource has shadowed keys).
+    mount-prefix-sorted order, except single-operand find, whose merged
+    lines are path-sorted (see below). The parent mount's output is
+    filtered to drop lines that fall under any descendant mount (avoids
+    duplicates when the parent's resource has shadowed keys).
 
     For `find`, mount-prefix paths themselves are injected as synthetic
     directory entries (subject to depth and -type filters) because
@@ -333,8 +372,13 @@ async def _fan_out_traversal(
     ``find`` to stop seeing one.
     """
     target_path = paths[0].virtual
-    descendants = registry.descendant_mounts(target_path)
-    descendant_prefixes = [m.prefix.rstrip("/") for m in descendants]
+    descendants = _allowed_descendants(registry, target_path)
+    # The shadow filter keeps the raw list on purpose: a mount the
+    # session cannot see still shadows the primary backend's keys under
+    # its prefix, the walk just never descends into it.
+    descendant_prefixes = [
+        m.prefix.rstrip("/") for m in registry.descendant_mounts(target_path)
+    ]
 
     # -c is one grand total however many mounts answered, so the per-mount
     # totals are re-summed below. Under -h the sub-runs are forced back to
@@ -385,7 +429,9 @@ async def _fan_out_traversal(
                                              stdin=stdin,
                                              cwd=cwd,
                                              mounts=mounts,
-                                             links=links)
+                                             links=links,
+                                             child_mounts=child_mounts,
+                                             stat_path=stat_path)
 
         if mount is not primary_mount and io.exit_code == 127:
             # A descendant that does not serve this command contributes
@@ -420,6 +466,25 @@ async def _fan_out_traversal(
     combined: ByteSource | None
     if du_c:
         combined = merge_du_totals(all_stdout, du_human)
+    elif all_stdout and cmd_name == "find" and len(paths) == 1:
+        # GNU lists a directory before its contents, and the per-mount
+        # blocks land here as separate chunks, so plain concatenation
+        # printed a mount root after its own descendants. Every find
+        # line is a bare path at this stage (actions render later), and
+        # a path always sorts before its extensions, so one path sort
+        # restores GNU's invariant and matches the per-mount emit order.
+        # A single-operand walk never visits a path twice, so the set
+        # collapses a synthesized ancestor row against a primary backend
+        # that happens to hold a real directory at the same path.
+        # Multiple operands keep the concatenation: GNU walks operands
+        # in command-line order, which a global sort would not honor.
+        lines = sorted({
+            line
+            for chunk in all_stdout
+            for line in chunk.decode("utf-8", errors="replace").split("\n")
+            if line
+        })
+        combined = ("\n".join(lines) + "\n").encode("utf-8")
     elif all_stdout:
         # `ls -R` separates directory groups with a blank line, and a
         # per-mount block is one more group; every other format is a
@@ -437,7 +502,12 @@ async def _fan_out_traversal(
 
     if cmd_name == "find":
         combined, action_err = await _apply_find_actions(
-            combined, flag_kwargs, registry, cwd)
+            combined,
+            flag_kwargs,
+            registry,
+            cwd,
+            child_mounts=child_mounts,
+            stat_path=stat_path)
         if action_err:
             existing = (await materialize(merged_io.stderr)
                         if merged_io.stderr else b"")
@@ -461,6 +531,8 @@ async def run_with_fanout(
     cwd: str,
     mounts: MountView | None,
     links: LinkView | None,
+    child_mounts: ChildMounts | None,
+    stat_path: StatPath | None,
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
@@ -487,6 +559,9 @@ async def run_with_fanout(
         mounts (MountView | None): the boundary facts, offered to the
             sub-runs.
         links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): child names the namespace
+            owes a directory, for a start point no backend lists.
+        stat_path (StatPath | None): dispatcher-backed stat of one path.
         cmd_name (str): command name.
         paths (list[PathSpec]): this operand, as a one-element list.
         texts (list[str]): positional text operands.
@@ -526,5 +601,7 @@ async def run_with_fanout(
                                              cmd_name,
                                              stdin,
                                              mounts=mounts,
-                                             links=links)
+                                             links=links,
+                                             child_mounts=child_mounts,
+                                             stat_path=stat_path)
     return stdout, io

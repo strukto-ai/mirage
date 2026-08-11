@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './pyodide.ts'
 import type { BridgeDispatchFn } from '../types.ts'
+import { PrefixResolver } from '../resolver.ts'
 
 function makeBridge(): {
   dispatch: BridgeDispatchFn
@@ -44,14 +45,22 @@ function makeBridge(): {
     if (op === 'READ') return Promise.resolve(files.get(path) ?? new Uint8Array())
     const prefix = path
     const entries: { path: string; size: number; isDir: boolean }[] = []
+    const dirs = new Set<string>()
     for (const [p, content] of files) {
       if (p.startsWith(prefix)) {
         const rest = p.slice(prefix.length)
         if (!rest.includes('/')) {
           entries.push({ path: p, size: content.length, isDir: false })
+        } else {
+          const seg = rest.split('/', 1)[0] ?? ''
+          if (seg !== '') dirs.add(prefix + seg)
         }
       }
     }
+    // The real door merges child mounts and directories into readdir
+    // (R1), so the double reports them too: preload descends through
+    // them exactly as it does against a live workspace.
+    for (const d of dirs) entries.push({ path: d, size: 0, isDir: true })
     return Promise.resolve(entries)
   }
   return { dispatch, calls, files }
@@ -62,7 +71,7 @@ describe('PyodideRuntime mount visibility', () => {
     const { dispatch, files } = makeBridge()
     files.set('/ram/hello.txt', new TextEncoder().encode('world'))
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/ram/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await rt.run({
       code: `with open('/ram/hello.txt') as f: print(f.read())`,
       args: [],
@@ -77,7 +86,7 @@ describe('PyodideRuntime mount visibility', () => {
   it('writes under a mounted prefix flush via the bridge on close', async () => {
     const { dispatch, calls } = makeBridge()
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/ram/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
     await rt.run({
       code: `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`,
       args: [],
@@ -97,7 +106,7 @@ describe('PyodideRuntime mount visibility', () => {
     const { dispatch, calls } = makeBridge()
     const mounts: string[] = ['/ram/']
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => mounts)
+    rt.attach(dispatch, new PrefixResolver(() => mounts))
     await rt.run({
       code: 'pass',
       args: [],
@@ -120,7 +129,7 @@ describe('PyodideRuntime mount visibility', () => {
     files.set('/ram/lazy.txt', new TextEncoder().encode('lazy'))
     const mounts: string[] = []
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => mounts)
+    rt.attach(dispatch, new PrefixResolver(() => mounts))
     await rt.run({
       code: 'pass',
       args: [],
@@ -149,7 +158,7 @@ describe('PyodideRuntime mount visibility', () => {
     const warn = console.warn
     console.warn = (msg: unknown) => warnings.push(String(msg))
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/']))
     try {
       const result = await rt.run({
         code: `open('/out.txt', 'wb').write(b'data')`,
@@ -170,13 +179,15 @@ describe('PyodideRuntime mount visibility', () => {
   }, 60_000)
 
   it('a nested prefix stays reachable under its parent mount', async () => {
-    // prefixes() is longest-first; mounting in that order puts /data
-    // over the /data/inner mounted a moment earlier and orphans it.
+    // Only the maximal prefix earns an Emscripten mountpoint; the
+    // nested mount's content arrives through the parent's preload,
+    // which descends the door's merged readdir. Mounting both used to
+    // orphan the child under the parent's mountpoint.
     const { dispatch, files } = makeBridge()
     files.set('/data/outer.txt', new TextEncoder().encode('OUTER'))
     files.set('/data/inner/deep.txt', new TextEncoder().encode('DEEP'))
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/data/', '/data/inner/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/data/', '/data/inner/']))
     const result = await rt.run({
       code: "print(open('/data/outer.txt').read(), open('/data/inner/deep.txt').read())",
       args: [],
@@ -195,7 +206,7 @@ describe('PyodideRuntime mount visibility', () => {
       return Promise.resolve([])
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/ram/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await rt.run({
       code: `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`,
       args: [],
@@ -232,7 +243,7 @@ describe('PyodideRuntime mount visibility', () => {
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/ram/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await rt.run({
       code: [
         'import os',
@@ -270,7 +281,7 @@ describe('PyodideRuntime mount visibility', () => {
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, () => ['/ram/'])
+    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await rt.run({
       code: `open('/ram/log.txt', 'a').write('tail')`,
       args: [],

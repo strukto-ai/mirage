@@ -129,10 +129,18 @@ export async function query(inv: CLIInvocation): Promise<CommandFnResult> {
   const result = await queryDataSourcePage(transport, strOf(dataSource, 'id'), body)
   if (fl.asBool('json')) return [prettyJson(result), new IOResult()]
 
-  // Columns are the schema's property names in alphabetical order, which is
-  // what the upstream CLI prints whatever order the API reports the schema in.
-  const columns = Object.keys(asObject(dataSource.properties)).sort()
+  // Columns are the property names the returned rows actually carry, in
+  // alphabetical order, not the data source's whole schema. Upstream derives
+  // them from the page objects it got back, so a result set that does not
+  // cover the schema prints narrower: a row created from Markdown alone holds
+  // only its title column, and on its own it prints as `<id>\t<title>` rather
+  // than as one title among seven blanks.
   const rows = Array.isArray(result.results) ? result.results : []
+  const named = new Set<string>()
+  for (const row of rows) {
+    for (const name of Object.keys(asObject(asObject(row).properties))) named.add(name)
+  }
+  const columns = [...named].sort()
   let out = ''
   for (const row of rows) {
     const record = asObject(row)

@@ -17,7 +17,6 @@ import { copy as dropboxCopy } from '../../../core/dropbox/copy.ts'
 import { create as dropboxCreate } from '../../../core/dropbox/create.ts'
 import { size as dropboxDu, entries as dropboxDuAll } from '../../../core/dropbox/du/index.ts'
 import { exists as dropboxExists } from '../../../core/dropbox/exists.ts'
-import { find as dropboxFind } from '../../../core/dropbox/find.ts'
 import { mkdir as dropboxMkdir } from '../../../core/dropbox/mkdir.ts'
 import { read as dropboxRead, stream as dropboxStream } from '../../../core/dropbox/read.ts'
 import { readdir as dropboxReaddir } from '../../../core/dropbox/readdir.ts'
@@ -49,5 +48,8 @@ export const DROPBOX_IO: CommandIO<DropboxAccessor> = {
   // rejects an existing destination).
   copy: dropboxCopy,
   create: dropboxCreate,
-  find: dropboxFind,
+  // No `find` slot on purpose, matching python — see the note in the Box
+  // table. Dropbox does have a recursive list_folder, so a real pushdown
+  // is possible here later; the op this replaced was not one, it was the
+  // builders' own walk minus the index, the stat overlay and the links.
 }

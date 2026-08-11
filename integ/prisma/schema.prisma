@@ -81,6 +81,12 @@ model Pin {
 // a NotionBlock row of type child_page carrying the *same* id. Creating a page
 // under a page_id parent must write both, or readdir and block-children
 // disagree about the tree.
+//
+// Trash is ONE bit, stored as `inTrash`. Upstream's `archived` is a deprecated
+// alias for it ("This is an alias for in_trash and always returns the same
+// value"), so it is a spelling on the wire, not a column: two columns let the
+// fake answer archived=true with in_trash=false, which real Notion cannot do,
+// and made every filter have to remember to name both.
 model NotionPage {
   id             String
   workspaceId    String
@@ -90,7 +96,6 @@ model NotionPage {
   propertiesJson String
   iconJson       String?
   coverJson      String?
-  archived       Boolean @default(false)
   inTrash        Boolean @default(false)
   createdTime    String
   lastEditedTime String
@@ -113,7 +118,6 @@ model NotionDatabase {
   descriptionJson String?
   propertiesJson  String
   isInline        Boolean @default(false)
-  archived        Boolean @default(false)
   inTrash         Boolean @default(false)
   createdTime     String
   lastEditedTime  String
@@ -134,7 +138,6 @@ model NotionBlock {
   type           String
   payloadJson    String
   hasChildren    Boolean @default(false)
-  archived       Boolean @default(false)
   inTrash        Boolean @default(false)
   createdTime    String
   lastEditedTime String

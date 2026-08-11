@@ -27,13 +27,15 @@ import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
+import { isMissingPath } from '../utils/errors.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { Reconciler } from './reconcile.ts'
-import { effectiveMountMode } from '../context/session_context.ts'
+import { effectiveMountMode, MountNotAllowedError } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
@@ -76,13 +78,54 @@ export class Dispatcher {
     this.reconciler = new Reconciler(cache, namespace, opsRegistry, consistency)
   }
 
+  /**
+   * The namespace's own answer for a path no backend serves.
+   *
+   * Child mounts and symlinks are structure the door owns, so a
+   * directory that exists only because a mount or link sits below it
+   * still lists and stats. Null for any other op, or when the
+   * namespace knows nothing at `virtual`.
+   */
+  private namespaceResult(opName: string, virtual: string): string[] | FileStat | null {
+    if (opName === 'readdir') {
+      return namespaceListing(this.namespace.mountPrefixes(), this.namespace, virtual)
+    }
+    if (opName === 'stat') {
+      return namespaceStat(this.namespace.mountPrefixes(), this.namespace, virtual)
+    }
+    return null
+  }
+
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
     let p = path
     if (!NO_FOLLOW_OPS.has(opName)) {
       const followed = this.namespace.follow(path.virtual)
       if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
     }
-    const [resource, scope, mode] = await this.namespace.resolve(p.virtual, false)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.namespace.resolve(p.virtual, false)
+    } catch (err) {
+      // No mount serves the path, but the namespace may still know a
+      // directory there (a deeper mount, a link). No mount means no
+      // cache to keep straight and no owning prefix (the gates see ''),
+      // but admission still fires: a policy that bounds readdir or stat
+      // by path must cover the synthetic answer too. A real but
+      // ungranted mount is the same case: a granted mount below it
+      // already put this path's name in a listing, so walking down to
+      // the grant must answer, and the merged names are
+      // session-filtered individually, so nothing of the mount's own
+      // content leaks.
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
+      if (fallback === null) throw err
+      const fallbackWrite = POLICY_WRITE_OPS.has(opName)
+      await preOpsGate(this.policies, opName, p, fallbackWrite, '')
+      const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
+      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
+      return [gated, new IOResult()]
+    }
+    const [resource, scope, mode] = resolved
     const mount = this.namespace.mountFor(p.virtual)
     const mountPrefix = mount?.prefix ?? '/'
     // Admission policies fire at the door, before the warm-cache early
@@ -168,8 +211,15 @@ export class Dispatcher {
         ),
       )
     } catch (err) {
-      await this.reconciler.onOpMissing(opName, p.virtual, err)
-      throw err
+      const fallback = isMissingPath(err) ? this.namespaceResult(opName, p.virtual) : null
+      if (fallback === null) {
+        await this.reconciler.onOpMissing(opName, p.virtual, err)
+        throw err
+      }
+      result = fallback
+    }
+    if (opName === 'readdir' && Array.isArray(result)) {
+      result = mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual)
     }
     if (DISPATCH_WRITE_OPS.has(opName)) {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null

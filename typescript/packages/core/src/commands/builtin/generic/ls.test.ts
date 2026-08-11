@@ -416,6 +416,72 @@ describe('link operands on backends with different readdir shapes', () => {
   })
 })
 
+describe('structure-only directories', () => {
+  const missing = (p: PathSpec): Promise<never> => {
+    const err = new Error(p.virtual) as Error & { code: string }
+    err.code = 'ENOENT'
+    return Promise.reject(err)
+  }
+  const childMounts = (parent: string): string[] => (parent === '/ghost' ? ['deep'] : [])
+
+  // A directory no backend serves still lists when the namespace owes it
+  // children (a nested mount, a link's ancestors): the door already names
+  // it in the parent listing, so ls must agree instead of reporting it
+  // missing.
+  it('lists namespace children when no backend serves the directory', async () => {
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: {}, cwd: '/', childMounts } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep\n')
+  })
+
+  // Under -R the group still renders from the namespace fact; only
+  // descent into the child-mount root is withheld, because that listing
+  // is another backend's and the cross-mount fan-out assembles it.
+  it('-R renders the namespace-only group and leaves descent to fan-out', async () => {
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: { R: true }, cwd: '/', childMounts } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n')
+  })
+
+  // A structure chain (a link's ancestors) continues below the first
+  // level, so -R descends it: only a child-mount root stops the walk.
+  it('-R descends structure that continues below', async () => {
+    const chain = (parent: string): string[] =>
+      parent === '/ghost' ? ['deep'] : parent === '/ghost/deep' ? ['lnk'] : []
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: { R: true }, cwd: '/', childMounts: chain } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
+  })
+
+  // -d stats the operand itself; the namespace fact is what says the
+  // directory exists, so the row must come from it when no backend does.
+  it('-d prints the namespace-only directory row', async () => {
+    const result = await lsGeneric(
+      [PathSpec.fromStrPath('/ghost')],
+      { flags: { d: true }, cwd: '/', childMounts } as never,
+      missing,
+      missing,
+    )
+    expect(result?.[1].exitCode).toBe(LS_OK)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost\n')
+  })
+})
+
 describe('honest per-entry errors', () => {
   function enoent(p: string): Error {
     const e = new Error(p) as Error & { code: string }

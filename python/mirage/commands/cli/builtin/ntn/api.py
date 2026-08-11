@@ -22,8 +22,8 @@ from mirage.commands.cli.builtin.ntn.util import (compact_json, first_text,
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView
-from mirage.core.notion._client import (notion_get, notion_patch, notion_post,
-                                        notion_put)
+from mirage.core.notion._client import (notion_delete, notion_get,
+                                        notion_patch, notion_post, notion_put)
 from mirage.core.notion.config import NotionConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -58,11 +58,16 @@ REFUSAL_EXIT = 5
 # at all".
 NotionCall = Callable[..., Awaitable[dict[str, Any]]]
 
+# DELETE is here because `DELETE /v1/blocks/{id}` is the only delete verb the
+# public API has, so without it the one way to remove anything is unreachable
+# from this CLI. It takes no body, which is why it is reached through `-X`
+# rather than by a body source inferring it.
 METHODS: dict[str, NotionCall] = {
     "GET": notion_get,
     "POST": notion_post,
     "PATCH": notion_patch,
     "PUT": notion_put,
+    "DELETE": notion_delete,
 }
 
 

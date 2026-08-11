@@ -1493,7 +1493,7 @@
       "command": "f=/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
       "expect": {
         "exit": 0,
-        "stdout": "cold=0\nread=1211\nwarm=1211\n",
+        "stdout": "cold=0\nread=1466\nwarm=1466\n",
         "stderr": ""
       },
       "clear_cache": true

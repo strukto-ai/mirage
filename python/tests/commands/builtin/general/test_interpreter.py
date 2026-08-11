@@ -14,9 +14,10 @@
 
 import pytest
 
-from mirage.commands.builtin.general.interpreter import (Source,
+from mirage.commands.builtin.general.interpreter import (Argv0Rules, Source,
                                                          resolve_source,
-                                                         run_code, run_output)
+                                                         run_code, run_output,
+                                                         skip_first_line)
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
@@ -145,3 +146,34 @@ def test_run_output_empty_stdout_becomes_no_stream():
     assert stdout is None
     assert io.exit_code == 0
     assert io.stderr is None
+
+
+def test_skip_first_line_empties_the_line_rather_than_dropping_it():
+    # CPython keeps the file's numbering under -x, so a raise on
+    # physical line 2 still reports line 2.
+    assert skip_first_line("junk\nprint(1)\n") == "\nprint(1)\n"
+
+
+def test_skip_first_line_on_a_one_line_file_leaves_nothing():
+    assert skip_first_line("junk") == ""
+
+
+@pytest.mark.asyncio
+async def test_skip_line_applies_to_a_script_operand():
+    _, prepared = await resolve_source("python3", [spec("/script.py")], (),
+                                       None, None, fake_dispatch, None, True,
+                                       None, Argv0Rules(), True)
+    assert prepared is not None
+    # The fixture script is a single line, so -x leaves nothing of it.
+    assert prepared.code == ""
+
+
+@pytest.mark.asyncio
+async def test_skip_line_leaves_a_payload_alone():
+    # CPython's -x reads the script file; -c, -m and stdin are
+    # untouched by it.
+    _, prepared = await resolve_source("python3", [], (), "print(1)",
+                                       None, None, None, True, None,
+                                       Argv0Rules(), True)
+    assert prepared is not None
+    assert prepared.code == "print(1)"

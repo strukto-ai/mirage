@@ -16,8 +16,10 @@ import asyncio
 from typing import Any, Callable, Literal
 
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.resolver import MountResolver
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import OperationNotSupportedError
+from mirage.utils.path import norm
 
 FlushKind = Literal["append", "write"]
 
@@ -67,18 +69,17 @@ class RuntimeVFS:
     Args:
         dispatch (Callable): the workspace dispatch coroutine function.
         loop (asyncio.AbstractEventLoop): the loop dispatch belongs to.
-        mount_prefixes (Callable | None): live view of the workspace
-            mount prefixes; None means routing questions answer None.
+        resolver (MountResolver | None): the workspace mount routing
+            table; None means routing questions answer None.
     """
 
-    def __init__(
-            self,
-            dispatch: Callable[..., Any],
-            loop: asyncio.AbstractEventLoop,
-            mount_prefixes: Callable[[], list[str]] | None = None) -> None:
+    def __init__(self,
+                 dispatch: Callable[..., Any],
+                 loop: asyncio.AbstractEventLoop,
+                 resolver: MountResolver | None = None) -> None:
         self._dispatch = dispatch
         self._loop = loop
-        self._mount_prefixes = mount_prefixes
+        self._resolver = resolver
         self._no_append: set[str] = set()
 
     def _raw(self, op: str, path: str, **kwargs: Any) -> Any:
@@ -112,22 +113,25 @@ class RuntimeVFS:
         `mount_of` answer None for a workspace whose only mount was the
         root one, so the routing table disagreed with the world.
         """
-        if self._mount_prefixes is None:
+        if self._resolver is None:
             return []
-        out = ["/" + prefix.strip("/") for prefix in self._mount_prefixes()]
+        out = [norm(prefix) for prefix in self._resolver.prefixes()]
         return sorted(out, key=len, reverse=True)
 
     def mount_of(self, path: str) -> str | None:
         """The mount prefix serving `path`, longest match first, or None.
 
+        The resolver answers in the mount table's own spelling; this
+        surface re-spells to its no-trailing-slash convention, the form
+        `prefixes` reports.
+
         Args:
             path (str): guest-absolute virtual path.
         """
-        for prefix in self.prefixes():
-            boundary = prefix if prefix.endswith("/") else prefix + "/"
-            if path == prefix or path.startswith(boundary):
-                return prefix
-        return None
+        if self._resolver is None:
+            return None
+        owner = self._resolver.owner_of(path)
+        return None if owner is None else norm(owner)
 
     def read(self, path: str) -> bytes:
         data = self.call("read", path)

@@ -17,7 +17,7 @@ from mirage import MountMode, Workspace
 from mirage.resource.github import GitHubConfig, GitHubResource
 
 config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
-resource = GitHubResource(
+resource = await GitHubResource.build(
     config=config, owner="my-org", repo="my-repo", ref="main")
 ws = Workspace({"/github": resource}, mode=MountMode.READ)
 ```
@@ -44,7 +44,9 @@ the path - those are specified at mount time.
 
 ## Tree Fetching
 
-The resource fetches the full recursive tree at init. For repos with
+`GitHubResource.build` fetches the full recursive tree, which is why it is
+a coroutine — the constructor itself takes that tree and touches no
+network. For repos with
 
 > 100K entries, it falls back to per-directory fetching.
 
@@ -68,7 +70,7 @@ load_dotenv(".env.development")
 
 async def main():
     config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
-    resource = GitHubResource(
+    resource = await GitHubResource.build(
         config=config, owner="my-org", repo="my-repo", ref="main")
     ws = Workspace({"/github": resource}, mode=MountMode.READ)
 

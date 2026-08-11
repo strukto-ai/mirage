@@ -23,6 +23,8 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { ChildMounts } from '../../ops/types.ts'
+import { namespaceNames } from '../../ops/namespace_view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
@@ -272,6 +274,8 @@ export async function handleCommand(
       mountView(registry),
       linkViewFor(namespace ?? null, dispatch),
       ensureOpen,
+      (parent: string) => namespaceNames(registry.mountPrefixes(), namespace ?? null, parent),
+      (path: string) => pathStat(dispatch, path, null),
     )
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
@@ -421,6 +425,8 @@ export async function handleCommand(
   }
 
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+    const fanChildMounts: ChildMounts = (parent: string) =>
+      namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
     const [fanOut, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
@@ -434,6 +440,8 @@ export async function handleCommand(
       ensureOpen,
       mountView(registry),
       linkViewFor(namespace ?? null, dispatch),
+      fanChildMounts,
+      (path: string) => pathStat(dispatch, path, null),
     )
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)

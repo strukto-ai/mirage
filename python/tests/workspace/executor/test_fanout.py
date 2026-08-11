@@ -87,7 +87,21 @@ def test_synthesize_type_dir_includes_mount_dirs():
 def test_synthesize_maxdepth_window():
     desc = _mounts("/ram/", "/a/b/")
     assert _synthesize_find_mount_entries("/", desc, ["-maxdepth", "1"],
-                                          "/") == "/ram"
+                                          "/") == "/ram\n/a"
+
+
+def test_synthesize_namespace_ancestors():
+    desc = _mounts("/ghost/very/deep/")
+    assert _synthesize_find_mount_entries(
+        "/", desc, [], "/") == "/ghost\n/ghost/very\n/ghost/very/deep"
+    assert _synthesize_find_mount_entries(
+        "/ghost", desc, [], "/ghost") == "/ghost/very\n/ghost/very/deep"
+
+
+def test_synthesize_shared_ancestor_once():
+    desc = _mounts("/a/b/", "/a/c/")
+    assert _synthesize_find_mount_entries("/", desc, [],
+                                          "/") == "/a\n/a/b\n/a/c"
 
 
 def test_adjust_depth_texts_reduces_maxdepth_by_delta():
@@ -124,6 +138,49 @@ def test_maxdepth_applies_to_child_mount_depth_end_to_end():
     out = (io.stdout if isinstance(io.stdout, bytes) else b"").decode()
     assert "/data/a" in out
     assert "/data/a/b.txt" not in out
+
+
+def _nested_ghost_workspace() -> Workspace:
+    parent = RAMResource()
+    parent._store.files["/top.txt"] = b"hello\n"
+    deep = RAMResource()
+    deep._store.files["/leaf.txt"] = b"deep\n"
+    return Workspace(
+        resources={
+            "/": (parent, MountMode.EXEC),
+            "/ghost/very/deep/": (deep, MountMode.EXEC),
+        })
+
+
+def test_find_ls_renders_namespace_ancestor_rows():
+    ws = _nested_ghost_workspace()
+    io = asyncio.run(ws.execute("find / -ls"))
+    assert io.exit_code == 0
+    out = (io.stdout if isinstance(io.stdout, bytes) else b"").decode()
+    rows = [
+        line.rsplit("\t", 1)[-1].rsplit(" ", 1)[-1]
+        for line in out.splitlines()
+    ]
+    assert "/ghost" in rows
+    assert "/ghost/very" in rows
+    assert "/ghost/very/deep" in rows
+
+
+def test_find_delete_skips_namespace_ancestors():
+    ws = _nested_ghost_workspace()
+
+    async def scenario():
+        io = await ws.execute("find / -delete")
+        after = await ws.execute("find /")
+        return io, after
+
+    io, after = asyncio.run(scenario())
+    assert io.exit_code == 0
+    assert (io.stderr if isinstance(io.stderr, bytes) else b"") == b""
+    out = (after.stdout if isinstance(after.stdout, bytes) else b"").decode()
+    assert "/ghost/very/deep" in out
+    assert "/top.txt" not in out
+    assert "leaf.txt" not in out
 
 
 def test_fanout_preserves_partial_failure_exit_code():

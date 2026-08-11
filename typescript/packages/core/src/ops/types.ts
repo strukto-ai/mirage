@@ -33,6 +33,13 @@ export type ReaddirPath = (path: string) => Promise<string[]>
 // backend.
 export type MountRoot = (path: string) => string
 
+// Child names the namespace owes a directory (mounts and links, mount
+// names session-filtered). The other half of namespace structure beside
+// link rows: a nested mount is invisible to the parent mount's backend,
+// so a listing command is handed the names from above, the same names
+// the door merges into its own readdir.
+export type ChildMounts = (parent: string) => string[]
+
 // Where the mount boundaries are, as one injected object.
 //
 // A command runs bound to one backend, and that backend cannot see a

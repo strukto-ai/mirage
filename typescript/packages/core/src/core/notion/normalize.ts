@@ -133,6 +133,7 @@ export interface NormalizedPage {
   archived: boolean
   created_by: string
   last_edited_by: string
+  properties: Json
   markdown: string
   blocks: Json[]
 }
@@ -160,6 +161,11 @@ export interface NormalizedDataSource {
   properties: Json
 }
 
+// A database row's cells are its `properties`, and they are the reason the row
+// exists, so they belong in the file rather than only in a `datasources query`.
+// Kept as Notion's own property objects for the same reason `blocks` is: the
+// schema they answer to is rendered one level up, in data_source.json's
+// `properties`.
 export function normalizePage(page: Json, blocks: readonly Json[]): NormalizedPage {
   const parent = asObject(page.parent)
   const parentType = strOf(parent, 'type')
@@ -180,6 +186,7 @@ export function normalizePage(page: Json, blocks: readonly Json[]): NormalizedPa
     archived: boolOf(page, 'archived'),
     created_by: strOf(asObject(page.created_by), 'id'),
     last_edited_by: strOf(asObject(page.last_edited_by), 'id'),
+    properties: asObject(page.properties),
     markdown: blocksToMarkdown(contentBlocks),
     blocks: contentBlocks,
   }

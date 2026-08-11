@@ -15,14 +15,16 @@
 import { NOOPAccessor } from '../accessor/base.ts'
 import { applyOpLimit } from '../commands/builtin/utils/limit.ts'
 import { getExtension } from '../commands/resolve.ts'
+import { MountNotAllowedError } from '../context/session_context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
 import type { StatOverlay } from '../ops/types.ts'
 import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { type Policies, postOpsGate, preOpsGate } from '../policy/policies.ts'
 import type { Resource } from '../resource/base.ts'
-import type { FileStat, MountMode, PathSpec } from '../types.ts'
-import { FileType } from '../types.ts'
+import type { FileStat, MountMode } from '../types.ts'
+import { FileType, PathSpec } from '../types.ts'
 import { isMissingPath } from '../utils/errors.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
@@ -48,6 +50,12 @@ export class WorkspaceFS {
   // direct construction in tests.
   private readonly policies: Policies | null
   private readonly prefixOf: PrefixOf | null
+  // Live view of the workspace mount prefixes, for the structure merge:
+  // this facade is a second door beside the dispatcher until they
+  // collapse (R2), so both must answer readdir and stat with the same
+  // namespace structure. Null means no structure to merge (direct
+  // construction in tests).
+  private readonly prefixes: (() => string[]) | null
 
   constructor(
     resolver: Resolver,
@@ -57,6 +65,7 @@ export class WorkspaceFS {
     statOverlay: StatOverlay | null = null,
     policies: Policies | null = null,
     prefixOf: PrefixOf | null = null,
+    prefixes: (() => string[]) | null = null,
   ) {
     this.resolver = resolver
     this.ops = ops
@@ -65,6 +74,20 @@ export class WorkspaceFS {
     this.statOverlay = statOverlay
     this.policies = policies
     this.prefixOf = prefixOf
+    this.prefixes = prefixes
+  }
+
+  /**
+   * The namespace's own answer for a path no backend serves, mirroring
+   * the dispatcher: a directory that exists only because a mount or a
+   * link sits below it still lists and stats. Null for any other op,
+   * or when the namespace knows nothing at `path`.
+   */
+  private namespaceResult(op: string, path: string): string[] | FileStat | null {
+    if (this.prefixes === null) return null
+    if (op === 'readdir') return namespaceListing(this.prefixes(), this.links, path)
+    if (op === 'stat') return namespaceStat(this.prefixes(), this.links, path)
+    return null
   }
 
   private follow(op: string, path: string): string {
@@ -72,15 +95,19 @@ export class WorkspaceFS {
     return this.links.follow(path)
   }
 
+  // `prefix` overrides the mount attribution; the structure fallbacks
+  // pass '' ("no owning mount"), matching how the dispatcher and both
+  // Python doors gate the same synthetic answer.
   private async firePreOps(
     op: string,
     path: string,
     pathSpec: PathSpec,
     write: boolean,
+    prefix?: string,
   ): Promise<void> {
     if (this.policies === null) return
-    const prefix = this.prefixOf !== null ? this.prefixOf(path) : ''
-    await preOpsGate(this.policies, op, pathSpec, write, prefix)
+    const p = prefix ?? (this.prefixOf !== null ? this.prefixOf(path) : '')
+    await preOpsGate(this.policies, op, pathSpec, write, p)
   }
 
   // Bookkeeping precedes this gate: a denied result is still a completed
@@ -92,10 +119,11 @@ export class WorkspaceFS {
     pathSpec: PathSpec,
     write: boolean,
     result: unknown,
+    prefix?: string,
   ): Promise<unknown> {
     if (this.policies === null) return result
-    const prefix = this.prefixOf !== null ? this.prefixOf(path) : ''
-    const bound = await postOpsGate(this.policies, op, pathSpec, write, prefix, result)
+    const p = prefix ?? (this.prefixOf !== null ? this.prefixOf(path) : '')
+    const bound = await postOpsGate(this.policies, op, pathSpec, write, p, result)
     if (bound !== null) return applyOpLimit(result, bound)
     return result
   }
@@ -168,17 +196,49 @@ export class WorkspaceFS {
   async readdir(path: string): Promise<string[]> {
     const start = Date.now()
     path = this.follow('readdir', path)
-    const [resource, pathSpec] = await this.resolver(path)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.resolver(path)
+    } catch (err) {
+      // No mount serves the path, or a real mount is ungranted; mirror
+      // the dispatcher and fire the gates anyway, with the synthetic ''
+      // prefix (a grant-miss resolves to the real ungranted prefix,
+      // which must not attribute the namespace's own answer), so a
+      // policy that bounds readdir by path covers the synthetic answer
+      // too. The merged names are session-filtered, so an ungranted
+      // mount's own content never leaks.
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.namespaceResult('readdir', path) : null
+      if (fallback === null) throw err
+      const pathSpec = PathSpec.fromStrPath(path)
+      await this.firePreOps('readdir', path, pathSpec, false, '')
+      return (
+        ((await this.firePostOps('readdir', path, pathSpec, false, fallback, '')) as
+          | string[]
+          | null) ?? []
+      )
+    }
+    const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     await this.firePreOps('readdir', path, pathSpec, false)
-    const result = (await this.ops.call(
-      'readdir',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-      [],
-      kwargs,
-    )) as string[] | null
+    let result: string[] | null
+    try {
+      result = (await this.ops.call(
+        'readdir',
+        resource.kind,
+        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+        pathSpec,
+        [],
+        kwargs,
+      )) as string[] | null
+    } catch (err) {
+      const fallback = isMissingPath(err) ? this.namespaceResult('readdir', path) : null
+      if (fallback === null) throw err
+      result = fallback as string[]
+    }
+    if (this.prefixes !== null) {
+      result = mergeReaddir(result ?? [], this.prefixes(), this.links, path)
+    }
     await this.record('readdir', path, resource.kind, 0, start)
     return (
       ((await this.firePostOps('readdir', path, pathSpec, false, result)) as string[] | null) ?? []
@@ -188,17 +248,36 @@ export class WorkspaceFS {
   async stat(path: string): Promise<FileStat> {
     const start = Date.now()
     path = this.follow('stat', path)
-    const [resource, pathSpec] = await this.resolver(path)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.resolver(path)
+    } catch (err) {
+      // Same gate routing as the readdir resolver miss above.
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.namespaceResult('stat', path) : null
+      if (fallback === null) throw err
+      const pathSpec = PathSpec.fromStrPath(path)
+      await this.firePreOps('stat', path, pathSpec, false, '')
+      return (await this.firePostOps('stat', path, pathSpec, false, fallback, '')) as FileStat
+    }
+    const [resource, pathSpec] = resolved
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     await this.firePreOps('stat', path, pathSpec, false)
-    let result = (await this.ops.call(
-      'stat',
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      pathSpec,
-      [],
-      kwargs,
-    )) as FileStat
+    let result: FileStat
+    try {
+      result = (await this.ops.call(
+        'stat',
+        resource.kind,
+        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+        pathSpec,
+        [],
+        kwargs,
+      )) as FileStat
+    } catch (err) {
+      const fallback = isMissingPath(err) ? this.namespaceResult('stat', path) : null
+      if (fallback === null) throw err
+      result = fallback as FileStat
+    }
     await this.record('stat', path, resource.kind, 0, start)
     result = (await this.firePostOps('stat', path, pathSpec, false, result)) as FileStat
     if (this.statOverlay !== null) return this.statOverlay(path, result)

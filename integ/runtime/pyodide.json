@@ -249,6 +249,100 @@
           }
         }
       ]
+    },
+    {
+      "id": "nested_mounts_one_mountpoint",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "resource": "ram",
+            "files": {
+              "leaf.txt": "deep\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print(sorted(os.listdir('/data')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['inner', 'top.txt']\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(open('/data/inner/leaf.txt').read().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "deep\n"
+          }
+        },
+        {
+          "command": "python3 -c \"open('/data/inner/w.txt', 'w').write('guest')\" && cat /data/inner/w.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "guest"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_rename_exdev",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf 'import errno\\nimport os\\ntry:\\n    os.rename(\"/data/top.txt\", \"/data/inner/moved.txt\")\\n    print(\"renamed\")\\nexcept OSError as e:\\n    print(\"exdev\" if e.errno == errno.EXDEV else e)\\n' > /data/x.py",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 /data/x.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "exdev\n"
+          }
+        },
+        {
+          "command": "cat /data/top.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "top\n"
+          }
+        }
+      ]
     }
   ]
 }

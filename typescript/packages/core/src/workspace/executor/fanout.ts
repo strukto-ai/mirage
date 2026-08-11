@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountAllowed } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -30,7 +31,7 @@ import {
 } from '../../commands/builtin/findParse.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
-import type { LinkView, MountView } from '../../ops/types.ts'
+import type { ChildMounts, LinkView, MountView, StatPath } from '../../ops/types.ts'
 import { mergeDuTotals } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -44,6 +45,19 @@ function pathSegments(path: string): string[] {
   return path.split('/').filter((s) => s !== '')
 }
 
+/**
+ * Descendant mounts the current session may see.
+ *
+ * A fan-out rooted above a session boundary must not walk into an
+ * ungranted mount: enumerating it through the raw registry is exactly
+ * how `grep -r x /` leaked a walled-off mount's contents. The filter
+ * matches the door's structure merge, so the fan-out stays an
+ * unobservable optimization.
+ */
+function allowedDescendants(registry: MountRegistry, path: string): MountEntry[] {
+  return registry.descendantMounts(path).filter((m) => mountAllowed(m.prefix))
+}
+
 export function shouldFanOut(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -51,6 +65,11 @@ export function shouldFanOut(
   registry: MountRegistry,
 ): boolean {
   if (paths.length === 0 || paths[0] === undefined) return false
+  // Gated on the raw registry, not the session view: with every
+  // descendant ungranted, single-mount dispatch would serve the parent
+  // backend's keys shadowed under a hidden mount's prefix, and only the
+  // fan-out's shadow filter drops those. Execution still runs the
+  // allowed descendants only.
   if (registry.descendantMounts(paths[0].virtual).length === 0) return false
   if (TRAVERSAL_CMDS.has(cmdName)) return true
   if (cmdName === 'grep') {
@@ -117,7 +136,10 @@ function adjustDepthTexts(
 }
 
 // Entries print in the operand's typed spelling (`raw`) like every
-// other line of the walk.
+// other line of the walk. The namespace-only ancestors between the
+// start and each mount root (`/ghost` above a mount at `/ghost/deep`)
+// get a row too: no backend walk covers them, yet `ls` lists them
+// through the door's structure merge, so find must agree.
 function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
@@ -135,15 +157,27 @@ function synthesizeFindMountEntries(
   const maxDepth = expr.maxDepth
   const minDepth = expr.minDepth ?? 0
   const parentDepth = pathSegments(targetPath).length
+  const parentBase = rstripSlash(targetPath)
+  const seen = new Set<string>()
   const out: string[] = []
   for (const m of descendants) {
     const prefixNoSlash = rstripSlash(m.prefix)
-    const depth = pathSegments(prefixNoSlash).length - parentDepth
-    if (maxDepth !== null && depth > maxDepth) continue
-    const segs = prefixNoSlash.split('/').filter((s) => s !== '')
-    const base = segs[segs.length - 1] ?? prefixNoSlash
-    if (!keep({ key: prefixNoSlash, name: base, kind: 'd', depth }, tree, minDepth)) continue
-    out.push(respellOne(prefixNoSlash, targetPath, raw))
+    const ancestors: string[] = []
+    let parent = prefixNoSlash.slice(0, prefixNoSlash.lastIndexOf('/'))
+    while (parent !== '' && parent !== parentBase) {
+      ancestors.push(parent)
+      parent = parent.slice(0, parent.lastIndexOf('/'))
+    }
+    for (const candidate of [...ancestors.reverse(), prefixNoSlash]) {
+      if (seen.has(candidate)) continue
+      seen.add(candidate)
+      const depth = pathSegments(candidate).length - parentDepth
+      if (maxDepth !== null && depth > maxDepth) continue
+      const segs = pathSegments(candidate)
+      const base = segs[segs.length - 1] ?? candidate
+      if (!keep({ key: candidate, name: base, kind: 'd', depth }, tree, minDepth)) continue
+      out.push(respellOne(candidate, targetPath, raw))
+    }
   }
   return out.join('\n')
 }
@@ -256,10 +290,15 @@ export async function fanOutTraversal(
   // tree with every link missing, and a nested mount is not a reason for
   // `find` to stop seeing one.
   links?: LinkView | null,
+  childMounts: ChildMounts | null = null,
+  statPath: StatPath | null = null,
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
-  const descendants = registry.descendantMounts(targetPath)
-  const descendantPrefixes = descendants.map((m) => rstripSlash(m.prefix))
+  const descendants = allowedDescendants(registry, targetPath)
+  // The shadow filter keeps the raw list on purpose: a mount the
+  // session cannot see still shadows the primary backend's keys under
+  // its prefix, the walk just never descends into it.
+  const descendantPrefixes = registry.descendantMounts(targetPath).map((m) => rstripSlash(m.prefix))
 
   // -c is one grand total however many mounts answered, so the per-mount
   // totals are re-summed below. Under -h the sub-runs are forced back to
@@ -313,11 +352,18 @@ export async function fanOutTraversal(
     if (ensureOpen !== undefined) {
       await ensureOpen(mount.resource)
     }
+    // The child-mount names and the dispatcher-backed start-point stat.
+    // A start point only the namespace serves (a nested mount's
+    // ancestor) has no backend listing, so without them the primary run
+    // reports the operand missing. The stat overlay is still dropped
+    // here, a known seam of the fan-out.
     const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
       stdin,
       cwd,
       ...(mounts === undefined ? {} : { mounts }),
       ...(links === undefined || links === null ? {} : { links }),
+      ...(childMounts !== null ? { childMounts } : {}),
+      ...(statPath !== null ? { statPath } : {}),
     })
     let stdout: ByteSource | null = stdout0
     if (mount !== primaryMount && io.exitCode === 127) {
@@ -359,6 +405,26 @@ export async function fanOutTraversal(
   let combined: ByteSource | null = null
   if (duC) {
     combined = mergeDuTotals(allStdout, duHuman)
+  } else if (allStdout.length > 0 && cmdName === 'find' && paths.length === 1) {
+    // GNU lists a directory before its contents, and the per-mount
+    // blocks land here as separate chunks, so plain concatenation
+    // printed a mount root after its own descendants. Every find line
+    // is a bare path at this stage (actions render later), and a path
+    // always sorts before its extensions, so one path sort restores
+    // GNU's invariant and matches the per-mount emit order. A
+    // single-operand walk never visits a path twice, so the set
+    // collapses a synthesized ancestor row against a primary backend
+    // that happens to hold a real directory at the same path. Multiple
+    // operands keep the concatenation: GNU walks operands in
+    // command-line order, which a global sort would not honor.
+    const lines = [
+      ...new Set(
+        allStdout
+          .flatMap((d) => new TextDecoder().decode(d).split('\n'))
+          .filter((line) => line !== ''),
+      ),
+    ].sort()
+    combined = new TextEncoder().encode(lines.join('\n') + '\n')
   } else if (allStdout.length > 0) {
     const parts = allStdout.map((d) => {
       const s = new TextDecoder().decode(d).replace(/\n+$/, '')
@@ -372,7 +438,14 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const [newCombined, actionErr] = await applyFindActions(combined, flags, registry, cwd)
+    const [newCombined, actionErr] = await applyFindActions(
+      combined,
+      flags,
+      registry,
+      cwd,
+      childMounts,
+      statPath,
+    )
     combined = newCombined
     if (actionErr.length > 0) {
       const existing = await materialize(mergedIo.stderr)
@@ -415,6 +488,8 @@ export function runWithFanout(
   mounts: MountView | undefined,
   links: LinkView | null,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+  childMounts: ChildMounts | null = null,
+  statPath: StatPath | null = null,
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
@@ -443,6 +518,8 @@ export function runWithFanout(
       ensureOpen,
       mounts,
       links,
+      childMounts,
+      statPath,
     )
     return [stdout, io]
   }

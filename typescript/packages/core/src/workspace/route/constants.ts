@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SPECS } from '../../commands/spec/index.ts'
+import { compileSpec } from '../../commands/spec/compile.ts'
 import { ShellBuiltin } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 
@@ -173,6 +175,112 @@ export function reportsLink(name: string, words: readonly (string | PathSpec)[])
   if (dereferences(name, words)) return false
   const spec = NO_FOLLOW_FLAGS[name]
   return spec !== undefined && hasOption(words, spec[0], spec[1])
+}
+
+// Options whose argument is a program, so the words after it are that
+// program's argv rather than the command's own: python3's -c and -m
+// (`python3 -c 'code' -u x` hands -u to the code). This is a table
+// rather than a spec field on purpose. argparse cannot express it at
+// all (`add_argument("-c")` beside `nargs=REMAINDER` answers
+// `unrecognized arguments: -u`), and CPython parses its own command
+// line in C for the same reason, so it is one command's rule and not
+// part of the shared grammar.
+const PROGRAM_OPTIONS: Record<string, readonly string[]> = {
+  python: ['-c', '-m'],
+  python3: ['-c', '-m'],
+}
+
+/**
+ * Where a short cluster's program value ends, or null if it has none.
+ *
+ * Args:
+ *   word: the option word, dash included.
+ *   index: the word's position in the command's words.
+ *   carriers: the spellings whose value is a program.
+ *   valueSpellings: every short spelling that takes a value.
+ */
+function clusterHandoff(
+  word: string,
+  index: number,
+  carriers: readonly string[],
+  valueSpellings: readonly string[],
+): number | null {
+  for (let j = 1; j < word.length; j++) {
+    const letter = `-${word[j] ?? ''}`
+    // Attached (`-cCODE`) carries its value in this word; the detached
+    // form takes the next one.
+    if (carriers.includes(letter)) return word.slice(j + 1) !== '' ? index + 1 : index + 2
+    if (valueSpellings.includes(letter)) return null
+  }
+  return null
+}
+
+/**
+ * How many words a short cluster with no program value consumes.
+ *
+ * Args:
+ *   word: the option word, dash included.
+ *   valueSpellings: every short spelling that takes a value.
+ */
+function clusterWords(word: string, valueSpellings: readonly string[]): number {
+  for (let j = 1; j < word.length; j++) {
+    if (valueSpellings.includes(`-${word[j] ?? ''}`)) return word.slice(j + 1) !== '' ? 1 : 2
+  }
+  return 1
+}
+
+/**
+ * Insert POSIX's `--` after a program-carrying option's value.
+ *
+ * The handoff already has a spelling every parser honors, so the rule is
+ * applied by writing one down rather than by teaching the parser a new
+ * kind of option. The marker is inserted unconditionally, never skipped
+ * because the line already carries one: CPython stops parsing at -c and
+ * passes a later `--` through as data (`python3 -c p -- -u` gives the
+ * program `['-c', '--', '-u']`), so the parser must consume exactly the
+ * one added here and leave any typed one alone.
+ *
+ * Only the option run before the first operand is scanned. A -c after an
+ * operand belongs to the program (`python3 s.py -c x`), and the operand
+ * already ended option parsing by itself.
+ *
+ * The scan walks a short cluster letter by letter rather than matching
+ * the word's prefix, because the carrier need not be first: CPython
+ * reads `python3 -uc 'p' -v` and `python3 -uc'p' -v` the same way it
+ * reads the unclustered forms, handing `-v` to the program.
+ */
+export function endOptionsAfterProgram(name: string, words: string[]): string[] {
+  const carriers = PROGRAM_OPTIONS[name]
+  if (carriers === undefined) return words
+  // Value spellings say which words carry a value, so `-W ignore -c p`
+  // steps over `ignore` instead of reading it as the first operand.
+  const spec = SPECS[name]
+  if (spec === undefined) return words
+  const compiled = compileSpec(spec)
+  let i = 0
+  while (i < words.length) {
+    const word = words[i] ?? ''
+    if (word === '--') return words
+    // The first operand, which ended option parsing by itself.
+    if (!word.startsWith('-') || word === '-') return words
+    if (word.startsWith('--')) {
+      const attached = word.includes('=')
+      const longName = word.split('=', 1)[0] ?? word
+      i += attached || !compiled.longValueSpellings.has(longName) ? 1 : 2
+      continue
+    }
+    const after = clusterHandoff(word, i, carriers, compiled.valueSpellings)
+    if (after === null) {
+      i += clusterWords(word, compiled.valueSpellings)
+      continue
+    }
+    // Nothing to hand over, and a detached form with no value at all is
+    // the parser's refusal to report, not ours to turn into a program
+    // named `--`.
+    if (after >= words.length) return words
+    return [...words.slice(0, after), '--', ...words.slice(after)]
+  }
+  return words
 }
 
 export const SHELL_NAMES: ReadonlySet<string> = new Set([

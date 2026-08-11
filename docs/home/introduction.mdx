@@ -175,7 +175,7 @@ grep -r "mirage" /slack /gmail /github
     from mirage.resource.slack import SlackConfig, SlackResource
 
     slack = SlackResource(SlackConfig(token="xoxb-..."))
-    github = GitHubResource(
+    github = await GitHubResource.build(
         GitHubConfig(token="github_pat_..."),
         owner="strukto-ai",
         repo="mirage",
@@ -226,7 +226,7 @@ grep -r "mirage" /slack /gmail /github
     import { MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 
     const slack = new SlackResource({ token: process.env.SLACK_BOT_TOKEN! })
-    const github = new GitHubResource({
+    const github = await GitHubResource.create({
       token: process.env.GITHUB_TOKEN!,
       owner: 'strukto-ai',
       repo: 'mirage',

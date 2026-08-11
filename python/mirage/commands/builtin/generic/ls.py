@@ -6,7 +6,7 @@ from mirage.commands.builtin.utils.formatting import format_ls_long
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.io.types import IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import ChildMounts, LinkView
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
@@ -228,6 +228,7 @@ async def _stat_entries(
     index: IndexCacheStore,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[list[FileStat], list[LsWarning]]:
     """Stat every name in a directory, plus the symlinks living there.
 
@@ -245,6 +246,10 @@ async def _stat_entries(
             name instead of the link row. A dereferenced directory link
             then carries FileType.DIRECTORY, which is what makes -R
             descend it.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names under a directory. A nested mount is namespace
+            structure the backend readdir cannot name, merged here like
+            a link row.
     """
     stats: list[FileStat] = []
     warnings: list[LsWarning] = []
@@ -273,9 +278,18 @@ async def _stat_entries(
             continue
         if not all_files and link.name.startswith("."):
             continue
+        seen.add(link.name)
         resolved = (await _deref_entry(path, link, links, stat, index)
                     if deref and links is not None else None)
         stats.append(resolved if resolved is not None else link)
+    for name in (child_mounts(path.virtual)
+                 if child_mounts is not None else []):
+        if name in seen:
+            continue
+        if not all_files and name.startswith("."):
+            continue
+        seen.add(name)
+        stats.append(FileStat(name=name, type=FileType.DIRECTORY))
     return stats, warnings
 
 
@@ -292,6 +306,7 @@ async def probe_operand(
     index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -307,8 +322,15 @@ async def probe_operand(
             a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names. Under ``-R`` a backend-served listing withholds the
+            merge and a child-mount root is never descended (the walk
+            cannot read another mount's backend, so the cross-mount
+            fan-out assembles those groups); a directory only the
+            namespace serves still renders its own group from it.
     """
     warnings: list[LsWarning] = []
+    structure_only = False
     try:
         names = await readdir(path, index)
     except (OSError, ValueError) as exc:
@@ -318,13 +340,23 @@ async def probe_operand(
         link_row = _link_row(path, links)
         if link_row is not None:
             return Operand(path, link_row, []), warnings
-        warnings.append(
-            LsWarning(
-                f"ls: cannot access '{path.raw_path}': "
-                f"{fs_strerror(exc) or exc}", command_line_arg))
-        return Operand(path, None, []), warnings
+        if child_mounts is None or not child_mounts(path.virtual):
+            warnings.append(
+                LsWarning(
+                    f"ls: cannot access '{path.raw_path}': "
+                    f"{fs_strerror(exc) or exc}", command_line_arg))
+            return Operand(path, None, []), warnings
+        # No backend serves it, but the namespace owes it children (a
+        # nested mount, a link's ancestors), so the door lists it as a
+        # directory and ls must agree: the merge below renders those
+        # rows from an empty backend listing. Under -R this group still
+        # renders; only descent into a child-mount root is withheld,
+        # because that listing is another backend's and the cross-mount
+        # fan-out assembles it.
+        names = []
+        structure_only = True
 
-    if not names:
+    if not names and not structure_only:
         row = await _file_entry(path, stat, index)
         if row is not None:
             return Operand(path, row, []), warnings
@@ -335,13 +367,16 @@ async def probe_operand(
         if link_row is not None:
             return Operand(path, link_row, []), warnings
 
-    entries, entry_ws = await _stat_entries(path,
-                                            names,
-                                            stat=stat,
-                                            all_files=all_files,
-                                            index=index,
-                                            links=links,
-                                            deref=deref)
+    entries, entry_ws = await _stat_entries(
+        path,
+        names,
+        stat=stat,
+        all_files=all_files,
+        index=index,
+        links=links,
+        deref=deref,
+        child_mounts=child_mounts if structure_only else
+        (None if recursive else child_mounts))
     warnings.extend(entry_ws)
     entries = sort_stats(entries, sort_by, reverse)
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
@@ -349,8 +384,13 @@ async def probe_operand(
         for entry in entries:
             if entry.type != FileType.DIRECTORY:
                 continue
-            child, child_ws = await probe_operand(_child_spec(
-                path, entry.name),
+            child_path = _child_spec(path, entry.name)
+            if structure_only and (child_mounts is None
+                                   or not child_mounts(child_path.virtual)):
+                # A child-mount root: its listing is another backend's,
+                # so the cross-mount fan-out renders that group.
+                continue
+            child, child_ws = await probe_operand(child_path,
                                                   readdir=readdir,
                                                   stat=stat,
                                                   all_files=all_files,
@@ -360,7 +400,8 @@ async def probe_operand(
                                                   command_line_arg=False,
                                                   index=index,
                                                   links=links,
-                                                  deref=deref)
+                                                  deref=deref,
+                                                  child_mounts=child_mounts)
             groups.extend(child.groups)
             warnings.extend(child_ws)
     return Operand(path, None, groups), warnings
@@ -380,6 +421,7 @@ async def walk(
     index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> WalkResult:
     """Flat listing for one operand: a directory's entries, or the operand
     itself when it is not one. ``recursive`` flattens the whole subtree in
@@ -398,6 +440,8 @@ async def walk(
             a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names to merge into a directory listing.
     """
     if list_dir:
         link_row = _link_row(path, links)
@@ -406,6 +450,12 @@ async def walk(
         try:
             listed = await stat(path, index)
         except (OSError, ValueError) as exc:
+            if child_mounts is not None and child_mounts(path.virtual):
+                # No backend serves it, but the namespace owes it
+                # children, so the door stats it as a directory and -d
+                # must print the same row.
+                return WalkResult(
+                    [FileStat(name=path.raw_path, type=FileType.DIRECTORY)])
             detail = fs_strerror(exc) or exc
             return WalkResult(warnings=[
                 LsWarning(f"ls: cannot access '{path.raw_path}': {detail}",
@@ -425,7 +475,8 @@ async def walk(
                                             command_line_arg=command_line_arg,
                                             index=index,
                                             links=links,
-                                            deref=deref)
+                                            deref=deref,
+                                            child_mounts=child_mounts)
     if operand.row is not None:
         return WalkResult([operand.row], warnings)
     entries = [e for _, group in operand.groups for e in group]
@@ -507,6 +558,7 @@ async def ls(
     index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -522,7 +574,8 @@ async def ls(
                                 list_dir=True,
                                 index=index,
                                 links=links,
-                                deref=deref)
+                                deref=deref,
+                                child_mounts=child_mounts)
             rows.extend(result.entries)
             warnings.extend(result.warnings)
         if len(rows) > 1:
@@ -546,7 +599,8 @@ async def ls(
                                             recursive=recursive,
                                             index=index,
                                             links=links,
-                                            deref=deref)
+                                            deref=deref,
+                                            child_mounts=child_mounts)
         warnings.extend(p_ws)
         operands.append(operand)
     if len(operands) > 1:

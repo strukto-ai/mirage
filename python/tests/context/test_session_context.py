@@ -15,8 +15,8 @@
 import pytest
 
 from mirage.context import (assert_mount_allowed, effective_mount_mode,
-                            get_current_session, reset_current_session,
-                            set_current_session)
+                            get_current_session, mount_allowed,
+                            reset_current_session, set_current_session)
 from mirage.types import MountMode, weaker_mode
 from mirage.workspace.session import Session
 
@@ -85,3 +85,13 @@ def test_prefix_normalization(bound_session):
 
 def test_missing_grant_defaults_effective_to_read(bound_session):
     assert effective_mount_mode("/other", MountMode.EXEC) == MountMode.READ
+
+
+def test_mount_allowed_is_the_non_raising_twin(bound_session):
+    assert mount_allowed("/ro") is True
+    assert mount_allowed("/ro/") is True
+    assert mount_allowed("/other") is False
+
+
+def test_mount_allowed_without_session_permits_everything():
+    assert mount_allowed("/anything") is True

@@ -319,4 +319,69 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
     expect(stdoutStr(check).trim()).toBe('False')
     await ws.close()
   }, 60_000)
+
+  it('a shadowing function receives the words as typed', async () => {
+    // bash's own rule: a function of the same name takes the line. It has
+    // no CPython option table, so the `--` the interpreter's handoff would
+    // need must not be inserted into its arguments.
+    const { ws } = await makeWorkspace()
+    await ws.execute('python3() { echo "$@"; }')
+    const io = await ws.execute('python3 -c payload -u x')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('-c payload -u x\n')
+    await ws.close()
+  })
+
+  it('command bypasses the function and restores the handoff', async () => {
+    // `command` masks the function for its inner run, so the interpreter
+    // is what runs and -u belongs to the program again.
+    const { ws } = await makeWorkspace()
+    await ws.execute('python3() { echo "$@"; }')
+    const io = await ws.execute('command python3 -c "import sys; print(sys.argv)" -u x')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("['-c', '-u', 'x']\n")
+    await ws.close()
+  }, 60_000)
+
+  it('an invalid -W filter is reported and the program still runs', async () => {
+    // CPython names a bad filter at startup and runs the program anyway;
+    // aborting would kill a line every other runtime completes.
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('python3 -W nonsense -c "print(42)"')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('42\n')
+    expect(stderrStr(io)).toBe("Invalid -W option ignored: invalid action: 'nonsense'\n")
+    await ws.close()
+  }, 60_000)
+
+  it('a known -X name is reported as unhonored', async () => {
+    // -X dev's real effect is read out of sys.flags, which is read-only,
+    // so populating sys._xoptions is all this engine can do for it.
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('python3 -X dev -c "print(7)"')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('7\n')
+    expect(stderrStr(io)).toContain("-X dev is ignored by the 'pyodide' runtime")
+    await ws.close()
+  }, 60_000)
+
+  it('an arbitrary -X name lands in sys._xoptions in silence', async () => {
+    // On CPython it does nothing but land in the dict either.
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('python3 -X nosuchopt -c "import sys; print(sys._xoptions)"')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("{'nosuchopt': True}\n")
+    expect(stderrStr(io)).toBe('')
+    await ws.close()
+  }, 60_000)
+
+  it('unsetting the function restores the handoff', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('python3() { echo "$@"; }')
+    await ws.execute('unset -f python3')
+    const io = await ws.execute('python3 -c "import sys; print(sys.argv)" -u x')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("['-c', '-u', 'x']\n")
+    await ws.close()
+  }, 60_000)
 })

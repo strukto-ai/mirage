@@ -76,7 +76,12 @@ const DIR_A = `${MOUNT}/pages/Project_Roadmap__${PAGE_A}`
 const DIR_B = `${MOUNT}/pages/Notes__${PAGE_B}`
 const DIR_C = `${DIR_A}/Q1_Goals__${PAGE_C}`
 const DB_DIR = `${MOUNT}/databases/Tasks__${DB_TASKS}`
-const ROW_1_DIR = `${DB_DIR}/Write_spec__${ROW_1}`
+// Since 2025-09-03 the rows live under the data source, not the database, so a
+// row sits one level deeper than it used to. These paths feed the MCP/REST
+// parity battery, where a stale one costs nothing visible: both arms answer
+// the same error and the case passes while asserting nothing.
+const DS_DIR = `${DB_DIR}/Tasks__${dataSourceIdOf(DB_TASKS)}`
+const ROW_1_DIR = `${DS_DIR}/Write_spec__${ROW_1}`
 
 type Json = Record<string, unknown>
 
@@ -119,6 +124,7 @@ interface FixtureDatabase {
   last_edited_by?: string
   url?: string
   archived?: boolean
+  in_trash?: boolean
 }
 interface FixtureBlock {
   id: string
@@ -156,7 +162,6 @@ interface PageRow {
   propertiesJson: string
   iconJson: string | null
   coverJson: string | null
-  archived: boolean
   inTrash: boolean
   createdTime: string
   lastEditedTime: string
@@ -173,7 +178,6 @@ interface DatabaseRow {
   descriptionJson: string | null
   propertiesJson: string
   isInline: boolean
-  archived: boolean
   inTrash: boolean
   createdTime: string
   lastEditedTime: string
@@ -188,7 +192,6 @@ interface BlockRow {
   type: string
   payloadJson: string
   hasChildren: boolean
-  archived: boolean
   inTrash: boolean
   createdTime: string
   lastEditedTime: string
@@ -255,9 +258,30 @@ function titleProp(title: string, column = 'title'): Json {
   }
 }
 
-function titleColumnOf(database: DatabaseRow | null): string {
-  if (database === null) return 'title'
-  const schema = asObject(JSON.parse(database.propertiesJson))
+function schemaOf(database: DatabaseRow | null): Json {
+  if (database === null) return {}
+  return asObject(JSON.parse(database.propertiesJson))
+}
+
+// Normalizing a write can add a select option to its column, and the option id
+// the answer carries is only usable if that lands, so the schema goes back to
+// the row whenever normalization changed it.
+async function persistSchema(
+  db: PrismaClient,
+  workspaceId: string,
+  owner: DatabaseRow | null,
+  schema: Json,
+  before: string,
+): Promise<void> {
+  const next = JSON.stringify(schema)
+  if (owner === null || next === before) return
+  await db.notionDatabase.update({
+    where: { workspaceId_id: { workspaceId, id: owner.id } },
+    data: { propertiesJson: next },
+  })
+}
+
+function titleColumnOf(schema: Json): string {
   for (const [name, spec] of Object.entries(schema)) {
     if (asObject(spec).type === 'title') return name
   }
@@ -326,21 +350,87 @@ function normalizeRichText(value: unknown): Json[] {
   return out
 }
 
-function normalizeProperties(properties: Json): Json {
+// The value key is the discriminator: {"select": {...}} says select on its
+// own, which is how a body that omits `type` still names its own shape. The
+// column is the fallback for a body that carries nothing readable.
+function propertyKind(prop: Json, columnType: string | undefined): string | undefined {
+  if (typeof prop.type === 'string') return prop.type
+  const keys = Object.keys(prop).filter((key) => key !== 'id' && key !== 'type')
+  return keys.length === 1 ? keys[0] : columnType
+}
+
+// A writer names a select option; Notion answers with the whole option off the
+// schema. A name the schema has never seen is minted rather than dropped,
+// which is what the real API does with a new select/multi_select value, and it
+// is added to the column's options right here, because the id in the answer is
+// only usable if a later write naming it alone resolves back to the same
+// option. Its id is the name, so the fake stays reproducible across runs.
+// Deliberate divergence: a status option is minted the same way, where the
+// real API refuses one it does not already have.
+function selectOption(column: Json, kind: string, value: Json): Json {
+  const name = typeof value.name === 'string' ? value.name : ''
+  const id = typeof value.id === 'string' ? value.id : ''
+  const config = asObject(column[kind])
+  const options = config.options
+  if (Array.isArray(options)) {
+    for (const one of options) {
+      const option = asObject(one)
+      if ((id !== '' && option.id === id) || (name !== '' && option.name === name)) {
+        return { id: option.id, name: option.name, color: option.color }
+      }
+    }
+  }
+  const minted: Json = { id: id !== '' ? id : name, name, color: 'default' }
+  if (Array.isArray(options)) options.push({ ...minted })
+  return minted
+}
+
+function normalizeValue(column: Json, kind: string, value: unknown): unknown {
+  if (kind === 'title' || kind === 'rich_text') return normalizeRichText(value)
+  if (kind === 'select' || kind === 'status') {
+    return value === null || value === undefined ? null : selectOption(column, kind, asObject(value))
+  }
+  if (kind === 'multi_select') {
+    if (!Array.isArray(value)) return []
+    return value.map((one) => selectOption(column, kind, asObject(one)))
+  }
+  // Notion answers a date with all three fields whatever the writer sent.
+  if (kind === 'date') {
+    if (value === null || value === undefined) return null
+    const date = asObject(value)
+    return { start: date.start ?? null, end: date.end ?? null, time_zone: date.time_zone ?? null }
+  }
+  return value ?? null
+}
+
+// Notion answers with the property value its schema decides, never the one the
+// writer sent: the column's id and type ride on every value, and a select
+// carries the whole option rather than the bare name a client may write. The
+// fake used to echo the request back, so a PATCH that left `type` out (the API
+// treats it as optional and the official SDK's own examples omit it) stored an
+// untyped object, which every reader renders blank because the type is what
+// says which key holds the value. Key order matches the fixture's, so a
+// written row and a seeded one look alike.
+function normalizeProperties(properties: Json, schema: Json): Json {
   const out: Json = {}
   for (const [key, value] of Object.entries(properties)) {
-    if (Array.isArray(value)) {
-      out[key] = { id: key, type: 'title', title: normalizeRichText(value) }
+    const column = asObject(schema[key])
+    const columnType = typeof column.type === 'string' ? column.type : undefined
+    // A bare array under the column name is a shorthand the fake accepts; it
+    // is only ever the title column or a rich text one.
+    const prop = Array.isArray(value)
+      ? { [columnType === 'rich_text' ? 'rich_text' : 'title']: value }
+      : asObject(value)
+    const kind = propertyKind(prop, columnType)
+    if (kind === undefined) {
+      out[key] = prop
       continue
     }
-    const prop = asObject(value)
-    const copy: Json = { ...prop }
-    if (Array.isArray(prop.title)) copy.title = normalizeRichText(prop.title)
-    if (Array.isArray(prop.rich_text)) copy.rich_text = normalizeRichText(prop.rich_text)
-    if (copy.type === undefined) {
-      if (Array.isArray(prop.title)) copy.type = 'title'
-      else if (Array.isArray(prop.rich_text)) copy.type = 'rich_text'
-    }
+    const copy: Json = {}
+    if (typeof column.id === 'string') copy.id = column.id
+    else if (kind === 'title') copy.id = 'title'
+    copy.type = kind
+    copy[kind] = normalizeValue(column, kind, prop[kind])
     out[key] = copy
   }
   return out
@@ -375,7 +465,7 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
         descriptionJson: d.description !== undefined ? JSON.stringify(d.description) : null,
         propertiesJson: JSON.stringify(d.properties),
         isInline: d.is_inline ?? false,
-        archived: d.archived ?? false,
+        inTrash: d.in_trash ?? d.archived ?? false,
         createdTime: d.created_time ?? fx.defaults.created_time,
         lastEditedTime: d.last_edited_time ?? fx.defaults.last_edited_time,
         createdBy: d.created_by ?? fx.defaults.created_by,
@@ -398,8 +488,7 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
         propertiesJson: JSON.stringify(properties),
         iconJson: p.icon !== undefined ? JSON.stringify(p.icon) : null,
         coverJson: p.cover !== undefined ? JSON.stringify(p.cover) : null,
-        archived: p.archived ?? false,
-        inTrash: p.in_trash ?? false,
+        inTrash: p.in_trash ?? p.archived ?? false,
         createdTime: p.created_time ?? fx.defaults.created_time,
         lastEditedTime: p.last_edited_time ?? fx.defaults.last_edited_time,
         createdBy: p.created_by ?? fx.defaults.created_by,
@@ -448,6 +537,9 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
   }
 }
 
+// `archived` is upstream's deprecated alias for `in_trash` and, in its own
+// words, "always returns the same value". So both names are read off the one
+// stored bit here rather than from two columns that can disagree.
 function pageJson(row: PageRow): Json {
   const out: Json = {
     object: 'page',
@@ -457,7 +549,7 @@ function pageJson(row: PageRow): Json {
     created_by: { object: 'user', id: row.createdBy },
     last_edited_by: { object: 'user', id: row.lastEditedBy },
     parent: pageParentJson(row.parentType, row.parentId),
-    archived: row.archived,
+    archived: row.inTrash,
     in_trash: row.inTrash,
     url: row.url,
     properties: JSON.parse(row.propertiesJson) as Json,
@@ -505,7 +597,7 @@ function dataSourceJson(row: DatabaseRow): Json {
     last_edited_time: row.lastEditedTime,
     parent: { type: 'database_id', database_id: row.id },
     database_parent: parentJson(row.parentType, row.parentId),
-    archived: row.archived,
+    archived: row.inTrash,
     in_trash: row.inTrash,
     title: JSON.parse(row.titleJson) as unknown[],
     description: [],
@@ -525,7 +617,7 @@ function databaseJson(row: DatabaseRow): Json {
     created_time: row.createdTime,
     last_edited_time: row.lastEditedTime,
     parent: parentJson(row.parentType, row.parentId),
-    archived: row.archived,
+    archived: row.inTrash,
     in_trash: row.inTrash,
     is_inline: row.isInline,
     url: row.url,
@@ -733,7 +825,7 @@ async function childrenOf(
   parentId: string,
 ): Promise<BlockRow[]> {
   return (await db.notionBlock.findMany({
-    where: { workspaceId, parentId, archived: false },
+    where: { workspaceId, parentId, inTrash: false },
     orderBy: { position: 'asc' },
   })) as BlockRow[]
 }
@@ -747,14 +839,14 @@ async function searchResults(db: PrismaClient, workspaceId: string, args: Json):
   // battery's client and the official CLI can share one server.
   if (filter.value === 'database' || filter.value === 'data_source') {
     const rows = (await db.notionDatabase.findMany({
-      where: { workspaceId, archived: false, inTrash: false },
+      where: { workspaceId, inTrash: false },
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
     })) as DatabaseRow[]
     const kept = rows.filter((r) => matches(r.titleText))
     return filter.value === 'data_source' ? kept.map(dataSourceJson) : kept.map(databaseJson)
   }
   const rows = (await db.notionPage.findMany({
-    where: { workspaceId, archived: false, inTrash: false },
+    where: { workspaceId, inTrash: false },
     orderBy: [{ position: 'asc' }, { id: 'asc' }],
   })) as PageRow[]
   return rows.filter((r) => matches(r.titleText)).map(pageJson)
@@ -890,7 +982,6 @@ async function createPage(
   body: Json,
 ): Promise<Reply> {
   const parent = asObject(body.parent)
-  const properties = normalizeProperties(asObject(body.properties))
   let parentType = 'workspace'
   let parentId: string | null = null
   if (typeof parent.page_id === 'string') {
@@ -914,10 +1005,20 @@ async function createPage(
     const owner = await db.notionPage.findFirst({ where: { workspaceId, id: parentId } })
     if (owner === null) return notFound('page', parentId)
   }
+  // The owner is read once and serves three purposes: the parent check, the
+  // column schema a written property is normalized against, and the name of
+  // the title column a markdown-only create files its heading under.
+  let owner: DatabaseRow | null = null
   if (parentType === 'database_id' && parentId !== null) {
-    const owner = await db.notionDatabase.findFirst({ where: { workspaceId, id: parentId } })
+    owner = (await db.notionDatabase.findFirst({
+      where: { workspaceId, id: parentId },
+    })) as DatabaseRow | null
     if (owner === null) return notFound('database', parentId)
   }
+  const schema = schemaOf(owner)
+  const schemaBefore = JSON.stringify(schema)
+  const properties = normalizeProperties(asObject(body.properties), schema)
+  await persistSchema(db, workspaceId, owner, schema, schemaBefore)
   const id = mintId(workspaceId, 'a0000000')
   // `ntn pages create --content` sends Markdown rather than properties; the
   // first heading becomes the title, exactly as the official CLI documents.
@@ -932,13 +1033,7 @@ async function createPage(
     }
   }
   if (title !== '' && Object.keys(properties).length === 0) {
-    const owner =
-      parentType === 'database_id' && parentId !== null
-        ? ((await db.notionDatabase.findFirst({
-            where: { workspaceId, id: parentId },
-          })) as DatabaseRow | null)
-        : null
-    Object.assign(properties, titleProp(title, titleColumnOf(owner)))
+    Object.assign(properties, titleProp(title, titleColumnOf(schema)))
   }
   await db.notionPage.create({
     data: {
@@ -1067,6 +1162,49 @@ async function createComment(
   return { status: 200, json: commentJson(row) }
 }
 
+// A child page is one object in two tables (see the schema's NotionPage note),
+// so trashing it has to move both rows: the NotionPage row is what /search and
+// a database query read, the NotionBlock row is what the parent's children
+// listing reads, and setting only one leaves the page gone from half the
+// surfaces and present in the other half.
+async function setTrashed(
+  db: PrismaClient,
+  workspaceId: string,
+  id: string,
+  trashed: boolean,
+): Promise<void> {
+  const where = { workspaceId_id: { workspaceId, id } }
+  if ((await db.notionPage.findFirst({ where: { workspaceId, id } })) !== null) {
+    await db.notionPage.update({ where, data: { inTrash: trashed } })
+  }
+  if ((await db.notionBlock.findFirst({ where: { workspaceId, id } })) !== null) {
+    await db.notionBlock.update({ where, data: { inTrash: trashed } })
+  }
+}
+
+// DELETE /v1/blocks/{id} is the only delete verb the public API has, and the
+// only one the MCP tool surface exposes (API-delete-a-block), so without it an
+// MCP client cannot remove anything. Upstream: "Sets a Block object, including
+// page blocks, to in_trash: true", which covers database rows, so this resolves
+// a block id first and falls back to a page of the same id.
+async function deleteBlock(db: PrismaClient, workspaceId: string, id: string): Promise<Reply> {
+  const block = (await db.notionBlock.findFirst({
+    where: { workspaceId, id },
+  })) as BlockRow | null
+  const page = (await db.notionPage.findFirst({
+    where: { workspaceId, id },
+  })) as PageRow | null
+  if (block === null && page === null) return notFound('block', id)
+  await setTrashed(db, workspaceId, id, true)
+  // A page that owns no block row (a top-level page, or a database row) still
+  // answers as a block, which is what "including page blocks" means.
+  const body =
+    block === null
+      ? { object: 'block', id, type: 'child_page', has_children: false, child_page: { title: (page as PageRow).titleText } }
+      : blockJson(block)
+  return { status: 200, json: { ...body, archived: true, in_trash: true } }
+}
+
 async function updatePage(
   db: PrismaClient,
   workspaceId: string,
@@ -1076,10 +1214,21 @@ async function updatePage(
   const row = (await db.notionPage.findFirst({ where: { workspaceId, id } })) as PageRow | null
   if (row === null) return notFound('page', id)
   const data: Record<string, unknown> = {}
-  if (typeof body.archived === 'boolean') data.archived = body.archived
-  if (typeof body.in_trash === 'boolean') data.inTrash = body.in_trash
+  // Two spellings of one bit, so `ntn pages trash` (in_trash) and an API or
+  // MCP client (archived) reach the same state rather than half of it.
+  const trash = typeof body.in_trash === 'boolean' ? body.in_trash : body.archived
+  if (typeof trash === 'boolean') await setTrashed(db, workspaceId, id, trash)
   if (body.properties !== undefined) {
-    const patch = normalizeProperties(asObject(body.properties))
+    const owner =
+      row.parentType === 'database_id' && row.parentId !== null
+        ? ((await db.notionDatabase.findFirst({
+            where: { workspaceId, id: row.parentId },
+          })) as DatabaseRow | null)
+        : null
+    const schema = schemaOf(owner)
+    const schemaBefore = JSON.stringify(schema)
+    const patch = normalizeProperties(asObject(body.properties), schema)
+    await persistSchema(db, workspaceId, owner, schema, schemaBefore)
     const merged = { ...(JSON.parse(row.propertiesJson) as Json), ...patch }
     data.propertiesJson = JSON.stringify(merged)
     data.titleText = titleOfProperties(merged)
@@ -1262,6 +1411,10 @@ async function handle(
     return appendChildren(db, ws, fx, parts[2] ?? '', body)
   }
 
+  if (method === 'DELETE' && parts.length === 3 && parts[1] === 'blocks') {
+    return deleteBlock(db, ws, parts[2] ?? '')
+  }
+
   if (method === 'POST' && parts.length === 2 && parts[1] === 'comments') {
     return createComment(db, ws, fx, body)
   }
@@ -1276,6 +1429,50 @@ async function createStore(label: string): Promise<{ db: PrismaClient; fx: Fixtu
   const fx = loadFixture()
   await seed(db, fx, DEFAULT_TOKEN)
   return { db, fx }
+}
+
+// The fake answers every request from one event loop, so two writes to the
+// same workspace interleave at any await: both read the schema (or a page's
+// properties, or the row count that becomes a position), both write it back,
+// and the later one silently drops the earlier one's change. A minted select
+// option lost that way is the worst of them, because the page that minted it
+// still stores the id the schema no longer has. Every mutating route is a
+// read-modify-write from end to end, so they queue per workspace at the door
+// rather than step by step: one rule, and the only place that cannot fall out
+// of step when a route is added. Reads over GET stay concurrent, and a POST
+// query waiting behind a pending write is what makes its answer a consistent
+// one.
+const writeQueue = new Map<string, Promise<unknown>>()
+
+function serialize<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const prior = writeQueue.get(key) ?? Promise.resolve()
+  const next = prior.then(run)
+  writeQueue.set(
+    key,
+    next.catch(() => null),
+  )
+  return next
+}
+
+// /reset carries no bearer, so its workspace comes from the body; every other
+// route is scoped by the token, which is the workspace id.
+function workspaceKey(req: IncomingMessage, url: URL, body: Json): string {
+  if (url.pathname === '/reset') {
+    return typeof body.workspace === 'string' ? body.workspace : DEFAULT_TOKEN
+  }
+  return bearer(req)
+}
+
+function dispatch(
+  db: PrismaClient,
+  fx: Fixture,
+  method: string,
+  req: IncomingMessage,
+  url: URL,
+  body: Json,
+): Promise<Reply> {
+  if (method === 'GET' || method === 'HEAD') return handle(db, fx, method, req, url, body)
+  return serialize(workspaceKey(req, url, body), () => handle(db, fx, method, req, url, body))
 }
 
 function serve(db: PrismaClient, fx: Fixture): Server {
@@ -1297,7 +1494,7 @@ function serve(db: PrismaClient, fx: Fixture): Server {
           return
         }
       }
-      void handle(db, fx, req.method ?? 'GET', req, url, body)
+      void dispatch(db, fx, req.method ?? 'GET', req, url, body)
         .then((reply) => {
           res.writeHead(reply.status, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(reply.json))
@@ -1372,6 +1569,14 @@ async function toolPayload(db: PrismaClient, name: string, args: Json): Promise<
     const size = intOr(args.page_size, MAX_PAGE_SIZE)
     return pageOf(rows.map(blockJson), cursorOf(args.start_cursor), size)
   }
+  // The one delete verb the tool surface has. It mutates, so it takes the same
+  // per-workspace queue every REST mutation takes rather than a second rule.
+  if (name === 'API-delete-a-block') {
+    const id = String(args.block_id)
+    const reply = await serialize(ws, () => deleteBlock(db, ws, id))
+    if (reply.status !== 200) throw new Error(`mock notion: unknown block ${id}`)
+    return reply.json
+  }
   throw new Error(`mock notion: unsupported tool ${name}`)
 }
 
@@ -1438,8 +1643,11 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['ls_databases', `ls ${MOUNT}/databases/`],
   ['ls_database_dir', `ls ${DB_DIR}/`],
   ['cat_database_json', `cat ${DB_DIR}/database.json`],
-  ['jq_db_props', `jq ".properties | keys" ${DB_DIR}/database.json`],
+  ['ls_data_source_dir', `ls ${DS_DIR}/`],
+  ['cat_data_source_json', `cat ${DS_DIR}/data_source.json`],
+  ['jq_data_source_props', `jq ".properties | keys" ${DS_DIR}/data_source.json`],
   ['cat_row', `cat ${ROW_1_DIR}/page.json`],
+  ['jq_row_cells', `jq ".properties.Priority.number" ${ROW_1_DIR}/page.json`],
   ['du_pages', `du ${MOUNT}/pages/`],
   ['du_page_a', `du ${DIR_A}/`],
 ]

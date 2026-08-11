@@ -14,7 +14,9 @@
 
 import { isMissingOp, isMissingPath } from '../utils/errors.ts'
 import { CrossMountError } from './errors.ts'
-import type { BridgeDispatchFn, PrefixSource } from './types.ts'
+import { normDir } from '../utils/slash.ts'
+import { PrefixResolver, type MountResolver } from './resolver.ts'
+import type { BridgeDispatchFn } from './types.ts'
 
 export type FlushKind = 'append' | 'write'
 
@@ -28,6 +30,10 @@ export interface VFSEntry {
   path: string
   size: number
   isDir: boolean
+  // A namespace symlink. Marked so a whole-tree preload can skip it:
+  // stat follows links, so a directory link would otherwise read as a
+  // plain directory and a cyclic one would recurse the walk forever.
+  isLink?: boolean
 }
 
 /** One path's metadata, in the shape every guest encoder needs. */
@@ -90,17 +96,17 @@ export function planFlush(
  *
  * Args:
  *   dispatch: the workspace op dispatch this runtime was attached to.
- *   mountPrefixes: live view of the workspace mount prefixes; the
- *     default answers no mounts, so routing questions answer null.
+ *   resolver: the workspace mount routing table; the default answers
+ *     no mounts, so routing questions answer null.
  */
 export class RuntimeVFS {
   private readonly dispatch: BridgeDispatchFn
-  private readonly mountPrefixes: PrefixSource
+  private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
 
-  constructor(dispatch: BridgeDispatchFn, mountPrefixes: PrefixSource = () => []) {
+  constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
     this.dispatch = dispatch
-    this.mountPrefixes = mountPrefixes
+    this.resolver = resolver
   }
 
   /**
@@ -109,16 +115,19 @@ export class RuntimeVFS {
    * right one when one mount nests inside another.
    */
   prefixes(): string[] {
-    const out = this.mountPrefixes().map((p) => (p.endsWith('/') ? p : p + '/'))
+    const out = this.resolver.prefixes().map((p) => normDir(p))
     return out.sort((a, b) => b.length - a.length)
   }
 
-  /** The mount prefix serving `path`, longest match first, or null. */
+  /**
+   * The mount prefix serving `path`, longest match first, or null. The
+   * resolver answers in the mount table's own spelling; this surface
+   * re-spells to its trailing-slash convention, the form `prefixes`
+   * reports.
+   */
   mountOf(path: string): string | null {
-    for (const prefix of this.prefixes()) {
-      if (path === prefix.slice(0, -1) || path.startsWith(prefix)) return prefix
-    }
-    return null
+    const owner = this.resolver.ownerOf(path)
+    return owner === null ? null : normDir(owner)
   }
 
   async read(path: string): Promise<Uint8Array> {

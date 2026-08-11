@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isEnoent } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -40,10 +41,6 @@ interface WalkEntry {
   path: string
   depth: number
   file: boolean
-}
-
-export function isEnoent(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
 }
 
 export function modifiedTs(modified: string | null): number | null {

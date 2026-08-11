@@ -27,7 +27,7 @@ config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 
 
 async def main():
-    resource = GitHubResource(
+    resource = await GitHubResource.build(
         config=config,
         owner="strukto-ai",
         repo="mirage",

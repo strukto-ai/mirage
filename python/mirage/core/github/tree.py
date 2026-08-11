@@ -15,7 +15,7 @@
 import logging
 from typing import Any
 
-from mirage.core.github._client import github_get, github_get_sync
+from mirage.core.github._client import github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
 
@@ -47,13 +47,13 @@ def _parse_tree_response(
     return result, truncated
 
 
-def fetch_tree_sync(
+async def fetch_tree(
     config: GitHubConfig,
     owner: str,
     repo: str,
     ref: str,
 ) -> tuple[dict[str, TreeEntry], bool]:
-    data = github_get_sync(
+    data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{ref}",
         params={"recursive": "1"},

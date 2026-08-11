@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage import Workspace
 from mirage.cache.index import (RAMIndexCacheStore, RedisIndexCacheStore,
                                 RedisIndexConfig)
@@ -36,11 +38,12 @@ def test_workspace_default_index_is_ram():
     assert isinstance(r.index, RAMIndexCacheStore)
 
 
-def test_config_index_redis_block_builds_redis_config():
+@pytest.mark.asyncio
+async def test_config_index_redis_block_builds_redis_config():
     cfg = WorkspaceConfig(
         mounts={"/m": MountBlock(resource="ram")},
         index=RedisIndexBlock(type="redis"),
     )
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert isinstance(kwargs["index"], RedisIndexConfig)
     assert kwargs["index"].key_prefix == "mirage:index:"

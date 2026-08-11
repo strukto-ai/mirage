@@ -78,7 +78,6 @@ export class MountCore {
   readonly session: Session | null
   private readonly now: Date
   private readonly root: string
-  private readonly prefixes: string[]
   readonly handles = new Map<number, Handle>()
   // In-memory extended attributes, keyed by path. Backends have no POSIX
   // xattrs, so these are advisory and never persisted; see setxattr.
@@ -93,9 +92,6 @@ export class MountCore {
     this.ws = ws
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
-    // When scoped to a single mount, the root maps onto that mount and
-    // there are no virtual intermediate directories to synthesize.
-    this.prefixes = this.root === '' ? ws.mounts().map((m) => m.prefix) : []
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
     this.gid = typeof process.getgid === 'function' ? process.getgid() : 0
     this.session = options.session ?? null
@@ -193,29 +189,6 @@ export class MountCore {
     return entry
   }
 
-  isVirtualDir(path: string): boolean {
-    const bare = rstripSlash(path)
-    const normalized = bare + '/'
-    for (const p of this.prefixes) {
-      const pBare = rstripSlash(p)
-      if (p.startsWith(normalized) || pBare === bare) return true
-    }
-    return false
-  }
-
-  virtualChildren(path: string): string[] {
-    const normalized = path === '/' ? '/' : rstripSlash(path) + '/'
-    const children = new Set<string>()
-    for (const p of this.prefixes) {
-      if (p.startsWith(normalized) && p !== normalized) {
-        const rest = p.slice(normalized.length)
-        const child = rest.split('/')[0]
-        if (child !== undefined && child !== '') children.add(child)
-      }
-    }
-    return [...children].sort()
-  }
-
   cachedSize(path: string): number | null {
     for (const ctx of this.handles.values()) {
       if (ctx.path === path && ctx.data !== undefined) return ctx.data.byteLength
@@ -292,7 +265,6 @@ export class MountCore {
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
     if (target !== null) return this.linkStat(target)
-    if (this.isVirtualDir(path)) return this.dirStat()
     const s = await this.ws.fs.stat(this.resolve(path))
     if (s.type === FileType.DIRECTORY) {
       return this.applyStatAttrs(this.dirStat(), s)
@@ -318,21 +290,15 @@ export class MountCore {
   }
 
   async readdir(path: string): Promise<string[]> {
-    const names = new Set(this.virtualChildren(path))
-    const links = this.ws.fs.links
-    if (links !== null) {
-      for (const linkName of links.linksUnder(this.resolve(path)).keys()) {
-        if (linkName !== '' && !isMacosMetadata(linkName)) names.add(linkName)
-      }
-    }
-    try {
-      const entries = await this.ws.fs.readdir(this.resolve(path))
-      for (const e of entries) {
-        const part = rstripSlash(e).split('/').pop() ?? ''
-        if (part !== '' && !isMacosMetadata(part)) names.add(part)
-      }
-    } catch (err) {
-      if (names.size === 0) throw err
+    // The workspace dispatcher merges namespace structure (child mounts
+    // and symlinks) into readdir and answers structure-only directories
+    // itself, so the core only normalizes entry shapes and drops macOS
+    // metadata names.
+    const names = new Set<string>()
+    const entries = await this.ws.fs.readdir(this.resolve(path))
+    for (const e of entries) {
+      const part = rstripSlash(e).split('/').pop() ?? ''
+      if (part !== '' && !isMacosMetadata(part)) names.add(part)
     }
     return ['.', '..', ...[...names].sort()]
   }

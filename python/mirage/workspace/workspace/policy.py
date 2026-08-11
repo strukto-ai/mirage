@@ -12,17 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from typing import Any
 
 from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyError,
                                    PolicyFn, decide_line, parsed_commands)
+from mirage.runtime.resolver import MountResolver
 from mirage.runtime.table import catch_all, runtime_bindings_for
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.workspace.runtimes import Runtimes
-
-PrefixFn = Callable[[], list[str]]
 
 
 class PolicyRouter:
@@ -38,14 +36,14 @@ class PolicyRouter:
     Args:
         registry (MountRegistry): carries the resolved static bindings.
         runtimes (Runtimes): the ordered runtime entries.
-        mount_prefixes (PrefixFn): mount prefixes for the policy context.
+        resolver (MountResolver): mount prefixes for the policy context.
     """
 
     def __init__(self, registry: MountRegistry, runtimes: Runtimes,
-                 mount_prefixes: PrefixFn) -> None:
+                 resolver: MountResolver) -> None:
         self._registry = registry
         self._runtimes = runtimes
-        self._mount_prefixes = mount_prefixes
+        self._resolver = resolver
 
     async def decide(
         self,
@@ -111,7 +109,7 @@ class PolicyRouter:
             env=dict(session.env),
             session_id=session_id,
             agent_id=agent_id,
-            mounts=tuple(self._mount_prefixes()),
+            mounts=tuple(self._resolver.prefixes()),
         )
         try:
             return await decide_line(entries, policy, ctx,

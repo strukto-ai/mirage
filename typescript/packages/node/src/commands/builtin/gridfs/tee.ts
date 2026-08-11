@@ -16,18 +16,14 @@ import {
   IOResult,
   ResourceName,
   command,
-  materialize,
-  parseTeeFlags,
-  readStdinAsync,
   resolveGlobOf,
   specOf,
-  writeOutput,
+  teeGeneric,
   type CommandFnResult,
   type CommandOpts,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
-import { exists as gridfsExists } from '../../../core/gridfs/exists.ts'
 import { stream as gridfsStream } from '../../../core/gridfs/stream.ts'
 import { write as gridfsWrite } from '../../../core/gridfs/write.ts'
 import { GRIDFS_IO } from './io.ts'
@@ -45,31 +41,18 @@ async function teeCommand(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tee: missing operand\n') })]
   }
-  const parsed = parseTeeFlags(opts.flags)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
-  }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const first = resolved[0]
-  if (first === undefined) return [null, new IOResult()]
-  const stdinData = await readStdinAsync(opts.stdin)
-  const raw: Uint8Array = stdinData ?? ENC.encode(texts.join(' '))
-  let writeData = raw
-  if (parsed.append) {
-    let existingFound = false
-    try {
-      existingFound = await gridfsExists(accessor, first)
-    } catch {
-      existingFound = false
-    }
-    if (existingFound) {
-      const existing = await materialize(gridfsStream(accessor, first))
-      writeData = new Uint8Array(existing.byteLength + raw.byteLength)
-      writeData.set(existing, 0)
-      writeData.set(raw, existing.byteLength)
-    }
-  }
-  return writeOutput((p, d) => gridfsWrite(accessor, p, d), first, writeData, raw)
+  // Wiring only: every flag semantic, the write to each operand and the append
+  // fallback live in the generic. This file used to restate them, wrote only
+  // resolved[0], and carried an exists() pre-check to work around the
+  // generic's broken not-found test.
+  return teeGeneric(
+    resolved,
+    texts,
+    opts,
+    (p) => gridfsStream(accessor, p),
+    (p, d) => gridfsWrite(accessor, p, d),
+  )
 }
 
 export const GRIDFS_TEE = command({

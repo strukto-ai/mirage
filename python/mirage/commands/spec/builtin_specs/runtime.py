@@ -14,16 +14,97 @@
 
 from mirage.commands.spec.types import CommandSpec, Operand, Option
 
+# CPython's own option table, minus four switches that describe a
+# process mirage does not have: -i (drop to an interactive prompt), -d
+# (parser debug, a debug-build-only switch), -v (trace every import to
+# stderr) and the --help-env/--help-xoptions/--help-all dumps, which
+# document a CPython build rather than this command. Everything else
+# CPython accepts, this accepts.
+#
+# The four groups differ in who answers them: -c/-m select the source
+# and end option parsing (their argument is a program, so trailing
+# words are that program's argv); -x also selects source, by dropping
+# the script file's first line, and is answered here rather than by a
+# runtime because every engine reads the same resolved text; the init
+# switches are handed to the runtime through RunArgs.flags and honored
+# by whichever engine can; -u is a structural no-op, since mirage
+# buffers every stream and returns it whole. Pinned against CPython
+# 3.12.11.
+_PYTHON_OPTIONS: tuple[Option, ...] = (
+    Option(short="-c",
+           type="str",
+           description="Run the next argument as a program."),
+    Option(short="-m",
+           type="str",
+           description="Run the named module as __main__."),
+    Option(short="-u",
+           description=("(Ignored) Unbuffered output. Mirage buffers "
+                        "every stream and returns it whole.")),
+    Option(short="-b",
+           count=True,
+           description=("Warn on str(bytes) and on comparing bytes with "
+                        "str; -bb raises instead.")),
+    Option(short="-B", description="Do not write .pyc files on import."),
+    Option(short="-E", description="Ignore PYTHON* environment variables."),
+    Option(short="-I", description="Isolated mode: implies -E and -s."),
+    Option(short="-O",
+           count=True,
+           description=("Remove assert and __debug__ blocks; -OO also "
+                        "strips docstrings.")),
+    Option(short="-P",
+           description=("Do not prepend the script's directory to "
+                        "sys.path.")),
+    Option(short="-q",
+           description=("(Ignored) Suppress the version banner. Mirage "
+                        "prints none.")),
+    Option(short="-s",
+           description="Do not add the user site directory to sys.path."),
+    Option(short="-S",
+           description="Do not run 'import site' on initialization."),
+    Option(short="-W",
+           type="str",
+           multiple=True,
+           description="Set a warning control filter."),
+    Option(short="-x",
+           description=("Skip the script file's first line, for a "
+                        "non-Unix #! form.")),
+    Option(short="-X",
+           type="str",
+           multiple=True,
+           description="Set an implementation-specific option."),
+    # CPython parses this one by hand and so rejects the --opt=value
+    # spelling it accepts everywhere else; mirage's parser takes both,
+    # which is the harmless direction to diverge in.
+    Option(long="--check-hash-based-pycs",
+           type="str",
+           choices=("always", "default", "never"),
+           description="How to validate hash-based .pyc files."),
+    # Aliases of the injected help/version options, not new behavior:
+    # sharing their long spelling means they share their dest, so
+    # _with_help_support short-circuits them on the one path every
+    # command uses. CPython's -VV adds build info; mirage has no
+    # CPython build to report, so -VV clusters into -V and prints the
+    # same line.
+    Option(short="-h",
+           long="--help",
+           description="Show this help message and exit."),
+    Option(short="-V",
+           long="--version",
+           description="Show version information and exit."),
+)
+
 SPECS: dict[str, CommandSpec] = {
     'python':
     CommandSpec(
-        options=(Option(short="-c", type="str"), ),
-        rest=Operand(type="str"),
+        description="Run Python on the workspace's bound runtime.",
+        options=_PYTHON_OPTIONS,
+        rest=Operand(type="str", remainder=True),
     ),
     'python3':
     CommandSpec(
-        options=(Option(short="-c", type="str"), ),
-        rest=Operand(type="str"),
+        description="Run Python on the workspace's bound runtime.",
+        options=_PYTHON_OPTIONS,
+        rest=Operand(type="str", remainder=True),
     ),
     'js':
     CommandSpec(

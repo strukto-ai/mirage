@@ -16,7 +16,7 @@ import { IOResult } from '../../../io/types.ts'
 import { PolicyDenied } from '../../../policy/index.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
-import { fsStrerror, isFsError, isMissingOp } from '../../../utils/errors.ts'
+import { fsStrerror, isEnoent, isFsError, isMissingOp } from '../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -238,10 +238,6 @@ function isReadOnlyError(err: unknown): boolean {
   return err instanceof Error && err.message.includes('read-only')
 }
 
-function isEnoent(err: unknown): boolean {
-  return err instanceof Error && (err as { code?: string }).code === 'ENOENT'
-}
-
 interface SetAttrFields {
   mode?: number
   uid?: number | string
@@ -295,11 +291,13 @@ function joinedError(cmd: string, errors: string[], exitCode: number): Result {
 
 // A subtree as [path, stat] pairs, parents before children. Each entry's
 // stat is captured during the walk because chmod's symbolic clauses (u+x)
-// build on the entry's own current mode. Symlinks never appear: they are
-// namespace state, so no backend readdir reports one, which is exactly
-// GNU chmod -R's rule of changing neither a traversed link nor its
-// referent.
+// build on the entry's own current mode. Symlinks are skipped by name:
+// the door's readdir reports them (they are namespace structure), GNU
+// chmod -R changes neither a traversed link nor its referent, and the
+// skip must come before the stat because stat follows a link and would
+// descend through a directory link.
 async function walkStats(
+  namespace: Namespace,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
@@ -311,6 +309,7 @@ async function walkStats(
     if (directory === undefined) break
     const [children] = await dispatch('readdir', directory)
     for (const childVirtual of children as string[]) {
+      if (namespace.isLink(childVirtual)) continue
       const child = PathSpec.fromStrPath(childVirtual)
       const [childStat] = await dispatch('stat', child)
       const stat = childStat as FileStat
@@ -331,7 +330,7 @@ async function walkOwned(
   root: PathSpec,
   rootStat: FileStat,
 ): Promise<{ paths: PathSpec[]; links: string[] }> {
-  const walked = await walkStats(dispatch, root, rootStat)
+  const walked = await walkStats(namespace, dispatch, root, rootStat)
   return {
     paths: walked.map(([path]) => path),
     links: namespace.linkStatsBelow(root.virtual).map(([path]) => path),
@@ -388,7 +387,7 @@ export async function handleChmod(
       throw err
     }
     const entries: [PathSpec, FileStat][] = recursive
-      ? await walkStats(dispatch, resolved, stat)
+      ? await walkStats(namespace, dispatch, resolved, stat)
       : [[resolved, stat]]
     for (const [path, pathStat] of entries) {
       // Backends without a mode default to what ls renders: 755 for

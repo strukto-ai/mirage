@@ -14,6 +14,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
+import { PrefixResolver } from '../../resolver.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { applyMutation, createJournal, type MutationJournal } from './journal.ts'
 import { preloadInto } from './preload.ts'
@@ -50,7 +51,7 @@ describe('MirageFs', () => {
     const seed = new MirageFsSeed()
     await preloadInto(seed, vfs, prefix)
     const mountpoint = prefix.slice(0, -1)
-    const fs = new MirageFs(py.FS, py.ERRNO_CODES, journal, mountpoint)
+    const fs = new MirageFs(py.FS, py.ERRNO_CODES, journal, mountpoint, (path) => vfs.mountOf(path))
     py.FS.mkdirTree(mountpoint)
     py.FS.mount(fs.type, {}, mountpoint)
     fs.seed(seed)
@@ -96,7 +97,7 @@ describe('MirageFs', () => {
       }
       return Promise.resolve(undefined)
     }
-    vfs = new RuntimeVFS(dispatch, () => mounts)
+    vfs = new RuntimeVFS(dispatch, new PrefixResolver(() => mounts))
     journal = createJournal()
   }, 60_000)
 
@@ -228,6 +229,31 @@ except OSError as e:
 `)
     expect(py.globals.get('_res')).toBe('EXDEV')
     expect(journal.takeMutations()).toEqual([])
+  })
+
+  it('refuses a rename across a nested mount boundary inside one mountpoint', async () => {
+    const p = prefix()
+    const nested = `${p}inner/`
+    store.set(`${p}x.txt`, enc.encode('X'))
+    store.set(`${nested}deep.txt`, enc.encode('D'))
+    // The nested prefix is a mirage mount but not an Emscripten one:
+    // syncMounts collapses to maximal prefixes, so one mountpoint serves
+    // both trees and the kernel's own cross-mount check cannot fire.
+    mounts.push(nested)
+    await mountPrefix(p)
+    await py.runPythonAsync(`
+import errno, os
+try:
+    os.rename('${p}x.txt', '${nested}x.txt')
+    _res2 = 'NO ERROR'
+except OSError as e:
+    _res2 = 'EXDEV' if e.errno == errno.EXDEV else f'wrong errno {e.errno}'
+`)
+    expect(py.globals.get('_res2')).toBe('EXDEV')
+    expect(journal.takeMutations()).toEqual([])
+    // The refused source is still readable in place.
+    await py.runPythonAsync(`_kept = open('${p}x.txt').read()`)
+    expect(py.globals.get('_kept')).toBe('X')
   })
 
   it('resolves a relative path against the guest cwd', async () => {

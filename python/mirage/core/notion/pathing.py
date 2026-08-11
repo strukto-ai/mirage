@@ -59,7 +59,11 @@ def extract_data_source_title(data_source: dict[str, Any]) -> str:
 
 def extract_title(page: dict[str, Any]) -> str:
     props = page.get("properties", {})
+    if not isinstance(props, dict):
+        return ""
     for prop in props.values():
+        if not isinstance(prop, dict):
+            continue
         if prop.get("type") == "title":
             title_items = prop.get("title", [])
             return "".join(item.get("plain_text", "") for item in title_items)

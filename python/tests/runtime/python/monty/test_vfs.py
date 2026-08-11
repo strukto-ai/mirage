@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.python.monty.vfs import MontyVFS
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -24,7 +25,9 @@ class CountingCore(RuntimeVFS):
     """
 
     def __init__(self, files: dict[str, bytes]) -> None:
-        super().__init__(dispatch=None, loop=None, mount_prefixes=lambda: [])
+        super().__init__(dispatch=None,
+                         loop=None,
+                         resolver=PrefixResolver(lambda: []))
         self.files = files
         self.calls: list[tuple[str, str]] = []
 

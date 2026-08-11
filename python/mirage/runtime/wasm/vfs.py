@@ -24,6 +24,7 @@ from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
 from mirage.runtime.wasm.types import GuestStat
 from mirage.types import FileType
+from mirage.utils.path import owner_prefix
 
 
 def _mtime_ns(modified: str | None) -> int:
@@ -93,10 +94,7 @@ class WasmVFS:
         return [p for p in self._core.prefixes() if p != "/"]
 
     def _claimed_by_mount(self, path: str) -> bool:
-        for prefix in self._prefixes():
-            if path == prefix or path.startswith(prefix + "/"):
-                return True
-        return False
+        return owner_prefix(self._prefixes(), path) is not None
 
     def _serving_build(self, path: str) -> BuildDir | None:
         """The build directory when it answers for `path`, else None.
@@ -261,6 +259,13 @@ class WasmVFS:
         return sorted(entries.items())
 
     def _readdir_root(self) -> list[tuple[str, int]]:
+        """Merge the build directory's root listing with the core's.
+
+        The core's readdir already carries mount structure (the door
+        merges child mounts and links), so no prefix synthesis happens
+        here; mount entries arrive kind-unknown and guests stat lazily,
+        which the door also answers for structure-only directories.
+        """
         entries: dict[str, int] = {}
         if self._build is not None:
             for name, kind in self._build.readdir("/"):
@@ -268,7 +273,4 @@ class WasmVFS:
         if self._core is not None:
             for name, kind in self._readdir_core("/"):
                 entries.setdefault(name, kind)
-            for prefix in self._prefixes():
-                top = prefix.lstrip("/").split("/", 1)[0]
-                entries[top] = FT_DIR
         return sorted(entries.items())

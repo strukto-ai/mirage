@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS, plan_flush
 from mirage.utils.errors import OperationNotSupportedError
 
@@ -27,7 +28,7 @@ class RecordingVFS(RuntimeVFS):
     def __init__(self, prefixes=(), no_append=()):
         super().__init__(dispatch=None,
                          loop=None,
-                         mount_prefixes=lambda: list(prefixes))
+                         resolver=PrefixResolver(lambda: list(prefixes)))
         self.calls = []
         self._declines = set(no_append)
 

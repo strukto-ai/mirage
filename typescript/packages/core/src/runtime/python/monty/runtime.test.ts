@@ -21,6 +21,7 @@ import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { PrefixResolver } from '../../resolver.ts'
 
 function makeBridge(seed: Record<string, Uint8Array>): {
   dispatch: BridgeDispatchFn
@@ -93,7 +94,7 @@ describe('MontyRuntime', () => {
     listMounts: () => string[] = () => [],
   ): MontyRuntime => {
     const rt = new MontyRuntime()
-    if (dispatch !== undefined) rt.attach(dispatch, listMounts)
+    if (dispatch !== undefined) rt.attach(dispatch, new PrefixResolver(listMounts))
     runtimes.push(rt)
     return rt
   }
@@ -534,5 +535,90 @@ describe('buildRuntime', () => {
 
   it("hints that 'local' lives in the node package", () => {
     expect(() => buildRuntime('local')).toThrow(/mirage-node/)
+  })
+})
+
+describe('python3 option table (CPython-pinned)', () => {
+  async function run(line: string) {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+    )
+    try {
+      return await ws.execute(line)
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('takes -u before a script as a flag, not as the script', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+    )
+    try {
+      await ws.execute("printf 'print(42)\\n' > /s.py")
+      const io = await ws.execute('python3 -u /s.py')
+      expect(io.exitCode).toBe(0)
+      expect(new TextDecoder().decode(io.stdout)).toBe('42\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('exits 2 naming the letter for an unknown short option', async () => {
+    const io = await run("python3 -zz -c 'print(1)'")
+    expect(io.exitCode).toBe(2)
+    expect(new TextDecoder().decode(io.stderr)).toContain('Unknown option: -z')
+  })
+
+  it("exits 2 with CPython's wording when a payload has no argument", async () => {
+    const io = await run('python3 -c')
+    expect(io.exitCode).toBe(2)
+    const err = new TextDecoder().decode(io.stderr)
+    expect(err).toContain('Argument expected for the -c option')
+    expect(err).toContain('usage: python3 [option] ...')
+  })
+
+  it('sets argv[0] to the script as typed', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+    )
+    try {
+      await ws.execute("printf 'print(argv[0])\\n' > /s.py")
+      const io = await ws.execute('python3 /s.py')
+      expect(new TextDecoder().decode(io.stdout)).toBe('/s.py\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('sets argv[0] to -c under a payload', async () => {
+    const io = await run("python3 -c 'print(argv[0])'")
+    expect(new TextDecoder().decode(io.stdout)).toBe('-c\n')
+  })
+
+  it('refuses -m on a runtime with no import system', async () => {
+    const io = await run('python3 -m json.tool')
+    expect(io.exitCode).toBe(1)
+    const err = new TextDecoder().decode(io.stderr)
+    expect(err).toContain('-m')
+    expect(err).toContain('monty')
+  })
+
+  it('warns on an init switch monty cannot honor', async () => {
+    const io = await run("python3 -O -c 'print(1)'")
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(io.stderr)).toContain("-O is ignored by the 'monty' runtime")
+  })
+
+  it('does not warn for the by-design no-ops', async () => {
+    const io = await run("python3 -u -q -c 'print(1)'")
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(io.stderr)).toBe('')
   })
 })

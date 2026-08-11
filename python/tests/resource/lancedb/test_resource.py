@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.resource.lancedb import LanceDBConfig, LanceDBResource
 from mirage.resource.registry import REGISTRY, build_resource
 
@@ -46,9 +48,10 @@ def test_resource_registers_commands():
     assert expected <= {c.name for c in res.commands()}
 
 
-def test_resource_in_registry():
+@pytest.mark.asyncio
+async def test_resource_in_registry():
     assert "lancedb" in REGISTRY
-    res = build_resource("lancedb", {"uri": "/tmp/db"})
+    res = await build_resource("lancedb", {"uri": "/tmp/db"})
     assert res.name == "lancedb"
 
 

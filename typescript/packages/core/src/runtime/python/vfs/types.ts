@@ -22,6 +22,7 @@ export interface ErrnoCodes {
   readonly EPERM: number
   readonly EINVAL: number
   readonly EIO: number
+  readonly EXDEV: number
 }
 
 export interface FSNode {

@@ -79,6 +79,9 @@ class CompiledSpec:
         numeric_dest (str | None): canonical spelling fed by the
             ``-<digits>`` shorthand, when one option declares it.
         rest_kind (ValueType | None): kind of the rest operand.
+        remainder (bool): the rest operand gathers every word from the
+            first operand on, options included (``Operand.remainder``,
+            argparse's ``nargs=REMAINDER``).
         base_dest (str | None): canonical spelling of the option that
             re-bases the path operands after it (``CommandSpec.
             operand_base``, tar's -C).
@@ -107,6 +110,7 @@ class CompiledSpec:
     numeric_dest: str | None = None
     rest_kind: ValueType | None = None
     base_dest: str | None = None
+    remainder: bool = False
 
     def dest_of(self, spelling: str) -> str:
         """Canonical spelling for a typed spelling.
@@ -309,4 +313,5 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         numeric_dest=numeric_dest,
         rest_kind=spec.rest.type if spec.rest is not None else None,
         base_dest=base_dest,
+        remainder=spec.rest is not None and spec.rest.remainder,
     )

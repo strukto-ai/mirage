@@ -16,9 +16,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { MontyVFS } from './index.ts'
+import { PrefixResolver } from '../../resolver.ts'
 
 function viewOn(dispatch: BridgeDispatchFn, mounts: string[] = ['/ram']): MontyVFS {
-  return new MontyVFS(new RuntimeVFS(dispatch, () => mounts))
+  return new MontyVFS(new RuntimeVFS(dispatch, new PrefixResolver(() => mounts)))
 }
 
 describe('MontyVFS scoping', () => {

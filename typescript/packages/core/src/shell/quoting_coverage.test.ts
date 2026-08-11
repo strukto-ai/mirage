@@ -564,3 +564,62 @@ describe('a bare $ is a literal word', () => {
     await ws.close()
   })
 })
+
+describe('a quoted "$@" splices into the word around it', () => {
+  it.each([
+    // The prefix joins the first parameter and the suffix joins the
+    // last; the ones between stand alone. Pinned on bash 5.2.37 in
+    // debian:stable-slim, NOT on macOS bash 3.2, which diverges on the
+    // slice below.
+    ['set -- a b; printf "[%s]\\n" "pre $@ post"', '[pre a]\n[b post]\n'],
+    ['set -- a b; printf "[%s]\\n" "pre $@"', '[pre a]\n[b]\n'],
+    ['set -- a b; printf "[%s]\\n" "$@ post"', '[a]\n[b post]\n'],
+    // One parameter merges both literals into a single word.
+    ['set -- a; printf "[%s]\\n" "pre $@ post"', '[pre a post]\n'],
+    // No parameters leaves the literals as one word...
+    ['set --; printf "[%s]\\n" "pre $@ post"', '[pre  post]\n'],
+    // ...but an empty splat alone is no word at all.
+    ['set --; printf "[%s]\\n" x "$@" y', '[x]\n[y]\n'],
+    ['arr=(); printf "[%s]\\n" x "${arr[@]}" y', '[x]\n[y]\n'],
+    // A parameter's own spaces survive; only the splat splits.
+    ['set -- "x y" b; printf "[%s]\\n" "pre $@ post"', '[pre x y]\n[b post]\n'],
+    // The braced spelling splits identically; "$*" joins instead.
+    ['set -- a b; printf "[%s]\\n" "pre ${@} post"', '[pre a]\n[b post]\n'],
+    ['set -- a b; printf "[%s]\\n" "pre ${*} post"', '[pre a b post]\n'],
+    // A slice numbers the parameters from 1, so index 0 is $0.
+    ['set -- a b c d; printf "[%s]\\n" "${@:2}"', '[b]\n[c]\n[d]\n'],
+    ['set -- a b c d; printf "[%s]\\n" "${@:0}"', '[mirage]\n[a]\n[b]\n[c]\n[d]\n'],
+    // Every other op applies per element.
+    ['set -- ax bx; printf "[%s]\\n" "${@/x/y}"', '[ay]\n[by]\n'],
+  ])('prints %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})
+
+describe('an empty splat element is still a word', () => {
+  it.each([
+    // One EMPTY element is still an element, so the word survives and is
+    // empty. Zero elements is what drops the word, and the two render the
+    // same text, so only the count can tell them apart.
+    ['set -- ""; printf "[%s]\\n" A "$@" B', '[A]\n[]\n[B]\n'],
+    ['set -- ""; printf "[%s]\\n" A "${@}" B', '[A]\n[]\n[B]\n'],
+    ['arr=(""); printf "[%s]\\n" A "${arr[@]}" B', '[A]\n[]\n[B]\n'],
+    ['set -- "" ""; printf "[%s]\\n" A "$@" B', '[A]\n[]\n[]\n[B]\n'],
+    ['set -- ""; printf "[%s]\\n" A "$@$@" B', '[A]\n[]\n[B]\n'],
+    // An expansion that renders empty does NOT rescue the word: with no
+    // parameters, "$u$@" is nothing at all, either way round.
+    ['set --; printf "[%s]\\n" A "$u$@" B', '[A]\n[B]\n'],
+    ['set --; printf "[%s]\\n" A "$@$u" B', '[A]\n[B]\n'],
+    ['arr=(); printf "[%s]\\n" A "$u${arr[@]}" B', '[A]\n[B]\n'],
+    // A literal does rescue it, even one space.
+    ['set --; printf "[%s]\\n" A "$@ $@" B', '[A]\n[ ]\n[B]\n'],
+  ])('prints %j', async (line, expected) => {
+    const ws = await makeQuotingWs()
+    const r = await run(ws, line)
+    expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})

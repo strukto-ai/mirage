@@ -727,6 +727,105 @@ async def test_link_operand_on_a_backend_whose_readdir_raises():
 
 
 @pytest.mark.asyncio
+async def test_structure_only_directory_lists_its_children():
+    """A directory no backend serves still lists when the namespace owes
+    it children (a nested mount, a link's ancestors): the door already
+    names it in the parent listing, so ls must agree instead of
+    reporting it missing."""
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    def child_mounts(parent: str) -> list[str]:
+        return ["deep"] if parent == "/ghost" else []
+
+    out, io = await ls([PathSpec.from_str_path("/ghost")],
+                       readdir=readdir,
+                       stat=stat,
+                       child_mounts=child_mounts)
+    assert io.exit_code == 0
+    assert out.decode() == "deep\n"
+
+
+@pytest.mark.asyncio
+async def test_structure_only_directory_renders_group_under_recursive():
+    """Under -R the group still renders from the namespace fact; only
+    descent into the child-mount root is withheld, because that listing
+    is another backend's and the cross-mount fan-out assembles it."""
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    def child_mounts(parent: str) -> list[str]:
+        return ["deep"] if parent == "/ghost" else []
+
+    out, io = await ls([PathSpec.from_str_path("/ghost")],
+                       readdir=readdir,
+                       stat=stat,
+                       recursive=True,
+                       child_mounts=child_mounts)
+    assert io.exit_code == 0
+    assert out.decode() == "/ghost:\ndeep\n"
+
+
+@pytest.mark.asyncio
+async def test_structure_only_chain_descends_under_recursive():
+    """A structure chain (a link's ancestors) continues below the first
+    level, so -R descends it: only a child-mount root stops the walk."""
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    def child_mounts(parent: str) -> list[str]:
+        if parent == "/ghost":
+            return ["deep"]
+        if parent == "/ghost/deep":
+            return ["lnk"]
+        return []
+
+    out, io = await ls([PathSpec.from_str_path("/ghost")],
+                       readdir=readdir,
+                       stat=stat,
+                       recursive=True,
+                       child_mounts=child_mounts)
+    assert io.exit_code == 0
+    assert out.decode() == "/ghost:\ndeep\n\n/ghost/deep:\nlnk\n"
+
+
+@pytest.mark.asyncio
+async def test_list_dir_itself_on_structure_only_directory():
+    """-d stats the operand itself; the namespace fact is what says the
+    directory exists, so the row must come from it when no backend
+    does."""
+
+    async def readdir(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    async def stat(p, index=None):
+        raise FileNotFoundError(p.virtual)
+
+    def child_mounts(parent: str) -> list[str]:
+        return ["deep"] if parent == "/ghost" else []
+
+    out, io = await ls([PathSpec.from_str_path("/ghost")],
+                       readdir=readdir,
+                       stat=stat,
+                       list_dir=True,
+                       child_mounts=child_mounts)
+    assert io.exit_code == 0
+    assert out.decode() == "/ghost\n"
+
+
+@pytest.mark.asyncio
 async def test_link_operand_on_a_backend_whose_readdir_returns_empty():
     """Backends without real directories (s3, nextcloud) answer readdir
     on a link with an empty list rather than raising, which rendered the

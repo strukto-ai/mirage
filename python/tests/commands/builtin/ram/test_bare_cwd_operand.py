@@ -33,12 +33,16 @@ async def _seed(workspace):
 async def test_find_bare_walks_the_cwd(workspace):
     seeded = await _seed(workspace)
     # GNU find with no path operand behaves exactly as `find .`; the
-    # implicit dev/history mounts ride along dot-spelled.
+    # implicit dev/history mounts ride along dot-spelled, interleaved
+    # at their path-sorted position (the fan-out merge sorts so a
+    # mount root prints before its contents).
     io = await seeded.execute("find", cwd="/")
     assert io.exit_code == 0
     out = (io.stdout or b"").decode()
-    assert out.startswith(".\n./a.txt\n./sub\n./sub/b.txt\n")
-    assert all(line.startswith(".") for line in out.strip().split("\n"))
+    lines = out.strip().split("\n")
+    assert lines == sorted(lines)
+    assert all(line.startswith(".") for line in lines)
+    assert {".", "./a.txt", "./sub", "./sub/b.txt"} <= set(lines)
 
 
 @pytest.mark.asyncio
@@ -87,5 +91,6 @@ async def test_ls_bare_still_lists_the_cwd(workspace):
     io = await seeded.execute("ls", cwd="/")
     assert io.exit_code == 0
     out = (io.stdout or b"").decode()
-    assert out.startswith("a.txt\nsub")
-    assert "dev" in out
+    # The dev mount is a row like any other now, so it sorts into the
+    # listing instead of trailing it the way the old stdout patch did.
+    assert out.startswith("a.txt\ndev\nsub")

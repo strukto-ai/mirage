@@ -22,14 +22,23 @@ from pathlib import Path
 from typing import Any
 
 import mirage.commands.builtin
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import CommandSpec, Operand, Option
-from mirage.resource.registry import REGISTRY
+from mirage.resource.base import BaseResource
+from mirage.resource.registry import REGISTRY, resolve_class
 
 logger = logging.getLogger(__name__)
 
 OUT = Path(__file__).resolve().parent.parent / "spec" / "python" / "general"
+
+BUILTIN = Path(mirage.commands.builtin.__file__).resolve(
+).parent  # type: ignore[arg-type]
+
+# Slots holding a configuration value rather than an operation. Everything
+# else on the adapter is a wired operation, reported by name.
+IO_VALUE_FIELDS = frozenset({"local", "max_glob_matches", "max_du_entries"})
 
 
 def _walk_pkg(pkg: Any) -> list[str]:
@@ -178,6 +187,58 @@ def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
         json.dumps(payload, indent=2, sort_keys=True, default=_default) + "\n")
 
 
+def _capabilities() -> dict[str, dict[str, Any]]:
+    """Per-resource behavior values, read off the class, never an instance.
+
+    Registry membership only says a backend can be built. How it behaves
+    once mounted is a second hand-maintained surface that drifted just as
+    quietly: python kept the 600 s ``index_ttl`` default for postgres and
+    mongodb where typescript pins 0, so an ``ls`` of a live schema could
+    be ten minutes stale. ``storage_id`` and ``statfs`` are reported as
+    "does this class override the base" rather than by value, because the
+    base answers are per-instance identity and UNKNOWN.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for name in sorted(REGISTRY):
+        cls = resolve_class(REGISTRY[name].resource_path)
+        out[name] = {
+            "index_ttl": cls.index_ttl,
+            "caches_reads": cls.caches_reads,
+            "supports_snapshot": cls.SUPPORTS_SNAPSHOT,
+            "sizes_always_known": cls.SIZES_ALWAYS_KNOWN,
+            "storage_id": cls.storage_id is not BaseResource.storage_id,
+            "statfs": cls.statfs is not BaseResource.statfs,
+        }
+    return out
+
+
+def _command_io() -> dict[str, dict[str, Any]]:
+    """The wired ``CommandIO`` slots per backend command package.
+
+    The adapter's slot set is a hand-filled literal that no gate reads, so
+    a backend can omit ``du`` or ``find`` and quietly fall back to the
+    capped readdir walk while its twin pushes the work down to the API.
+    Dumping the key set turns that omission into a spec diff.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for path in sorted(BUILTIN.glob("*/io.py")):
+        backend = path.parent.name
+        mod = importlib.import_module(f"mirage.commands.builtin.{backend}.io")
+        io = getattr(mod, "IO", None)
+        if not isinstance(io, CommandIO):
+            continue
+        slots = sorted(f.name for f in fields(CommandIO)
+                       if f.name not in IO_VALUE_FIELDS
+                       and getattr(io, f.name) is not None)
+        out[backend] = {
+            "slots": slots,
+            "local": io.local,
+            "max_glob_matches": io.max_glob_matches,
+            "max_du_entries": io.max_du_entries,
+        }
+    return out
+
+
 def _emit_resources(registry: dict[str, list[RegisteredCommand]]) -> None:
     """Dump the two resource-name sets the parity gate compares.
 
@@ -201,6 +262,8 @@ def _emit_resources(registry: dict[str, list[RegisteredCommand]]) -> None:
     payload = {
         "registry": sorted(REGISTRY),
         "command_resources": sorted(command_resources),
+        "capabilities": _capabilities(),
+        "command_io": _command_io(),
     }
     path = OUT.parent / "resources.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

@@ -116,7 +116,7 @@ def _lookup_var(var: str,
     if var.isdigit():
         idx = int(var)
         if idx == 0:
-            return "mirage"
+            return SHELL_ARGV0
         if call_stack and call_stack.get_positional(idx):
             return call_stack.get_positional(idx)
         if positional and 0 < idx <= len(positional):
@@ -692,6 +692,41 @@ def _slice_array(arr: ShellArray, groups: list[str],
     return array_slice(arr, offset, length)
 
 
+# What the shell calls itself, bash's "bash". It is a value of "$@"
+# only through a slice, where bash numbers the positional parameters
+# from 1 and index 0 is this.
+SHELL_ARGV0 = "mirage"
+
+
+def _is_at_splat(p: _BraceParse) -> bool:
+    """Whether a parsed "${...}" splats one word per element.
+
+    Two spellings mean the same thing: an ``@`` subscript on a name
+    (``${a[@]}``) and the positional parameters themselves (``${@}``,
+    which bash word-splits exactly like the bare ``$@``). ``${*}`` and
+    ``${a[*]}`` are excluded because they join.
+
+    Args:
+        p (_BraceParse): the parsed brace expansion.
+    """
+    if p.subscript == "@":
+        return True
+    return p.subscript is None and p.var_name == "@"
+
+
+def _positional_args(session: Session,
+                     call_stack: CallStack | None) -> list[str]:
+    """The positional parameters in scope, function args winning.
+
+    Args:
+        session (Session): shell session state.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    if call_stack and call_stack.get_all_positional():
+        return call_stack.get_all_positional()
+    return getattr(session, "positional_args", None) or []
+
+
 def is_multiword_at(node: tree_sitter.Node) -> bool:
     """Report whether a "${a[@]...}" splat word-splits when quoted.
 
@@ -704,10 +739,15 @@ def is_multiword_at(node: tree_sitter.Node) -> bool:
     Args:
         node (tree_sitter.Node): the ``expansion`` node.
     """
+    if node.type == NT.SIMPLE_EXPANSION:
+        # Bare "$@" is the positional splat. It word-splits exactly like
+        # "${a[@]}" and stitches onto surrounding literals the same way,
+        # so it takes the same path rather than a rule of its own.
+        return get_text(node).strip() == "$@"
     if node.type != NT.EXPANSION:
         return False
     p = _parse_braces(node)
-    if p.subscript != "@" or p.length_op:
+    if not _is_at_splat(p) or p.length_op:
         return False
     if p.indirect_op or p.op is None:
         return True
@@ -729,9 +769,22 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): nested-node expander for op operands.
     """
+    if node.type == NT.SIMPLE_EXPANSION:
+        return _positional_args(session, call_stack)
     p = _parse_braces(node)
-    arrays = getattr(session, "arrays", {})
-    arr = arrays.get(p.var_name)
+    arr: list[str | None] | None
+    if p.subscript is None and p.var_name == "@":
+        # "${@}" splats the positional parameters; every op below then
+        # applies per element, which is what bash does for "${@/x/y}".
+        # A slice is the exception: bash numbers the parameters from 1
+        # there, so index 0 is the shell's own name and "${@:0}" yields
+        # it ahead of $1. Pinned on bash 5.2.37; macOS bash 3.2 drops
+        # it, so probe this one in docker, not locally.
+        params: list[str | None] = [*_positional_args(session, call_stack)]
+        arr = [SHELL_ARGV0, *params] if p.op == ":" else params
+    else:
+        arrays = getattr(session, "arrays", {})
+        arr = arrays.get(p.var_name)
     if arr is None:
         name = p.var_name or ""
         arr = [session.env[name]] if name in session.env else []

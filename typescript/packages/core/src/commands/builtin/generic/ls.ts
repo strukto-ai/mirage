@@ -18,7 +18,7 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { ChildMounts, LinkView } from '../../../ops/types.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { gnuStrerror, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -54,6 +54,13 @@ interface WalkOpts {
   // dereferenced directory link then carries FileType.DIRECTORY, which
   // is what makes -R descend it.
   deref: boolean
+  // Session-filtered child-mount names: the other half of namespace
+  // structure beside links, merged as directory rows. Under -R a
+  // backend-served listing withholds the merge and a child-mount root
+  // is never descended (the cross-mount fan-out assembles those
+  // groups); a directory only the namespace serves still renders its
+  // own group from it.
+  childMounts: ChildMounts | null
 }
 
 // One ls operand once its kind is known. `row` is set when the operand is not
@@ -174,8 +181,25 @@ async function listDir(
   links: LinkView | null,
   deref: boolean,
   stat2: Stat,
-): Promise<FileStat[]> {
-  const entries = await readdir(dir)
+  childMounts: ChildMounts | null,
+  recursive: boolean,
+): Promise<{ stats: FileStat[]; structureOnly: boolean }> {
+  let entries: string[]
+  let structureOnly = false
+  try {
+    entries = await readdir(dir)
+  } catch (err) {
+    if (!isWalkError(err) || (childMounts?.(dir.virtual) ?? []).length === 0) throw err
+    // No backend serves it, but the namespace owes it children (a
+    // nested mount, a link's ancestors), so the door lists it as a
+    // directory and ls must agree: the merge below renders those rows
+    // from an empty backend listing. Under -R this group still renders;
+    // only descent into a child-mount root is withheld, because that
+    // listing is another backend's and the cross-mount fan-out
+    // assembles it.
+    entries = []
+    structureOnly = true
+  }
   const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
   const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
   const stats: FileStat[] = []
@@ -197,10 +221,21 @@ async function listDir(
   const seen = new Set(stats.map((s) => s.name))
   for (const link of links?.children(dir.virtual) ?? []) {
     if (seen.has(link.name)) continue
+    seen.add(link.name)
     const resolved = deref && links !== null ? await derefEntry(dir, link, links, stat2) : null
     stats.push(resolved ?? link)
   }
-  return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
+  if (!recursive || structureOnly) {
+    for (const name of childMounts?.(dir.virtual) ?? []) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      stats.push(new FileStat({ name, type: FileType.DIRECTORY }))
+    }
+  }
+  return {
+    stats: all ? stats : stats.filter((s) => !s.name.startsWith('.')),
+    structureOnly,
+  }
 }
 
 // The row for an operand that is itself a symlink, else null.
@@ -255,8 +290,22 @@ async function probeOperand(
   commandLineArg: boolean,
 ): Promise<Operand> {
   let stats: FileStat[]
+  let structureOnly = false
   try {
-    stats = await listDir(readdir, stat, path, opts.all, warnings, opts.links, opts.deref, stat)
+    const listed = await listDir(
+      readdir,
+      stat,
+      path,
+      opts.all,
+      warnings,
+      opts.links,
+      opts.deref,
+      stat,
+      opts.childMounts,
+      opts.recursive,
+    )
+    stats = listed.stats
+    structureOnly = listed.structureOnly
   } catch (err) {
     if (!isWalkError(err)) throw err
     const row = await fileEntry(stat, path)
@@ -284,6 +333,11 @@ async function probeOperand(
     for (const s of entries) {
       if (s.type !== FileType.DIRECTORY) continue
       const childPath = `${rstripSlash(path.virtual)}/${s.name}`
+      if (structureOnly && (opts.childMounts?.(childPath) ?? []).length === 0) {
+        // A child-mount root: its listing is another backend's, so the
+        // cross-mount fan-out renders that group.
+        continue
+      }
       const child = await probeOperand(
         readdir,
         stat,
@@ -389,6 +443,13 @@ export async function lsGeneric(
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
         if (!isWalkError(err)) throw err
+        if ((opts.childMounts?.(p.virtual) ?? []).length > 0) {
+          // No backend serves it, but the namespace owes it children,
+          // so the door stats it as a directory and -d must print the
+          // same row.
+          collected.push(new FileStat({ name: p.rawPath, type: FileType.DIRECTORY }))
+          continue
+        }
         warnings.push({
           message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
           serious: true,
@@ -400,7 +461,15 @@ export async function lsGeneric(
     return finish(lines, warnings)
   }
 
-  const walkOpts: WalkOpts = { all, sortBy, reverse, recursive, links, deref }
+  const walkOpts: WalkOpts = {
+    all,
+    sortBy,
+    reverse,
+    recursive,
+    links,
+    deref,
+    childMounts: opts.childMounts ?? null,
+  }
   const probed: Operand[] = []
   for (const p of targets) {
     probed.push(await probeOperand(readdir, stat, p, walkOpts, warnings, true))

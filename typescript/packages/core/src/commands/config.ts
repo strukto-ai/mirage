@@ -18,7 +18,14 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
-import type { LinkView, MountView, ReaddirPath, StatOverlay, StatPath } from '../ops/types.ts'
+import type {
+  ChildMounts,
+  LinkView,
+  MountView,
+  ReaddirPath,
+  StatOverlay,
+  StatPath,
+} from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
@@ -74,6 +81,10 @@ export interface CommandOpts {
   // Dispatcher-backed readdir of one path, for a walker that has to read
   // past a mount boundary (tree).
   readdirPath?: ReaddirPath
+  // Child names the namespace owes a directory (mounts and links): the
+  // other half of namespace structure beside link rows, merged into
+  // listings the same way they are.
+  childMounts?: ChildMounts
   // Where the mount boundaries are, for a walker whose output cannot be
   // fanned out and concatenated (tar, zip). A nested mount's keys live
   // in another resource, so this backend's readdir cannot see it.

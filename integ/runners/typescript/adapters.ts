@@ -1304,9 +1304,10 @@ async function openSlack(target: Target): Promise<Open> {
 }
 
 // The fake api.github.com server (integ/server/github_server.py) is external
-// and shared across both hosts, mirroring the fake Slack server. Out of
-// process is required for the python host, whose GitHubResource fetches the
-// repo tree with a blocking urlopen from its constructor.
+// and shared across both hosts, mirroring the fake Slack server. It used to
+// have to be out of process for the python host, whose GitHubResource
+// fetched the repo tree with a blocking urlopen from its constructor; that
+// fetch is awaited now, so being shared is the only reason left.
 async function openGitHub(target: Target): Promise<Open> {
   let base = process.env.GITHUB_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)

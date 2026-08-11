@@ -16,10 +16,13 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied } from '../policy/errors.ts'
+import { Policies } from '../policy/policies.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
+import { MountNotAllowedError } from '../context/session_context.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { Limit, MountMode } from '../types.ts'
-import { enotdir } from '../utils/errors.ts'
+import { FileType, Limit, MountMode } from '../types.ts'
+import { enoent, enotdir } from '../utils/errors.ts'
+import { WorkspaceFS } from './fs.ts'
 import { Workspace } from './workspace.ts'
 
 const DEC = new TextDecoder()
@@ -223,5 +226,104 @@ describe('WorkspaceFS policy door', () => {
     const ws = mkGuarded()
     await expect(ws.fs.writeFile('/data/locked/f.txt', 'hi')).rejects.toThrow(PolicyDenied)
     expect(await ws.fs.exists('/data/locked/f.txt')).toBe(false)
+  })
+})
+
+// The resolver-miss structure fallback (a directory that exists only
+// because a mount sits below it) answers with no owning mount, so the
+// gates fire with prefix '' — skipping them would make "no mount here"
+// a policy bypass.
+describe('WorkspaceFS structure fallback still clears admission', () => {
+  class SealInner implements Policy {
+    preOps(ctx: OpsContext): Action | null {
+      if (ctx.path.virtual === '/data/inner') return { kind: 'deny', message: 'sealed\n' }
+      return null
+    }
+  }
+
+  function mkStructureFS(policies: Policies): WorkspaceFS {
+    return new WorkspaceFS(
+      () => Promise.reject(enoent('/data/inner')),
+      new OpsRegistry(),
+      null,
+      null,
+      null,
+      policies,
+      () => '',
+      () => ['/data/inner/deep/'],
+    )
+  }
+
+  it('a policy deny covers the synthetic readdir and stat', async () => {
+    const policies = new Policies()
+    policies.add(new SealInner())
+    const fs = mkStructureFS(policies)
+    await expect(fs.readdir('/data/inner')).rejects.toThrow(PolicyDenied)
+    await expect(fs.stat('/data/inner')).rejects.toThrow(PolicyDenied)
+  })
+
+  it('the synthetic answer serves when no policy objects', async () => {
+    const fs = mkStructureFS(new Policies())
+    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+  })
+})
+
+describe('WorkspaceFS structure below an ungranted mount', () => {
+  function mkUngrantedFS(prefixes: string[]): WorkspaceFS {
+    return new WorkspaceFS(
+      () => Promise.reject(new MountNotAllowedError('agent', '/data')),
+      new OpsRegistry(),
+      null,
+      null,
+      null,
+      new Policies(),
+      () => '',
+      () => prefixes,
+    )
+  }
+
+  it('serves the granted structure instead of the denial', async () => {
+    // The resolver rejects because the owning mount is ungranted, but a
+    // granted mount below the path already put its name in a listing,
+    // so walking down to the grant must answer.
+    const fs = mkUngrantedFS(['/data/inner/deep/'])
+    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+    const st = await fs.stat('/data/inner')
+    expect(st.type).toBe(FileType.DIRECTORY)
+  })
+
+  it('a path the structure does not owe keeps the canonical denial', async () => {
+    const fs = mkUngrantedFS([])
+    await expect(fs.readdir('/data/inner')).rejects.toThrow(MountNotAllowedError)
+    await expect(fs.stat('/data/inner')).rejects.toThrow(MountNotAllowedError)
+  })
+
+  it("gates the fallback with the synthetic '' prefix, not the ungranted mount's", async () => {
+    // prefixOf still resolves the real ungranted '/data/' here, but the
+    // namespace's own answer has no owning mount: the gates must see ''
+    // exactly as the dispatcher and both Python doors report it, or a
+    // mount-scoped policy diverges between ws.readdir and ws.dispatch.
+    const seen: string[] = []
+    class RecordPrefix implements Policy {
+      preOps(ctx: OpsContext): Action | null {
+        seen.push(ctx.prefix)
+        return null
+      }
+    }
+    const policies = new Policies()
+    policies.add(new RecordPrefix())
+    const fs = new WorkspaceFS(
+      () => Promise.reject(new MountNotAllowedError('agent', '/data')),
+      new OpsRegistry(),
+      null,
+      null,
+      null,
+      policies,
+      () => '/data/',
+      () => ['/data/inner/deep/'],
+    )
+    expect(await fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
+    await fs.stat('/data/inner')
+    expect(seen).toEqual(['', ''])
   })
 })

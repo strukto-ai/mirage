@@ -43,7 +43,11 @@ const INLINE_SOURCE = 'inline body inputs'
 const BAD_BODY_EXIT = 1
 const REFUSAL_EXIT = 5
 
-const METHODS = new Set(['GET', 'POST', 'PATCH', 'PUT'])
+// DELETE is here because `DELETE /v1/blocks/{id}` is the only delete verb the
+// public API has, so without it the one way to remove anything is unreachable
+// from this CLI. It takes no body, which is why it is reached through `-X`
+// rather than by a body source inferring it.
+const METHODS = new Set(['GET', 'POST', 'PATCH', 'PUT', 'DELETE'])
 
 // One inline input the CLI could not interpret, carrying the clause upstream
 // puts after its fixed lead.

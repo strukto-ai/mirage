@@ -17,7 +17,7 @@ pnpm add @struktoai/mirage-node
 ```ts
 import { GitHubResource, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const gh = new GitHubResource({
+const gh = await GitHubResource.create({
   token: process.env.GITHUB_TOKEN!,
   owner: 'strukto-ai',
   repo: 'mirage',
@@ -28,6 +28,10 @@ const ws = new Workspace({ '/repo': gh }, { mode: MountMode.READ })
 await ws.execute('cat /repo/README.md')
 ```
 
+The constructor is private: `create` fetches the repo's git tree before it
+builds the resource, so it has to be awaited. Python's equivalent is
+`await GitHubResource.build(...)`.
+
 ## Browser
 
 ```bash
@@ -37,7 +41,7 @@ pnpm add @struktoai/mirage-browser
 ```ts
 import { GitHubResource, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const gh = new GitHubResource({
+const gh = await GitHubResource.create({
   token: GITHUB_TOKEN,
   owner: 'strukto-ai',
   repo: 'mirage',

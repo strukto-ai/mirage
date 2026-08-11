@@ -488,8 +488,13 @@ class WorkspaceConfig(BaseModel):
     def _v_cons(cls, v):
         return _coerce_consistency(v)
 
-    def to_workspace_kwargs(self) -> dict[str, Any]:
+    async def to_workspace_kwargs(self) -> dict[str, Any]:
         """Produce kwargs ready to splat into ``Workspace(**kwargs)``.
+
+        Async because building a mount's resource can be: a backend
+        whose setup needs I/O does it in ``BaseResource.create``. Only
+        the resources are awaited — ``Workspace(**kwargs)`` itself stays
+        synchronous. Mirrors the TypeScript ``configToWorkspaceArgs``.
 
         Returns:
             dict[str, Any]: resource instances, cache config, and
@@ -498,7 +503,7 @@ class WorkspaceConfig(BaseModel):
         """
         resources: dict[str, Mount] = {}
         for prefix, block in self.mounts.items():
-            prov = build_resource(block.resource, block.config)
+            prov = await build_resource(block.resource, block.config)
             mode = block.mode if block.mode is not None else self.mode
             resources[prefix] = Mount(
                 resource=prov,

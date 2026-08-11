@@ -13,13 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Runtime } from './base.ts'
-import type {
-  BridgeDispatchFn,
-  PrefixSource,
-  RunArgs,
-  RunResult,
-  RuntimeLanguage,
-} from './types.ts'
+import type { MountResolver } from './resolver.ts'
+import type { BridgeDispatchFn, RunArgs, RunResult, RuntimeLanguage } from './types.ts'
 
 /**
  * A runtime that interprets one language's code inside a command.
@@ -50,7 +45,7 @@ export abstract class LanguageRuntime extends Runtime {
    * workspace attaches its dispatch at construction; runtimes that
    * never touch workspace files keep the default no-op.
    */
-  attach(_dispatch: BridgeDispatchFn, _listMounts: PrefixSource): void {
+  attach(_dispatch: BridgeDispatchFn, _resolver: MountResolver): void {
     // runtimes that never touch workspace files keep the no-op
   }
 

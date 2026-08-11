@@ -112,10 +112,10 @@ def github_config():
 @pytest.fixture
 def mock_github_api(monkeypatch):
 
-    def _fetch_default_branch_sync(config, owner, repo):
+    async def _fetch_default_branch(config, owner, repo):
         return MOCK_DEFAULT_BRANCH
 
-    def _fetch_tree_sync(config, owner, repo, ref):
+    async def _fetch_tree(config, owner, repo, ref):
         return dict(MOCK_TREE), False
 
     async def _read_bytes(config, owner, repo, sha):
@@ -127,10 +127,9 @@ def mock_github_api(monkeypatch):
             results = [r for r in results if r.path.startswith(path_filter)]
         return results
 
-    monkeypatch.setattr(
-        "mirage.resource.github.github.fetch_default_branch_sync",
-        _fetch_default_branch_sync)
-    monkeypatch.setattr("mirage.resource.github.github.fetch_tree_sync",
-                        _fetch_tree_sync)
+    monkeypatch.setattr("mirage.resource.github.github.fetch_default_branch",
+                        _fetch_default_branch)
+    monkeypatch.setattr("mirage.resource.github.github.fetch_tree",
+                        _fetch_tree)
     monkeypatch.setattr("mirage.core.github.read.read_bytes", _read_bytes)
     monkeypatch.setattr("mirage.core.github.search.search_code", _search_code)

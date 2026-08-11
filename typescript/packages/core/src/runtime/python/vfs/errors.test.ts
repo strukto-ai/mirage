@@ -28,7 +28,7 @@ class FakeErrnoError extends Error {
 // musl's numbering, which is what pyodide reports and what an errno
 // literal copied from Linux would get wrong (EXDEV is 75 here, and 18
 // is EDOM rather than the cross-device link everyone remembers).
-const CODES: ErrnoCodes = { ENOENT: 44, EPERM: 63, EINVAL: 28, EIO: 29 }
+const CODES: ErrnoCodes = { ENOENT: 44, EPERM: 63, EINVAL: 28, EIO: 29, EXDEV: 75 }
 
 const HOST = { ErrnoError: FakeErrnoError } as unknown as FSHost
 
