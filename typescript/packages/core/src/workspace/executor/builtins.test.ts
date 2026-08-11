@@ -18,6 +18,7 @@ import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import { enoent } from '../../utils/errors.ts'
 import { byteChar } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
@@ -1186,11 +1187,25 @@ describe('handleSource', () => {
 
   it('returns exit 1 with stderr on read failure', async () => {
     const s = new Session({ sessionId: 'test', cwd: '/' })
-    const dispatch = vi.fn(() => Promise.reject(new Error('not found'))) as unknown as DispatchFn
+    const dispatch = vi.fn(() => Promise.reject(enoent('/missing.sh'))) as unknown as DispatchFn
     const executeFn = vi.fn(() => Promise.resolve(new IOResult()))
     const [, io] = await handleSource(dispatch, executeFn, '/missing.sh', s)
     expect(io.exitCode).toBe(1)
-    expect(decode(io.stderr instanceof Uint8Array ? io.stderr : null)).toMatch(/missing.sh/)
+    expect(decode(io.stderr instanceof Uint8Array ? io.stderr : null)).toBe(
+      'source: /missing.sh: No such file or directory\n',
+    )
+    expect(executeFn).not.toHaveBeenCalled()
+  })
+
+  it('propagates a failure that is not a filesystem error', async () => {
+    const s = new Session({ sessionId: 'test', cwd: '/' })
+    const dispatch = vi.fn(() =>
+      Promise.reject(new Error('token expired')),
+    ) as unknown as DispatchFn
+    const executeFn = vi.fn(() => Promise.resolve(new IOResult()))
+    await expect(handleSource(dispatch, executeFn, '/script.sh', s)).rejects.toThrow(
+      'token expired',
+    )
     expect(executeFn).not.toHaveBeenCalled()
   })
 

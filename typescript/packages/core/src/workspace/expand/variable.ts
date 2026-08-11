@@ -148,7 +148,7 @@ export function lookupVar(
   }
   if (/^\d+$/.test(name)) {
     const idx = parseInt(name, 10)
-    if (idx === 0) return session.scriptName ?? SHELL_ARGV0
+    if (idx === 0) return session.argv0
     if (callStack) {
       const fromCall = callStack.getPositional(idx)
       if (fromCall !== '') return fromCall
@@ -538,12 +538,6 @@ function sliceArray(arr: ShellArray, groups: string[], env: Record<string, strin
 // plain, slice, per-element strip/replace/case ops, and ${!a[@]}
 // indices. False for single-word forms (${a[*]}, ${#a[@]}, non-@
 // subscript, or a default/alternate op acting on the joined value).
-// What the shell calls itself, bash's "bash", when no script is running:
-// a nested `bash`/`sh` overrides it through Session.scriptName. It is a
-// value of "$@" only through a slice, where bash numbers the positional
-// parameters from 1 and index 0 is this.
-const SHELL_ARGV0 = 'mirage'
-
 // The positional parameters in scope, function args winning.
 function positionalArgs(session: Session, callStack: CallStack | null): string[] {
   if (callStack !== null && callStack.getAllPositional().length > 0) {
@@ -597,8 +591,7 @@ export async function expandArrayAt(
     // of $1. Pinned on bash 5.2.37; macOS bash 3.2 drops it, so probe
     // this one in docker, not locally.
     const params = positionalArgs(session, callStack)
-    const argv0 = session.scriptName ?? SHELL_ARGV0
-    arr = p.op === ':' ? [argv0, ...params] : params
+    arr = p.op === ':' ? [session.argv0, ...params] : params
   } else {
     arr = session.arrays[p.varName ?? '']
   }

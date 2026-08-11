@@ -161,4 +161,157 @@ describe('sh/bash script file', () => {
       await ws.close()
     }
   })
+
+  it('applies the option named by -o', async () => {
+    const { ws } = await makeIntegrationWS({ 'pf.sh': 'false | true\necho pipefail=$?\n' })
+    try {
+      expect(await run(ws, 'bash -o pipefail /data/pf.sh')).toBe('pipefail=1\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('applies -o from inside a cluster', async () => {
+    const { ws } = await makeIntegrationWS({ 'pf.sh': 'false | true\necho pipefail=$?\n' })
+    try {
+      const [code, out, err] = await runResult(ws, 'bash -xo pipefail /data/pf.sh')
+      expect(out).toBe('pipefail=1\n')
+      expect(err).toBe('+ false\n+ true\n+ echo pipefail=1\n')
+      expect(code).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads a + word as an option, not as the script', async () => {
+    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    try {
+      expect(await runResult(ws, 'bash +x /data/run.sh')).toEqual([0, 'hi\n', ''])
+      expect(await runResult(ws, 'bash +o xtrace /data/run.sh')).toEqual([0, 'hi\n', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('ends option parsing at a single dash', async () => {
+    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    try {
+      expect(await run(ws, 'bash - /data/run.sh')).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lets a long option consume its value', async () => {
+    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    try {
+      expect(await runResult(ws, 'bash --rcfile /data/run.sh')).toEqual([0, '', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses an unknown long option', async () => {
+    const { ws } = await makeIntegrationWS({ 'run.sh': 'echo hi\n' })
+    try {
+      const [code, , err] = await runResult(ws, 'bash --nosuch /data/run.sh')
+      expect(err).toBe('bash: --nosuch: unsupported option\n')
+      expect(code).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads the program from stdin when no operand names one', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await run(ws, "echo 'echo hi' | bash")).toBe('hi\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps every operand positional under -s', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await run(ws, "echo 'echo zero=$0 one=$1' | bash -s A B")).toBe('zero=bash one=A\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('does not leak the working directory out of a nested shell', async () => {
+    const { ws } = await makeIntegrationWS({
+      'cd.sh': 'cd /data/sub\n',
+      'sub/keep.txt': 'x\n',
+    })
+    try {
+      expect(await run(ws, 'cd /data; bash /data/cd.sh; pwd')).toBe('/data\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('does not leak an export out of a nested shell', async () => {
+    const { ws } = await makeIntegrationWS({ 'exp.sh': 'export LEAK=1\n' })
+    try {
+      expect(await run(ws, 'bash /data/exp.sh; echo [$LEAK]')).toBe('[]\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('does not leak a shell option out of a nested shell', async () => {
+    const { ws } = await makeIntegrationWS({ 'opt.sh': 'set -f\n', 'a.txt': 'x\n' })
+    try {
+      expect(await run(ws, 'bash /data/opt.sh; echo /data/*.txt')).toBe('/data/a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps a sourced shell option set in the caller', async () => {
+    const { ws } = await makeIntegrationWS({ 'opt.sh': 'set -f\n', 'a.txt': 'x\n' })
+    try {
+      expect(await run(ws, 'source /data/opt.sh; echo /data/*.txt')).toBe('/data/*.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports a file source cannot read, as typed', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [code, , err] = await runResult(ws, 'cd /data; source nope.sh')
+      expect(err).toBe('source: nope.sh: No such file or directory\n')
+      expect(code).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reports a directory operand to source', async () => {
+    const { ws } = await makeIntegrationWS({ 'sub/keep.txt': 'x\n' })
+    try {
+      const [code, , err] = await runResult(ws, 'source /data/sub')
+      expect(err).toBe('source: /data/sub: Is a directory\n')
+      expect(code).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses source with no operand', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      const [code, out, err] = await runResult(ws, 'source; echo after=$?')
+      expect(err).toBe(
+        'source: filename argument required\nsource: usage: source filename [arguments]\n',
+      )
+      expect(out).toBe('after=2\n')
+      expect(code).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
 })

@@ -45,3 +45,8 @@ export const ARITH_ASSIGN_OPS = new Set([
 // Recursion budget for variables holding expressions (`x="1+2"; $((x))`),
 // mirroring bash's expression recursion limit.
 export const ARITH_MAX_DEPTH = 16
+
+// What the shell calls itself when no script is running, bash's "bash".
+// A nested `bash`/`sh` overrides it through Session.scriptName, and
+// `Session.argv0` is the one place the two are folded together.
+export const SHELL_ARGV0 = 'mirage'

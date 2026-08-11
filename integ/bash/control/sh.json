@@ -101,6 +101,74 @@
         "stdout": "",
         "stderr": "sh: /data/nosuch.sh: No such file or directory\n"
       }
+    },
+    {
+      "id": "ctl_sh_script_file_stdin",
+      "seq": 502156,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'echo zero=$0 one=$1' | sh -s AA BB",
+      "expect": {
+        "exit": 0,
+        "stdout": "zero=sh one=AA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_sh_script_file_cwd_isolated",
+      "seq": 502157,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'cd /\\n' > /data/cd.sh && cd /data && sh /data/cd.sh && pwd && rm /data/cd.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
     }
   ]
 }

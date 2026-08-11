@@ -13,55 +13,77 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../../io/types.ts'
 import { parseBashArgs } from './script.ts'
-
-const DEC = new TextDecoder()
 
 describe('parseBashArgs', () => {
   it('ends option parsing at a script file operand', () => {
-    const parsed = parseBashArgs('sh', ['run.sh', '-x', 'a'])
+    const parsed = parseBashArgs(['run.sh', '-x', 'a'])
     expect(parsed.path).toBe('run.sh')
     expect(parsed.argv).toEqual(['-x', 'a'])
-    expect(parsed.options).toEqual([])
+    expect(parsed.settings).toEqual([])
   })
 
   it('takes a flag-shaped file after --', () => {
-    const parsed = parseBashArgs('sh', ['--', '-weird.sh', 'a'])
+    const parsed = parseBashArgs(['--', '-weird.sh', 'a'])
     expect(parsed.path).toBe('-weird.sh')
     expect(parsed.argv).toEqual(['a'])
   })
 
+  it('ends option parsing at a single dash', () => {
+    expect(parseBashArgs(['-', 'run.sh']).path).toBe('run.sh')
+  })
+
   it('keeps set options from a cluster ending in c', () => {
-    const parsed = parseBashArgs('bash', ['-xc', 'echo hi', 'name', 'a'])
+    const parsed = parseBashArgs(['-xc', 'echo hi', 'name', 'a'])
     expect(parsed.script).toBe('echo hi')
     expect(parsed.argv).toEqual(['name', 'a'])
-    expect(parsed.options).toEqual(['xtrace'])
+    expect(parsed.settings).toEqual([['xtrace', true]])
   })
 
   it('maps set flags to shell options', () => {
-    const parsed = parseBashArgs('bash', ['-eux', 'run.sh'])
+    const parsed = parseBashArgs(['-eux', 'run.sh'])
     expect(parsed.path).toBe('run.sh')
-    expect(parsed.options).toEqual(['errexit', 'nounset', 'xtrace'])
+    expect(parsed.settings).toEqual([
+      ['errexit', true],
+      ['nounset', true],
+      ['xtrace', true],
+    ])
   })
 
-  it('reads the program from stdin under -s', () => {
-    const parsed = parseBashArgs('bash', ['-s'])
-    expect(parsed.readStdin).toBe(true)
+  it('lets the last sign win within one invocation', () => {
+    const parsed = parseBashArgs(['-e', '+e', 'run.sh'])
+    expect(parsed.settings).toEqual([
+      ['errexit', true],
+      ['errexit', false],
+    ])
+  })
+
+  it('keeps every operand positional under -s', () => {
+    const parsed = parseBashArgs(['-s', 'A', 'B'])
     expect(parsed.path).toBeNull()
     expect(parsed.script).toBeNull()
+    expect(parsed.argv).toEqual(['A', 'B'])
   })
 
-  it('skips -o and its value', () => {
-    const parsed = parseBashArgs('bash', ['-o', 'pipefail', 'run.sh'])
+  it('applies -o and its value', () => {
+    const parsed = parseBashArgs(['-o', 'pipefail', 'run.sh'])
     expect(parsed.path).toBe('run.sh')
+    expect(parsed.settings).toEqual([['pipefail', true]])
   })
 
-  it('reports an unsupported option as a usage error', async () => {
-    const parsed = parseBashArgs('sh', ['-Z'])
-    if (parsed.error === null) throw new Error('expected a usage error')
-    const [, io] = parsed.error
-    expect(io.exitCode).toBe(2)
-    expect(DEC.decode(await materialize(io.stderr))).toBe('sh: -Z: unsupported option\n')
+  it('consumes a long option value', () => {
+    expect(parseBashArgs(['--rcfile', 'rc', 'run.sh']).path).toBe('run.sh')
+  })
+
+  it('reports an unsupported short option', () => {
+    expect(parseBashArgs(['-Z']).invalid).toBe('-Z')
+  })
+
+  it('reports an unsupported long option', () => {
+    expect(parseBashArgs(['--nosuch', 'run.sh']).invalid).toBe('--nosuch')
+  })
+
+  it('reports -c with no value', () => {
+    expect(parseBashArgs(['-c']).needsValue).toBe('-c')
   })
 })

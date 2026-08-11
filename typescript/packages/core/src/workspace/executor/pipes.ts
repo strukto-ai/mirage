@@ -17,12 +17,11 @@ import { asyncChain, closeQuietly, mergeStdoutStderr } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { finishStatement } from './statement.ts'
-import type { ShellArray } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import type { JobTable } from '../../shell/job_table.ts'
-import { ownRecord, type Session } from '../session/session.ts'
+import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground } from './jobs.ts'
@@ -255,17 +254,7 @@ export async function handleSubshell(
   jobTable: JobTable | null = null,
   agentId: string | null = null,
 ): Promise<Result> {
-  const savedCwd = session.cwd
-  const savedEnv = ownRecord(session.env)
-  const savedOptions = { ...session.shellOptions }
-  const savedReadonly = new Set(session.readonlyVars)
-  const savedArrays: Record<string, ShellArray> = ownRecord()
-  for (const [k, v] of Object.entries(session.arrays)) savedArrays[k] = [...v]
-  const savedFunctions = ownRecord(session.functions)
-  const savedPositional = [...session.positionalArgs]
-  const savedLastBgJob = session.lastBgJobId
-  const savedGetoptsPos = session.getoptsPos
-  const savedGetoptsOptind = session.getoptsOptind
+  const saved = session.snapshot()
   try {
     const allStdout: ByteSource[] = []
     let mergedIo = new IOResult()
@@ -339,16 +328,7 @@ export async function handleSubshell(
     const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
     return [combined, mergedIo, lastExec]
   } finally {
-    session.cwd = savedCwd
-    session.env = savedEnv
-    session.shellOptions = savedOptions
-    session.readonlyVars = savedReadonly
-    session.arrays = savedArrays
-    session.functions = savedFunctions
-    session.positionalArgs = savedPositional
-    session.lastBgJobId = savedLastBgJob
-    session.getoptsPos = savedGetoptsPos
-    session.getoptsOptind = savedGetoptsOptind
+    session.restore(saved)
   }
 }
 

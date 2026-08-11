@@ -20,7 +20,7 @@ import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../shell/errors.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
+import { parseOptionWord } from '../../../shell/options.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
@@ -626,27 +626,18 @@ export function handleSet(
       session.positionalArgs = args.slice(i + 1)
       return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
     }
-    if (tok === '-o' || tok === '+o') {
-      if (i + 1 < args.length) {
-        const optName = args[i + 1] ?? ''
-        session.shellOptions[optName] = tok === '-o'
-        i += 2
-        continue
-      }
-      i += 1
-      continue
+    const word = parseOptionWord(tok, args[i + 1] ?? null)
+    if (word === null) {
+      session.positionalArgs = args.slice(i)
+      break
     }
-    if ((tok.startsWith('-') || tok.startsWith('+')) && tok.length > 1) {
-      const enable = tok.startsWith('-')
-      for (const ch of tok.slice(1)) {
-        const opt = SET_FLAG_TO_OPTION[ch]
-        if (opt !== undefined) session.shellOptions[opt] = enable
-      }
-      i += 1
-      continue
-    }
-    session.positionalArgs = args.slice(i)
-    break
+    for (const [option, enable] of word.settings) session.shellOptions[option] = enable
+    // A letter naming no option is ignored rather than refused: bash has
+    // options mirage does not implement (`-a`, `-B`, `-H`), and `set` is
+    // where a script turns those on without wanting to fail. A nested shell
+    // answers the same leftovers differently, which is why the grammar hands
+    // them back instead of deciding here.
+    i += word.consumed
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
 }

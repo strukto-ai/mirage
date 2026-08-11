@@ -232,16 +232,7 @@ async def handle_subshell(
             (bash forks: the parent's table never sees these jobs).
         agent_id (str | None): agent identity for job bookkeeping.
     """
-    saved_cwd = session.cwd
-    saved_env = dict(session.env)
-    saved_options = dict(session.shell_options)
-    saved_readonly = set(session.readonly_vars)
-    saved_arrays = {k: list(v) for k, v in session.arrays.items()}
-    saved_functions = dict(session.functions)
-    saved_positional = list(getattr(session, "positional_args", None) or [])
-    saved_last_bg_job = session.last_bg_job_id
-    saved_getopts_pos = session._getopts_pos
-    saved_getopts_optind = session._getopts_optind
+    saved = session.snapshot()
     try:
         all_stdout: list[Any] = []
         merged_io = IOResult()
@@ -296,13 +287,4 @@ async def handle_subshell(
         combined = async_chain(*all_stdout) if all_stdout else None
         return combined, merged_io, last_exec
     finally:
-        session.cwd = saved_cwd
-        session.env = saved_env
-        session.shell_options = saved_options
-        session.readonly_vars = saved_readonly
-        session.arrays = saved_arrays
-        session.functions = saved_functions
-        session.positional_args = saved_positional
-        session.last_bg_job_id = saved_last_bg_job
-        session._getopts_pos = saved_getopts_pos
-        session._getopts_optind = saved_getopts_optind
+        session.restore(saved)
