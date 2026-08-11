@@ -195,11 +195,14 @@ class Ops:
                                               **kwargs)
         except PolicyDenied as denied:
             # A post_ops deny suppresses the result, not the effect: the
-            # backend already mutated, so observation must reflect the
-            # op before the deny propagates.
+            # backend already ran, so observation must reflect the op
+            # before the deny propagates. The suppressed result is gone,
+            # so a read's byte count rides on the exception; a write's is
+            # still in its own arguments.
             if denied.completed and owner is not None:
-                self._record(op, path, owner.resource_type,
-                             self._payload_bytes(None, kwargs), start)
+                nbytes = (denied.completed_bytes
+                          or self._payload_bytes(None, kwargs))
+                self._record(op, path, owner.resource_type, nbytes, start)
             raise
         if owner is not None:
             # A cache-served read moved no bytes over the network;

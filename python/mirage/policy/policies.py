@@ -84,6 +84,8 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
         denied = PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
                               path.virtual)
         denied.completed = True
+        if isinstance(result, (bytes, bytearray)):
+            denied.completed_bytes = len(result)
         raise denied
     return bound
 

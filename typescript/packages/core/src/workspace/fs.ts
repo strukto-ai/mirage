@@ -118,10 +118,13 @@ export class WorkspaceFS {
       cached = Object.keys(io.reads).length > 0
     } catch (err) {
       // A postOps deny suppresses the result, not the effect: the
-      // backend already mutated, so observation must reflect the op
-      // before the deny propagates.
+      // backend already ran, so observation must reflect the op before
+      // the deny propagates. The suppressed result is gone, so a read's
+      // byte count rides on the exception; a write's is still in its
+      // own arguments.
       if (err instanceof PolicyDenied && err.completed && owner !== null) {
-        await this.record(op, followed, owner.kind, payloadBytes(null, args), start)
+        const nbytes = err.completedBytes || payloadBytes(null, args)
+        await this.record(op, followed, owner.kind, nbytes, start)
       }
       throw err
     }

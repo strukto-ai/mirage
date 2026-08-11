@@ -36,6 +36,13 @@ class PolicyDenied(PermissionError):
     the backend: a post_ops deny suppresses the result, not the effect,
     so the door's caller must still account for the op (the ops facade
     records it). A pre_ops deny leaves it False, the class default.
+
+    ``completed_bytes`` carries how many bytes that completed op moved,
+    because the caller cannot recover it: the result is suppressed, and
+    a read's byte count lives nowhere else (a write's is still in its
+    own arguments). Without it a denied read records zero and
+    ``network_bytes`` under-reports traffic that actually happened.
     """
 
     completed = False
+    completed_bytes = 0

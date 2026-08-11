@@ -343,11 +343,62 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     expect(ws.records.map((r) => r.op)).toEqual(['write', 'read'])
   })
 
+  it('records the bytes a post-denied read moved', async () => {
+    // The suppressed result is the only place a read's byte count
+    // lived, so without carrying it on the exception the record says
+    // zero and networkBytes under-reports traffic that happened.
+    const ws = mkWs(new DenyBigReads())
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    await expect(ws.fs.readFile('/data/a.txt')).rejects.toThrow(PolicyDenied)
+    const read = ws.records.find((r) => r.op === 'read')
+    expect(read?.bytes).toBe(5)
+  })
+
   it('records nothing for a pre-denied read: the backend never ran', async () => {
     const ws = mkWs(new SealReads())
     await ws.fs.writeFile('/data/a.txt', 'hello')
     await expect(ws.fs.readFile('/data/a.txt')).rejects.toThrow(PolicyDenied)
     expect(ws.records.map((r) => r.op)).toEqual(['write'])
+  })
+})
+
+describe('a warm cache still answers a ranged read with the window', () => {
+  // The cache holds the whole object; a ranged read asked for a window
+  // instead of the file, so serving the file back is wrong. git reads
+  // pack indexes this way (4 bytes at a known offset) and reaches the
+  // dispatcher directly, which is where the window has to be applied.
+  // Mirrors Python's tests/ops/test_raw_read.py.
+  function mkCaching(): Workspace {
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    return new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+  }
+
+  async function readAt(ws: Workspace, offset: number, size: number | null): Promise<string> {
+    const kwargs = size === null ? { offset } : { offset, size }
+    const body = await ws.dispatch('read', '/m/f.bin', [], kwargs)
+    return DEC.decode(body as Uint8Array)
+  }
+
+  it('slices the cached bytes instead of returning the whole file', async () => {
+    const ws = mkCaching()
+    await ws.fs.writeFile('/m/f.bin', '0123456789')
+    const cold = await readAt(ws, 2, 3)
+    await ws.cache.set('/m/f.bin', new TextEncoder().encode('0123456789'))
+    expect(await readAt(ws, 2, 3)).toBe(cold)
+    expect(await readAt(ws, 2, 3)).toBe('234')
+    expect(await readAt(ws, 7, null)).toBe('789')
+    expect(await readAt(ws, 2, 0)).toBe('')
+    expect(await readAt(ws, 99, 3)).toBe('')
+  })
+
+  it('still serves the whole file when no window was asked for', async () => {
+    const ws = mkCaching()
+    await ws.fs.writeFile('/m/f.bin', '0123456789')
+    await ws.cache.set('/m/f.bin', new TextEncoder().encode('CACHED-VAL'))
+    expect(await ws.fs.readFileText('/m/f.bin')).toBe('CACHED-VAL')
   })
 })
 

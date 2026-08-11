@@ -27,6 +27,7 @@ from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.ranges import slice_window
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
@@ -34,6 +35,7 @@ from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.session import assert_mount_allowed
 
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
+
 _DISPATCH_WRITE_OPS = frozenset({
     "write", "write_bytes", "append", "unlink", "create", "truncate", "mkdir",
     "rmdir", "rename"
@@ -42,6 +44,18 @@ _DISPATCH_WRITE_OPS = frozenset({
 # _setattr_via, so it is a write for policy admission without joining
 # the dispatcher's post-write invalidation path.
 _POLICY_WRITE_OPS = _DISPATCH_WRITE_OPS | frozenset({"setattr"})
+
+
+def _window(kwargs: dict[str, Any]) -> tuple[int, int | None]:
+    """The byte window a read asked for, whole file when it asked none.
+
+    Args:
+        kwargs (dict[str, Any]): the op's keyword arguments.
+    """
+    offset = kwargs.get("offset")
+    size = kwargs.get("size")
+    return (offset if isinstance(offset, int) else 0,
+            size if isinstance(size, int) else None)
 
 
 class Dispatcher:
@@ -156,11 +170,19 @@ class Dispatcher:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):
+                # The cache holds the whole object, so a ranged read is
+                # answered by slicing it, never by handing back the
+                # whole file: the window is what the caller asked for
+                # instead of the file, and git reads pack indexes this
+                # way. slice_window is the same helper the ranged read
+                # op falls back to, so warm and cold agree.
+                offset, size = _window(kwargs)
+                served = slice_window(cached, offset, size)
                 bound = await post_ops_gate(policies, op, path, write,
-                                            mount.prefix, cached)
+                                            mount.prefix, served)
                 if bound is not None:
-                    cached = await apply_op_limit(cached, bound)
-                return cached, IOResult(reads={path.virtual: cached})
+                    served = await apply_op_limit(served, bound)
+                return served, IOResult(reads={path.virtual: served})
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's

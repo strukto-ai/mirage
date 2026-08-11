@@ -37,11 +37,18 @@ export class PolicyError extends Error {
  * backend: a postOps deny suppresses the result, not the effect, so
  * the door's caller must still account for the op (the fs facade
  * records it). A preOps deny leaves it false, the constructed default.
+ *
+ * `completedBytes` carries how many bytes that completed op moved,
+ * because the caller cannot recover it: the result is suppressed, and
+ * a read's byte count lives nowhere else (a write's is still in its
+ * own arguments). Without it a denied read records zero and
+ * `networkBytes` under-reports traffic that actually happened.
  */
 export class PolicyDenied extends Error {
   readonly code = 'EACCES'
   readonly virtualPath: string
   completed = false
+  completedBytes = 0
 
   constructor(message: string, virtualPath: string) {
     super(message)

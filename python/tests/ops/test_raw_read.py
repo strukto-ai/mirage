@@ -76,3 +76,30 @@ async def test_raw_read_is_not_served_from_the_file_cache():
                  cache=["/data/books.tally"]))
     assert await ws.ops.read("/data/books.tally") == b"CACHED"
     assert await ws.ops.read("/data/books.tally", raw=True) == b"STORED"
+
+
+@pytest.mark.asyncio
+async def test_a_warm_cache_still_answers_a_ranged_read_with_the_window():
+    # The cache holds the whole object; a ranged read asked for a
+    # window instead of the file, so serving the file back is wrong.
+    # git reads pack indexes this way (4 bytes at a known offset), and
+    # the dispatcher is the door it reaches too.
+    ws = _workspace(_CachingRAM())
+    await ws.ops.write("/data/f.bin", b"0123456789")
+    await ws.apply_io(
+        IOResult(reads={"/data/f.bin": b"0123456789"}, cache=["/data/f.bin"]))
+    assert await ws.ops.read("/data/f.bin", 2, 3) == b"234"
+    assert await ws.ops.read("/data/f.bin") == b"0123456789"
+    assert await ws.ops.read("/data/f.bin", 7) == b"789"
+    assert await ws.ops.read("/data/f.bin", 2, 0) == b""
+    assert await ws.ops.read("/data/f.bin", 99, 3) == b""
+
+
+@pytest.mark.asyncio
+async def test_a_cold_and_a_warm_ranged_read_agree():
+    ws = _workspace(_CachingRAM())
+    await ws.ops.write("/data/f.bin", b"0123456789")
+    cold = await ws.ops.read("/data/f.bin", 2, 3)
+    await ws.apply_io(
+        IOResult(reads={"/data/f.bin": b"0123456789"}, cache=["/data/f.bin"]))
+    assert await ws.ops.read("/data/f.bin", 2, 3) == cold

@@ -201,6 +201,34 @@ async def test_post_ops_deny_still_records_the_completed_write():
         await ws.close()
 
 
+class SuppressProdReads(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
+            return Deny("no reads\n")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_post_ops_deny_records_the_bytes_a_denied_read_moved():
+    # The suppressed result is the only place a read's byte count
+    # lived, so without carrying it on the exception the record says
+    # zero and network_bytes under-reports traffic that happened.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        ws.ops.records.clear()
+        ws.policies.add(SuppressProdReads())
+        with pytest.raises(PermissionError):
+            await ws.ops.read("/data/prod/x.txt")
+        reads = [r for r in ws.ops.records if r.op == "read"]
+        assert len(reads) == 1
+        assert reads[0].bytes == 10
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_pre_ops_policy_holds_on_the_dispatcher_door():
     # touch routes through the shell's internal dispatcher, not

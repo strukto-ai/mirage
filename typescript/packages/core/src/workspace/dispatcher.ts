@@ -35,10 +35,19 @@ import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { Reconciler } from './reconcile.ts'
+import { sliceWindow } from '../utils/ranges.ts'
 import { effectiveMountMode, MountNotAllowedError } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
+
+/** The byte window a read asked for, whole file when it asked none. */
+function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
+  return [
+    typeof kwargs?.offset === 'number' ? kwargs.offset : 0,
+    typeof kwargs?.size === 'number' ? kwargs.size : null,
+  ]
+}
 const DISPATCH_WRITE_OPS = new Set([
   'write',
   'write_bytes',
@@ -145,9 +154,17 @@ export class Dispatcher {
     if (caches && !raw && mount !== null && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
-        const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, cached)
+        // The cache holds the whole object, so a ranged read is answered
+        // by slicing it, never by handing back the whole file: the
+        // window is what the caller asked for instead of the file, and
+        // git reads pack indexes this way. sliceWindow is the same
+        // helper the ranged read op falls back to, so warm and cold
+        // agree. Mirrors Python's Dispatcher.dispatch.
+        const [offset, size] = readWindow(kwargs)
+        const window = sliceWindow(cached, offset, size)
+        const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
         const served =
-          warmBound !== null ? ((await applyOpLimit(cached, warmBound)) as Uint8Array) : cached
+          warmBound !== null ? ((await applyOpLimit(window, warmBound)) as Uint8Array) : window
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
