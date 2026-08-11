@@ -160,6 +160,42 @@ class TestRename:
         assert exc.value.errno == errno.EXDEV
 
 
+class UngrantedRemote(RAMResource):
+    caches_reads = True
+    name = "s3"
+
+
+@pytest.fixture
+def deep_only_session():
+    """Bind a session granted only /m/inner/deep."""
+    session = Session(session_id="agent",
+                      mount_modes={"/m/inner/deep": MountMode.EXEC})
+    token = set_current_session(session)
+    yield session
+    reset_current_session(token)
+
+
+@pytest.mark.asyncio
+async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
+    # /m/inner is served by no backend: the parent mount is ungranted
+    # and the answer exists only because a granted mount sits below it.
+    # Attributing it to the lexical owner invents a network op against
+    # that backend for every such lookup.
+    ws = Workspace({
+        "/m/": UngrantedRemote(),
+        "/m/inner/deep/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    try:
+        ws.ops.records.clear()
+        assert await ws.ops.readdir("/m/inner") == ["/m/inner/deep"]
+        assert [(r.source, r.is_cache)
+                for r in ws.ops.records] == [("ram", True)]
+        assert ws.ops.network_records == []
+    finally:
+        await ws.close()
+
+
 class TestCreateTruncate:
 
     def test_create(self):

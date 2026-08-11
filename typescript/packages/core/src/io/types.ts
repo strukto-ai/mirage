@@ -33,6 +33,7 @@ export interface IOResultInit {
   reads?: Record<string, ByteSource>
   writes?: Record<string, ByteSource>
   cache?: string[]
+  opSource?: string | null
   opBytes?: number | null
   producer?: Producer | null
 }
@@ -44,6 +45,13 @@ export class IOResult {
   reads: Record<string, ByteSource>
   writes: Record<string, ByteSource>
   cache: string[]
+  // The resource that actually served a single VFS op, when that is
+  // not the mount that owns the path: 'ram' for a warm file-cache hit
+  // and for a synthetic namespace answer, since neither contacted a
+  // backend. Null means the owning mount served it. Only the op door
+  // sets it; without it an accounting caller attributes both to the
+  // lexical owner and counts network traffic that never happened.
+  opSource: string | null
   // Bytes the backend moved for a single VFS op, when that differs
   // from what the caller receives. Only the op door sets it, and only
   // when a postOps Limit truncated the result: the transfer already
@@ -66,6 +74,7 @@ export class IOResult {
     this.reads = init.reads ?? {}
     this.writes = init.writes ?? {}
     this.cache = init.cache ?? []
+    this.opSource = init.opSource ?? null
     this.opBytes = init.opBytes ?? null
     this.producer = init.producer ?? null
     this.streamSource = null
@@ -125,6 +134,7 @@ export class IOResult {
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },
       cache: [...this.cache, ...other.cache],
+      opSource: other.opSource ?? this.opSource,
       opBytes: other.opBytes ?? this.opBytes,
       producer: other.producer,
     })

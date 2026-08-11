@@ -25,7 +25,7 @@ from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
                                        namespace_stat)
 from mirage.policy import PolicyDenied, post_ops_gate, pre_ops_gate
-from mirage.types import ConsistencyPolicy, FileStat, PathSpec
+from mirage.types import ConsistencyPolicy, FileStat, PathSpec, ResourceName
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import slice_window
 from mirage.workspace.mount import MountEntry
@@ -44,6 +44,17 @@ _DISPATCH_WRITE_OPS = frozenset({
 # _setattr_via, so it is a write for policy admission without joining
 # the dispatcher's post-write invalidation path.
 _POLICY_WRITE_OPS = _DISPATCH_WRITE_OPS | frozenset({"setattr"})
+
+
+def _namespace_served() -> IOResult:
+    """The door's report for an answer no backend produced.
+
+    A synthetic namespace answer (a directory that exists only because
+    a mount or a link sits below it) contacts nothing, so attributing
+    it to the mount that lexically owns the path invents a network op
+    against that backend.
+    """
+    return IOResult(op_source=ResourceName.RAM.value)
 
 
 def _window(kwargs: dict[str, Any]) -> tuple[int, int | None]:
@@ -138,7 +149,8 @@ class Dispatcher:
             fallback = self._namespace_result(op, path.virtual)
             if fallback is None:
                 raise
-            return await self._gated_namespace(op, path, fallback), IOResult()
+            return (await self._gated_namespace(op, path,
+                                                fallback), _namespace_served())
         if not mount_allowed(mount.prefix):
             # The mount is real but ungranted, and the namespace may
             # still owe the session a directory here: a granted mount
@@ -149,8 +161,9 @@ class Dispatcher:
             # the canonical denial below.
             fallback = self._namespace_result(op, path.virtual)
             if fallback is not None:
-                return await self._gated_namespace(op, path,
-                                                   fallback), IOResult()
+                return (await
+                        self._gated_namespace(op, path,
+                                              fallback), _namespace_served())
         assert_mount_allowed(mount.prefix)
         # Admission policies fire at the door, before the warm-cache
         # early return below: a cached read must be refused exactly
@@ -192,6 +205,7 @@ class Dispatcher:
                 if bound is not None:
                     served = await apply_op_limit(served, bound)
                 return served, IOResult(reads={path.virtual: served},
+                                        op_source=ResourceName.RAM.value,
                                         op_bytes=moved)
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):

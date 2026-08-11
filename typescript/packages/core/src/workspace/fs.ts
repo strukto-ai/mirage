@@ -111,12 +111,12 @@ export class WorkspaceFS {
     const followed = this.links !== null && !NO_FOLLOW_OPS.has(op) ? this.links.follow(path) : path
     const owner = this.ownerOf(followed)
     let result: unknown
-    let cached = false
+    let servedBy: string | null = null
     let moved: number | null = null
     try {
       const [value, io] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs)
       result = value
-      cached = Object.keys(io.reads).length > 0
+      servedBy = io.opSource
       moved = io.opBytes
     } catch (err) {
       // A postOps deny suppresses the result, not the effect: the
@@ -132,11 +132,12 @@ export class WorkspaceFS {
       throw err
     }
     if (owner !== null) {
-      // A cache-served read moved no bytes over the network; 'ram' is
-      // what OpRecord.isCache reads. The door reports opBytes when a
-      // postOps limit truncated the result, since the transfer had
-      // already happened by then.
-      const source = cached ? ResourceName.RAM : owner.kind
+      // The door names the server when it is not the owning mount (a
+      // warm cache hit, a synthetic namespace answer): neither moved
+      // bytes over the network, and 'ram' is what OpRecord.isCache
+      // reads. It reports opBytes when a postOps limit truncated the
+      // result, since the transfer had already happened by then.
+      const source = servedBy ?? owner.kind
       const nbytes = moved ?? payloadBytes(result, args)
       await this.record(op, followed, source, nbytes, start)
     }

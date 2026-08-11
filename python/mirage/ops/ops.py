@@ -206,11 +206,13 @@ class Ops:
                 self._record(op, path, source, nbytes, start)
             raise
         if owner is not None:
-            # A cache-served read moved no bytes over the network;
-            # "ram" is what OpRecord.is_cache reads. The door reports
-            # op_bytes when a post_ops limit truncated the result, since
-            # the transfer had already happened by then.
-            source = "ram" if io.reads else owner.resource_type
+            # The door names the server when it is not the owning mount
+            # (a warm cache hit, a synthetic namespace answer): neither
+            # moved bytes over the network, and "ram" is what
+            # OpRecord.is_cache reads. It reports op_bytes when a
+            # post_ops limit truncated the result, since the transfer
+            # had already happened by then.
+            source = io.op_source or owner.resource_type
             nbytes = (io.op_bytes if io.op_bytes is not None else
                       self._payload_bytes(result, kwargs))
             self._record(op, path, source, nbytes, start)

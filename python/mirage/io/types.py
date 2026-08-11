@@ -47,6 +47,14 @@ class IOResult:
         reads (dict[str, ByteSource]): Paths read with content or streams.
         writes (dict[str, ByteSource]): Paths written with content or streams.
         cache (list[str]): Paths worth caching (from reads or writes).
+        op_source (str | None): the resource that actually served a
+            single VFS op, when that is not the mount that owns the
+            path: "ram" for a warm file-cache hit and for a synthetic
+            namespace answer, since neither contacted a backend. None
+            means the owning mount served it. Only the op door sets
+            it; without it an accounting caller attributes both to the
+            lexical owner and counts network traffic that never
+            happened.
         op_bytes (int | None): bytes the backend moved for a single VFS
             op, when that differs from what the caller receives. Only
             the op door sets it, and only when a post_ops Limit
@@ -87,6 +95,7 @@ class IOResult:
     reads: dict[str, ByteSource] = field(default_factory=dict)
     writes: dict[str, ByteSource] = field(default_factory=dict)
     cache: list[str] = field(default_factory=list)
+    op_source: str | None = None
     op_bytes: int | None = None
     producer: Producer | None = None
     _stream_source: "IOResult | None" = field(default=None, repr=False)
@@ -151,6 +160,8 @@ class IOResult:
                 **other.writes
             },
             cache=self.cache + other.cache,
+            op_source=(other.op_source
+                       if other.op_source is not None else self.op_source),
             op_bytes=(other.op_bytes
                       if other.op_bytes is not None else self.op_bytes),
             producer=other.producer,

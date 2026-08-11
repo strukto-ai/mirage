@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { runWithSession } from '../context/session_context.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied } from '../policy/errors.ts'
@@ -266,6 +267,30 @@ describe('WorkspaceFS is one door with the dispatcher', () => {
     ws.addMount('/other', outer, MountMode.WRITE)
     expect(await ws.fs.readdir('/data/inner')).toEqual(['/data/inner/deep'])
     expect((await ws.fs.stat('/data/inner')).type).toBe(FileType.DIRECTORY)
+  })
+
+  it('does not attribute a namespace answer to the lexical owner', async () => {
+    // '/m/inner' is served by no backend: the parent mount is
+    // ungranted for this session and the answer exists only because a
+    // granted mount sits below it. Attributing it to the lexical owner
+    // invents a network op against that backend for every such lookup.
+    // Mirrors Python's tests/ops/test_ops.py.
+    const outer = new RAMResource()
+    const inner = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of outer.ops()) ops.register({ ...op, resource: 's3' })
+    ops.registerResource(inner)
+    Object.assign(outer, { kind: 's3' })
+    const ws = new Workspace({}, { mode: MountMode.WRITE, ops })
+    ws.addMount('/m', outer, MountMode.WRITE)
+    ws.addMount('/m/inner/deep', inner, MountMode.WRITE)
+    const session = ws.createSession('agent', { mounts: { '/m/inner/deep': MountMode.EXEC } })
+    await runWithSession(session, async () => {
+      ws.records.length = 0
+      expect(await ws.fs.readdir('/m/inner')).toEqual(['/m/inner/deep'])
+      expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
+      expect(ws.networkRecords).toEqual([])
+    })
   })
 
   it('renders a registered filetype, and raw asks for the stored bytes', async () => {

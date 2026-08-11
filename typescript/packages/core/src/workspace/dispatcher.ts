@@ -30,7 +30,7 @@ import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
 import { isMissingPath } from '../utils/errors.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
-import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
+import { ConsistencyPolicy, FileStat, MountMode, PathSpec, ResourceName } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
@@ -132,7 +132,11 @@ export class Dispatcher {
       await preOpsGate(this.policies, opName, p, fallbackWrite, '')
       const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
       const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
-      return [gated, new IOResult()]
+      // A synthetic namespace answer (a directory that exists only
+      // because a mount or a link sits below it) contacts nothing, so
+      // attributing it to the mount that lexically owns the path would
+      // invent a network op against that backend.
+      return [gated, new IOResult({ opSource: ResourceName.RAM })]
     }
     const [resource, scope, mode] = resolved
     const mount = this.namespace.mountFor(p.virtual)
@@ -176,7 +180,14 @@ export class Dispatcher {
         const moved = window.byteLength
         const served =
           warmBound !== null ? ((await applyOpLimit(window, warmBound)) as Uint8Array) : window
-        return [served, new IOResult({ reads: { [p.virtual]: served }, opBytes: moved })]
+        return [
+          served,
+          new IOResult({
+            reads: { [p.virtual]: served },
+            opSource: ResourceName.RAM,
+            opBytes: moved,
+          }),
+        ]
       }
     }
     if (
