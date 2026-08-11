@@ -19,7 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
+from mirage.ops.types import MountView, ReaddirPath, StatPath
 from mirage.types import PathSpec
 
 
@@ -36,6 +36,8 @@ async def tree(
     P: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
     stat_path: StatPath | None = None,
+    readdir_path: ReaddirPath | None = None,
+    mounts: MountView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -52,6 +54,8 @@ async def tree(
         match_pattern=P,
         index=index,
         stat_path=stat_path,
+        readdir_path=readdir_path,
+        mounts=mounts,
     )
 
 

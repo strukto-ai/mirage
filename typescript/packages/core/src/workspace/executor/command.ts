@@ -37,7 +37,7 @@ import { resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
-import { fanOutTraversal, shouldFanOut } from './fanout.ts'
+import { fanOutTraversal, runWithFanout, shouldFanOut } from './fanout.ts'
 import {
   FindParseError,
   findExprTail,
@@ -51,7 +51,7 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links.ts'
-import { dropServiceCaches, mountRootOf } from './command/run.ts'
+import { dropServiceCaches, linkViewFor, mountRootOf, mountView } from './command/run.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -262,13 +262,24 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
+    // A per-operand native run is single-mount by construction, so a
+    // traversal operand holding nested mounts has to fan out inside it,
+    // exactly as the same operand would on a line of its own.
+    const runOperand = runWithFanout(
+      runSingle,
+      registry,
+      session.cwd,
+      mountView(registry),
+      linkViewFor(namespace ?? null, dispatch),
+      ensureOpen,
+    )
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
       csScopes,
       csTexts,
       csFlags,
       dispatch,
-      runSingle,
+      runOperand,
       stdin,
       cmdStr,
       makeStorageKey(registry),
@@ -421,6 +432,8 @@ export async function handleCommand(
       cmdStr,
       stdin,
       ensureOpen,
+      mountView(registry),
+      linkViewFor(namespace ?? null, dispatch),
     )
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)

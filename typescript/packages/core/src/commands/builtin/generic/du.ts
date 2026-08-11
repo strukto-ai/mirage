@@ -23,7 +23,7 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { LinkView, MountView } from '../../../ops/types.ts'
 
 export type DuEntries = [entries: [string, number][], total: number]
 export type ComputeSize = (p: PathSpec) => Promise<number>
@@ -306,6 +306,24 @@ export function rollup(
   return order
 }
 
+/**
+ * Drop leaves that fall under a descendant mount's root.
+ *
+ * The parent backend's keys under a nested mount are shadowed: no read can
+ * reach them, so no size may count them. GNU agrees (coreutils 9.7,
+ * `du --apparent-size -B1` over a tmpfs mounted inside the operand): a file
+ * covered by a mount appears nowhere and is in no total. What GNU
+ * additionally folds into the parent's rows, the mounted filesystem's own
+ * content, arrives here as the descendant's separately appended block
+ * instead, so the parent's own report is GNU's `du -x`.
+ */
+function dropShadowed(entries: [string, number][], roots: string[]): [string, number][] {
+  return entries.filter(([leaf]) => {
+    const node = norm(leaf)
+    return !roots.some((root) => node === root || node.startsWith(root + '/'))
+  })
+}
+
 // Symlinks under an operand as du leaf entries.
 //
 // Links live in the namespace, so no backend du op or readdir walk
@@ -329,6 +347,7 @@ async function duOne(
   fmt: (size: number) => string,
   flags: DuFlags,
   links: LinkView | null,
+  mounts: MountView | null,
 ): Promise<[string[], number]> {
   const label = path.rawPath
 
@@ -340,22 +359,35 @@ async function duOne(
     return [[`${fmt(size)}\t${label}`], size]
   }
 
-  const leaves = linkLeaves(links, path.virtual)
+  const roots = mounts?.descendants(path.virtual) ?? []
+  let leaves = linkLeaves(links, path.virtual)
+  if (roots.length > 0) leaves = dropShadowed(leaves, roots)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (flags.s) {
+  if (flags.s && roots.length === 0) {
     const total = (await computeSize(path)) + linkTotal
     return [[`${fmt(total)}\t${label}`], total]
   }
 
   const [raw, rawTotal] = await computeEntries(path)
-  const total = rawTotal + linkTotal
+  let total = rawTotal + linkTotal
   if (raw.length === 0 && leaves.length === 0) {
+    // A backend that can only produce a size degrades to one total; it
+    // cannot enumerate, so shadowed keys cannot be excluded either.
     const fallback = await computeSize(path)
     return [[`${fmt(fallback)}\t${label}`], fallback]
   }
 
-  const entries = toVirtual(raw, path).concat(leaves)
+  let entries = toVirtual(raw, path).concat(leaves)
+  if (roots.length > 0) {
+    // The backend's own total counted the shadowed leaves, so the
+    // honest number is the sum of what survived.
+    entries = dropShadowed(entries, roots)
+    total = entries.reduce((acc, [, size]) => acc + size, 0)
+  }
+  if (flags.s) {
+    return [[`${fmt(total)}\t${label}`], total]
+  }
   const rootKey = norm(path.virtual)
   // A file operand walks to itself. GNU prints it once, with or without -a,
   // never as a leaf line plus a roll-up line.
@@ -409,7 +441,16 @@ export async function runDu(
     opts.mountPrefix,
     links,
   )
-  return duGeneric(present, flags, computeSize, computeEntries, missing, truncated, links)
+  return duGeneric(
+    present,
+    flags,
+    computeSize,
+    computeEntries,
+    missing,
+    truncated,
+    links,
+    opts.mounts ?? null,
+  )
 }
 
 /**
@@ -420,7 +461,9 @@ export async function runDu(
  * `-a` and the per-directory lines degrade to one total. `missing` names the
  * operands that could not be read: GNU reports each and exits 1 but still
  * prints the rest. `truncated` is read after the walks to ask whether any of
- * them hit its entry cap.
+ * them hit its entry cap. `mounts` marks the descendant boundaries: leaves
+ * under one are shadowed and dropped from every row and total (see
+ * `dropShadowed`).
  */
 export async function duGeneric(
   paths: PathSpec[],
@@ -430,13 +473,14 @@ export async function duGeneric(
   missing: string[] = [],
   truncated?: () => boolean,
   links: LinkView | null = null,
+  mounts: MountView | null = null,
 ): Promise<DuOutput> {
   const fmt = (size: number): string => (flags.h ? humanSize(size) : String(size))
 
   const lines: string[] = []
   let grand = 0
   for (const root of paths) {
-    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags, links)
+    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags, links, mounts)
     lines.push(...block)
     grand += total
   }

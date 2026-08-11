@@ -181,3 +181,99 @@ describe('treeGeneric operand that is not a directory', () => {
     expect(DEC.decode(out)).toBe('/locked  [error opening dir]\n\n0 directories, 0 files\n')
   })
 })
+
+describe('treeGeneric across a nested mount', () => {
+  const PARENT: Record<string, FileType> = {
+    '/base': FileType.DIRECTORY,
+    '/base/top.txt': FileType.TEXT,
+    '/base/inner': FileType.DIRECTORY,
+    '/base/inner/leftover.txt': FileType.TEXT,
+  }
+  const CHILD: Record<string, FileType> = {
+    '/base/inner': FileType.DIRECTORY,
+    '/base/inner/real.txt': FileType.TEXT,
+    '/base/inner/deep': FileType.DIRECTORY,
+    '/base/inner/deep/d.txt': FileType.TEXT,
+  }
+  const ROOT = '/base/inner'
+
+  // Each path is answered by its OWNING mount: a key the parent holds
+  // under the mount root is shadowed and cannot be reached through it,
+  // which is the whole point of crossing.
+  function owner(virtual: string): Record<string, FileType> {
+    return virtual === ROOT || virtual.startsWith(ROOT + '/') ? CHILD : PARENT
+  }
+
+  function listing(rows: Record<string, FileType>, dir: string): string[] {
+    const prefix = rstripSlash(dir) + '/'
+    return Object.keys(rows)
+      .filter((k) => k.startsWith(prefix) && !k.slice(prefix.length).includes('/'))
+      .sort()
+  }
+
+  function backendReaddir(p: PathSpec): Promise<string[]> {
+    return Promise.resolve(listing(PARENT, key(p)))
+  }
+
+  function backendStat(p: PathSpec): Promise<FileStat> {
+    const type = PARENT[key(p)]
+    if (type === undefined) return Promise.reject(new Error(`ENOENT ${key(p)}`))
+    return Promise.resolve(new FileStat({ name: key(p).split('/').pop() ?? '', type }))
+  }
+
+  function crossOpts(): CommandOpts {
+    return {
+      ...opts({}),
+      mounts: {
+        descendants: (path: string) => [ROOT].filter((r) => r.startsWith(rstripSlash(path) + '/')),
+        isRoot: (path: string) => rstripSlash(path) === ROOT,
+        rootOf: () => '/',
+      },
+      readdirPath: (virtual: string) => Promise.resolve(listing(owner(virtual), virtual)),
+      statPath: (virtual: string) => {
+        const type = owner(virtual)[virtual]
+        return Promise.resolve(
+          type === undefined ? null : new FileStat({ name: virtual.split('/').pop() ?? '', type }),
+        )
+      },
+    } as unknown as CommandOpts
+  }
+
+  // Real tree draws the mounted filesystem's entries under the mount
+  // point, never the ones it covers, and counts the whole thing once
+  // (pinned on tree 2.2.1 over a tmpfs at the same spot). Concatenating a
+  // per-mount run cannot do that: it would print two roots and two
+  // summaries.
+  it('draws the mounted entries and none of the covered ones', async () => {
+    const [out] = (await treeGeneric(
+      [spec('/base')],
+      crossOpts(),
+      backendReaddir,
+      backendStat,
+    )) as [Uint8Array, unknown]
+    expect(DEC.decode(out)).toBe(
+      [
+        '/base',
+        '|-- inner',
+        '|   |-- deep',
+        '|   |   `-- d.txt',
+        '|   `-- real.txt',
+        '`-- top.txt',
+        '',
+        '3 directories, 3 files',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  it('stops at the mount point under -L 1', async () => {
+    const withDepth = { ...crossOpts(), flags: { L: '1' } } as unknown as CommandOpts
+    const [out] = (await treeGeneric([spec('/base')], withDepth, backendReaddir, backendStat)) as [
+      Uint8Array,
+      unknown,
+    ]
+    expect(DEC.decode(out)).toBe(
+      ['/base', '|-- inner', '`-- top.txt', '', '2 directories, 1 file', ''].join('\n'),
+    )
+  })
+})

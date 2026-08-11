@@ -23,6 +23,11 @@ StatOverlay = Callable[[str, FileStat], FileStat]
 # What a traversal command asks about its own start point, which decides
 # whether a walk is possible at all.
 StatPath = Callable[[str], Awaitable["FileStat | None"]]
+# readdir one virtual path through the workspace rather than one backend.
+# What a walker whose output is a single document (tree) reads once it
+# reaches a mount boundary, since the subtree below it lives in another
+# resource that the walker's own accessor cannot open.
+ReaddirPath = Callable[[str], Awaitable[list[str]]]
 # The mount prefix serving a virtual path. A mount boundary is a
 # filesystem boundary, which is where git stops looking for a repository
 # (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an
@@ -60,11 +65,15 @@ class MountView:
     walker that must account for the whole subtree therefore has to be
     told, the same way ``LinkView`` tells it about symlinks.
 
-    Traversal commands that render lines (find, du, grep -r) get this
-    for free from the executor's fan-out, which reruns them per mount
-    and concatenates the output. A command whose output is one binary
-    object (tar, zip) cannot be merged that way, so it reads the
-    boundaries here and says what it did with them.
+    Traversal commands that render independent lines (find, grep -r)
+    get this for free from the executor's fan-out, which reruns them per
+    mount and concatenates the output. A command whose output is one
+    binary object (tar, zip) cannot be merged that way, so it reads the
+    boundaries here and says what it did with them. du is in between:
+    its lines concatenate, but its per-directory totals are sums that
+    already counted the parent backend's shadowed keys by the time any
+    line filter runs, so it reads the boundaries here too and excludes a
+    descendant's subtree while accounting.
 
     A command opts in by naming a ``mounts`` parameter, which is what
     makes the dispatcher hand it one.

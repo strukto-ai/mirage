@@ -20,6 +20,7 @@ import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { isWalkError } from '../../../utils/errors.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { MountView } from '../../../ops/types.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 
@@ -29,6 +30,27 @@ interface TreeOpts {
   ignorePattern: string | null
   dirsOnly: boolean
   matchPattern: string | null
+  // Where the boundaries are, and the dispatcher-backed pair that reads
+  // past one. Unlike find and du, tree's output is a single document
+  // (one root line, one drawing, one count), so a per-mount run cannot
+  // be concatenated: it would print two of each. The boundary is crossed
+  // here instead, the way real tree crosses one.
+  mounts: MountView | null
+  crossReaddir: ((p: PathSpec) => Promise<string[]>) | null
+  crossStat: ((p: PathSpec) => Promise<FileStat>) | null
+}
+
+// The mount roots mounted directly on this directory. A mount point need
+// not exist in the parent backend at all, and when it does the parent
+// lists a directory whose contents belong to somebody else. Either way
+// the name has to come from the mount table, as `ls` injects it.
+function childMounts(mounts: MountView | null, directory: string): string[] {
+  if (mounts === null) return []
+  const base = rstripSlash(directory) || '/'
+  return mounts.descendants(directory).filter((root) => {
+    const parent = root.slice(0, root.lastIndexOf('/')) || '/'
+    return parent === base
+  })
 }
 
 // GNU tree's ASCII (C-locale) drawing set, matching the docker oracle.
@@ -50,8 +72,10 @@ async function walkTree(
     if (!isWalkError(err)) throw err
     return { dirs, files, failed: true }
   }
+  const nested = childMounts(treeOpts.mounts, path.virtual)
+  if (nested.length > 0) entries = [...new Set([...entries, ...nested])]
   entries.sort()
-  const filtered: { spec: PathSpec; name: string; isDir: boolean }[] = []
+  const filtered: { spec: PathSpec; name: string; isDir: boolean; crossing: boolean }[] = []
   for (const entry of entries) {
     const childPath = rstripSlash(entry)
     const name = childPath.slice(childPath.lastIndexOf('/') + 1)
@@ -63,17 +87,25 @@ async function walkTree(
       resolved: false,
       resourcePath: mountKey(childPath, mountPrefixOf(path.virtual, path.resourcePath)),
     })
+    const crossing = nested.includes(childPath) && treeOpts.crossReaddir !== null
     let isDir: boolean
-    try {
-      const s = await stat(sub)
-      isDir = s.type === FileType.DIRECTORY
-    } catch (err) {
-      if (!isWalkError(err)) throw err
-      continue
+    if (crossing) {
+      // The mount table already says this is a directory, and the
+      // backend serving it may not stat its own root (an empty mount, or
+      // a prefix store with no marker object).
+      isDir = true
+    } else {
+      try {
+        const s = await stat(sub)
+        isDir = s.type === FileType.DIRECTORY
+      } catch (err) {
+        if (!isWalkError(err)) throw err
+        continue
+      }
     }
     if (treeOpts.dirsOnly && !isDir) continue
     if (treeOpts.matchPattern !== null && !isDir && !fnmatch(name, treeOpts.matchPattern)) continue
-    filtered.push({ spec: sub, name, isDir })
+    filtered.push({ spec: sub, name, isDir, crossing })
   }
   for (let i = 0; i < filtered.length; i++) {
     const entry = filtered[i]
@@ -85,9 +117,15 @@ async function walkTree(
       dirs += 1
       if (treeOpts.maxDepth !== null && depth + 1 >= treeOpts.maxDepth) continue
       const nextPrefix = prefix + (last ? '    ' : '|   ')
+      // Past a mount root the subtree belongs to another resource, so the
+      // rest of this branch reads through the dispatcher. Deeper mounts
+      // under it need no second switch: the dispatcher already routes
+      // every path to its owner.
+      const subReaddir = entry.crossing ? (treeOpts.crossReaddir ?? readdir) : readdir
+      const subStat = entry.crossing ? (treeOpts.crossStat ?? stat) : stat
       const child = await walkTree(
-        readdir,
-        stat,
+        subReaddir,
+        subStat,
         entry.spec,
         nextPrefix,
         lines,
@@ -130,12 +168,24 @@ export async function treeGeneric(
   const depthRaw = fl.asStr('L') ?? null
   const ignoreRaw = fl.asStr('args_I') ?? null
   const matchRaw = fl.asStr('P') ?? null
+  const readdirPath = opts.readdirPath
+  const statPath = opts.statPath
   const treeOpts: TreeOpts = {
     showHidden: fl.asBool('a'),
     maxDepth: depthRaw === null ? null : Number.parseInt(depthRaw, 10),
     ignorePattern: ignoreRaw,
     dirsOnly: fl.asBool('d'),
     matchPattern: matchRaw,
+    mounts: opts.mounts ?? null,
+    crossReaddir: readdirPath === undefined ? null : (p: PathSpec) => readdirPath(p.virtual),
+    crossStat:
+      statPath === undefined
+        ? null
+        : async (p: PathSpec) => {
+            const s = await statPath(p.virtual)
+            if (s === null) throw new Error(`tree: ${p.virtual}: No such file or directory`)
+            return s
+          },
   }
   const lines: string[] = []
   let totalDirs = 0

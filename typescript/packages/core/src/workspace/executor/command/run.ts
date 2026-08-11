@@ -19,9 +19,9 @@ import { assertMountAllowed, MountNotAllowedError } from '../../../context/sessi
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { LinkView, MountView, StatOverlay, StatPath } from '../../../ops/types.ts'
+import type { LinkView, MountView, ReaddirPath, StatOverlay, StatPath } from '../../../ops/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { linkTargetStat, pathExists, pathStat } from '../builtins/links.ts'
+import { linkTargetStat, pathExists, pathReaddir, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import type { Runtime } from '../../../runtime/base.ts'
@@ -134,7 +134,7 @@ export function mountRootOf(registry: MountRegistry, virtual: string): string {
  * A command that does not read `mounts` off its context simply ignores it, so
  * there is no list of boundary-aware commands to keep in step.
  */
-function mountView(registry: MountRegistry): MountView {
+export function mountView(registry: MountRegistry): MountView {
   return {
     descendants: (path: string) =>
       registry.descendantMounts(path).map((m) => rstripSlash(m.prefix) || '/'),
@@ -251,11 +251,15 @@ export async function runOnMount(
   // Symlinks are namespace state no backend readdir or stat can see. A
   // command that does not read `links` off its context ignores it, so
   // there is no list of symlink-aware commands to keep in step.
-  const links = linkView(namespace ?? null, dispatch, statOverlay)
+  const links = linkViewFor(namespace ?? null, dispatch)
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
   const statPath: StatPath = (path: string) => pathStat(dispatch, path, statOverlay)
+  // The same door for a listing: a walker whose output is one document
+  // (tree) reads the subtree under a nested mount through here, because
+  // that subtree lives in a resource its own accessor cannot open.
+  const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -277,6 +281,7 @@ export async function runOnMount(
       ...(statOverlay !== null ? { statOverlay } : {}),
       ...(links !== null ? { links } : {}),
       statPath,
+      readdirPath,
       mounts: mountView(registry),
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
@@ -344,6 +349,18 @@ function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<str
 // Which commands actually receive this is decided by whether the
 // handler reads `links` off its context, so there is no list of
 // symlink-aware commands to keep in step here or anywhere else.
+// The symlink facts on offer, built with the namespace's own attr overlay so
+// a link's target stat carries the same rows `ls -l` renders. Exported for the
+// mount fan-out, which reaches `executeCmd` without going through
+// `runOnMount` and would otherwise run every sub-command link-blind.
+export function linkViewFor(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
+  const overlay =
+    namespace !== null
+      ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
+      : null
+  return linkView(namespace, dispatch, overlay)
+}
+
 function linkView(
   namespace: Namespace | null,
   dispatch: DispatchFn,

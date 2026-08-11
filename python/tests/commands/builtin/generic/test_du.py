@@ -6,8 +6,9 @@ from mirage.commands.builtin.generic.du import (DuFlags, _depth, du,
                                                 rollup, run_du, to_virtual)
 from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.errors import UsageError
+from mirage.ops.types import LinkView, MountView
 from mirage.resource.disk import DiskResource
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def _ok(value):
@@ -461,6 +462,123 @@ def test_depth_counts_segments_below_the_base():
     assert _depth("/dir", "/dir") == 0
     assert _depth("/dir/a.txt", "/dir") == 1
     assert _depth("/dir/sub/b.txt", "/dir") == 2
+
+
+def _mounts_view(descendants: tuple[str, ...]) -> MountView:
+    return MountView(
+        descendants=lambda p:
+        [d for d in descendants if d.startswith(p.rstrip("/") + "/")],
+        is_root=lambda p: False,
+        root_of=lambda p: "/")
+
+
+async def _no_target_stat(path: str) -> FileStat | None:
+    return None
+
+
+async def _never_exists(path: str) -> bool:
+    return False
+
+
+def _links_view(links: dict[str, str]) -> LinkView:
+
+    def stat_of(path: str) -> FileStat:
+        target = links[path]
+        return FileStat(name=path.rsplit("/", 1)[-1],
+                        type=FileType.SYMLINK,
+                        size=len(target))
+
+    return LinkView(stat_at=lambda p: stat_of(p) if p in links else None,
+                    children=lambda p: [],
+                    subtree=lambda p: [(k, stat_of(k)) for k in sorted(links)
+                                       if k.startswith(p.rstrip("/") + "/")],
+                    resolve=lambda p: links.get(p, p),
+                    exists=_never_exists,
+                    target_stat=_no_target_stat)
+
+
+# The nested-mount behavior is pinned against GNU coreutils 9.7 on
+# debian:stable-slim (du --apparent-size -B1 over a tmpfs mounted inside
+# the operand): a file shadowed by a mount appears nowhere and counts
+# nowhere. The parent mount's own rows are GNU's `du -x` report; the
+# descendant mount's block is appended by the executor fan-out.
+@pytest.mark.asyncio
+async def test_descendant_mount_rows_and_total_are_excluded():
+    tree = {"/top.txt": 10, "/inner/leftover.txt": 1000}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/base", "")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(),
+                   mounts=_mounts_view(("/base/inner", )))
+    assert out.stdout == b"10\t/base\n"
+
+
+@pytest.mark.asyncio
+async def test_descendant_mount_leaves_are_excluded_under_a():
+    tree = {"/top.txt": 10, "/inner/leftover.txt": 1000}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/base", "")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(a=True),
+                   mounts=_mounts_view(("/base/inner", )))
+    assert out.stdout == b"10\t/base/top.txt\n10\t/base\n"
+
+
+@pytest.mark.asyncio
+async def test_descendant_mount_bytes_are_excluded_under_s():
+    tree = {"/top.txt": 10, "/inner/leftover.txt": 1000}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/base", "")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(s=True),
+                   mounts=_mounts_view(("/base/inner", )))
+    assert out.stdout == b"10\t/base\n"
+
+
+@pytest.mark.asyncio
+async def test_without_a_mount_view_shadowed_keys_still_count():
+    """The opt-in is the mechanism: a caller that offers no view cannot
+    know where the boundaries are, so the backend's keys all count."""
+    tree = {"/top.txt": 10, "/inner/leftover.txt": 1000}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/base", "")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags())
+    assert out.stdout == b"1000\t/base/inner\n1010\t/base\n"
+
+
+@pytest.mark.asyncio
+async def test_link_under_a_descendant_mount_is_not_counted():
+    """A namespace link below the boundary belongs to the child's run."""
+    compute_size, compute_entries = _make_backend({"/top.txt": 10})
+    out = await du([_spec("/base", "")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(),
+                   links=_links_view({
+                       "/base/inner/lnk": "12345",
+                       "/base/kept": "123",
+                   }),
+                   mounts=_mounts_view(("/base/inner", )))
+    assert out.stdout == b"13\t/base\n"
+
+
+@pytest.mark.asyncio
+async def test_fully_shadowed_operand_reports_zero():
+    """Backend holds only shadowed keys: the parent's own report is empty,
+    never a compute_size fallback that would count the shadowed bytes."""
+    compute_size, compute_entries = _make_backend(
+        {"/inner/leftover.txt": 1000})
+    out = await du([_spec("/base", "")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(),
+                   mounts=_mounts_view(("/base/inner", )))
+    assert out.stdout == b"0\t/base\n"
 
 
 @pytest.mark.asyncio

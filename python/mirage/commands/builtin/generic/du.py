@@ -7,7 +7,7 @@ from functools import partial
 from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, MountView
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
@@ -333,6 +333,31 @@ def rollup(entries: Sequence[tuple[str, int]], root: str, *, a: bool,
     return order
 
 
+def drop_shadowed(entries: Sequence[tuple[str, int]],
+                  roots: Sequence[str]) -> list[tuple[str, int]]:
+    """Drop leaves that fall under a descendant mount's root.
+
+    The parent backend's keys under a nested mount are shadowed: no read
+    can reach them, so no size may count them. GNU agrees (coreutils 9.7,
+    ``du --apparent-size -B1`` over a tmpfs mounted inside the operand): a
+    file covered by a mount appears nowhere and is in no total. What GNU
+    additionally folds into the parent's rows, the mounted filesystem's
+    own content, arrives here as the descendant's separately appended
+    block instead, so the parent's own report is GNU's ``du -x``.
+
+    Args:
+        entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
+        roots (Sequence[str]): descendant mount roots, no trailing slash.
+    """
+    kept: list[tuple[str, int]] = []
+    for leaf, size in entries:
+        node = _norm(leaf)
+        if any(node == root or node.startswith(root + "/") for root in roots):
+            continue
+        kept.append((leaf, size))
+    return kept
+
+
 def link_leaves(links: LinkView | None, root: str) -> list[tuple[str, int]]:
     """Symlinks under an operand as du leaf entries.
 
@@ -361,6 +386,7 @@ async def _du_one(
     compute_entries: ComputeEntries,
     flags: DuFlags,
     links: LinkView | None = None,
+    mounts: MountView | None = None,
 ) -> tuple[list[str], int]:
     label = path.raw_path
 
@@ -371,20 +397,32 @@ async def _du_one(
         size = link_row.size or 0
         return [_line(size, flags.h, label)], size
 
+    roots = mounts.descendants(path.virtual) if mounts is not None else []
     leaves = link_leaves(links, path.virtual)
+    if roots:
+        leaves = drop_shadowed(leaves, roots)
     link_total = sum(size for _, size in leaves)
 
-    if flags.s:
+    if flags.s and not roots:
         total = await compute_size(path) + link_total
         return [_line(total, flags.h, label)], total
 
     entries, total = await compute_entries(path)
     total += link_total
     if not entries and not leaves:
+        # A backend that can only produce a size degrades to one total;
+        # it cannot enumerate, so shadowed keys cannot be excluded either.
         total = await compute_size(path)
         return [_line(total, flags.h, label)], total
 
     virtual = to_virtual(entries, path) + leaves
+    if roots:
+        # The backend's own total counted the shadowed leaves, so the
+        # honest number is the sum of what survived.
+        virtual = drop_shadowed(virtual, roots)
+        total = sum(size for _, size in virtual)
+    if flags.s:
+        return [_line(total, flags.h, label)], total
     root_key = _norm(path.virtual)
     # A file operand walks to itself. GNU prints it once, with or
     # without -a, never as a leaf line plus a roll-up line.
@@ -415,6 +453,7 @@ async def run_du(
     max_depth: str | None = None,
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
+    mounts: MountView | None = None,
 ) -> DuOutput:
     """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
@@ -437,6 +476,9 @@ async def run_du(
         max_depth (str | None): raw --max-depth text.
         truncated (Callable[[], bool] | None): whether a walk was cut off.
         links (LinkView | None): the namespace's symlink facts.
+        mounts (MountView | None): where the mount boundaries are, so
+            keys shadowed by a nested mount are excluded from every row
+            and total.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
@@ -455,7 +497,8 @@ async def run_du(
                     flags=flags,
                     missing=missing,
                     truncated=truncated,
-                    links=links)
+                    links=links,
+                    mounts=mounts)
 
 
 async def du(
@@ -467,6 +510,7 @@ async def du(
     missing: Sequence[str] = (),
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
+    mounts: MountView | None = None,
 ) -> DuOutput:
     """Render ``du`` output for a list of operands.
 
@@ -484,12 +528,15 @@ async def du(
             whether any of them hit its entry cap.
         links (LinkView | None): the namespace's symlink facts, merged
             into every operand's leaf list.
+        mounts (MountView | None): where the mount boundaries are; leaves
+            under a descendant mount's root are shadowed and dropped from
+            every row and total (see ``drop_shadowed``).
     """
     lines: list[str] = []
     totals: list[int] = []
     for path in paths:
         block, total = await _du_one(path, compute_size, compute_entries,
-                                     flags, links)
+                                     flags, links, mounts)
         lines.extend(block)
         totals.append(total)
     # GNU still prints the grand total when every operand failed ("0

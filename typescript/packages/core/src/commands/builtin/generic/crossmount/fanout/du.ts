@@ -28,21 +28,25 @@ function humanizeRow(line: string): string {
   return `${humanSize(Number(line.slice(0, tab)))}\t${line.slice(tab + 1)}`
 }
 
-// Strip each run's own total row and emit one global total. Every native run
-// receives `-c` so glob operands total natively; the per-run totals (always
-// the last row) are removed and re-summed.
+// Strip each block's own total row and emit one global total.
 //
-// `runFanout` forces the native runs to report exact bytes even under `-h`,
-// and the sizes are humanized here instead. Summing each run's already
-// humanized total would round twice, so two 1500-byte operands read back as
-// 1536 each and report `3.0K` where one mount says `2.9K`. Per-run totals
-// cannot be replaced by summing the rows either: without `-a` a run prints a
-// row per directory, and those nest.
-export function duTotal(results: OperandRun[], human: boolean): Uint8Array {
+// GNU `du -c` prints exactly one grand total, whatever it walked (pinned on
+// coreutils 9.7: `du -c` over a directory holding a mount reports the mounted
+// filesystem's bytes inside the one total). mirage reaches that number by
+// concatenating runs, so each run's own total row (always its last) is removed
+// here and the values re-summed.
+//
+// The callers force the runs to report exact bytes even under `-h`, and the
+// sizes are humanized here instead. Summing already-humanized totals would
+// round twice, so two 1500-byte operands read back as 1536 each and report
+// `3.0K` where one mount says `2.9K`. Per-run totals cannot be replaced by
+// summing the rows either: without `-a` a run prints a row per directory, and
+// those nest.
+export function mergeDuTotals(blocks: readonly Uint8Array[], human: boolean): Uint8Array {
   const kept: string[] = []
   let total = 0
-  for (const run of results) {
-    let body = DEC.decode(run.data)
+  for (const data of blocks) {
+    let body = DEC.decode(data)
       .split('\n')
       .filter((l) => l !== '')
     const last = body.at(-1)
@@ -54,4 +58,13 @@ export function duTotal(results: OperandRun[], human: boolean): Uint8Array {
   }
   kept.push(`${formatSize(total, human)}\ttotal`)
   return ENC.encode(kept.join('\n') + '\n')
+}
+
+// Re-total a per-operand fan-out, one native run per operand. Every native run
+// receives `-c` so glob operands total natively.
+export function duTotal(results: OperandRun[], human: boolean): Uint8Array {
+  return mergeDuTotals(
+    results.map((run) => run.data),
+    human,
+  )
 }

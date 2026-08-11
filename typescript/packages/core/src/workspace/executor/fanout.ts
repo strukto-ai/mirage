@@ -17,7 +17,7 @@ import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
-import type { MountRegistry } from '../mount/registry.ts'
+import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { respellOne } from '../../utils/path.ts'
@@ -29,10 +29,16 @@ import {
   type FindExpr,
 } from '../../commands/builtin/findParse.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
+import type { RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
+import type { LinkView, MountView } from '../../ops/types.ts'
+import { mergeDuTotals } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
-const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'tree', 'du'])
+// `tree` is deliberately absent: its output is one document (root line,
+// drawing, summary), so a second per-mount block would print a second of
+// each. It crosses the boundary inside the generic instead.
+const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
 function pathSegments(path: string): string[] {
   return path.split('/').filter((s) => s !== '')
@@ -142,21 +148,68 @@ function synthesizeFindMountEntries(
   return out.join('\n')
 }
 
-async function filterUnderPrefixes(
+// Drop whole `ls -R` groups whose header names a nested mount.
+//
+// `ls -R` renders `PATH:`, then that directory's bare names, with a blank
+// line between groups. Reading a path off every line drops the header and
+// keeps the names, so a shadowed directory's entries land at the end of
+// the previous group, which is how `leftover.txt` came to be listed as a
+// child of `/base`.
+function dropShadowedLsGroups(text: string, descendantPrefixes: readonly string[]): string[] {
+  const kept: string[] = []
+  let skipping = false
+  for (const line of text.split('\n')) {
+    const header = line.endsWith(':') ? line.slice(0, -1) : null
+    if (header?.startsWith('/') === true) {
+      skipping = descendantPrefixes.some((pre) => header === pre || header.startsWith(pre + '/'))
+      if (skipping) {
+        // The blank line ahead of a dropped group would otherwise be left
+        // dangling at the end of the block.
+        if (kept.at(-1) === '') kept.pop()
+        continue
+      }
+    } else if (skipping) {
+      continue
+    }
+    kept.push(line)
+  }
+  while (kept.at(-1) === '') kept.pop()
+  return kept
+}
+
+// Drop lines whose path falls under any descendant mount prefix.
+//
+// `du` renders SIZE\tPATH, so its path is everything after the first
+// tab; `ls -R` renders groups and is filtered a group at a time; for the
+// path-first formats (find, grep) the path is the start of the line up to
+// the first tab or colon. Lines whose path does not start with `/` are
+// passed through.
+export async function filterUnderPrefixes(
   stdout: ByteSource,
   descendantPrefixes: readonly string[],
+  cmdName: string,
 ): Promise<Uint8Array> {
   const data = await materialize(stdout)
   const text = new TextDecoder().decode(data)
+  if (cmdName === 'ls') {
+    const grouped = dropShadowedLsGroups(text, descendantPrefixes)
+    if (grouped.length === 0) return new Uint8Array()
+    return new TextEncoder().encode(grouped.join('\n') + '\n')
+  }
   const outLines: string[] = []
   for (const line of text.split('\n')) {
     if (line === '') continue
     let path = line
-    for (const sep of ['\t', ':']) {
-      const idx = path.indexOf(sep)
-      if (idx >= 0) {
-        path = path.slice(0, idx)
-        break
+    if (cmdName === 'du') {
+      const tab = line.indexOf('\t')
+      path = tab >= 0 ? line.slice(tab + 1) : line
+    } else {
+      for (const sep of ['\t', ':']) {
+        const idx = path.indexOf(sep)
+        if (idx >= 0) {
+          path = path.slice(0, idx)
+          break
+        }
       }
     }
     if (path.startsWith('/')) {
@@ -194,10 +247,26 @@ export async function fanOutTraversal(
   cmdStr: string,
   stdin: ByteSource | null,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+  // Offered to every sub-run, because a rollup total cannot be repaired
+  // by line filtering: du must exclude a shadowed subtree while it is
+  // accounting, not after it has rendered.
+  mounts?: MountView,
+  // Offered for the same reason the single-mount path offers it: symlinks
+  // are namespace state, so a sub-run that never receives them reports a
+  // tree with every link missing, and a nested mount is not a reason for
+  // `find` to stop seeing one.
+  links?: LinkView | null,
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
   const descendants = registry.descendantMounts(targetPath)
   const descendantPrefixes = descendants.map((m) => rstripSlash(m.prefix))
+
+  // -c is one grand total however many mounts answered, so the per-mount
+  // totals are re-summed below. Under -h the sub-runs are forced back to
+  // exact bytes and the sizes humanized once, at the end (`mergeDuTotals`).
+  const duC = cmdName === 'du' && flagKwargs.c === true
+  const duHuman = duC && flagKwargs.h === true
+  const flags = duHuman ? { ...flagKwargs, h: false } : flagKwargs
 
   const allStdout: Uint8Array[] = []
   let mergedIo = new IOResult()
@@ -211,10 +280,10 @@ export async function fanOutTraversal(
     let subTexts: string[]
     if (mount === primaryMount) {
       subPaths = [...paths]
-      subFlags = { ...flagKwargs }
+      subFlags = { ...flags }
       subTexts = [...texts]
     } else {
-      const adjusted = adjustDepthFlags(flagKwargs, targetPath, mount.prefix)
+      const adjusted = adjustDepthFlags(flags, targetPath, mount.prefix)
       if (adjusted === null) continue
       subFlags = adjusted
       if (cmdName === 'rg') {
@@ -247,6 +316,8 @@ export async function fanOutTraversal(
     const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
       stdin,
       cwd,
+      ...(mounts === undefined ? {} : { mounts }),
+      ...(links === undefined || links === null ? {} : { links }),
     })
     let stdout: ByteSource | null = stdout0
     if (mount !== primaryMount && io.exitCode === 127) {
@@ -256,7 +327,7 @@ export async function fanOutTraversal(
       continue
     }
     if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
-      stdout = await filterUnderPrefixes(stdout, descendantPrefixes)
+      stdout = await filterUnderPrefixes(stdout, descendantPrefixes, cmdName)
     } else if (mount !== primaryMount && cmdName === 'find' && stdout !== null) {
       // The child's own root line arrives respelled with the operand's
       // typed base, so drop that spelling, not the absolute prefix.
@@ -286,16 +357,22 @@ export async function fanOutTraversal(
 
   let finalIoExit = successSeen ? 0 : finalExit
   let combined: ByteSource | null = null
-  if (allStdout.length > 0) {
+  if (duC) {
+    combined = mergeDuTotals(allStdout, duHuman)
+  } else if (allStdout.length > 0) {
     const parts = allStdout.map((d) => {
       const s = new TextDecoder().decode(d).replace(/\n+$/, '')
       return s
     })
-    combined = new TextEncoder().encode(parts.filter((s) => s !== '').join('\n') + '\n')
+    // `ls -R` separates directory groups with a blank line, and a
+    // per-mount block is one more group; every other format is a plain
+    // line stream.
+    const sep = cmdName === 'ls' ? '\n\n' : '\n'
+    combined = new TextEncoder().encode(parts.filter((s) => s !== '').join(sep) + '\n')
   }
 
   if (cmdName === 'find') {
-    const [newCombined, actionErr] = await applyFindActions(combined, flagKwargs, registry, cwd)
+    const [newCombined, actionErr] = await applyFindActions(combined, flags, registry, cwd)
     combined = newCombined
     if (actionErr.length > 0) {
       const existing = await materialize(mergedIo.stderr)
@@ -320,4 +397,53 @@ export async function fanOutTraversal(
     exitCode: finalIoExit,
   })
   return [combined, mergedIo, exec]
+}
+
+// One operand's native run, fanned out over the mounts nested in it.
+//
+// A line whose operands span mounts runs once per operand on the operand's
+// owning mount, and that runner is single-mount by construction: it never
+// descends into a mount nested *under* the operand. So `du /base /other`
+// reported the parent backend's keys shadowed by a mount at `/base/inner`
+// and none of that mount's own, while `du /base` on the same tree got both
+// right. Wrapping the per-operand runner is what makes the two agree, and
+// it is a pass-through for everything the traversal fan-out does not claim.
+export function runWithFanout(
+  runSingle: RunSingle,
+  registry: MountRegistry,
+  cwd: string,
+  mounts: MountView | undefined,
+  links: LinkView | null,
+  ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+): RunSingle {
+  return async (cmdName, paths, texts, flagKwargs, opts) => {
+    const stdin = opts?.stdin ?? null
+    if (!shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+      return runSingle(cmdName, paths, texts, flagKwargs, opts ?? {})
+    }
+    let mount: MountEntry | null = null
+    try {
+      mount = await registry.resolveMount(cmdName, paths, cwd)
+    } catch (err) {
+      // The single-mount runner owns the wording for a command this mount
+      // does not serve, so let it report rather than re-throwing.
+      if (!(err instanceof MountCommandUnsupported)) throw err
+    }
+    if (mount === null) return runSingle(cmdName, paths, texts, flagKwargs, opts ?? {})
+    const [stdout, io] = await fanOutTraversal(
+      cmdName,
+      paths,
+      texts,
+      flagKwargs,
+      registry,
+      mount,
+      cwd,
+      cmdName,
+      stdin,
+      ensureOpen,
+      mounts,
+      links,
+    )
+    return [stdout, io]
+  }
 }

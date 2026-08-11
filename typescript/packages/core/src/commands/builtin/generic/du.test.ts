@@ -24,10 +24,11 @@ import {
   runDu,
   toVirtual,
 } from './du.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { UsageError } from '../../errors.ts'
+import type { LinkView, MountView } from '../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -271,6 +272,130 @@ describe('duGeneric', () => {
     const out = await duGeneric([spec('/dir', 'dir')], flags(), size, entries, [], () => false)
     expect(out.stderr.length).toBe(0)
     expect(out.exitCode).toBe(0)
+  })
+})
+
+function mountsView(descendants: string[]): MountView {
+  return {
+    descendants: (p: string) =>
+      descendants.filter((d) => d.startsWith(p.replace(/\/+$/, '') + '/')),
+    isRoot: () => false,
+    rootOf: () => '/',
+  }
+}
+
+function linksView(links: Record<string, string>): LinkView {
+  const statOf = (path: string): FileStat =>
+    new FileStat({
+      name: path.split('/').pop() ?? '',
+      type: FileType.SYMLINK,
+      size: links[path]?.length ?? 0,
+    })
+  return {
+    statAt: (p: string) => (p in links ? statOf(p) : null),
+    children: () => [],
+    subtree: (p: string) =>
+      Object.keys(links)
+        .sort()
+        .filter((k) => k.startsWith(p.replace(/\/+$/, '') + '/'))
+        .map((k): [string, FileStat] => [k, statOf(k)]),
+    resolve: (p: string) => links[p] ?? p,
+    exists: () => Promise.resolve(false),
+    targetStat: () => Promise.resolve(null),
+  }
+}
+
+// Pinned against GNU coreutils 9.7 on debian:stable-slim (du
+// --apparent-size -B1 over a tmpfs mounted inside the operand): a file
+// shadowed by a mount appears nowhere and counts nowhere. The parent
+// mount's own rows are GNU's `du -x` report; the descendant mount's
+// block is appended by the executor fan-out.
+describe('duGeneric descendant mounts', () => {
+  const TREE = { '/top.txt': 10, '/inner/leftover.txt': 1000 }
+
+  it('excludes shadowed rows and bytes', async () => {
+    const [size, entries] = backend(TREE)
+    const out = await duGeneric(
+      [spec('/base', '')],
+      flags(),
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      mountsView(['/base/inner']),
+    )
+    expect(DEC.decode(out.stdout)).toBe('10\t/base\n')
+  })
+
+  it('excludes shadowed leaves under -a', async () => {
+    const [size, entries] = backend(TREE)
+    const out = await duGeneric(
+      [spec('/base', '')],
+      flags({ a: true }),
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      mountsView(['/base/inner']),
+    )
+    expect(DEC.decode(out.stdout)).toBe('10\t/base/top.txt\n10\t/base\n')
+  })
+
+  it('excludes shadowed bytes under -s', async () => {
+    const [size, entries] = backend(TREE)
+    const out = await duGeneric(
+      [spec('/base', '')],
+      flags({ s: true }),
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      mountsView(['/base/inner']),
+    )
+    expect(DEC.decode(out.stdout)).toBe('10\t/base\n')
+  })
+
+  it('still counts shadowed keys without a mount view', async () => {
+    // The opt-in is the mechanism: a caller that offers no view cannot
+    // know where the boundaries are, so the backend's keys all count.
+    const [size, entries] = backend(TREE)
+    const out = await duGeneric([spec('/base', '')], flags(), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('1000\t/base/inner\n1010\t/base\n')
+  })
+
+  it('drops a namespace link below the boundary', async () => {
+    // A link below the boundary belongs to the child's run.
+    const [size, entries] = backend({ '/top.txt': 10 })
+    const out = await duGeneric(
+      [spec('/base', '')],
+      flags(),
+      size,
+      entries,
+      [],
+      undefined,
+      linksView({ '/base/inner/lnk': '12345', '/base/kept': '123' }),
+      mountsView(['/base/inner']),
+    )
+    expect(DEC.decode(out.stdout)).toBe('13\t/base\n')
+  })
+
+  it('reports zero when every key is shadowed', async () => {
+    // Never a computeSize fallback that would count the shadowed bytes.
+    const [size, entries] = backend({ '/inner/leftover.txt': 1000 })
+    const out = await duGeneric(
+      [spec('/base', '')],
+      flags(),
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      mountsView(['/base/inner']),
+    )
+    expect(DEC.decode(out.stdout)).toBe('0\t/base\n')
   })
 })
 

@@ -30,7 +30,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, ResourceName
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
-                                                      path_exists, path_stat)
+                                                      path_exists,
+                                                      path_readdir, path_stat)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -328,6 +329,8 @@ async def run_on_mount(
     links = link_view(namespace, dispatch)
     stat_path = (functools.partial(path_stat, dispatch)
                  if dispatch is not None else None)
+    readdir_path = (functools.partial(path_readdir, dispatch)
+                    if dispatch is not None else None)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)
@@ -351,6 +354,7 @@ async def run_on_mount(
             stat_overlay=stat_overlay,
             links=links,
             stat_path=stat_path,
+            readdir_path=readdir_path,
             mounts=mount_view(registry),
         )
     except UsageError as exc:

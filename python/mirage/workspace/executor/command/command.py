@@ -41,12 +41,13 @@ from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
                                                        merge_scopes,
                                                        path_flag_scopes)
 from mirage.workspace.executor.command.run import (drop_service_caches,
-                                                   exec_node, mount_root_of,
+                                                   exec_node, link_view,
+                                                   mount_root_of, mount_view,
                                                    run_on_mount,
                                                    scalar_find_flags)
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
-                                              _should_fan_out)
+                                              _should_fan_out, run_with_fanout)
 from mirage.workspace.executor.jobs import (handle_fg, handle_jobs,
                                             handle_kill, handle_ps,
                                             handle_wait)
@@ -221,13 +222,19 @@ async def handle_command(
                                        dispatch,
                                        namespace,
                                        routing_decision=routing_decision)
+        # A per-operand native run is single-mount by construction, so a
+        # traversal operand holding nested mounts has to fan out inside
+        # it, exactly as the same operand would on a line of its own.
+        run_operand = functools.partial(run_with_fanout, run_single, registry,
+                                        session.cwd, mount_view(registry),
+                                        link_view(namespace, dispatch))
         stdout, io = await handle_cross_mount(
             cmd_name,
             cross_scopes,
             cross_texts,
             cross_parsed.flag_kwargs,
             dispatch,
-            run_single,
+            run_operand,
             stdin=stdin,
             storage_key=make_storage_key(registry))
         if cross_parsed.warnings:
@@ -323,10 +330,18 @@ async def handle_command(
         for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        stdout, io, node = await _fan_out_traversal(cmd_name, paths, texts,
-                                                    flag_kwargs, registry,
-                                                    mount, session.cwd,
-                                                    cmd_str, stdin)
+        stdout, io, node = await _fan_out_traversal(
+            cmd_name,
+            paths,
+            texts,
+            flag_kwargs,
+            registry,
+            mount,
+            session.cwd,
+            cmd_str,
+            stdin,
+            mounts=mount_view(registry),
+            links=link_view(namespace, dispatch))
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing
