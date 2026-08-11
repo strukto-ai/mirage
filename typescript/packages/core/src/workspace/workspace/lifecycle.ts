@@ -38,12 +38,20 @@ export interface CloseDeps {
  * `workspace/lifecycle.py`.
  *
  * Order matters: the watch runtime goes first (it reads mounts), then
- * in-flight cache drains settle, then the state store if this workspace
- * built it, then the runtime closers and jobs, and finally every
- * resource not shared with a sibling workspace.
+ * background jobs, then in-flight cache drains settle, then the state
+ * store if this workspace built it, then the runtime closers, and
+ * finally every resource not shared with a sibling workspace.
  */
 export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   await deps.watch.detach()
+  // Settle jobs rather than merely aborting them: killAll records the
+  // outcome and finishes each console, which is what releases a reader
+  // parked on waitFinished; a bare abort leaves the job RUNNING with no
+  // ending chunk and that reader waits forever. It never joins the
+  // runner, so this cannot block shutdown on a job mid-write, and it
+  // happens before any resource closes so a job cannot keep touching one
+  // that is already gone.
+  await deps.jobTable.killAll()
   const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
   for (const task of drainTasks) {
     await task
@@ -69,12 +77,6 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
     } catch {
       // keep tearing down; swallow subsystem-cleanup failures
     }
-  }
-  // Teardown only requests the cancel; jobs die with their process, like
-  // processes at reboot. Awaiting each console here would block shutdown
-  // on a job that is mid-write.
-  for (const job of deps.jobTable.runningJobs()) {
-    job.abort?.abort()
   }
   const toClose = new Set<Resource>(deps.openOrder)
   for (const mount of deps.registry.allMounts()) {

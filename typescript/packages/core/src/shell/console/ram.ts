@@ -36,6 +36,11 @@ export class RAMConsoleStore implements ConsoleStore {
   private bytes: number
   private readonly maxBytes: number | null
   private waiters: Waiter[] = []
+  private isClosed = false
+
+  get closed(): boolean {
+    return this.isClosed
+  }
 
   /**
    * @param maxBytes retention budget. When set, the oldest chunks are
@@ -78,13 +83,16 @@ export class RAMConsoleStore implements ConsoleStore {
   }
 
   wait(seq: number): Promise<void> {
-    if (this.nextSeq > seq) return Promise.resolve()
+    // A closed store is checked here too, so a reader that re-arms after
+    // close() released it resolves instead of parking forever.
+    if (this.isClosed || this.nextSeq > seq) return Promise.resolve()
     return new Promise<void>((resolve) => {
       this.waiters.push({ seq, resolve })
     })
   }
 
   close(): Promise<void> {
+    this.isClosed = true
     const waiters = this.waiters
     this.waiters = []
     for (const w of waiters) w.resolve()

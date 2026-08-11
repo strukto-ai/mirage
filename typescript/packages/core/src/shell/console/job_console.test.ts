@@ -234,4 +234,43 @@ describe('JobConsole', () => {
     expect(truncated).toBe(true)
     expect(chunks.map((k) => dec(k.data))).toEqual(['b', 'c'])
   })
+
+  // close() releases the registered waiter once, but readers loop: they
+  // re-read, find no CONTROL chunk, and wait again. Without closed state
+  // on the store that second wait never resolves.
+  it('close releases a reader parked on waitFinished', async () => {
+    const c = new JobConsole()
+    let joined = false
+    const task = c.waitFinished().then(() => {
+      joined = true
+    })
+    await Promise.resolve()
+    expect(joined).toBe(false)
+
+    await c.close()
+    await task
+
+    expect(joined).toBe(true)
+  })
+
+  it('close ends a follow in progress', async () => {
+    const c = new JobConsole()
+    const seen: string[] = []
+    const task = (async () => {
+      for await (const chunk of c.follow()) seen.push(dec(chunk.data))
+    })()
+    await c.emit(Channel.STDOUT, enc('a'))
+    await Promise.resolve()
+
+    await c.close()
+    await task
+
+    expect(seen).toEqual(['a'])
+  })
+
+  it('waitFinished returns immediately once closed', async () => {
+    const c = new JobConsole()
+    await c.close()
+    await c.waitFinished()
+  })
 })

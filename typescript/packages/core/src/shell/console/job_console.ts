@@ -95,10 +95,18 @@ export class JobConsole {
         if (chunk.channel === Channel.CONTROL) return
       }
       await this.store.wait(cursor)
+      // A discarded console will never produce an ending chunk, and
+      // releasing once would only send this loop back to waiting.
+      if (this.store.closed) return
     }
   }
 
-  /** Resolve once the job has ended. */
+  /**
+   * Resolve once the job has ended.
+   *
+   * Resolves on a closed store too, so a console discarded while someone
+   * was joining on it does not strand them.
+   */
   async waitFinished(): Promise<void> {
     let cursor = 0
     for (;;) {
@@ -106,6 +114,7 @@ export class JobConsole {
       cursor = next
       if (chunks.some((c) => c.channel === Channel.CONTROL)) return
       await this.store.wait(cursor)
+      if (this.store.closed) return
     }
   }
 

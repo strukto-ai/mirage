@@ -70,6 +70,11 @@ class RAMConsoleStore:
         self._max_bytes = max_bytes
         self._waiters: list[Waiter] = []
         self._lock = threading.Lock()
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
         chunk = ConsoleChunk(seq=self._next_seq,
@@ -100,14 +105,17 @@ class RAMConsoleStore:
             # Checking under the same mutex the appender takes to wake
             # waiters is what closes the lost-wakeup window: a chunk
             # appended between this check and the registration below
-            # would find the waiter already listed.
-            if self._next_seq > seq:
+            # would find the waiter already listed. A closed store is
+            # checked here too, so a reader that re-arms after close()
+            # woke it returns instead of parking forever.
+            if self._closed or self._next_seq > seq:
                 return
             self._waiters.append((seq, loop, future))
         await future
 
     async def close(self) -> None:
         with self._lock:
+            self._closed = True
             waiters = self._waiters
             self._waiters = []
         for _, loop, future in waiters:

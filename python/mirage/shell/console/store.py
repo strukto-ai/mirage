@@ -57,8 +57,22 @@ class ConsoleStore(Protocol):
         """
         ...
 
+    @property
+    def closed(self) -> bool:
+        """Whether ``close`` has run.
+
+        Readers loop, so waking them once is not enough to end a follow:
+        they re-read, find no CONTROL chunk, and wait again. They check
+        this to tell "more may arrive" from "this console is discarded".
+        """
+        ...
+
     async def wait(self, seq: int) -> None:
         """Return once the console holds a chunk after ``seq``.
+
+        Returns immediately on a closed store, which is what keeps a
+        reader that re-arms from parking on a console nobody will write
+        to again.
 
         Args:
             seq (int): cursor the caller has already consumed up to.

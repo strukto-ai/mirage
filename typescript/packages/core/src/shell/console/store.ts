@@ -40,7 +40,21 @@ export interface ConsoleStore {
    */
   readFrom(seq: number, limit?: number): Promise<ReadResult>
 
-  /** Resolve once the console holds a chunk after `seq`. */
+  /**
+   * Whether `close` has run.
+   *
+   * Readers loop, so releasing them once is not enough to end a follow:
+   * they re-read, find no CONTROL chunk, and wait again. They check this
+   * to tell "more may arrive" from "this console is discarded".
+   */
+  readonly closed: boolean
+
+  /**
+   * Resolve once the console holds a chunk after `seq`.
+   *
+   * Resolves immediately on a closed store, which is what keeps a reader
+   * that re-arms from parking on a console nobody will write to again.
+   */
   wait(seq: number): Promise<void>
 
   /**

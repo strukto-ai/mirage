@@ -94,6 +94,10 @@ class JobConsole:
     async def follow(self, seq: int = 0) -> AsyncIterator[ConsoleChunk]:
         """Yield chunks as they arrive, ending when the job does.
 
+        Ends on a closed store as well as on the job's ending chunk: a
+        discarded console will never produce either, and waking once
+        would only send this loop back to waiting.
+
         Args:
             seq (int): cursor to start from. The default replays the
                 console from the beginning.
@@ -105,13 +109,16 @@ class JobConsole:
                 if chunk.channel == Channel.CONTROL:
                     return
             await self._store.wait(seq)
+            if self._store.closed:
+                return
 
     async def wait_finished(self) -> None:
         """Return once the job has ended.
 
         Safe to await from a different thread and event loop than the one
         running the job, which is what makes it the join point for kill
-        and for ``wait``.
+        and for ``wait``. Returns on a closed store too, so a console
+        discarded while someone was joining on it does not strand them.
         """
         seq = 0
         while True:
@@ -119,6 +126,8 @@ class JobConsole:
             if any(c.channel == Channel.CONTROL for c in chunks):
                 return
             await self._store.wait(seq)
+            if self._store.closed:
+                return
 
     async def snapshot(self, channel: Channel | None = None) -> bytes:
         """Join everything the job has printed so far.

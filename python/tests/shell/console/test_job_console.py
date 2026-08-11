@@ -181,3 +181,54 @@ async def test_truncation_surfaces_to_the_reader():
 
     assert truncated
     assert [c.data for c in chunks] == [b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_close_releases_a_reader_parked_on_wait_finished(console):
+    """A discarded console must not strand whoever was joining on it.
+
+    ``close`` wakes the registered waiter once, but the reader loops: it
+    re-reads, finds no CONTROL chunk, and waits again. Without closed
+    state on the store that second wait parks forever.
+    """
+    joined = asyncio.Event()
+
+    async def _join() -> None:
+        await console.wait_finished()
+        joined.set()
+
+    task = asyncio.create_task(_join())
+    await asyncio.sleep(0)
+    assert not joined.is_set()
+
+    await console.close()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert joined.is_set()
+
+
+@pytest.mark.asyncio
+async def test_close_ends_a_follow_in_progress(console):
+    """The same re-arm applies to ``follow``, which yields then waits."""
+    seen: list[bytes] = []
+
+    async def _drain() -> None:
+        async for chunk in console.follow():
+            seen.append(chunk.data)
+
+    task = asyncio.create_task(_drain())
+    await console.emit(Channel.STDOUT, b"a")
+    await asyncio.sleep(0)
+
+    await console.close()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert seen == [b"a"]
+
+
+@pytest.mark.asyncio
+async def test_wait_returns_immediately_once_closed(console):
+    """A reader that arrives after close must not park either."""
+    await console.close()
+
+    await asyncio.wait_for(console.wait_finished(), timeout=2)
