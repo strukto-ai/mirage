@@ -12,11 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.utils.errors import readdir_error
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
+
+
+async def _is_file(store: RAMStore, key: str) -> bool:
+    return key in store.files
+
+
+async def _is_dir(store: RAMStore, key: str) -> bool:
+    return key in store.dirs
 
 
 async def readdir(accessor: RAMAccessor,
@@ -33,7 +45,8 @@ async def readdir(accessor: RAMAccessor,
         return listing.entries
     p = norm(target.resource_path)
     if p not in store.dirs:
-        raise FileNotFoundError(p)
+        raise await readdir_error(path, p, partial(_is_file, store),
+                                  partial(_is_dir, store))
     dir_prefix = p.rstrip("/") + "/"
     seen: set[str] = set()
     for key in list(store.files) + list(store.dirs):

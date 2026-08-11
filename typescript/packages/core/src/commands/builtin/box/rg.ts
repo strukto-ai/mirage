@@ -20,14 +20,10 @@ import { IOResult } from '../../../io/types.ts'
 import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
-import { defaultProvision } from '../generic_bind/provision.ts'
 import { patternArg } from '../grep_helper.ts'
 import { rgGeneric } from '../generic/rg.ts'
-import { BOX_IO } from './io.ts'
 import { narrowScope } from './narrow.ts'
-
-const boxResolveGlob = resolveGlobOf(BOX_IO)
+import { FlagView } from '../../spec/types.ts'
 
 // Reproduce rg's dotfile pruning for search-narrowed candidates: the generic
 // rg walk skips hidden files and never descends into hidden directories, but
@@ -63,6 +59,7 @@ async function rgCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('rg'))
   let resolved = paths
   let runOpts = opts
   if (paths.length > 0) {
@@ -71,22 +68,21 @@ async function rgCommand(
     // whose every line matches inverted); --type/--glob keep the walk so
     // their file filtering stays in one place.
     const narrowed = await narrowScope(accessor, paths, pattern, {
-      fixedString: opts.flags.F === true,
+      fixedString: fl.asBool('F'),
       recursive: true,
+      wholeWord: fl.asBool('w'),
       exactFileSet:
-        opts.flags.v === true ||
-        typeof opts.flags.type === 'string' ||
-        typeof opts.flags.glob === 'string',
+        fl.asBool('v') || fl.asStr('type') !== undefined || fl.asStr('glob') !== undefined,
       ...(opts.index !== null ? { index: opts.index } : {}),
     })
     if (narrowed.usedSearch) {
-      const visible = keepVisible(narrowed.resolved, paths, opts.flags.hidden === true)
+      const visible = keepVisible(narrowed.resolved, paths, fl.asBool('hidden'))
       if (visible.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
       resolved = visible
       // ripgrep labels every file a walk finds; narrowed candidates arrive as
       // explicit operands, so force the label flag — unless -I suppresses
       // labels (forcing H would defeat it in the delegated grepGeneric body).
-      if (opts.flags.args_I !== true) {
+      if (!fl.asBool('args_I')) {
         runOpts = { ...opts, flags: { ...opts.flags, H: true } }
       }
     } else {
@@ -108,5 +104,4 @@ export const BOX_RG = command({
   fn: rgCommand,
   // Same cost estimate the generic-bound rg carried; narrowing only ever
   // lowers the real cost below it.
-  provision: defaultProvision('rg', BOX_IO.stat, boxResolveGlob, BOX_IO.readdir),
 })

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -36,8 +36,13 @@ describe('core/disk/mkdir', () => {
     expect((await stat(join(root, 'd'))).isDirectory()).toBe(true)
   })
 
-  it('throws "parent directory does not exist" when parent missing and parents=false', async () => {
-    await expect(mkdir(accessor, spec('/a/b'))).rejects.toThrow(/parent directory does not exist/)
+  it('is ENOENT when the parent is missing and parents=false', async () => {
+    // The kernel's errno is kept and restamped against the mount, so the
+    // command layer can render the GNU strerror and no host path leaks.
+    await expect(mkdir(accessor, spec('/a/b'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/a/b',
+    })
   })
 
   it('creates nested directories with parents=true', async () => {
@@ -45,8 +50,31 @@ describe('core/disk/mkdir', () => {
     expect((await stat(join(root, 'a/b/c'))).isDirectory()).toBe(true)
   })
 
-  it('is a no-op when directory already exists', async () => {
+  it('refuses an existing directory without -p, and is a no-op with it (GNU)', async () => {
     await mkdir(accessor, spec('/d'))
-    await expect(mkdir(accessor, spec('/d'))).resolves.toBeUndefined()
+    await expect(mkdir(accessor, spec('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
+    await expect(mkdir(accessor, spec('/d'), true)).resolves.toBeUndefined()
+  })
+
+  it('refuses an existing file with EEXIST', async () => {
+    await writeFile(join(root, 'a.txt'), 'hi')
+    await expect(mkdir(accessor, spec('/a.txt'))).rejects.toMatchObject({ code: 'EEXIST' })
+    expect(await readFile(join(root, 'a.txt'), 'utf-8')).toBe('hi')
+  })
+
+  it('-p across a plain file names the component and keeps the file', async () => {
+    await writeFile(join(root, 'a.txt'), 'hi')
+    // The kernel names the whole path; GNU names the component it tripped on,
+    // and the host root never appears.
+    await expect(mkdir(accessor, spec('/a.txt/sub'), true)).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      virtualPath: '/a.txt',
+    })
+    expect(await readFile(join(root, 'a.txt'), 'utf-8')).toBe('hi')
+  })
+
+  it('-p onto a plain file target is EEXIST', async () => {
+    await writeFile(join(root, 'a.txt'), 'hi')
+    await expect(mkdir(accessor, spec('/a.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
   })
 })

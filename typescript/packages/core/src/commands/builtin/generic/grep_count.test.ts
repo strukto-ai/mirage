@@ -40,7 +40,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   stdin: Uint8Array | null = null,
 ): CommandOpts {
   return {
@@ -75,7 +75,7 @@ async function decode(out: GrepOut): Promise<string> {
 async function runGrep(
   paths: PathSpec[],
   pattern: string,
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   stdin: Uint8Array | null = null,
 ): Promise<[string, IOResult]> {
   const [out, io] = (await grepGeneric(

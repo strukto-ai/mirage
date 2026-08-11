@@ -105,6 +105,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.JSON,
+            size=lookup.entry.size,
             extra={"user_id": lookup.entry.id},
         )
 
@@ -114,7 +115,18 @@ async def stat(
 
     if (len(parts) == 4 and parts[0] in ("channels", "dms")
             and _DATE_RE.match(parts[2]) and parts[3] == "chat.jsonl"):
-        return FileStat(name="chat.jsonl", type=FileType.TEXT)
+        # The day's readdir renders the messages it fetched and stores the
+        # byte length, so stat serves it from the index instead of
+        # answering blind.
+        lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            await _populate_via_parent(accessor, virtual_key, prefix, index)
+            lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            raise enoent(virtual)
+        return FileStat(name="chat.jsonl",
+                        type=FileType.TEXT,
+                        size=lookup.entry.size)
 
     if (len(parts) == 4 and parts[0] in ("channels", "dms")
             and _DATE_RE.match(parts[2]) and parts[3] == "files"):

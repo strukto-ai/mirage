@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 const ENC = new TextEncoder()
@@ -20,6 +23,7 @@ const ENC = new TextEncoder()
 export const TOUCH_BUILDER: Builder = {
   name: 'touch',
   write: true,
+  requirements: ['exists', 'write'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('touch: missing operand\n') })]
@@ -30,13 +34,24 @@ export const TOUCH_BUILDER: Builder = {
       throw new Error('touch: backend provides no write op')
     }
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    const createOnly = opts.flags.c === true
+    const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('c')
+    const writes: Record<string, Uint8Array> = {}
+    const errors: string[] = []
     for (const p of resolved) {
       if (createOnly) continue
-      if (!(await exists(accessor, p))) {
+      if (await exists(accessor, p)) continue
+      try {
         await write(accessor, p, new Uint8Array(0))
+      } catch (err) {
+        // One unusable operand is not an aborted command: GNU reports it
+        // and still touches the remaining ones.
+        if (!isFsError(err)) throw err
+        errors.push(`touch: cannot touch '${p.virtual}': ${String(fsStrerror(err))}`)
+        continue
       }
+      writes[p.mountPath] = new Uint8Array(0)
     }
-    return [null, new IOResult()]
+    const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
+    return [null, new IOResult({ writes, stderr, exitCode: errors.length > 0 ? 1 : 0 })]
   },
 }

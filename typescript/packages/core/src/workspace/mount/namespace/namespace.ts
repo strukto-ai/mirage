@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Resource } from '../../../resource/base.ts'
-import { type MountMode, type PathSpec } from '../../../types.ts'
+import {
+  FileStat,
+  FileType,
+  LINK_TARGET_KEY,
+  type MountMode,
+  type PathSpec,
+} from '../../../types.ts'
+import { epochToIso } from '../../../utils/dates.ts'
 import { globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { ResolveFn } from '../../dispatcher.ts'
@@ -35,6 +42,34 @@ export interface NodeMeta {
   uid?: number | string
   gid?: number | string
   atime?: string
+  // Time of the last content write observed through mirage. Unlike
+  // `mtime` (an explicit touch, which wins over the backend), this is
+  // a fallback that only surfaces when the backend reports no modified
+  // time at all, so `find -mtime` works on mtime-less backends for
+  // files written through mirage.
+  observedMtime?: number
+}
+
+// Render a symlink node as a stat row. Size is the target string's
+// byte length and mode is left unset so the formatter supplies 0777,
+// which is what a real symlink inode reports (a link carries no
+// permission bits of its own). Ownership is not in that category: a link
+// has a real uid/gid that `chown -h` writes and `ls -l` shows, so both
+// ride through from the node. The target rides along in `extra` so
+// every surface that has to name it (ls -l's `name -> target`, file's
+// "symbolic link to") reads one fact rather than querying the link
+// table a second time.
+function linkStat(name: string, meta: NodeMeta): FileStat {
+  const target = meta.target ?? ''
+  return new FileStat({
+    name,
+    size: new TextEncoder().encode(target).length,
+    modified: meta.mtime !== undefined ? epochToIso(meta.mtime) : null,
+    type: FileType.SYMLINK,
+    ...(meta.uid !== undefined ? { uid: meta.uid } : {}),
+    ...(meta.gid !== undefined ? { gid: meta.gid } : {}),
+    extra: { [LINK_TARGET_KEY]: target },
+  })
 }
 
 export interface SetAttrsFields {
@@ -53,6 +88,7 @@ function metaToFields(meta: NodeMeta): NodeFields {
   if (meta.uid !== undefined) out.uid = meta.uid
   if (meta.gid !== undefined) out.gid = meta.gid
   if (meta.atime !== undefined) out.atime = meta.atime
+  if (meta.observedMtime !== undefined) out.observed_mtime = meta.observedMtime
   return out
 }
 
@@ -64,6 +100,7 @@ function metaFromFields(fields: NodeFields): NodeMeta {
   if (typeof fields.uid === 'number' || typeof fields.uid === 'string') meta.uid = fields.uid
   if (typeof fields.gid === 'number' || typeof fields.gid === 'string') meta.gid = fields.gid
   if (typeof fields.atime === 'string') meta.atime = fields.atime
+  if (typeof fields.observed_mtime === 'number') meta.observedMtime = fields.observed_mtime
   return meta
 }
 
@@ -251,11 +288,19 @@ export class Namespace {
     return true
   }
 
-  async clearTimes(path: string): Promise<void> {
-    const meta = this.nodeTable.get(path)
+  async clearTimes(path: string, observed: number | null = null): Promise<void> {
+    let meta = this.nodeTable.get(path)
+    if (meta === undefined && observed !== null) {
+      meta = {}
+      this.nodeTable.set(path, meta)
+    }
     if (meta === undefined || meta.target !== undefined) return
     delete meta.mtime
     delete meta.atime
+    // null (a removal) also drops any prior observed time, so a
+    // deleted path's meta does not linger.
+    if (observed === null) delete meta.observedMtime
+    else meta.observedMtime = observed
     if (Object.keys(meta).length === 0) {
       this.nodeTable.delete(path)
       await this.store.delete([path])
@@ -302,17 +347,43 @@ export class Namespace {
     return resolveSymlinks(path, targets)
   }
 
-  // Links living directly under a directory: basename -> target.
-  linksUnder(directory: string): Map<string, string> {
+  // lstat a path: the link's own stat, or null when not a link. A
+  // symlink has no backend inode, so the node table is the only
+  // authority for it.
+  linkStatAt(path: string): FileStat | null {
+    const key = rstripSlash(path) || path
+    const meta = this.nodeTable.get(key)
+    if (meta?.target === undefined) return null
+    return linkStat(key.split('/').pop() ?? key, meta)
+  }
+
+  // Every link at any depth under a directory, with its own stat. A
+  // walker (find, du) needs the whole subtree, unlike a listing (ls)
+  // which wants one level.
+  linkStatsBelow(directory: string): [string, FileStat][] {
     const base = rstripSlash(directory) + '/'
-    const out = new Map<string, string>()
+    const out: [string, FileStat][] = []
+    for (const [path, meta] of this.nodeTable) {
+      if (meta.target !== undefined && path.startsWith(base)) {
+        out.push([path, linkStat(path.split('/').pop() ?? path, meta)])
+      }
+    }
+    return out
+  }
+
+  // Stat rows for the links living directly under a directory. Links
+  // are namespace state and invisible to a backend readdir, so listing
+  // commands merge these rows into the backend's entries.
+  linkStatsUnder(directory: string): FileStat[] {
+    const base = rstripSlash(directory) + '/'
+    const out: FileStat[] = []
     for (const [path, meta] of this.nodeTable) {
       if (
         meta.target !== undefined &&
         path.startsWith(base) &&
         !path.slice(base.length).includes('/')
       ) {
-        out.set(path.slice(base.length), meta.target)
+        out.push(linkStat(path.slice(base.length), meta))
       }
     }
     return out
@@ -339,6 +410,10 @@ export class Namespace {
 
   mountFor(path: string): MountEntry | null {
     return this.registry.mountFor(path)
+  }
+
+  mountPrefixes(): string[] {
+    return this.registry.mountPrefixes()
   }
 
   isMountRoot(path: string): boolean {

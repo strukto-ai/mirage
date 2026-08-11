@@ -3,11 +3,9 @@ from mirage.commands.builtin.dify.io import resolve_glob
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic.cat import needs_display
 from mirage.commands.builtin.generic_bind import CommandIO
-from mirage.commands.builtin.generic_bind.provision import \
-    make_file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.dify.stat import stat as dify_stat
+from mirage.commands.spec.types import FlagValue
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
@@ -22,16 +20,13 @@ def make_cat(ops: CommandIO):
             ``read_stream`` already serve cached bytes when warm.
     """
 
-    @command("cat",
-             resource="dify",
-             spec=SPECS["cat"],
-             provision=make_file_read_provision(dify_stat))
+    @command("cat", resource="dify", spec=SPECS["cat"])
     async def cat(
         accessor,
         paths: list[PathSpec],
         *texts: str,
         index: IndexCacheStore,
-        **flags: object,
+        **flags: FlagValue,
     ) -> tuple[ByteSource | None, IOResult]:
         paths = await resolve_glob(accessor, paths, index)
         # dify is a remote (cacheable) backend. Single file: stream via a

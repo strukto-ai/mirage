@@ -18,9 +18,13 @@ import pytest_asyncio
 from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
-from mirage.runtime.base import RunArgs, RunResult, Runtime, ScriptSource
+from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.policy import DenyResult, RouteResult
 from mirage.runtime.python import LocalRuntime, MontyRuntime
-from mirage.runtime.table import VfsRuntime
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.table import VFSRuntime
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 
 @pytest_asyncio.fixture
@@ -106,17 +110,15 @@ def test_config_vfs_entry_takes_no_options():
         _build_runtime_entries([{"name": "vfs", "home": "/x"}])
 
 
-class AlphaRuntime(Runtime):
+class AlphaRuntime(PythonRuntime):
     name = "alpha"
-    captures = ("python3", "python")
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=b"ran-alpha\n", stderr=None, exit_code=0)
 
 
-class BetaRuntime(Runtime):
+class BetaRuntime(PythonRuntime):
     name = "beta"
-    captures = ("python3", "python")
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=b"ran-beta\n", stderr=None, exit_code=0)
@@ -205,7 +207,7 @@ async def test_all_capturers_refuse_is_admission_failure():
         io = await ws.execute("python3 -c 'x'")
         assert io.exit_code == 126
         err = await materialize(io.stderr)
-        assert err == b"mirage: python3: no runtime accepted this line\n"
+        assert err == b"python3: no runtime accepted this line\n"
         io = await ws.execute("echo vfs-still-open")
         assert await materialize(io.stdout) == b"vfs-still-open\n"
     finally:
@@ -217,7 +219,7 @@ async def test_vfs_entry_script_locks_down_lines():
     ws = Workspace(
         {"/": RAMResource()},
         mode=MountMode.EXEC,
-        runtimes=[VfsRuntime(script=lambda ctx: "/secret" not in ctx.line)])
+        runtimes=[VFSRuntime(script=lambda ctx: "/secret" not in ctx.line)])
     try:
         io = await ws.execute("echo ok > /notes.txt && cat /notes.txt")
         assert await materialize(io.stdout) == b"ok\n"
@@ -232,14 +234,14 @@ async def test_vfs_explicit_captures_restrict_the_workspace():
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
-                             VfsRuntime(captures=("echo", ))])
+                             VFSRuntime(captures=("echo", ))])
     try:
         io = await ws.execute("echo listed")
         assert await materialize(io.stdout) == b"listed\n"
         io = await ws.execute("ls /")
         assert io.exit_code == 126
         err = await materialize(io.stderr)
-        assert err == b"mirage: ls: no runtime accepted this line\n"
+        assert err == b"ls: no runtime accepted this line\n"
         io = await ws.execute("python3 -c 'x'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
     finally:
@@ -251,7 +253,7 @@ def test_config_vfs_entry_carries_captures():
         "name": "vfs",
         "captures": ["grep", "cat"]
     }])
-    assert isinstance(entries[0], VfsRuntime)
+    assert isinstance(entries[0], VFSRuntime)
     assert entries[0].captures == ("grep", "cat")
 
 
@@ -260,7 +262,7 @@ async def test_empty_captures_serve_nothing():
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
-                             VfsRuntime(captures=())])
+                             VFSRuntime(captures=())])
     try:
         io = await ws.execute("ls /")
         assert io.exit_code == 126
@@ -291,7 +293,7 @@ async def test_vfs_explicit_captures_restrict_under_routing():
     alpha.script = lambda ctx: True
     ws = Workspace({"/": RAMResource()},
                    mode=MountMode.EXEC,
-                   runtimes=[alpha, VfsRuntime(captures=("echo", ))])
+                   runtimes=[alpha, VFSRuntime(captures=("echo", ))])
     try:
         io = await ws.execute("echo routed-ok")
         assert await materialize(io.stdout) == b"routed-ok\n"
@@ -307,12 +309,74 @@ async def test_global_route_names_the_runtime():
                    mode=MountMode.EXEC,
                    runtimes=[AlphaRuntime(),
                              BetaRuntime(), "vfs"],
-                   route=lambda ctx: "beta" if "heavy" in ctx.line else None)
+                   policy=lambda ctx: "beta" if "heavy" in ctx.line else None)
     try:
         io = await ws.execute("python3 -c 'heavy'")
         assert await materialize(io.stdout) == b"ran-beta\n"
         io = await ws.execute("python3 -c 'light'")
         assert await materialize(io.stdout) == b"ran-alpha\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_policy_deny_folds_into_the_line_result():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(), "vfs"],
+                   policy=lambda ctx: {"deny": "python3 is blocked"}
+                   if ctx.command == "python3" else None)
+    try:
+        io = await ws.execute("python3 -c 'x'")
+        assert io.exit_code == 126
+        assert io.stderr == b"python3: policy denied: python3 is blocked\n"
+        io = await ws.execute("echo ok")
+        assert await materialize(io.stdout) == b"ok\n"
+        assert io.exit_code == 0
+        # The denied line is still a typed line: it records like any
+        # other command.
+        events = await ws.history()
+        assert [e["command"] for e in events] == ["python3 -c 'x'", "echo ok"]
+        assert events[0]["exit_code"] == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_syntax_error_gates_before_policy():
+    calls: list[str] = []
+
+    def deny_all(ctx):
+        calls.append(ctx.line)
+        return {"deny": "nothing runs"}
+
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(), "vfs"],
+                   policy=deny_all)
+    try:
+        io = await ws.execute("echo (")
+        assert io.exit_code == 2
+        assert b"syntax error" in io.stderr
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_policy_result_arms_route_and_deny():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[AlphaRuntime(),
+                             BetaRuntime(), "vfs"],
+                   policy=lambda ctx: DenyResult("secrets stay put")
+                   if "secret" in ctx.line else RouteResult("beta"))
+    try:
+        io = await ws.execute("python3 -c 'x'")
+        assert await materialize(io.stdout) == b"ran-beta\n"
+        io = await ws.execute("python3 -c 'secret'")
+        assert io.exit_code == 126
+        assert io.stderr == b"python3: policy denied: secrets stay put\n"
     finally:
         await ws.close()
 
@@ -351,7 +415,7 @@ async def test_add_runtime_appends_and_rebinds():
 
 
 def test_config_inline_script_is_rejected():
-    with pytest.raises(ValueError, match=r"reference a \.py file"):
+    with pytest.raises(ValueError, match=r"reference a \.py/\.js file"):
         _build_runtime_entries([{
             "name": "local",
             "script": "ctx['command'] == 'python3'"
@@ -359,7 +423,7 @@ def test_config_inline_script_is_rejected():
 
 
 def test_config_script_path_form_embeds_content(tmp_path):
-    script = tmp_path / "route.py"
+    script = tmp_path / "policy.py"
     script.write_text("ctx['command'] == 'python3'")
     entries = _build_runtime_entries([{
         "name": "local",
@@ -369,12 +433,12 @@ def test_config_script_path_form_embeds_content(tmp_path):
         "script": str(script)
     }])
     assert entries[0].script == ScriptSource("ctx['command'] == 'python3'")
-    assert isinstance(entries[1], VfsRuntime)
+    assert isinstance(entries[1], VFSRuntime)
     assert entries[1].script == ScriptSource("ctx['command'] == 'python3'")
 
 
 def test_code_string_script_is_rejected():
-    vfs = VfsRuntime()
+    vfs = VFSRuntime()
     vfs.script = "ctx['command'] == 'python3'"
     with pytest.raises(TypeError, match="reference a .py file"):
         Workspace({"/ram": RAMResource()}, runtimes=[vfs])
@@ -383,7 +447,7 @@ def test_code_string_script_is_rejected():
 @pytest.mark.asyncio
 async def test_code_string_route_is_rejected():
     with pytest.raises(TypeError, match="reference a .py file"):
-        Workspace({"/ram": RAMResource()}, route="'local'")
+        Workspace({"/ram": RAMResource()}, policy="'local'")
 
 
 def test_config_script_path_form_missing_file_fails_loud(tmp_path):
@@ -394,16 +458,12 @@ def test_config_script_path_form_missing_file_fails_loud(tmp_path):
         }])
 
 
-class LineBox(Runtime):
+class LineBox(Runtime, LineExecutorMixin):
     name = "sandbox"
     captures = ("nvidia-smi", )
-    runs_lines = True
 
     def __init__(self) -> None:
         self.lines: list[tuple[str, bytes | None, str]] = []
-
-    async def run(self, args: RunArgs) -> RunResult:
-        raise AssertionError("run_line runtimes never get single stages")
 
     async def run_line(self, line: str, stdin: bytes | None,
                        env: dict[str, str], cwd: str) -> RunResult:
@@ -471,17 +531,18 @@ async def test_runtime_argument_places_the_whole_line():
 
 
 @pytest.mark.asyncio
-async def test_vfs_run_line_is_the_workspace_executor():
+async def test_vfs_entry_is_a_pure_routing_marker():
+    # A vfs-resolved line runs on the workspace executor inline; the
+    # registry entry is a marker with no line door to call.
     ws = Workspace({"/ram": RAMResource()}, mode=MountMode.EXEC)
     vfs = ws._registry.vfs_runtime
     assert vfs is not None
-    result = await vfs.run_line("echo through-vfs", None, {}, "/")
-    assert result.stdout == b"through-vfs\n"
-    assert result.exit_code == 0
+    assert not isinstance(vfs, LineExecutorMixin)
+    result = await ws.execute("echo through-vfs")
+    assert await materialize(result.stdout) == b"through-vfs\n"
     await ws.close()
 
 
-@pytest.mark.asyncio
-async def test_run_line_default_is_not_implemented():
-    with pytest.raises(NotImplementedError, match="whole lines"):
-        await MontyRuntime().run_line("echo x", None, {}, "/")
+def test_stage_engines_carry_no_line_door():
+    assert not isinstance(MontyRuntime(), LineExecutorMixin)
+    assert not hasattr(MontyRuntime(), "run_line")

@@ -1,0 +1,233 @@
+---
+title: Sandbox
+description: Run captured lines whole inside a remote sandbox (Docker, Daytona, or e2b) you provision yourself.
+icon: server
+---
+
+The `monty`, `wasi`, and `local` runtimes run `python3` in-process on your
+machine. A **sandbox runtime** does the opposite: it takes a whole command
+line and runs it inside a remote machine, a local Docker container or a
+cloud sandbox. Reach for it when a line needs a real OS, heavy packages, or
+a GPU that the in-process interpreters cannot give it.
+
+Three sandbox runtimes ship today, all with the same surface:
+
+| Runtime | Connects to | Config |
+| --- | --- | --- |
+| `docker` | A container you started (`docker run`) | `container` |
+| `daytona` | A [Daytona](https://www.daytona.io) sandbox you created | `sandbox_id`, `api_key` |
+| `e2b` | An [e2b](https://e2b.dev) sandbox you created | `sandbox_id`, `api_key` |
+
+## Routing: what goes to the sandbox
+
+A sandbox runtime does not claim every line. Each runtime **captures** a set
+of commands; a captured line runs in the sandbox, everything else stays on
+the local vfs. You list the runtimes in order, and `vfs` is the catch-all:
+
+```yaml
+runtimes:
+  - name: daytona
+    captures: ["python3", "pip"] # these run in the sandbox
+  - vfs                          # ls, grep, cat, ... stay local
+```
+
+So `grep`, `cat`, and `ls` run locally as always, while `python3 train.py`
+runs on the cloud box. Mirage never creates, provisions, or deletes
+sandboxes: **you bring your own** (a running container, a live Daytona or
+E2B sandbox), the first captured line connects to it, and every captured
+line execs inside it verbatim.
+
+## The workspace inside the sandbox
+
+For the job to see your mounts as ordinary files, the sandbox must serve
+the workspace itself, and provisioning that is yours, like everything else
+about the sandbox. Run Mirage inside it, with the **same mounts at the
+same prefixes** as the host workspace, each FUSE-mounted at its own
+prefix:
+
+```yaml
+# sandbox.yaml, inside the sandbox
+mounts:
+  /data:
+    resource: s3
+    config:
+      bucket: my-bucket
+      aws_access_key_id: ...
+      aws_secret_access_key: ...
+    fuse: /data
+```
+
+```bash
+mirage workspace create sandbox.yaml # entrypoint, or once by hand
+```
+
+A read then pulls from the backend and a write streams straight back to
+it, with no upload or sync step: inside the sandbox, `/data` backed by S3
+is a real directory. Because you write the sandbox-side config, it can
+differ from the host's where it should: the endpoint that is
+`127.0.0.1:9000` on your laptop is `host.docker.internal:9000` from inside
+a container, credentials can be scoped down, and none of it ever travels
+over the provider's exec API. The flip side is that keeping the prefixes
+in step with the host workspace is your job; a sandbox serving different
+mounts fails loud only when a path misses.
+
+This needs an image with `fuse3` and Mirage plus your backends installed
+(see [The sandbox image](#the-sandbox-image)).
+
+## Paths inside the sandbox
+
+Mirage rewrites nothing: the line, its cwd, and every path in it pass
+through verbatim. With the sandbox serving the same prefixes, `cd /data`
+then `python3 train.py` works, and so does an absolute path like
+`python3 /data/train.py`, because `/data` means the same thing on both
+sides.
+
+## The sandbox image
+
+The sandbox needs `fuse3` plus Mirage with the backends you mount. The repo
+ships a Dockerfile that builds this image from the current checkout, so it
+always matches your code:
+
+```bash
+docker build -f docker/sandbox/Dockerfile --target fuse -t mirage-python-fuse .
+```
+
+By default it installs the `sandbox` extra, every mountable backend plus
+fuse. Narrow it to just the backends you use for a smaller image, or extend
+it as a base:
+
+```bash
+docker build -f docker/sandbox/Dockerfile --target fuse \
+  --build-arg MIRAGE_EXTRAS=s3,postgres -t mirage-fuse-lean .
+```
+
+The one image is the shared base for all three providers: run it directly
+under Docker, use it as a Daytona `image`/`snapshot` source, or as an e2b
+template base.
+
+## Docker
+
+Start the container yourself, provision the workspace inside it, then
+point `DockerRuntime` at it. Live FUSE mounts need `--cap-add SYS_ADMIN
+--device /dev/fuse` (Linux hosts) and the fuse image:
+
+```bash
+docker run -d --cap-add SYS_ADMIN --device /dev/fuse \
+  --name my-sandbox mirage-python-fuse sleep infinity
+docker cp sandbox.yaml my-sandbox:/tmp/sandbox.yaml # or bake it into the image
+docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
+```
+
+```python
+from mirage import MountMode, Workspace
+from mirage.accessor.s3 import S3Config
+from mirage.resource.s3.s3 import S3Resource
+from mirage.runtime.sandbox.docker import DockerRuntime
+
+runtime = DockerRuntime(captures=["python3"],
+                        config={"container": "my-sandbox"})
+ws = Workspace({"/data": S3Resource(S3Config(bucket="my-bucket"))},
+               mode=MountMode.EXEC,
+               runtimes=[runtime, "vfs"])
+await ws.execute("python3 job.py", cwd="/data")
+```
+
+Every sandbox runtime takes a `config`: how to reach the sandbox. Each
+provider's config carries exactly the fields that provider needs, and an
+unknown field fails loud. The docker CLI is the transport (Docker Desktop,
+colima, or a podman alias), so there is no SDK and no daemon socket
+wiring; the container gets real stdin and separated stderr. Sizing, GPUs,
+networks, and binds are all yours: pass them to your own `docker run`.
+
+## Daytona and e2b
+
+Create the sandbox with the provider's own tooling (dashboard, CLI, or
+SDK), boot it from an image or snapshot carrying the fuse image, provision
+the workspace inside it (the provider's exec or a terminal session), and
+hand mirage the id:
+
+```yaml
+runtimes:
+  - name: daytona
+    captures: ["python3", "pip"]
+    config:
+      sandbox_id: ${DAYTONA_SANDBOX_ID}
+      api_key: ${DAYTONA_API_KEY}
+  - vfs
+```
+
+They need the matching extra:
+
+```bash
+pip install mirage-ai[daytona]   # or mirage-ai[e2b]
+```
+
+Sizing, GPUs, snapshots, and lifecycle (idle-stop, auto-delete) are all
+provider concerns you set when you create the sandbox; mirage never
+touches them. Closing the workspace releases the SDK client and leaves the
+sandbox running. A
+[worked Daytona example](https://github.com/strukto-ai/mirage/tree/main/examples/python/runtimes/daytona)
+covers the one-time snapshot bake, sandbox creation, in-sandbox
+provisioning, and a full read/write round trip.
+
+## Selecting in YAML
+
+Sandbox runtimes are ordinary `runtimes` entries: a name, its captures, and
+a `config` block describing the machine (mirroring a mount's `config`
+block), with `vfs` as the in-process catch-all. Only the selected runtime
+consumes its entry, so one file stays portable:
+
+```yaml
+runtimes:
+  - name: docker
+    captures: ["python3"]
+    config:
+      container: my-sandbox # started with your own `docker run`
+  - vfs
+
+mounts:
+  /data:
+    resource: s3
+    config:
+      bucket: ${AWS_S3_BUCKET}
+      region: ${AWS_DEFAULT_REGION}
+      aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+      aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+```
+
+## Resource limits
+
+A captured line is a command like any other: the same `command_limits`
+that guard `cat` or `grep` guard `python3`, including in the sandbox. A run
+that exceeds `timeout_seconds` answers exit 124; `max_bytes` and `max_lines`
+cap its output the same way. There is no sandbox-specific limit surface.
+
+<Warning>
+**In a sandbox a limit bounds the wait, not the run.** Exit 124 means
+mirage stopped waiting; the command keeps going inside the sandbox. Mirage
+holds only a client, and the process lives in the sandbox's own namespace,
+so dropping that client never signals it — a `docker exec` command is still
+burning CPU after its client is killed. Only the provider's own timeout
+reclaims it, and mirage does not set one today:
+
+- **Docker** has no server-side timeout: a runaway runs until you stop it or
+  the container exits.
+- **e2b** applies its SDK default of 60 seconds, which cuts both ways — a
+  runaway stops there, and so does a legitimate build or query that needs
+  longer.
+- **Daytona** defaults to no timeout, so a runaway keeps running, and
+  billing, until you stop it.
+
+Cancelling a line has the same shape: it releases mirage's side and leaves
+the sandbox side running. Treat `command_limits` here as a bound on
+waiting rather than on execution, and set a lifecycle limit (idle-stop,
+auto-delete) on the sandbox itself.
+</Warning>
+
+## Serving as the policy engine
+
+A sandbox runs whole lines; it does not evaluate expressions, so it cannot
+run [policy scripts](/home/policy-engine). To make one eligible, subclass it
+and implement `eval` with your own transport. The
+[docker eval examples](https://github.com/strukto-ai/mirage/tree/main/examples)
+do exactly that by piping a small harness to the container's `python3 -`.

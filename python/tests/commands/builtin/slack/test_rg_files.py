@@ -19,8 +19,8 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.slack.rg import rg
+from mirage.core.slack.config import SlackConfig
 from mirage.io.stream import materialize
-from mirage.resource.slack.config import SlackConfig
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -56,6 +56,7 @@ async def test_rg_messages_only_when_chat_jsonl(accessor, index):
                 )
             ],
             "foo",
+            w=True,
             index=index,
         )
     assert mock_msgs.await_count == 1
@@ -84,6 +85,7 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
                 )
             ],
             "foo",
+            w=True,
             index=index,
         )
     assert mock_msgs.await_count == 0
@@ -114,6 +116,7 @@ async def test_rg_both_when_channel_or_day_root(accessor, index):
                 )
             ],
             "foo",
+            w=True,
             index=index,
         )
     assert mock_msgs.await_count == 1
@@ -142,6 +145,7 @@ async def test_grep_messages_only_when_chat_jsonl(accessor, index):
                 )
             ],
             "foo",
+            w=True,
             index=index,
         )
     assert mock_msgs.await_count == 1
@@ -184,6 +188,7 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
                 )
             ],
             "foo",
+            w=True,
             index=index,
         )
     assert mock_msgs.await_count == 0

@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "sym_hist_setup",
+      "seq": 310026,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo view > /data/ht.txt && ln -s /data/ht.txt /data/hlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_hist_cat",
+      "seq": 310027,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "cat /data/hlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "view\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_hist_shows_typed",
+      "seq": 310028,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "19  echo view > /data/ht.txt && ln -s /data/ht.txt /data/hlink\n20  cat /data/hlink\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_hist_file_has_link_path",
+      "seq": 310029,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -c 'cat /data/hlink' /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_hist_no_target_leak",
+      "seq": 310030,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -c 'cat /data/ht.txt' /.bash_history",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

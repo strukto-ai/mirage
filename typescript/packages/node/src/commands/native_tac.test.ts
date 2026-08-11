@@ -12,13 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { makeEnv, NATIVE_BACKENDS } from './native_fixture.ts'
 
 const ENC = new TextEncoder()
+// tac is GNU coreutils (macOS ships `tail -r`); the fixture captures only
+// native stdout, so a missing tac would silently compare against "".
+const hasTac = spawnSync('/bin/sh', ['-c', 'command -v tac'], { stdio: 'ignore' }).status === 0
 
 describe.each(NATIVE_BACKENDS)('native tac (%s backend)', (kind) => {
-  it('tac stdin matches native', async () => {
+  it.skipIf(!hasTac)('tac stdin matches native', async () => {
     const env = makeEnv(kind)
     try {
       const data = ENC.encode('a\nb\nc\n')
@@ -30,7 +34,7 @@ describe.each(NATIVE_BACKENDS)('native tac (%s backend)', (kind) => {
     }
   })
 
-  it('tac file matches native', async () => {
+  it.skipIf(!hasTac)('tac file matches native', async () => {
     const env = makeEnv(kind)
     try {
       env.createFile('f.txt', ENC.encode('1\n2\n3\n'))

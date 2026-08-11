@@ -18,14 +18,21 @@ import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+
+import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
+import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { secretStr } from '../resource/secrets.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { type JobResult } from '../shell/job_table.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
 import { MountMode } from '../types.ts'
 import { VERSION } from '../version.ts'
+import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
+import { ScriptSource } from '../runtime/policy/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace.ts'
 
@@ -351,6 +358,140 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(err?.message).toContain('must include overrides for')
     expect(err?.message).toContain('/a/')
     expect(err?.message).toContain('/b/')
+    await ws.close()
+  })
+})
+
+describe('cli registry snapshot', () => {
+  const cliEcho = (inv: CLIInvocation) =>
+    [
+      new TextEncoder().encode(`tok=${(inv.config as { token: string }).token}\n`),
+      new IOResult(),
+    ] as [Uint8Array, IOResult]
+
+  function makeCliSpec(): CLISpec {
+    return new CLISpec({
+      name: 'snapcli',
+      configModel: z.object({ token: secretStr(), channel: z.string().default('general') }),
+      subcommands: [new CLISpec({ name: 'run', fn: cliEcho })],
+    })
+  }
+
+  it('captures with schema-declared secrets redacted and restores via override', async () => {
+    const spec = makeCliSpec()
+    registerCliSpec(spec)
+    try {
+      const ws = buildWorkspace()
+      ws.registerCli('snapcli', spec, { token: 'sek', channel: 'eng' })
+      const state = await toStateDict(ws)
+      expect(state.clis).toEqual([
+        {
+          name: 'snapcli',
+          spec: 'snapcli',
+          config: { token: '<REDACTED>', channel: 'eng' },
+        },
+      ])
+
+      await expect(Workspace.fromState(state, { shellParser: parser })).rejects.toThrow(
+        /clis= must include/,
+      )
+
+      const ws2 = await Workspace.fromState(
+        state,
+        { shellParser: parser },
+        {},
+        { snapcli: { token: 'sek2', channel: 'eng' } },
+      )
+      const r = await ws2.execute('snapcli run')
+      expect(r.exitCode).toBe(0)
+      expect(r.stdoutText).toBe('tok=sek2\n')
+      await ws.close()
+      await ws2.close()
+    } finally {
+      unregisterCliSpec('snapcli')
+    }
+  })
+
+  it('copy shares live cli secrets and the live spec', async () => {
+    // The spec is deliberately NOT in the global registry: copy() must
+    // carry the live CLISpec like a live resource, not resolve by name.
+    const spec = makeCliSpec()
+    const ws = buildWorkspace()
+    ws.registerCli('snapcli', spec, { token: 'sek' })
+    const clone = await ws.copy()
+    const r = await clone.execute('snapcli run')
+    expect(r.exitCode).toBe(0)
+    expect(r.stdoutText).toBe('tok=sek\n')
+    await ws.close()
+    await clone.close()
+  })
+
+  it('persists a script install so load can rebuild the spec', async () => {
+    // A script install resolves under no registry name, so the embedded
+    // program rides in the state and load rebuilds the spec from it.
+    const ws = buildWorkspace()
+    ws.registerCli(
+      'pager',
+      new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") }),
+      { width: 80 },
+    )
+    const state = await toStateDict(ws)
+    const entry = state.clis?.[0]
+    expect(entry?.spec).toBe('pager')
+    expect(entry?.script?.source).toBe("print('hi')")
+    expect(entry?.script?.language).toBe('python')
+    expect(entry?.script?.module).toBe(false)
+    // No configModel means nothing declares a secret, so the mapping is
+    // captured verbatim rather than guessed at.
+    expect(entry?.config).toEqual({ width: 80 })
+
+    const restored = await Workspace.fromState(state, { shellParser: parser })
+    const install = restored.clis().get('pager')
+    expect(install?.spec.script?.source).toBe("print('hi')")
+    expect(install?.spec.runtime).toBeNull()
+    await ws.close()
+    await restored.close()
+  })
+
+  it('carries the runtime pin and the module bit through a snapshot', async () => {
+    const ws = buildWorkspace()
+    ws.registerCli(
+      'pager',
+      new CLISpec({
+        name: 'pager',
+        script: new ScriptSource('export const x = 1', 'js', true),
+        runtime: 'quickjs',
+      }),
+      null,
+    )
+    const state = await toStateDict(ws)
+    expect(state.clis?.[0]?.runtime).toBe('quickjs')
+    expect(state.clis?.[0]?.script?.module).toBe(true)
+    const restored = await Workspace.fromState(state, { shellParser: parser })
+    const install = restored.clis().get('pager')
+    expect(install?.spec.runtime).toBe('quickjs')
+    expect(install?.spec.script?.module).toBe(true)
+    expect(install?.spec.script?.language).toBe('js')
+    await ws.close()
+    await restored.close()
+  })
+
+  it('the tar manifest carries installed clis', async () => {
+    // The manifest is an explicit key allowlist, and omitting clis
+    // dropped every install from a tar snapshot.
+    const ws = buildWorkspace()
+    ws.registerCli(
+      'pager',
+      new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") }),
+      null,
+    )
+    const [manifest] = splitManifestAndBlobs(
+      (await toStateDict(ws)) as unknown as Record<string, unknown>,
+    )
+    const clis = manifest.clis as { name: string; script?: { source: string } }[]
+    expect(clis).toHaveLength(1)
+    expect(clis[0]?.name).toBe('pager')
+    expect(clis[0]?.script?.source).toBe("print('hi')")
     await ws.close()
   })
 })

@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
@@ -34,8 +37,9 @@ async function pathExists(stat: (p: PathSpec) => Promise<unknown>, p: PathSpec):
   try {
     await stat(p)
     return true
-  } catch {
-    return false
+  } catch (err) {
+    if (isMissingPath(err)) return false
+    throw err
   }
 }
 
@@ -45,7 +49,8 @@ export async function realpathGeneric(
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<unknown>,
 ): Promise<CommandFnResult> {
-  const requireExists = opts.flags.e === true
+  const fl = new FlagView(opts.flags, specOf('realpath'))
+  const requireExists = fl.asBool('e')
   const lines: string[] = []
   if (paths.length > 0) {
     for (const p of paths) {

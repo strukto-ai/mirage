@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
@@ -231,5 +231,23 @@ describe('handleSubshell', () => {
     const [stdout, io] = await handleSubshell(execute, [node('a'), node('b')], s)
     expect(io.exitCode).toBe(2)
     expect(decode(await materialize(stdout))).toBe('s1s2')
+  })
+
+  it('seeds lastExitCode between body commands for $?', async () => {
+    const s = new Session({ sessionId: 'test' })
+    s.lastExitCode = 0
+    const seen: number[] = []
+    const execute: ExecuteNodeFn = (nd, session) => {
+      seen.push(session.lastExitCode)
+      const code = nd.text === 'a' ? 7 : 0
+      return Promise.resolve([
+        null,
+        new IOResult({ exitCode: code }),
+        new ExecutionNode({ command: nd.text, exitCode: code }),
+      ])
+    }
+    await handleSubshell(execute, [node('a'), node('b')], s)
+    expect(seen).toEqual([0, 7])
+    expect(s.lastExitCode).toBe(0)
   })
 })

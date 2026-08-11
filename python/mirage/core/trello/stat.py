@@ -78,13 +78,15 @@ async def stat(
 
     if len(parts) == 3 and parts[0] == "workspaces":
         if parts[2] == "workspace.json":
-            ws_key = "/" + "/".join(parts[:2])
-            result = await index.get(ws_key)
-            ws_id = result.entry.id if result.entry else None
+            result = await _lookup_with_fallback(accessor, idx_key, prefix,
+                                                 index)
+            if result.entry is None:
+                raise enoent(virtual)
             return FileStat(
                 name="workspace.json",
                 type=FileType.JSON,
-                extra={"workspace_id": ws_id},
+                size=result.entry.size,
+                extra={"workspace_id": result.entry.id},
             )
         if parts[2] == "boards":
             return FileStat(name="boards", type=FileType.DIRECTORY)
@@ -102,13 +104,16 @@ async def stat(
 
     if (len(parts) == 5 and parts[0] == "workspaces" and parts[2] == "boards"):
         if parts[4] == "board.json":
-            board_key = "/" + "/".join(parts[:4])
-            result = await index.get(board_key)
-            board_id = result.entry.id if result.entry else None
+            result = await _lookup_with_fallback(accessor, idx_key, prefix,
+                                                 index)
+            if result.entry is None:
+                raise enoent(virtual)
             return FileStat(
                 name="board.json",
                 type=FileType.JSON,
-                extra={"board_id": board_id},
+                size=result.entry.size,
+                modified=result.entry.remote_time or None,
+                extra={"board_id": result.entry.id},
             )
         if parts[4] in {"members", "labels", "lists"}:
             return FileStat(name=parts[4], type=FileType.DIRECTORY)
@@ -121,6 +126,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            size=result.entry.size,
             modified=result.entry.remote_time or None,
             extra={"member_id": result.entry.id},
         )
@@ -133,6 +139,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            size=result.entry.size,
             modified=result.entry.remote_time or None,
             extra={"label_id": result.entry.id},
         )
@@ -152,13 +159,15 @@ async def stat(
     if (len(parts) == 7 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "lists"):
         if parts[6] == "list.json":
-            list_key = "/" + "/".join(parts[:6])
-            result = await index.get(list_key)
-            list_id = result.entry.id if result.entry else None
+            result = await _lookup_with_fallback(accessor, idx_key, prefix,
+                                                 index)
+            if result.entry is None:
+                raise enoent(virtual)
             return FileStat(
                 name="list.json",
                 type=FileType.JSON,
-                extra={"list_id": list_id},
+                size=result.entry.size,
+                extra={"list_id": result.entry.id},
             )
         if parts[6] == "cards":
             return FileStat(name="cards", type=FileType.DIRECTORY)
@@ -178,22 +187,27 @@ async def stat(
     if (len(parts) == 9 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "lists" and parts[6] == "cards"):
         if parts[8] == "card.json":
-            card_key = "/" + "/".join(parts[:8])
-            result = await index.get(card_key)
-            card_id = result.entry.id if result.entry else None
+            result = await _lookup_with_fallback(accessor, idx_key, prefix,
+                                                 index)
+            if result.entry is None:
+                raise enoent(virtual)
             return FileStat(
                 name="card.json",
                 type=FileType.JSON,
-                extra={"card_id": card_id},
+                size=result.entry.size,
+                modified=result.entry.remote_time or None,
+                extra={"card_id": result.entry.id},
             )
         if parts[8] == "comments.jsonl":
-            card_key = "/" + "/".join(parts[:8])
-            result = await index.get(card_key)
-            card_id = result.entry.id if result.entry else None
+            result = await _lookup_with_fallback(accessor, idx_key, prefix,
+                                                 index)
+            if result.entry is None:
+                raise enoent(virtual)
             return FileStat(
                 name="comments.jsonl",
                 type=FileType.TEXT,
-                extra={"card_id": card_id},
+                modified=result.entry.remote_time or None,
+                extra={"card_id": result.entry.id},
             )
 
     raise enoent(virtual)

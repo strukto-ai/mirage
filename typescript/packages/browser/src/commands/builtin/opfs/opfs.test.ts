@@ -141,3 +141,32 @@ describe('OPFS commands — writers', () => {
     expect(after).toBe('hello from opfs\nappended\n')
   })
 })
+
+// OPFS registers no setattr op, so chmod/touch state lives only in the
+// namespace overlay. stat renders backend stat rows, so without the overlay
+// merge it reports the OPFS write wall-clock and the default mode while ls -l
+// reports the touched/chmod'd values for the same file.
+describe('OPFS commands — namespace attr overlay', () => {
+  it('stat -c reports the touched mtime, not the backend write time', async () => {
+    expect((await run('touch -t 202401010000 /data/hello.txt')).exitCode).toBe(0)
+    const r = await run('stat -c "%y|%Y" /data/hello.txt')
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toBe('2024-01-01T00:00:00Z|1704067200\n')
+  })
+
+  it('stat -c reports the chmod mode', async () => {
+    expect((await run('chmod 640 /data/hello.txt')).exitCode).toBe(0)
+    const r = await run('stat -c "%a|%A" /data/hello.txt')
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toBe('640|-rw-r-----\n')
+  })
+
+  it('stat -c and ls -l agree after chmod and touch', async () => {
+    await run('chmod 640 /data/hello.txt')
+    await run('touch -t 202401010000 /data/hello.txt')
+    const statOut = await run('stat -c "%A" /data/hello.txt')
+    const lsOut = await run('ls -l /data/hello.txt')
+    expect(lsOut.stdout.split(' ')[0]).toBe(statOut.stdout.trim())
+    expect(lsOut.stdout).toContain('Jan  1 00:00')
+  })
+})

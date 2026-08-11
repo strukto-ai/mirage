@@ -9,7 +9,7 @@ MIRAGE ships `SlackResource` in **two runtimes**:
 - `@struktoai/mirage-node`, talks to `https://slack.com/api/*` directly using a bot token (and optionally a user token for `search.messages`).
 - `@struktoai/mirage-browser`, stays secret-free: a small proxy server on your backend holds the token and forwards `/api/slack/*` to `https://slack.com/api/*`. The browser only ever sees the proxy URL.
 
-Both runtimes expose the same filesystem shape (`/slack/channels/`, `/slack/dms/`, `/slack/users/`) and the same shell commands (`slack-post-message`, `slack-search`, etc.).
+Both runtimes expose the same filesystem shape (`/slack/channels/`, `/slack/dms/`, `/slack/users/`) and the same shell commands, and both pair with the [slack CLI](/typescript/cli/slack) for acting on the workspace.
 
 ## Get a bot token
 
@@ -26,7 +26,7 @@ Both runtimes expose the same filesystem shape (`/slack/channels/`, `/slack/dms/
 ```bash
 # .env.development
 SLACK_BOT_TOKEN=xoxb-...
-SLACK_USER_TOKEN=xoxp-...   # optional, only needed for slack-search
+SLACK_USER_TOKEN=xoxp-...   # optional, only needed for slack search
 ```
 
 ## Node (server-side)
@@ -155,71 +155,14 @@ Every standard MIRAGE shell command works on the mounted Slack tree:
 | `pwd` / `cd`    | Navigate the virtual tree                  |
 | `echo` (glob)   | Glob expansion via `resolve_glob`          |
 
-Resource-specific commands:
-
-### `slack-post-message`
-
-```bash
-slack-post-message --channel_id C04KEPWF6V7 --text "Hello from MIRAGE"
-```
-
-| Option         | Required | Description           |
-| -------------- | -------- | --------------------- |
-| `--channel_id` | yes      | Slack channel ID      |
-| `--text`       | yes      | Message text to send  |
-
-### `slack-reply-to-thread`
-
-```bash
-slack-reply-to-thread --channel_id C04KEPWF6V7 --ts 1712345678.123456 --text "Reply"
-```
-
-| Option         | Required | Description             |
-| -------------- | -------- | ----------------------- |
-| `--channel_id` | yes      | Slack channel ID        |
-| `--ts`         | yes      | Thread parent timestamp |
-| `--text`       | yes      | Reply text              |
-
-### `slack-add-reaction`
-
-```bash
-slack-add-reaction --channel_id C04KEPWF6V7 --ts 1712345678.123456 --reaction thumbsup
-```
-
-| Option         | Required | Description                   |
-| -------------- | -------- | ----------------------------- |
-| `--channel_id` | yes      | Slack channel ID              |
-| `--ts`         | yes      | Message timestamp to react to |
-| `--reaction`   | yes      | Emoji name (without colons)   |
-
-### `slack-search`
-
-```bash
-slack-search --query "incident report"
-```
-
-Requires `searchToken` (a Slack **user token**, `xoxp-…`, with `search:read`). Bot tokens cannot call `search.messages`.
-
-### `slack-get-users`
-
-```bash
-slack-get-users --query "alice"
-```
-
-Returns matching users as a JSON array.
-
-### `slack-get-user-profile`
-
-```bash
-slack-get-user-profile --user_id U04K21SEVR9
-```
-
-Returns the user profile JSON. The user ID is embedded in `/slack/users/<name>__<id>.json`.
+Acting on Slack (sending, reacting, pins, member info, search) goes
+through the [slack CLI](/typescript/cli/slack) when installed; the
+mounted tree stays read-oriented.
 
 ## Troubleshooting
 
 <AccordionGroup>
-  <Accordion title="`not_allowed_token_type` on slack-search / rg /slack/">
+  <Accordion title="`not_allowed_token_type` on slack search / rg /slack/">
     `search.messages` requires a **user token** (`xoxp-…`) with `search:read` scope. Set `searchToken` on the `SlackConfig`:
 
     ```ts
@@ -229,7 +172,7 @@ Returns the user profile JSON. The user ID is embedded in `/slack/users/<name>__
     })
     ```
 
-    Without it, workspace-scope `rg` and `slack-search` fail; channel-scope `rg` (e.g. `rg foo /slack/channels/general__C…/`) still works since it streams the JSONL files directly.
+    Without it, workspace-scope `rg` and `slack search` fail; channel-scope `rg` (e.g. `rg foo /slack/channels/general__C…/`) still works since it streams the JSONL files directly.
   </Accordion>
   <Accordion title="CORS error in browser">
     The browser cannot call `https://slack.com/api/*` directly, Slack does not set permissive CORS headers. You must run the proxy server shown above (or your own equivalent) and point `proxyUrl` at it.

@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.commands.config import (RegisteredCommand, command, cross_command,
                                     version_request)
-from mirage.commands.spec import CommandSpec, Operand, OperandKind, Option
+from mirage.commands.spec import CommandSpec, Operand, Option
 from mirage.version import __version__
 
 _HANDLER_CALLS: list[str] = []
@@ -45,7 +45,7 @@ class TestRegisteredCommand:
     def test_basic_fields(self):
         rc = RegisteredCommand(
             name="cat",
-            spec=CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+            spec=CommandSpec(rest=Operand(type="path")),
             resource="ram",
             filetype=None,
             fn=lambda: None,
@@ -69,7 +69,7 @@ class TestRegisteredCommand:
 class TestCommandDecorator:
 
     def test_decorator_attaches_registered_commands(self):
-        spec = CommandSpec(rest=Operand(kind=OperandKind.PATH))
+        spec = CommandSpec(rest=Operand(type="path"))
 
         @command("mytest", resource="ram", spec=spec)
         async def my_fn(backend, paths, *texts, **kw):
@@ -97,7 +97,7 @@ class TestCommandDecorator:
     def test_write_defaults_false(self):
         rc = RegisteredCommand(
             name="cat",
-            spec=CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+            spec=CommandSpec(rest=Operand(type="path")),
             resource="ram",
             filetype=None,
             fn=lambda: None,
@@ -175,6 +175,17 @@ class TestVersionSupport:
         assert _HANDLER_CALLS == []
         assert asyncio.run(
             _collect(stdout)) == f"tsort (Mirage) {__version__}\n".encode()
+        assert result.exit_code == 0
+
+    def test_help_keeps_the_spec_epilog(self):
+        registered = command(
+            "foo",
+            resource="disk",
+            spec=CommandSpec(epilog="Services:\n  drive"))(_noop_handler)
+        rc = registered._registered_commands[0]
+        assert rc.spec.epilog == "Services:\n  drive"
+        stdout, result = asyncio.run(rc.fn(None, [], help=True))
+        assert b"Services:\n  drive\n" in asyncio.run(_collect(stdout))
         assert result.exit_code == 0
 
 

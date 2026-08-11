@@ -5,7 +5,8 @@ from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.commands.builtin.sharepoint import COMMANDS as SHAREPOINT_COMMANDS
 from mirage.core.sharepoint.copy import copy
 from mirage.core.sharepoint.create import create
-from mirage.core.sharepoint.du import du, du_all
+from mirage.core.sharepoint.du import entries as du_entries
+from mirage.core.sharepoint.du import size as du_size
 from mirage.core.sharepoint.exists import exists
 from mirage.core.sharepoint.find import find
 from mirage.core.sharepoint.mkdir import mkdir
@@ -41,8 +42,8 @@ _SHAREPOINT_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,
@@ -55,7 +56,15 @@ class SharePointResource(BaseResource):
     accessor: SharePointAccessor
     name: str = ResourceName.SHAREPOINT
     caches_reads: bool = True
+    # Graph drive items carry an exact content-length size and the site
+    # and drive levels are plain directories; unlike onedrive there is
+    # no aggregate-size root item.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _SHAREPOINT_OPS
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
 
@@ -65,8 +74,8 @@ class SharePointResource(BaseResource):
         self.accessor = SharePointAccessor(self.config)
         for fn in SHAREPOINT_COMMANDS:
             self.register(fn)
-        for fn in SHAREPOINT_OPS:
-            self.register_op(fn)
+        for op in SHAREPOINT_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

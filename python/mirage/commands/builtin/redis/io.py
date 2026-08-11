@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.redis.append import append_bytes as _append
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.create import create as _create
-from mirage.core.redis.du import du as _du
-from mirage.core.redis.du import du_all as _du_all
+from mirage.core.redis.du import entries as _du_entries
+from mirage.core.redis.du import size as _du_size
 from mirage.core.redis.exists import exists as _exists
 from mirage.core.redis.find import find as _find
 from mirage.core.redis.mkdir import mkdir as _mkdir
@@ -52,8 +52,7 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du=DuOps(size=_du_size, entries=_du_entries),
     append=_append,
     set_attrs=_set_attrs,
     truncate=_truncate,

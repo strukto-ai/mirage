@@ -230,11 +230,14 @@ async def test_cp_recursive_uses_server_side_folder_copy():
                       "file": {}
                   }]
               })
+        # Statted twice: once for the directory-destination probe, once
+        # for the GNU overwrite type guard on the mapped target.
         m.get(_BASE + "/root:/dst",
               status=404,
               payload={"error": {
                   "code": "itemNotFound"
-              }})
+              }},
+              repeat=True)
         m.get(_BASE + "/root:/src",
               payload={
                   "id": "0",

@@ -20,25 +20,7 @@ import { getFolderInfo, type BoxItem } from './api.ts'
 import { readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../utils/errors.ts'
-
-function guessType(name: string): FileType {
-  const lower = name.toLowerCase()
-  if (lower.endsWith('.json')) return FileType.JSON
-  if (lower.endsWith('.csv')) return FileType.CSV
-  if (lower.endsWith('.png')) return FileType.IMAGE_PNG
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return FileType.IMAGE_JPEG
-  if (lower.endsWith('.gif')) return FileType.IMAGE_GIF
-  if (lower.endsWith('.zip')) return FileType.ZIP
-  if (lower.endsWith('.gz') || lower.endsWith('.gzip')) return FileType.GZIP
-  if (lower.endsWith('.pdf')) return FileType.PDF
-  if (lower.endsWith('.parquet')) return FileType.PARQUET
-  if (lower.endsWith('.orc')) return FileType.ORC
-  if (lower.endsWith('.feather')) return FileType.FEATHER
-  if (lower.endsWith('.h5') || lower.endsWith('.hdf5')) return FileType.HDF5
-  if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.log'))
-    return FileType.TEXT
-  return FileType.BINARY
-}
+import { guessType } from '../../utils/filetype.ts'
 
 function statFromItem(item: BoxItem): FileStat {
   const vfsName = item.name
@@ -51,7 +33,7 @@ function statFromItem(item: BoxItem): FileStat {
       extra: { box_id: item.id },
     })
   }
-  const size = typeof item.size === 'number' && item.size > 0 ? item.size : null
+  const size = typeof item.size === 'number' ? item.size : null
   return new FileStat({
     name: vfsName,
     size,
@@ -87,7 +69,9 @@ export async function stat(
     // The write-family builders and provision estimation call stat without a
     // threaded index; resolve the id directly rather than ENOENT.
     const item = await resolveItem(accessor, pathParts(path))
-    if (item === null) throw enoent(path.virtual)
+    // Weblinks are hidden from listings; a direct lookup must not
+    // resurface a sizeless, unreadable entry.
+    if (item === null || item.type === 'web_link') throw enoent(path.virtual)
     return statFromItem(item)
   }
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
@@ -113,7 +97,7 @@ export async function stat(
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
       const item = await resolveItem(accessor, pathParts(path))
-      if (item === null) throw enoent(path.virtual)
+      if (item === null || item.type === 'web_link') throw enoent(path.virtual)
       return statFromItem(item)
     }
   }

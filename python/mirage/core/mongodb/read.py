@@ -12,15 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from bson.json_util import RELAXED_JSON_OPTIONS, dumps
-
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb._client import database_exists, entity_exists
 from mirage.core.mongodb._schema_json import (build_collection_schema_json,
                                               build_database_json)
 from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.stream import read_stream
+from mirage.core.mongodb.stream import read_stream, render_doc
 from mirage.core.mongodb.types import ScopeLevel
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -48,13 +46,11 @@ async def read(
             raise enoent(path)
         payload = await build_collection_schema_json(accessor, scope.database,
                                                      scope.name)
-        return (dumps(payload, json_options=RELAXED_JSON_OPTIONS) +
-                "\n").encode()
+        return (render_doc(payload) + "\n").encode()
     if scope.level == ScopeLevel.DATABASE_JSON:
         if not await database_exists(accessor.client, accessor.config,
                                      scope.database, accessor):
             raise enoent(path)
         payload = await build_database_json(accessor, scope.database)
-        return (dumps(payload, json_options=RELAXED_JSON_OPTIONS) +
-                "\n").encode()
+        return (render_doc(payload) + "\n").encode()
     raise enoent(path)

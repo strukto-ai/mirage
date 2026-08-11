@@ -20,9 +20,12 @@ import {
   compilePattern,
   extractRequiredLiteral,
   grepFilesOnly,
+  hasSearchShapingFlags,
+  isLiteralPattern,
   isRegexPattern,
   mergePatternList,
   NEVER_MATCH,
+  searchPushdownOk,
   searchQuery,
 } from './grep_helper.ts'
 
@@ -195,7 +198,68 @@ describe('grepFilesOnly', () => {
       onlyMatching: false,
       maxCount: null,
       wholeWord: false,
+      basic: true,
     })
     expect(hits).toEqual(['/data/notes.txt'])
+  })
+})
+
+describe('isLiteralPattern', () => {
+  it.each([
+    ['abc', false, true],
+    ['a-b_c.d', false, false],
+    ['plain text', false, true],
+    ['a.b', false, false],
+    ['a*b', false, false],
+    ['^start', false, false],
+    ['a.b', true, true],
+    ['a\nb', false, false],
+    ['a\nb', true, true],
+  ])('isLiteralPattern(%j, %j) === %j', (pattern, fixed, expected) => {
+    expect(isLiteralPattern(pattern, fixed)).toBe(expected)
+  })
+})
+
+describe('hasSearchShapingFlags', () => {
+  it.each([
+    [{}, false],
+    [{ i: true }, false],
+    [{ F: true }, false],
+    [{ r: true }, false],
+    [{ v: true }, true],
+    [{ n: true }, true],
+    [{ c: true }, true],
+    [{ args_l: true }, true],
+    [{ l: true }, true],
+    [{ w: true }, true],
+    [{ o: true }, true],
+    [{ q: true }, true],
+    [{ H: true }, true],
+    [{ h: true }, true],
+    [{ m: '3' }, true],
+    [{ A: '2' }, true],
+    [{ B: '2' }, true],
+    [{ C: '2' }, true],
+  ])('hasSearchShapingFlags(%j) === %j', (flags, expected) => {
+    expect(
+      hasSearchShapingFlags(flags as Record<string, string | boolean | number | string[]>),
+    ).toBe(expected)
+  })
+})
+
+describe('searchPushdownOk', () => {
+  it('allows a plain literal, with or without -i', () => {
+    expect(searchPushdownOk({}, 'ada')).toBe(true)
+    expect(searchPushdownOk({ i: true }, 'ada')).toBe(true)
+  })
+
+  it('rejects any shaping flag', () => {
+    expect(searchPushdownOk({ v: true }, 'ada')).toBe(false)
+    expect(searchPushdownOk({ c: true }, 'ada')).toBe(false)
+  })
+
+  it('rejects a regex pattern but allows it under -F', () => {
+    expect(searchPushdownOk({}, 'a.b')).toBe(false)
+    expect(searchPushdownOk({ F: true }, 'a.b')).toBe(true)
   })
 })

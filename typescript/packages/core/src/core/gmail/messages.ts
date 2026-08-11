@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { decodeBase64 } from '../../utils/base64.ts'
 import { type TokenManager, gmailBase, googleGet } from '../google/_client.ts'
 
 export interface GmailHeader {
@@ -117,12 +118,7 @@ export async function getMessageRaw(
 
 function base64UrlDecodeToBytes(input: string): Uint8Array {
   const padded = input + '=='.slice((input.length + 2) % 4)
-  const standard = padded.replace(/-/g, '+').replace(/_/g, '/')
-  const binary =
-    typeof atob === 'function' ? atob(standard) : Buffer.from(standard, 'base64').toString('binary')
-  const out = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
-  return out
+  return decodeBase64(padded.replace(/-/g, '+').replace(/_/g, '/'))
 }
 
 const TEXT_DECODER = new TextDecoder('utf-8', { fatal: false })
@@ -242,6 +238,10 @@ export async function getMessageProcessed(
   messageId: string,
 ): Promise<GmailMessageProcessed> {
   const raw = await getMessageRaw(tokenManager, messageId)
+  return processMessage(raw)
+}
+
+function processMessage(raw: GmailMessageRaw): GmailMessageProcessed {
   const headers = raw.payload?.headers ?? []
   const bodyText = decodeBody(raw.payload)
   return {
@@ -257,4 +257,10 @@ export async function getMessageProcessed(
     labels: raw.labelIds ?? [],
     attachments: extractProcessedAttachments(raw.payload),
   }
+}
+
+// The single renderer behind both read and the readdir-time size, so
+// stat().size == len(read()) by construction.
+export function messageJsonBytes(raw: GmailMessageRaw): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(processMessage(raw)))
 }

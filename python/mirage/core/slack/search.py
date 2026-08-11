@@ -15,7 +15,7 @@
 import json
 
 from mirage.core.slack._client import slack_get, slack_search_available
-from mirage.resource.slack.config import SlackConfig
+from mirage.core.slack.config import SlackConfig
 
 
 def search_available(config: SlackConfig) -> bool:

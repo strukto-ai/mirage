@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox._client import DropboxApiError, DropboxTokenManager
-from mirage.core.dropbox.readdir import is_dir_name, readdir
+from mirage.core.dropbox.readdir import readdir
 from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -132,8 +132,3 @@ async def test_readdir_maps_409_to_enoent(index):
                 PathSpec(resource_path="missing",
                          virtual="/missing",
                          directory="/missing"), index)
-
-
-def test_is_dir_name_hint():
-    assert is_dir_name("docs/") is True
-    assert is_dir_name("notes.txt") is None

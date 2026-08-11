@@ -14,18 +14,23 @@
 
 import importlib
 import tempfile
-from typing import Any
+from typing import Any, cast, get_args
 
+from pydantic import BaseModel
+
+from mirage.commands.cli.types import CLISpec
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.registry import REGISTRY, resolve_class
-from mirage.resource.secrets import has_redacted_secret
+from mirage.resource.secrets import (has_redacted_secret, redacted_config_dump,
+                                     revealed_config_dump)
+from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (KILLED_OUTCOME, Channel, ConsoleChunk,
                                   JobConsole, RAMConsoleStore, exit_outcome)
 from mirage.shell.job_table import Job, JobStatus
-from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
-                          MountMode, ResourceName, ResourceStateKey,
-                          SessionKey, StateKey)
+from mirage.types import (CacheKey, CLIKey, ConsistencyPolicy, JobKey,
+                          JsonValue, MountKey, MountMode, ResourceName,
+                          ResourceStateKey, ScriptKey, SessionKey, StateKey)
 from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
 from mirage.workspace.session.session import Session
@@ -33,6 +38,96 @@ from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
 from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
+
+# A per-name override for restoring installed CLIs: a plain mapping is a
+# fresh config (the spec resolves from the snapshot's registry key); a
+# (spec, config) tuple carries a live spec too, which is how copy()
+# shares directly installed programs.
+CLIOverrides = dict[str, dict[str, Any]
+                    | tuple[str | CLISpec, dict[str, Any] | None]]
+
+
+def cli_config_dump(config: BaseModel | dict[str, JsonValue] | None,
+                    reveal: bool = False) -> dict[str, Any] | None:
+    """Serialize an installation's config for a snapshot.
+
+    A model-backed config redacts (or reveals, for a same-process copy)
+    its schema-declared secrets. A script install's config is an opaque
+    mapping instead: with no ``config_model`` nothing declares which
+    keys are secret, so it is captured verbatim rather than guessed at,
+    and a script CLI that needs a credential should read it from the
+    environment.
+
+    Args:
+        config (BaseModel | dict[str, JsonValue] | None): the validated
+            install config.
+        reveal (bool): reveal secrets instead of redacting them, which
+            only a same-process copy does.
+    """
+    if config is None:
+        return None
+    if isinstance(config, BaseModel):
+        return (revealed_config_dump(config)
+                if reveal else redacted_config_dump(config))
+    return dict(config)
+
+
+def cli_snapshot(name: str, install) -> dict[str, Any]:
+    """One installed CLI as snapshot state.
+
+    A registry-resolvable program is persisted by name, because the
+    spec is code that the loading process imports. A script install has
+    no name to resolve (the spec is synthesized from a yaml ``script:``
+    at load), so its embedded program rides along and ``load`` rebuilds
+    the spec from it; without this the head word would resolve against
+    the registry and fail.
+
+    Args:
+        name (str): installed head word.
+        install: the CLIInstall being captured.
+    """
+    entry: dict[str, Any] = {
+        CLIKey.NAME: name,
+        CLIKey.SPEC: install.spec.name,
+        CLIKey.CONFIG: cli_config_dump(install.config),
+    }
+    script = install.spec.script
+    if script is not None:
+        entry[CLIKey.SCRIPT] = {
+            ScriptKey.SOURCE: script.source,
+            ScriptKey.LANGUAGE: script.language,
+            ScriptKey.MODULE: script.module,
+        }
+        entry[CLIKey.RUNTIME] = install.spec.runtime
+    return entry
+
+
+def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLISpec:
+    """The spec a snapshot entry restores: a registry key or a program.
+
+    Args:
+        entry (dict[str, Any]): one captured ``clis`` entry.
+
+    Raises:
+        ValueError: the captured script names a language no runtime can
+            speak. The value comes from a file, so it is checked here
+            rather than carried to the selector, which would report the
+            world's runtimes for a language that never existed.
+    """
+    script = entry.get(CLIKey.SCRIPT)
+    if not isinstance(script, dict):
+        return str(entry[CLIKey.SPEC])
+    name = str(entry[CLIKey.SPEC])
+    language = script.get(ScriptKey.LANGUAGE)
+    if language not in get_args(Language):
+        raise ValueError(f"snapshot cli {name!r}: unknown script language "
+                         f"{language!r}")
+    return CLISpec(name=name,
+                   script=ScriptSource(str(script[ScriptKey.SOURCE]),
+                                       language=cast(Language, language),
+                                       module=bool(script.get(
+                                           ScriptKey.MODULE))),
+                   runtime=entry.get(CLIKey.RUNTIME))
 
 
 async def to_state_dict(ws) -> dict[str, Any]:
@@ -66,6 +161,11 @@ async def to_state_dict(ws) -> dict[str, Any]:
         if e.get("type") in (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE)
     ]
 
+    clis_state = [
+        cli_snapshot(name, install)
+        for name, install in ws._registry.clis.items().items()
+    ]
+
     finished_jobs = [
         await _job_to_dict(j) for j in ws.job_table.list_jobs()
         if j.status != JobStatus.RUNNING
@@ -88,6 +188,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
             CacheKey.ENTRIES: cache_entries,
         },
         StateKey.HISTORY: history_events,
+        StateKey.CLIS: clis_state,
         StateKey.JOBS: finished_jobs,
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
@@ -99,15 +200,17 @@ async def to_state_dict(ws) -> dict[str, Any]:
 
 
 def build_mount_args(state: dict[str, Any],
-                     resources: dict[str, Any] | None = None) -> MountArgs:
+                     resources: dict[str, Any] | None = None,
+                     clis: CLIOverrides | None = None) -> MountArgs:
     """Translate a state dict into Workspace constructor inputs.
 
     Validates that every mount with redacted secrets has a resource
-    override.
+    override, and every CLI installed with a redacted config has a
+    fresh config override.
     Does NOT construct a Workspace — that's the caller's job.
 
     Raises:
-        ValueError: if any redacted mount lacks an override, or
+        ValueError: if any redacted mount or CLI lacks an override, or
             if the snapshot is from an unsupported format version.
     """
     saved_version = state.get(StateKey.VERSION)
@@ -129,6 +232,19 @@ def build_mount_args(state: dict[str, Any],
             f"{missing}. These mounts were saved with redacted creds "
             "or transient connection state and need fresh resources.")
 
+    cli_overrides = clis or {}
+    cli_entries = state.get(StateKey.CLIS) or []
+    missing_clis = [
+        e[CLIKey.NAME] for e in cli_entries
+        if has_redacted_secret(e[CLIKey.CONFIG])
+        and e[CLIKey.NAME] not in cli_overrides
+    ]
+    if missing_clis:
+        raise ValueError(
+            "Workspace.load: clis= must include fresh configs for: "
+            f"{missing_clis}. These CLIs were saved with redacted "
+            "config secrets.")
+
     mount_args: dict[str, tuple[Any, ...]] = {}
     for m in state[StateKey.MOUNTS]:
         prefix = norm_mount_prefix(m[MountKey.PREFIX])
@@ -136,11 +252,26 @@ def build_mount_args(state: dict[str, Any],
                 if prefix in overrides else _construct_resource(m))
         mount_args[m[MountKey.PREFIX]] = (prov, MountMode(m[MountKey.MODE]))
 
+    cli_args: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] = {}
+    for e in cli_entries:
+        override = cli_overrides.get(e[CLIKey.NAME])
+        if isinstance(override, tuple):
+            # copy() shares the live spec alongside the revealed config,
+            # so a directly installed (never registry-named) spec
+            # survives the round trip like a shared live resource.
+            cli_args[e[CLIKey.NAME]] = override
+        elif override is not None:
+            cli_args[e[CLIKey.NAME]] = (cli_spec_from_entry(e), override)
+        else:
+            cli_args[e[CLIKey.NAME]] = (cli_spec_from_entry(e),
+                                        e[CLIKey.CONFIG])
+
     return MountArgs(
         mount_args=mount_args,
         consistency=ConsistencyPolicy.LAZY,
         default_session_id=state[StateKey.DEFAULT_SESSION_ID],
         default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID),
+        clis=cli_args or None,
     )
 
 
@@ -355,6 +486,47 @@ def requires_resource_override(mount_state: dict[str, Any]) -> bool:
     config = resource_state.get(ResourceStateKey.CONFIG)
     config_cls = _config_class_for(_resource_class_for(mount_state))
     return has_redacted_secret(config, config_cls)
+
+
+def reusable_clis(ws) -> CLIOverrides:
+    """Live-install overrides a same-process copy reinstalls from.
+
+    Each override carries the live CLISpec and the revealed config, the
+    way remote mounts share their live resources: a directly installed
+    spec (never named in the global registry) and a redacted secret
+    both survive without a registry lookup.
+
+    Args:
+        ws: the origin workspace.
+    """
+    overrides: CLIOverrides = {}
+    for name, install in ws._registry.clis.items().items():
+        overrides[name] = (install.spec,
+                           cli_config_dump(install.config, reveal=True))
+    return overrides
+
+
+def reusable_resources(mounts: list[Any], state: dict[str,
+                                                      Any]) -> dict[str, Any]:
+    """Live resources a copy should share with its origin.
+
+    Remote backends (S3, Redis, GDrive) stay shared: their state
+    redacts the secrets a reconstruction would need. Local content
+    resources (RAM, Disk) are rebuilt fresh so the copy's writes do
+    not clobber the original's data. The auto mounts are excluded
+    because the new workspace mounts its own.
+
+    Args:
+        mounts (list[Any]): the origin's mount entries.
+        state (dict[str, Any]): the origin's state dict.
+    """
+    auto = {"/dev/", norm_mount_prefix(HISTORY_PREFIX)}
+    live = {m.prefix: m.resource for m in mounts if m.prefix not in auto}
+    return {
+        m[MountKey.PREFIX]: live[m[MountKey.PREFIX]]
+        for m in state[StateKey.MOUNTS]
+        if requires_resource_override(m) and m[MountKey.PREFIX] in live
+    }
 
 
 def _resource_class_for(mount_state: dict[str, Any]):

@@ -1,0 +1,615 @@
+{
+  "cases": [
+    {
+      "id": "chroma_ls",
+      "seq": 630000,
+      "targets": [
+        "chroma"
+      ],
+      "command": "ls /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "CHANGELOG.md\nguides\npolicies\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_ls_guides",
+      "seq": 630001,
+      "targets": [
+        "chroma"
+      ],
+      "command": "ls /knowledge/guides/",
+      "expect": {
+        "exit": 0,
+        "stdout": "auth.md\nquickstart.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_md",
+      "seq": 630002,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -name '*.md'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n/knowledge/guides/auth.md\n/knowledge/guides/quickstart.md\n/knowledge/policies/archived.md\n/knowledge/policies/privacy.md\n/knowledge/policies/refunds.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_type_f",
+      "seq": 630003,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n/knowledge/guides/auth.md\n/knowledge/guides/quickstart.md\n/knowledge/policies/archived.md\n/knowledge/policies/privacy.md\n/knowledge/policies/refunds.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_root_maxdepth0",
+      "seq": 630004,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -maxdepth 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_root_name",
+      "seq": 630005,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -name knowledge",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_size_plus_100c",
+      "seq": 630006,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -type f -size +100c | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth.md\n/knowledge/guides/quickstart.md\n/knowledge/policies/privacy.md\n/knowledge/policies/refunds.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_size_small_file_dropped",
+      "seq": 630007,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/policies/ -name 'archived*' -size -1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_cold_single",
+      "seq": 630008,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep bearer /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_warm_single",
+      "seq": 630009,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep bearer /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_cat_auth",
+      "seq": 630010,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nRequests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_cat_quickstart",
+      "seq": 630011,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to Acme. This quickstart gets you running fast.\nInstall the CLI with npm i -g acme then run acme login.\nSet your token in the ACME_TOKEN environment variable.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_head_1",
+      "seq": 630012,
+      "targets": [
+        "chroma"
+      ],
+      "command": "head -n 1 /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to Acme. This quickstart gets you running fast.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_tail_1",
+      "seq": 630013,
+      "targets": [
+        "chroma"
+      ],
+      "command": "tail -n 1 /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Set your token in the ACME_TOKEN environment variable.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_429",
+      "seq": 630014,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep 429 /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "If you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_e_multi",
+      "seq": 630015,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -e bearer -e 429 /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nIf you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_c_rate",
+      "seq": 630016,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -c rate /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_r_refund",
+      "seq": 630017,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -r refund /knowledge/policies/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/policies/refunds.md:Email support to start a refund with your order id.\n/knowledge/policies/refunds.md:Approved refunds are processed within five business days.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_cold_count",
+      "seq": 630018,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -c sell /knowledge/policies/privacy.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_warm_count",
+      "seq": 630019,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -c sell /knowledge/policies/privacy.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_rl_encrypted",
+      "seq": 630020,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -rl encrypted /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/policies/privacy.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_v_bearer",
+      "seq": 630021,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -v bearer /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Requests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_grep_rE_alternation",
+      "seq": 630022,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep -rE \"rate limited|refund\" /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md:v2.0 added rate limit headers and refund automation.\n/knowledge/guides/auth.md:Requests are rate limited to 100 calls per minute per token.\n/knowledge/policies/refunds.md:Email support to start a refund with your order id.\n/knowledge/policies/refunds.md:Approved refunds are processed within five business days.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_wc_l_auth",
+      "seq": 630023,
+      "targets": [
+        "chroma"
+      ],
+      "command": "wc -l /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 /knowledge/guides/auth.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sort_auth",
+      "seq": 630024,
+      "targets": [
+        "chroma"
+      ],
+      "command": "sort /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nIf you exceed the limit you receive HTTP 429 and must back off.\nRequests are rate limited to 100 calls per minute per token.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_uniq_auth",
+      "seq": 630025,
+      "targets": [
+        "chroma"
+      ],
+      "command": "uniq /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nRequests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_uniq_w0_auth",
+      "seq": 630026,
+      "targets": [
+        "chroma"
+      ],
+      "command": "uniq -w 0 /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_stat_name_auth",
+      "seq": 630027,
+      "targets": [
+        "chroma"
+      ],
+      "command": "stat -c \"%n\" /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_cut_d_f1",
+      "seq": 630028,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cut -d ' ' -f 1 /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome\nInstall\nSet\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_awk_first_word",
+      "seq": 630029,
+      "targets": [
+        "chroma"
+      ],
+      "command": "awk '{{print $1}}' /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sed_upper_acme",
+      "seq": 630030,
+      "targets": [
+        "chroma"
+      ],
+      "command": "sed s/Acme/ACME/ /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to ACME. This quickstart gets you running fast.\nInstall the CLI with npm i -g acme then run acme login.\nSet your token in the ACME_TOKEN environment variable.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_rg_l_token",
+      "seq": 630031,
+      "targets": [
+        "chroma"
+      ],
+      "command": "rg -l token /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth.md\n/knowledge/guides/quickstart.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_pipe_cat_wc",
+      "seq": 630032,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/auth.md | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_pipe_sort_uniq_wc",
+      "seq": 630033,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/policies/refunds.md | sort | uniq | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_poison_concat",
+      "seq": 630034,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/quickstart.md /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to Acme. This quickstart gets you running fast.\nInstall the CLI with npm i -g acme then run acme login.\nSet your token in the ACME_TOKEN environment variable.Authentication uses bearer tokens via the Authorization header.\nRequests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_poison_first_intact",
+      "seq": 630035,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/quickstart.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to Acme. This quickstart gets you running fast.\nInstall the CLI with npm i -g acme then run acme login.\nSet your token in the ACME_TOKEN environment variable.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_poison_second_intact",
+      "seq": 630036,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nRequests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_pipe_concat_head",
+      "seq": 630037,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/quickstart.md /knowledge/guides/auth.md | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Welcome to Acme. This quickstart gets you running fast.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_du_guides",
+      "seq": 630038,
+      "targets": [
+        "chroma"
+      ],
+      "command": "du /knowledge/guides",
+      "expect": {
+        "exit": 0,
+        "stdout": "354\t/knowledge/guides\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_du_root",
+      "seq": 630039,
+      "targets": [
+        "chroma"
+      ],
+      "command": "du /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "354\t/knowledge/guides\n306\t/knowledge/policies\n712\t/knowledge\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_du_c_multi",
+      "seq": 630040,
+      "targets": [
+        "chroma"
+      ],
+      "command": "du -c /knowledge/guides /knowledge/policies",
+      "expect": {
+        "exit": 0,
+        "stdout": "354\t/knowledge/guides\n306\t/knowledge/policies\n660\ttotal\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sym_ln",
+      "seq": 630041,
+      "targets": [
+        "chroma"
+      ],
+      "command": "ln -s /knowledge/guides/auth.md /knowledge/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sym_readlink",
+      "seq": 630042,
+      "targets": [
+        "chroma"
+      ],
+      "command": "readlink /knowledge/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/guides/auth.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sym_cat",
+      "seq": 630043,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\nRequests are rate limited to 100 calls per minute per token.\nIf you exceed the limit you receive HTTP 429 and must back off.",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sym_wc",
+      "seq": 630044,
+      "targets": [
+        "chroma"
+      ],
+      "command": "wc -l /knowledge/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 /knowledge/meta_link\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sym_ls",
+      "seq": 630045,
+      "targets": [
+        "chroma"
+      ],
+      "command": "ls -F /knowledge/ | grep meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "meta_link@\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sym_rm",
+      "seq": 630046,
+      "targets": [
+        "chroma"
+      ],
+      "command": "rm /knowledge/meta_link && ls /knowledge/",
+      "expect": {
+        "exit": 0,
+        "stdout": "CHANGELOG.md\nguides\npolicies\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 from mirage.types import PathSpec
 
@@ -33,6 +34,8 @@ resource = GoogleDriveResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/gdrive": resource}, mode=MountMode.WRITE)
+    # The gws verbs are a CLI install, separate from the mounts.
+    ws.register_cli("gws", GWS, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /gdrive/__nf_missing__.txt",

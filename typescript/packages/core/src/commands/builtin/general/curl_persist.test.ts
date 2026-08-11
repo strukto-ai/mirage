@@ -83,8 +83,8 @@ describe('curl -o persists to mount', () => {
 
   it('fails with non-zero exit on a read-only mount', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('curl -s https://x.test/file -o /readonly/foo.bin')
-    expect(io.exitCode).toBe(1)
+    const io = await ws.execute('curl -sS https://x.test/file -o /readonly/foo.bin')
+    expect(io.exitCode).toBe(23)
     expect(io.stderrText).toMatch(/read-only/)
     expect(io.stderrText).toContain('/readonly/foo.bin')
     await ws.close()
@@ -95,17 +95,17 @@ describe('curl -o persists to mount', () => {
     // routes to the empty root mount and fails because the parent is missing
     // (the catch-all root never silently swallows an unmounted path).
     const ws = await makeWs()
-    const io = await ws.execute('curl -s https://x.test/file -o /nope/foo.bin')
-    expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toMatch(/parent directory does not exist/)
+    const io = await ws.execute('curl -sS https://x.test/file -o /nope/foo.bin')
+    expect(io.exitCode).toBe(23)
+    expect(io.stderrText).toMatch(/No such file or directory/)
     expect(io.stderrText).toContain('/nope/foo.bin')
     await ws.close()
   })
 
   it('fails when target resource has no write op', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('curl -s https://x.test/file -o /nowrite/foo.bin')
-    expect(io.exitCode).toBe(1)
+    const io = await ws.execute('curl -sS https://x.test/file -o /nowrite/foo.bin')
+    expect(io.exitCode).toBe(23)
     expect(io.stderrText).toMatch(/no op|write/)
     expect(io.stderrText).toContain('/nowrite/foo.bin')
     await ws.close()
@@ -133,7 +133,7 @@ describe('wget -O persists to mount', () => {
 
   it('fails with non-zero exit on a read-only mount', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('wget -q -O /readonly/wget.bin https://x.test/file')
+    const io = await ws.execute('wget -O /readonly/wget.bin https://x.test/file')
     expect(io.exitCode).toBe(1)
     expect(io.stderrText).toMatch(/read-only/)
     await ws.close()

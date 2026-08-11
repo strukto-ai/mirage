@@ -1,5 +1,223 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "chroma": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "dify": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "discord": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "disk": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "email": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gdocs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "github": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "github_ci": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gmail": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gsheets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gslides": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "hf_buckets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "jaeger": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "lancedb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "langfuse": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "linear": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "mem0": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "mongodb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "nextcloud": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "notion": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "postgres": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "qdrant": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "slack": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "trello": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
@@ -13,6 +231,7 @@
       "disk",
       "dropbox",
       "email",
+      "gcal",
       "gdocs",
       "gdrive",
       "github",
@@ -22,6 +241,7 @@
       "gsheets",
       "gslides",
       "hf_buckets",
+      "jaeger",
       "lancedb",
       "langfuse",
       "linear",
@@ -41,40 +261,24 @@
       "trello"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
       "long": "--before",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-b",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--regex",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-r",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--separator",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-s",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     }
   ],
-  "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "type": "path"
   }
 }

@@ -1,23 +1,39 @@
 import struct
 from collections.abc import AsyncIterator, Callable
 
+from mirage.commands.builtin.constants import (OD_COUNT_PATTERN,
+                                               OD_OVERFLOW_UNITS,
+                                               OD_SIZE_UNITS, UINTMAX)
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.errors import UsageError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def parse_count(value: str) -> int:
-    multipliers = {
-        "b": 512,
-        "K": 1024,
-        "KB": 1000,
-        "M": 1024**2,
-        "MB": 1000**2
-    }
-    suffix = next((key for key in sorted(multipliers, key=len, reverse=True)
-                   if value.endswith(key)), "")
-    return int(value[:-len(suffix)] if suffix else value, 0) * multipliers.get(
-        suffix, 1)
+def parse_count(value: str, flag: str) -> int:
+    """GNU strtoumax-base-0 byte count for ``od -j``/``-N``.
+
+    Args:
+        value (str): the raw flag value, e.g. ``0x10``, ``010``, ``1K``.
+        flag (str): the flag spelling used in error messages (``-j``/``-N``).
+    """
+    match = OD_COUNT_PATTERN.match(value)
+    if match is None:
+        raise UsageError(f"od: invalid {flag} argument '{value}'", 1)
+    number, suffix = match.group(1), match.group(2)
+    multiplier = (OD_SIZE_UNITS.get(suffix) or OD_OVERFLOW_UNITS.get(suffix))
+    if suffix and multiplier is None:
+        raise UsageError(f"od: invalid suffix in {flag} argument '{value}'", 1)
+    if number[:2].lower() == "0x":
+        base = 16
+    elif number.startswith("0") and len(number) > 1:
+        base = 8
+    else:
+        base = 10
+    count = int(number, base) * (multiplier or 1)
+    if count > UINTMAX:
+        raise UsageError(f"od: {flag} argument '{value}' too large", 1)
+    return count
 
 
 def _address(offset: int, radix: str) -> str:
@@ -101,12 +117,18 @@ async def od(
                                offset, address_radix) if index == 0 else ""
             if address:
                 prefix = f"{address} "
+            elif address_radix == "n":
+                # GNU prints every value as " %s", so a suppressed address
+                # column still leaves one leading space per line.
+                prefix = " "
             else:
-                prefix = " " * 8 if address_radix != "n" else ""
+                prefix = " " * 8
             lines.append(prefix + _format_values(block, type_spec))
     final_address = _address(skip + len(data), address_radix)
     if final_address:
         lines.append(final_address)
+    if not lines:
+        return b"", IOResult()
     return ("\n".join(lines) + "\n").encode(), IOResult()
 
 

@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "id": "lancedb_cat_missing",
+      "seq": 650033,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "cat /db/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /db/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "lancedb_write_rejected",
+      "seq": 650034,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "echo hi > /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/db/animals/cat/big/1.md: Operation not supported\n"
+      }
+    },
+    {
+      "id": "lancedb_sed_stream_1p",
+      "seq": 650035,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "sed -n 1p /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "# a big orange cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_sed_i_readonly",
+      "seq": 650036,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "sed -i s/x/y/ /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    },
+    {
+      "id": "lancedb_prov_cat",
+      "seq": 650037,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "cat /db/animals/cat/big/1.md",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=70 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_prov_grep",
+      "seq": 650038,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "grep x /db/animals/cat/big/1.md",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=70 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_prov_ls",
+      "seq": 650039,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "ls /db/animals/cat/big",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lancedb_prov_search",
+      "seq": 930040,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "search planning /db",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=0 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

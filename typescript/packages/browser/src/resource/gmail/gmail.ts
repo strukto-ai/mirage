@@ -45,6 +45,10 @@ export interface GmailResourceState {
 export class GmailResource implements Resource {
   readonly kind: string = ResourceName.GMAIL
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: .gmail.json is rendered at
+  // readdir from the full message the listing already fetched, and
+  // attachments carry the decoded byte count.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = GMAIL_PROMPT
   readonly writePrompt: string = GMAIL_WRITE_PROMPT

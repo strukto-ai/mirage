@@ -14,6 +14,8 @@
 
 export { buildApp, type BuildAppOptions, type MirageApp } from './app.ts'
 export {
+  checkWorkspaceConfig,
+  checkWorkspaceConfigFile,
   configToWorkspaceArgs,
   interpolateEnv,
   loadWorkspaceConfig,

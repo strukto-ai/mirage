@@ -22,8 +22,8 @@ import {
   getChildPages,
   getDatabase,
   getPage,
-  queryDatabase,
-  searchDatabases,
+  queryDataSource,
+  searchDataSources,
   searchPages,
   searchTopLevelPages,
 } from './pages.ts'
@@ -90,22 +90,38 @@ describe('searchTopLevelPages', () => {
   })
 })
 
-describe('searchDatabases', () => {
-  it('invokes API-post-search with a database filter', async () => {
+describe('searchDataSources', () => {
+  // 2025-09-03 dropped "database" as a search filter value: the searchable
+  // schema-bearing object is the data source now.
+  it('invokes API-post-search with a data source filter', async () => {
     const transport = new FakeTransport()
     transport.responses.push({
-      results: [{ id: 'db1', object: 'database' }],
+      results: [{ id: 'ds1', object: 'data_source' }],
       has_more: false,
       next_cursor: null,
     })
-    const databases = await searchDatabases(transport)
+    const sources = await searchDataSources(transport)
     expect(transport.invocations).toEqual([
       {
         name: 'API-post-search',
-        args: { filter: { value: 'database', property: 'object' }, page_size: 100 },
+        args: { filter: { value: 'data_source', property: 'object' }, page_size: 100 },
       },
     ])
-    expect(databases).toEqual([{ id: 'db1', object: 'database' }])
+    expect(sources).toEqual([{ id: 'ds1', object: 'data_source' }])
+  })
+})
+
+describe('searchPages', () => {
+  it('caps the page size at the API maximum and stops at maxResults', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push(
+      { results: [{ id: 'p1' }, { id: 'p2' }], has_more: true, next_cursor: 'c1' },
+      { results: [{ id: 'p3' }, { id: 'p4' }], has_more: true, next_cursor: 'c2' },
+    )
+    const pages = await searchPages(transport, '', 250, 3)
+    expect(pages.map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
+    expect(transport.invocations).toHaveLength(2)
+    expect(transport.invocations[0]?.args.page_size).toBe(100)
   })
 })
 
@@ -122,8 +138,8 @@ describe('getDatabase', () => {
   })
 })
 
-describe('queryDatabase', () => {
-  it('paginates API-post-database-query and returns database rows', async () => {
+describe('queryDataSource', () => {
+  it('paginates API-post-data-source-query and returns the rows', async () => {
     const transport = new FakeTransport()
     transport.responses.push({
       results: [{ id: 'row1', object: 'page' }],
@@ -135,12 +151,12 @@ describe('queryDatabase', () => {
       has_more: false,
       next_cursor: null,
     })
-    const rows = await queryDatabase(transport, 'db1')
+    const rows = await queryDataSource(transport, 'ds1')
     expect(transport.invocations).toEqual([
-      { name: 'API-post-database-query', args: { database_id: 'db1', page_size: 100 } },
+      { name: 'API-post-data-source-query', args: { data_source_id: 'ds1', page_size: 100 } },
       {
-        name: 'API-post-database-query',
-        args: { database_id: 'db1', page_size: 100, start_cursor: 'cursor-db' },
+        name: 'API-post-data-source-query',
+        args: { data_source_id: 'ds1', page_size: 100, start_cursor: 'cursor-db' },
       },
     ])
     expect(rows).toEqual([

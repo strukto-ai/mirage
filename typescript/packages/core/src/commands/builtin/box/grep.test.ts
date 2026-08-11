@@ -42,7 +42,7 @@ function scope(): PathSpec {
 }
 
 async function runGrep(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): Promise<CommandFnResult> {
   const cmd = BOX_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')

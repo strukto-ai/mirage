@@ -22,15 +22,35 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
+from mirage.shell.array import array_extent, array_unset
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
-from mirage.shell.types import SET_FLAG_TO_OPTION
+from mirage.shell.options import parse_option_word
+from mirage.workspace.executor.builtins.text import _PRINTF_TARGET_RE
 from mirage.workspace.executor.control import ReturnSignal
+from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 _ENV_HELP_HINT = "Try 'env --help' for more information.\n"
+_EXPORT_USAGE = "export: usage: export [-fn] [name[=value] ...] or export -p\n"
+_READONLY_USAGE = (
+    "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n")
+_EXPORT_FLAGS = frozenset("fnp")
+_READONLY_FLAGS = frozenset("aAfp")
+_ANSI_C_ESCAPES = {
+    "\\": "\\\\",
+    "'": "\\'",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+    "\x1b": "\\E",
+}
 
 
 def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
@@ -41,11 +61,163 @@ def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
                                                      stderr=err)
 
 
+def _is_control(ch: str) -> bool:
+    return ord(ch) < 0x20 or ord(ch) == 0x7F
+
+
+def _bash_declare_quote(value: str) -> str:
+    """Quote a value the way bash ``declare -p`` / ``export -p`` does.
+
+    A value holding any control character takes the ``$'...'`` form, with
+    the named escapes bash uses (``\\a \\b \\t \\n \\v \\f \\r``, and
+    ``\\E`` for escape) and three-digit octal for the rest; ``"``, ``$``
+    and backtick need no escaping there because ``$'...'`` does not
+    expand. Everything else is double-quoted with escapes for ``\\``,
+    ``"``, ``$`` and backtick. Non-ASCII printable text stays literal,
+    which is what bash emits in a UTF-8 locale.
+
+    Args:
+        value (str): the variable value to serialize.
+
+    Returns:
+        str: the quoted value, ready to follow ``declare -x NAME=``.
+    """
+    parts: list[str] = []
+    if any(_is_control(ch) for ch in value):
+        for ch in value:
+            escape = _ANSI_C_ESCAPES.get(ch)
+            if escape is not None:
+                parts.append(escape)
+            elif _is_control(ch):
+                parts.append(f"\\{ord(ch):03o}")
+            else:
+                parts.append(ch)
+        return "$'" + "".join(parts) + "'"
+    for ch in value:
+        if ch in '\\"$`':
+            parts.append("\\" + ch)
+        else:
+            parts.append(ch)
+    return '"' + "".join(parts) + '"'
+
+
+def _split_decl_flags(
+    args: list[str],
+    allowed: frozenset[str],
+) -> tuple[set[str], list[str], str | None]:
+    """Split leading ``-xyz`` flag clusters from declaration operands.
+
+    Returns:
+        ``(flags, operands, bad)`` where ``bad`` is the first illegal
+        option character, or ``None`` when every flag is allowed.
+    """
+    flags: set[str] = set()
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok.startswith("-") and len(tok) > 1 and tok != "-":
+            body = tok[1:]
+            illegal = next((c for c in body if c not in allowed), None)
+            if illegal is not None:
+                return flags, args[i:], illegal
+            flags.update(body)
+            i += 1
+            continue
+        break
+    return flags, args[i:], None
+
+
+def _export_lines(session: Session, flags: set[str]) -> list[str]:
+    """Build sorted ``declare -x`` lines for every variable in the env.
+
+    Mirage keeps shell variables in ``session.env`` and treats that map
+    as the exported environment (``printenv`` / ``env`` already do), so
+    ``export -p`` lists the same set. ``-f`` selects shell functions
+    instead of variables; mirage tracks no export attribute on functions,
+    so that form lists nothing, as bash does with none exported.
+
+    Args:
+        session (Session): shell session state.
+        flags (set[str]): option letters the caller supplied.
+
+    Returns:
+        list[str]: one ``declare -x`` line per selected name.
+    """
+    if "f" in flags:
+        return []
+    lines: list[str] = []
+    for name in sorted(session.env):
+        lines.append(
+            f"declare -x {name}={_bash_declare_quote(session.env[name])}")
+    return lines
+
+
+def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
+    """Build sorted ``declare -r`` / ``declare -ar`` readonly lines.
+
+    ``-a`` narrows the listing to indexed arrays, the way bash does.
+    ``-f`` selects functions and ``-A`` associative arrays, neither of
+    which mirage carries a readonly attribute for, so those forms list
+    nothing. Bare and ``-p`` list every readonly name.
+
+    Args:
+        session (Session): shell session state.
+        flags (set[str]): option letters the caller supplied.
+
+    Returns:
+        list[str]: one declaration line per selected name.
+    """
+    if "f" in flags or "A" in flags:
+        return []
+    arrays_only = "a" in flags
+    lines: list[str] = []
+    for name in sorted(session.readonly_vars):
+        arr = session.arrays.get(name)
+        if arr is not None:
+            parts = [
+                f"[{i}]={_bash_declare_quote(v)}" for i, v in enumerate(arr)
+                if v is not None
+            ]
+            lines.append(f"declare -ar {name}=({' '.join(parts)})")
+            continue
+        if arrays_only:
+            continue
+        if name in session.env:
+            lines.append(
+                f"declare -r {name}={_bash_declare_quote(session.env[name])}")
+        else:
+            lines.append(f"declare -r {name}")
+    return lines
+
+
 async def handle_export(
     assignments: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for assign in assignments:
+    """Export names, or print them (``export -p`` / bare ``export``).
+
+    With no name operands, prints every entry in ``session.env`` as
+    ``declare -x NAME="value"`` (bash's ``-p`` form). Invalid option
+    characters fail with status 2 and the GNU usage line.
+    """
+    flags, names, bad = _split_decl_flags(assignments, _EXPORT_FLAGS)
+    if bad is not None:
+        err = (f"bash: export: -{bad}: invalid option\n"
+               f"{_EXPORT_USAGE}").encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="export",
+                                                         exit_code=2,
+                                                         stderr=err)
+    # -p with names is ignored for display; bare / -p alone print.
+    if not names:
+        lines = _export_lines(session, flags)
+        out = (("\n".join(lines) + "\n") if lines else "").encode()
+        return out, IOResult(), ExecutionNode(command="export", exit_code=0)
+    # -f/-n accepted; name path matches prior export semantics.
+    for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
             if key in session.readonly_vars:
@@ -62,7 +234,25 @@ async def handle_readonly(
     assignments: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for assign in assignments:
+    """Mark names readonly, or print them (``readonly -p`` / bare form).
+
+    With no name operands, prints every readonly name as ``declare -r``
+    (or ``declare -ar`` for arrays). Invalid options fail with status 2.
+    """
+    flags, names, bad = _split_decl_flags(assignments, _READONLY_FLAGS)
+    if bad is not None:
+        err = (f"bash: readonly: -{bad}: invalid option\n"
+               f"{_READONLY_USAGE}").encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="readonly",
+                                                         exit_code=2,
+                                                         stderr=err)
+    if not names:
+        lines = _readonly_lines(session, flags)
+        out = (("\n".join(lines) + "\n") if lines else "").encode()
+        return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
+    # -a/-A/-f accepted; array shape is applied by the declaration path.
+    for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
             if key in session.readonly_vars:
@@ -76,21 +266,130 @@ async def handle_readonly(
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
 
 
+def _unset_variable(session: Session, name: str) -> str:
+    """Remove a scalar/array variable, or one array element ``name[idx]``.
+
+    Clearing an element keeps the indices of the elements after it, as
+    bash does: it leaves a hole, which neither expands in ``${arr[@]}``
+    nor counts toward ``${#arr[@]}`` but keeps ``${arr[i]}`` addressing
+    the same values. Trailing holes are dropped, so ``arr+=(x)`` refills
+    the slot a trailing unset freed.
+
+    A subscript on a scalar names element 0 only: ``x[0]`` unsets the
+    scalar and any other subscript is an error. A subscript on a name
+    that holds nothing at all is a silent no-op, but on an existing array
+    a negative subscript still below zero after the extent is added is a
+    bad-subscript error.
+
+    Args:
+        session (Session): shell session state.
+        name (str): a variable name or ``name[subscript]``.
+
+    Returns:
+        str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
+            applied to a scalar, or ``"subscript"`` for a negative
+            subscript outside an existing array.
+    """
+    match = _PRINTF_TARGET_RE.match(name)
+    if match is not None and match.group(2) is not None:
+        base, subscript = match.group(1), match.group(2)
+        arr = session.arrays.get(base)
+        if arr is None:
+            if base not in session.env:
+                return "ok"
+            if _array_index(subscript, session.env) != 0:
+                return "notarray"
+            session.env.pop(base, None)
+            return "ok"
+        idx = _array_index(subscript, session.env)
+        if idx < 0:
+            idx += array_extent(arr)
+            if idx < 0:
+                return "subscript"
+        array_unset(arr, idx)
+        return "ok"
+    session.env.pop(name, None)
+    session.arrays.pop(name, None)
+    if name == "OPTIND":
+        session._getopts_optind = None
+    return "ok"
+
+
 async def handle_unset(
-    names: list[str],
+    args: list[str],
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for name in names:
-        if name in session.readonly_vars:
-            err = (f"bash: unset: {name}: cannot unset: "
+    """Unset shell variables, arrays, or functions, with bash's flags.
+
+    ``-v`` targets a variable only, ``-f`` a function only, and a bare
+    name a variable if one exists or else a function. A ``name[idx]``
+    operand clears one element; the readonly guard resolves it to the
+    base name first, since that is what ``readonly`` records. ``-n``
+    (unset a nameref itself) has no referent here — mirage has no
+    nameref attribute — so it matches bash on a non-nameref name and
+    leaves it untouched.
+
+    Args:
+        args (list[str]): option words followed by names to unset.
+        session (Session): shell session state.
+    """
+    mode = "auto"
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] != "-":
+        tok = args[i]
+        if tok == "--":
+            i += 1
+            break
+        if all(ch in "vfn" for ch in tok[1:]):
+            if "f" in tok[1:]:
+                mode = "f"
+            elif "n" in tok[1:]:
+                mode = "n"
+            else:
+                mode = "v"
+            i += 1
+            continue
+        err = f"bash: unset: {tok}: invalid option\n".encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="unset",
+                                                         exit_code=2,
+                                                         stderr=err)
+    for name in args[i:]:
+        if mode == "n":
+            # No nameref attribute exists, so as in bash on a plain
+            # variable this leaves the name untouched.
+            continue
+        if mode == "f":
+            session.functions.pop(name, None)
+            continue
+        target = _PRINTF_TARGET_RE.match(name)
+        is_element = target is not None and target.group(2) is not None
+        # `readonly arr` records the base name, so an `arr[i]` operand has
+        # to be resolved before the guard, as bash does (which also names
+        # the base, not the element, in the error).
+        base = target.group(1) if target is not None else name
+        if base in session.readonly_vars:
+            err = (f"bash: unset: {base}: cannot unset: "
                    f"readonly variable\n").encode()
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command="unset",
                                                              exit_code=1,
                                                              stderr=err)
-        session.env.pop(name, None)
-        if name == "OPTIND":
-            session._getopts_optind = None
+        existed = is_element or name in session.env or name in session.arrays
+        status = _unset_variable(session, name)
+        if status != "ok":
+            # bash names the base for "not an array variable" but prints
+            # only the bracketed part for a bad subscript.
+            detail = (f"unset: {base}: not an array variable"
+                      if status == "notarray" else
+                      f"unset: {name[len(base):]}: bad array subscript")
+            err = f"bash: {detail}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command="unset",
+                                                             exit_code=1,
+                                                             stderr=err)
+        if mode == "auto" and not existed and name in session.functions:
+            session.functions.pop(name, None)
     return None, IOResult(), ExecutionNode(command="unset", exit_code=0)
 
 
@@ -317,6 +616,30 @@ async def handle_read(
     return None, IOResult(), ExecutionNode(command="read", exit_code=0)
 
 
+def note_local_array(session: Session, name: str) -> bool:
+    """Record the caller's array before a function shadows ``name``.
+
+    ``local -a`` / ``declare -a`` inside a function shadow the caller's
+    array, so the old value (or its absence) has to be remembered for the
+    teardown in ``execute_command``.
+
+    Args:
+        session (Session): shell session state.
+        name (str): the array name being declared.
+
+    Returns:
+        bool: True when a function scope is active, so the caller should
+            shadow rather than reuse whatever is already there.
+    """
+    local_arrays = session._local_arrays
+    if local_arrays is None:
+        return False
+    if name not in local_arrays:
+        existing = session.arrays.get(name)
+        local_arrays[name] = None if existing is None else list(existing)
+    return True
+
+
 async def handle_local(
     assignments: list[str],
     session: Session,
@@ -390,23 +713,19 @@ async def handle_set(
         if tok == "--":
             session.positional_args = args[i + 1:]
             return None, IOResult(), ExecutionNode(command="set", exit_code=0)
-        if tok in ("-o", "+o"):
-            if i + 1 < len(args):
-                session.shell_options[args[i + 1]] = (tok == "-o")
-                i += 2
-                continue
-            i += 1
-            continue
-        if (tok.startswith("-") or tok.startswith("+")) and len(tok) > 1:
-            enable = tok[0] == "-"
-            for ch in tok[1:]:
-                opt = SET_FLAG_TO_OPTION.get(ch)
-                if opt:
-                    session.shell_options[opt] = enable
-            i += 1
-            continue
-        session.positional_args = args[i:]
-        break
+        word = parse_option_word(tok,
+                                 args[i + 1] if i + 1 < len(args) else None)
+        if word is None:
+            session.positional_args = args[i:]
+            break
+        for option, enable in word.settings:
+            session.shell_options[option] = enable
+        # A letter naming no option is ignored rather than refused: bash
+        # has options mirage does not implement (`-a`, `-B`, `-H`), and
+        # `set` is where a script turns those on without wanting to fail.
+        # A nested shell answers the same leftovers differently, which is
+        # why the grammar hands them back instead of deciding here.
+        i += word.consumed
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
 
 

@@ -62,14 +62,9 @@ PROMPT = """\
     .revisionId"""
 
 WRITE_PROMPT = """\
-  Write commands:
-    gws docs +write --document <doc-id> --text "text to append"
-
-    gws docs documents create --json '{"title": "My Doc"}'
-
-    gws docs documents batchUpdate \\
-      --params '{"documentId": "<id>"}' \\
-      --json   '{"requests": [{"insertText": {"location": {"index": 1}, "text": "Hello"}}]}'
+  Writes go through the gws CLI if installed:
+    gws docs write --document <doc-id> --text "text to append"
+    See gws docs --help for the raw API passthroughs.
 
   Newline gotcha: bash double-quoted "...\\n..." is NOT a newline; the
   literal characters \\ + n end up in the doc. Either:

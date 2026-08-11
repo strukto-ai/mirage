@@ -15,21 +15,21 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { CommandSafeguard, MountMode, PathSpec } from '../types.ts'
+import { Limit, MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-describe('dispatch applies safeguards on the executing mount', () => {
-  it('a symlink into a safeguarded mount gets the target mount safeguard', async () => {
+describe('dispatch applies limits on the executing mount', () => {
+  it('a symlink into a limited mount gets the target mount limit', async () => {
     const parser = await getTestParser()
     const data = new RAMResource()
     const plain = new RAMResource()
     const ws = new Workspace(
       {
-        '/data': [data, MountMode.EXEC, { read: new CommandSafeguard({ maxBytes: 8 }) }],
+        '/data': [data, MountMode.EXEC, { read: new Limit({ maxBytes: 8 }) }],
         '/r': plain,
       },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
@@ -39,7 +39,7 @@ describe('dispatch applies safeguards on the executing mount', () => {
       await ws.execute('ln -s /data/big.txt /r/link')
       const direct = (await ws.dispatch('read', '/data/big.txt')) as Uint8Array
       const viaLink = (await ws.dispatch('read', '/r/link')) as Uint8Array
-      // The link lives on the unsafeguarded mount, but the read executes
+      // The link lives on the unlimited mount, but the read executes
       // on /data: its maxBytes cap must apply either way.
       expect(DEC.decode(viaLink)).toBe(DEC.decode(direct))
       expect(direct.byteLength).toBeLessThan(ENC.encode('0123456789abcdef\n').byteLength)
@@ -50,7 +50,7 @@ describe('dispatch applies safeguards on the executing mount', () => {
 })
 
 describe('dispatch rename addresses dst against the source mount', () => {
-  it('cross-mount dst lands where Python lands it (EXDEV is a follow-up)', async () => {
+  it('cross-mount dst is refused like Python refuses it (EXDEV is a follow-up)', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/a': new RAMResource(), '/b': new RAMResource() },
@@ -58,12 +58,16 @@ describe('dispatch rename addresses dst against the source mount', () => {
     )
     try {
       await ws.execute('echo moved-bytes > /a/x.txt')
-      await ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')])
-      // Both languages execute the rename on the source backend; the dst
-      // key is the virtual path minus the source prefix, so the file
-      // stays on /a under b/y.txt. Neither language crosses mounts.
-      expect(DEC.decode((await ws.execute('cat /a/b/y.txt')).stdout)).toBe('moved-bytes\n')
-      expect((await ws.execute('cat /a/x.txt')).exitCode).not.toBe(0)
+      // Both languages execute the rename on the source backend and address
+      // the dst key against it, so '/b/y.txt' means 'b/y.txt' inside /a, a
+      // directory that does not exist there. The store-backed backends
+      // refuse (rename(2) ENOENT) instead of growing an orphan key under a
+      // directory they never recorded. Neither language crosses mounts.
+      await expect(
+        ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')]),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(DEC.decode((await ws.execute('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+      expect((await ws.execute('cat /a/b/y.txt')).exitCode).not.toBe(0)
       expect((await ws.execute('cat /b/y.txt')).exitCode).not.toBe(0)
     } finally {
       await ws.close()

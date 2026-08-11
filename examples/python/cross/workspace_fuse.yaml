@@ -1,0 +1,32 @@
+mode: WRITE
+consistency: LAZY
+
+mounts:
+  /:
+    resource: ram
+    backend: fuse
+    mountpoint: /tmp/demo
+
+  /notion:
+    resource: notion
+    config:
+      api_key: ${NOTION_API_KEY}
+
+  /local:
+    resource: disk
+    config:
+      root: /tmp/mirage-local
+
+  /s3:
+    resource: s3
+    config:
+      bucket: ${AWS_S3_BUCKET}
+      region: ${AWS_DEFAULT_REGION}
+      aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+      aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+
+  /slack:
+    resource: slack
+    config:
+      token: ${SLACK_BOT_TOKEN}
+      search_token: ${SLACK_USER_TOKEN}

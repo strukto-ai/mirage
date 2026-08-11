@@ -28,7 +28,7 @@ import type { HfAccessor } from '../../accessor/hf.ts'
 import { HF_COMMANDS } from '../../commands/builtin/hf/index.ts'
 import { SCOPE_ERROR } from '../../core/hf/constants.ts'
 import { create as createCore } from '../../core/hf/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/hf/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/hf/du/index.ts'
 import { exists as existsCore } from '../../core/hf/exists.ts'
 import { find as findCore } from '../../core/hf/find.ts'
 import { mkdir as mkdirCore } from '../../core/hf/mkdir.ts'
@@ -47,6 +47,10 @@ export abstract class HfResource extends BaseResource implements Resource {
   abstract readonly prompt: string
   abstract readonly accessor: HfAccessor
   readonly cachesReads: boolean = true
+  // The Hub tree API reports each file's exact byte size (the LFS
+  // object size for LFS files); readdir backfills any lister-omitted
+  // size with one stat.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
   readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
@@ -54,8 +58,8 @@ export abstract class HfResource extends BaseResource implements Resource {
     stat: statCore,
     read_stream: streamCore,
     range_read: rangeReadCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     exists: existsCore,
     find_flat: findCore,
     write: writeCore,
@@ -65,10 +69,6 @@ export abstract class HfResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 
@@ -113,7 +113,7 @@ export abstract class HfResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

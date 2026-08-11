@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { LanceRow } from './_driver.ts'
 import { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { renderCard } from './render.ts'
 import { ScopeLevel, detectScope } from './scope.ts'
 
 function notFound(p: string): Error {
@@ -35,10 +37,43 @@ function rowFiles(rows: LanceRow[], config: LanceDBAccessor['config']): string[]
   return names
 }
 
+function rowEntries(rows: LanceRow[], config: LanceDBAccessor['config']): [string, IndexEntry][] {
+  // The widened select carries every rendered column, so each card's exact
+  // size is free here; blob values are deliberately not fetched at listing
+  // time, so blob entries stay size-unknown and stat renders them itself.
+  const entries: [string, IndexEntry][] = []
+  for (const row of rows) {
+    const id = String(row[config.idColumn])
+    entries.push([
+      `${id}.md`,
+      new IndexEntry({
+        id,
+        name: `${id}.md`,
+        resourceType: 'lancedb/row_card',
+        vfsName: `${id}.md`,
+        size: renderCard(row, config).byteLength,
+      }),
+    ])
+    if (config.blobColumn !== null) {
+      const blobName = `${id}.${config.blobExt}`
+      entries.push([
+        blobName,
+        new IndexEntry({
+          id,
+          name: blobName,
+          resourceType: 'lancedb/row_blob',
+          vfsName: blobName,
+        }),
+      ])
+    }
+  }
+  return entries
+}
+
 export async function readdir(
   accessor: LanceDBAccessor,
   path: PathSpec | string,
-  _index?: IndexCacheStore,
+  index?: IndexCacheStore,
 ): Promise<string[]> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const config = accessor.config
@@ -62,25 +97,24 @@ export async function readdir(
         config.maxRows,
       )
     } else {
+      // Select every column except the vector and blob ones (schema order,
+      // so the projected rows render byte-identically to the full rows
+      // read() fetches). Still one data query; the schema lookup is local
+      // metadata on the already-opened table.
+      const columns = (await accessor.driver.tableColumns(scope.table)).filter(
+        (c) => c !== config.vectorColumn && c !== config.blobColumn,
+      )
       const rows = await accessor.driver.rowsMatching(
         scope.table,
         scope.filters,
-        [config.idColumn],
+        columns,
         config.maxRows,
       )
       names = rowFiles(rows, config)
+      if (index !== undefined) await index.setDir(base, rowEntries(rows, config))
     }
     return names.map((name) => `${base}/${name}`)
   }
 
   throw notFound(spec.virtual)
-}
-
-export function isDirName(child: string, config: LanceDBAccessor['config']): boolean {
-  // Row files are recognized by extension, so classification never
-  // needs the stat fallback.
-  const name = child.split('/').pop() ?? ''
-  if (name.endsWith('.md')) return false
-  if (config.blobColumn !== null && name.endsWith(`.${config.blobExt}`)) return false
-  return true
 }

@@ -47,7 +47,8 @@ async def test_search_code_basic(mock_get, config):
     assert result[0] == SearchResult(path="src/main.py", sha="aaa")
     mock_get.assert_awaited_once_with(config.token,
                                       "/search/code",
-                                      params={"q": "import os repo:acme/proj"})
+                                      params={"q": "import os repo:acme/proj"},
+                                      base_url=None)
 
 
 @pytest.mark.asyncio
@@ -66,7 +67,8 @@ async def test_search_code_with_path_filter(mock_get, config):
     mock_get.assert_awaited_once_with(
         config.token,
         "/search/code",
-        params={"q": "import os repo:acme/proj path:src/"})
+        params={"q": "import os repo:acme/proj path:src/"},
+        base_url=None)
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -101,21 +103,22 @@ export async function csplitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const prefixValue = opts.flags.f ?? opts.flags.prefix
+  const fl = new FlagView(opts.flags, specOf('csplit'))
+  const prefixValue = fl.asStr('prefix')
   const rawPrefix = typeof prefixValue === 'string' ? prefixValue : 'xx'
   const prefix = new PathSpec({
     virtual: rawPrefix,
     directory: rawPrefix,
     resourcePath: mountKey(rawPrefix, opts.mountPrefix ?? ''),
   }).mountPath
-  const digitsValue = opts.flags.n ?? opts.flags.digits
-  const suffixValue = opts.flags.b ?? opts.flags.suffix_format
+  const digitsValue = fl.asStr('digits')
+  const suffixValue = fl.asStr('suffix_format')
   const digits = typeof digitsValue === 'string' ? Number.parseInt(digitsValue, 10) : 2
   const suffixFormat = typeof suffixValue === 'string' ? suffixValue : null
-  const quiet = opts.flags.s === true || opts.flags.quiet === true || opts.flags.silent === true
-  const keep = opts.flags.k === true || opts.flags.keep_files === true
-  const suppressMatched = opts.flags.suppress_matched === true
-  const elideEmpty = opts.flags.z === true || opts.flags.elide_empty_files === true
+  const quiet = fl.asBool('quiet') || fl.asBool('silent')
+  const keep = fl.asBool('keep_files')
+  const suppressMatched = fl.asBool('suppress_matched')
+  const elideEmpty = fl.asBool('elide_empty_files')
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]

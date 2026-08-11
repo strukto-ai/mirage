@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib.metadata
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -101,6 +102,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "onedrive":
     ResourceEntry("mirage.resource.onedrive:OneDriveResource",
                   "mirage.resource.onedrive:OneDriveConfig"),
+    "sharepoint":
+    ResourceEntry("mirage.resource.sharepoint:SharePointResource",
+                  "mirage.resource.sharepoint:SharePointConfig"),
     "box":
     ResourceEntry("mirage.resource.box:BoxResource",
                   "mirage.resource.box:BoxConfig"),
@@ -116,6 +120,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "linear":
     ResourceEntry("mirage.resource.linear:LinearResource",
                   "mirage.resource.linear:LinearConfig"),
+    "gcal":
+    ResourceEntry("mirage.resource.gcal:GCalResource",
+                  "mirage.resource.gcal:GCalConfig"),
     "gdocs":
     ResourceEntry("mirage.resource.gdocs:GDocsResource",
                   "mirage.resource.gdocs:GDocsConfig"),
@@ -152,6 +159,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "langfuse":
     ResourceEntry("mirage.resource.langfuse:LangfuseResource",
                   "mirage.resource.langfuse:LangfuseConfig"),
+    "jaeger":
+    ResourceEntry("mirage.resource.jaeger:JaegerResource",
+                  "mirage.resource.jaeger:JaegerConfig"),
     "ssh":
     ResourceEntry("mirage.resource.ssh:SSHResource",
                   "mirage.resource.ssh:SSHConfig"),
@@ -252,8 +262,35 @@ def resolve_class(ref: str | type) -> type:
     return ref if isinstance(ref, type) else load_backend_class(ref)
 
 
-def build_resource(name: str,
-                   config: dict[str, Any] | None = None) -> "BaseResource":
+async def _instantiate(resource_cls: type, *args: Any,
+                       **kwargs: Any) -> "BaseResource":
+    """Build one resource, awaiting its factory when it has one.
+
+    :func:`register_resource` and the ``mirage.resources`` entry point
+    both accept any class, not only :class:`BaseResource` subclasses, so
+    the async ``build`` factory is not guaranteed to exist. A class
+    without one is constructed directly — which is how it has always
+    been built, and a plain constructor has nothing to await anyway.
+    The coroutine check also keeps a third-party class that happens to
+    carry a synchronous ``build`` attribute out of the await path.
+
+    Args:
+        resource_cls (type): the class to instantiate.
+        *args (Any): forwarded to ``build`` or the constructor.
+        **kwargs (Any): forwarded to ``build`` or the constructor.
+
+    Returns:
+        BaseResource: the new instance.
+    """
+    factory = getattr(resource_cls, "build", None)
+    if not inspect.iscoroutinefunction(factory):
+        return resource_cls(*args, **kwargs)
+    return await factory(*args, **kwargs)
+
+
+async def build_resource(name: str,
+                         config: dict[str, Any] | None = None
+                         ) -> "BaseResource":
     """Construct a resource instance by its registry name.
 
     Resolves resource and config classes lazily via importlib, so
@@ -261,6 +298,11 @@ def build_resource(name: str,
     dependencies. Only the resources actually used get loaded. Lookup
     order: builtin ``REGISTRY``, then :func:`register_resource` names,
     then ``mirage.resources`` entry points from installed packages.
+
+    Async because construction is: backends whose setup needs I/O do it
+    in :meth:`BaseResource.create`, which this awaits. The alternative
+    is a blocking client inside ``__init__``, which stalls the caller's
+    event loop. Mirrors the TypeScript ``buildResource``.
 
     Args:
         name (str): registry key such as ``"s3"`` or ``"ram"``.
@@ -288,6 +330,6 @@ def build_resource(name: str,
     if config_ref is None:
         config_ref = getattr(resource_cls, "CONFIG_CLS", None)
     if config_ref is None:
-        return resource_cls(**cfg_dict)
+        return await _instantiate(resource_cls, **cfg_dict)
     config_cls = resolve_class(config_ref)
-    return resource_cls(config_cls(**cfg_dict))
+    return await _instantiate(resource_cls, config_cls(**cfg_dict))

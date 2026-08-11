@@ -38,7 +38,7 @@ def test_file_prompt_shows_write_commands_for_writable_mounts():
     )
     prompt = ws.file_prompt
     assert "/slack" in prompt
-    assert "slack-post-message" in prompt
+    assert "slack send-message" in prompt
 
 
 def test_file_prompt_hides_write_commands_for_readonly():
@@ -49,7 +49,7 @@ def test_file_prompt_hides_write_commands_for_readonly():
     )
     prompt = ws.file_prompt
     assert "/slack" in prompt
-    assert "slack-post-message" not in prompt
+    assert "slack send-message" not in prompt
 
 
 def test_file_prompt_substitutes_prefix_in_write_prompt():

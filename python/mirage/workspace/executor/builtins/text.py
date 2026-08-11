@@ -18,7 +18,15 @@ import re
 from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.shell.array import array_extent, array_set
+from mirage.shell.bytes import byte_char, encode_text
+from mirage.workspace.expand.variable import _array_index
+from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+# A subscript must be non-empty: bash rejects `a[]` as an invalid
+# identifier, while `a[ ]` is a valid arithmetic 0.
+_PRINTF_TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?\Z")
 
 _SIMPLE_ESCAPES = {
     "\\": "\\",
@@ -66,7 +74,7 @@ def _interpret_escapes(text: str) -> str:
                 digits.append(text[j])
                 j += 1
             if digits:
-                out.append(chr(int("".join(digits), 16)))
+                out.append(byte_char(int("".join(digits), 16)))
                 i = j
             else:
                 out.append("\\x")
@@ -78,7 +86,7 @@ def _interpret_escapes(text: str) -> str:
             while j < n and len(digits) < 3 and text[j] in _OCT:
                 digits.append(text[j])
                 j += 1
-            out.append(chr(int("".join(digits), 8)) if digits else "\0")
+            out.append(byte_char(int("".join(digits), 8)) if digits else "\0")
             i = j
         else:
             # unknown escape — pass through literally
@@ -120,7 +128,7 @@ async def handle_echo(
         text = _interpret_escapes(text)
     if not no_newline:
         text += "\n"
-    out = text.encode()
+    out = encode_text(text)
     return out, IOResult(), ExecutionNode(command="echo", exit_code=0)
 
 
@@ -416,7 +424,7 @@ def _expand_escapes(s: str) -> tuple[str, bool]:
 def _quote_shell(s: str) -> str:
     if s == "":
         return "''"
-    data = s.encode("utf-8")
+    data = encode_text(s)
     need_ansic = any(b < 0x20 or b == 0x7F or b >= 0x80 for b in data)
     if need_ansic:
         parts = ["$'"]
@@ -463,7 +471,10 @@ def _read_escape(fmt: str, i: int) -> tuple[str, int, bool]:
             digits.append(fmt[j])
             j += 1
         if digits:
-            return chr(int("".join(digits), 16)), j, False
+            value = int("".join(digits), 16)
+            # \x names a byte; \u and \U name a code point.
+            text = byte_char(value) if ch == "x" else chr(value)
+            return text, j, False
         return "\\" + ch, i + 2, False
     if ch in _OCT:
         digits = []
@@ -475,7 +486,7 @@ def _read_escape(fmt: str, i: int) -> tuple[str, int, bool]:
             j += 1
         if not digits:
             return "\0", j, False
-        return chr(int("".join(digits), 8)), j, False
+        return byte_char(int("".join(digits), 8)), j, False
     return "\\" + ch, i + 2, False
 
 
@@ -635,8 +646,55 @@ def _convert(conv: str, raw: str | None, flags: str, width: int | None,
     return _format_float(value_f, conv, flags, width, precision), err, False
 
 
+def _assign_printf_target(session: Session, name: str, subscript: str | None,
+                          value: str) -> str:
+    """Assign ``value`` to a ``printf -v`` target (scalar or ``name[idx]``).
+
+    A bare name assigns element 0 when the name already holds an array,
+    leaving its other elements alone, as bash does. Nothing is mutated
+    unless the whole assignment succeeds: a readonly name or an
+    out-of-range subscript leaves the variable exactly as it was.
+
+    Args:
+        session (Session): shell session whose variables are written.
+        name (str): the target's base variable name.
+        subscript (str | None): the ``[...]`` text, or None for a scalar.
+        value (str): the formatted text to store.
+
+    Returns:
+        str: ``"ok"``, ``"readonly"``, or ``"subscript"``.
+    """
+    if name in session.readonly_vars:
+        return "readonly"
+    if subscript is None:
+        arr = session.arrays.get(name)
+        if arr is None:
+            session.env[name] = value
+        else:
+            array_set(arr, 0, value)
+        return "ok"
+    arr = session.arrays.get(name)
+    from_scalar = arr is None
+    if arr is None:
+        scalar = session.env.get(name)
+        # An existing scalar becomes element 0, even when empty: bash
+        # resolves `x[-1]` against the length-1 array that produces.
+        arr = [] if scalar is None else [scalar]
+    idx = _array_index(subscript, session.env)
+    if idx < 0:
+        idx += array_extent(arr)
+    if idx < 0:
+        return "subscript"
+    array_set(arr, idx, value)
+    if from_scalar:
+        session.env.pop(name, None)
+    session.arrays[name] = arr
+    return "ok"
+
+
 async def handle_printf(
-        args: list[str],  # noqa: E125
+    args: list[str],
+    session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -649,17 +707,61 @@ async def handle_printf(
     string / ``0``. Integers wrap at 64 bits; ``%a`` formats at IEEE
     double precision.
 
+    With ``-v NAME`` the formatted text is stored in the shell variable
+    ``NAME`` (or the array element ``NAME[idx]``) instead of written to
+    stdout, matching GNU printf. An unusable ``NAME`` is rejected before
+    the format runs (status 2); a readonly name or an out-of-range
+    subscript still reports the format's own errors first, then fails
+    with status 1 and leaves the variable untouched.
+
     Args:
-        args (list[str]): the format followed by its arguments.
+        args (list[str]): the format followed by its arguments, optionally
+            preceded by ``-v NAME``.
+        session (Session): shell session, for the ``-v`` assignment.
     """
+    target: str | None = None
+    parsed: re.Match[str] | None = None
+    if len(args) >= 2 and args[0] == "-v":
+        target = args[1]
+        args = args[2:]
+        parsed = _PRINTF_TARGET_RE.match(target)
+        if parsed is None:
+            # bash validates the name before formatting, so a bad name
+            # suppresses the conversion errors the format would report.
+            err = f"printf: `{target}': not a valid identifier\n".encode()
+            return None, IOResult(exit_code=2,
+                                  stderr=err), ExecutionNode(command="printf",
+                                                             exit_code=2,
+                                                             stderr=err)
     if not args:
+        if target is not None:
+            # `printf -v x` with no format is a usage error in bash.
+            err = b"printf: usage: printf [-v var] format [arguments]\n"
+            return None, IOResult(exit_code=2,
+                                  stderr=err), ExecutionNode(command="printf",
+                                                             exit_code=2)
         return b"", IOResult(), ExecutionNode(command="printf", exit_code=0)
     output, errors = _run_printf(args[0], args[1:])
-    out = output.encode()
+    err_bytes = "".join(errors).encode() if errors else b""
+    if target is not None and parsed is not None:
+        base, subscript = parsed.group(1), parsed.group(2)
+        status = _assign_printf_target(session, base, subscript, output)
+        if status != "ok":
+            err_bytes += (f"bash: {base}: readonly variable\n"
+                          if status == "readonly" else
+                          f"bash: {target}: bad array subscript\n").encode()
+            return None, IOResult(
+                exit_code=1, stderr=err_bytes), ExecutionNode(command="printf",
+                                                              exit_code=1,
+                                                              stderr=err_bytes)
+        exit_code = 1 if errors else 0
+        return None, IOResult(exit_code=exit_code, stderr=err_bytes
+                              or None), ExecutionNode(command="printf",
+                                                      exit_code=exit_code)
+    out = encode_text(output)
     if errors:
-        err = "".join(errors).encode()
         return out, IOResult(exit_code=1,
-                             stderr=err), ExecutionNode(command="printf",
-                                                        exit_code=1,
-                                                        stderr=err)
+                             stderr=err_bytes), ExecutionNode(command="printf",
+                                                              exit_code=1,
+                                                              stderr=err_bytes)
     return out, IOResult(), ExecutionNode(command="printf", exit_code=0)

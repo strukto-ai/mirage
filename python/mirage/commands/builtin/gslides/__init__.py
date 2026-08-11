@@ -15,13 +15,14 @@
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.gslides.io import IO as _IO
 from mirage.commands.builtin.gslides.rm import rm
-from mirage.commands.builtin.gws import GWS_SLIDES_API_COMMANDS
 
+# Slides API passthroughs live in the gws CLI
+# (mirage.commands.cli.builtin.gws), installed by name; the mount only
+# serves the filesystem surface.
 COMMANDS = [
     *make_generic_commands(
         "gslides",
         _IO,
     ),
     rm,
-    *GWS_SLIDES_API_COMMANDS,
 ]

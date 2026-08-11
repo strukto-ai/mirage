@@ -12,17 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.disk.append import append_bytes as _append
 from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
-from mirage.core.disk.du import du as _du
-from mirage.core.disk.du import du_all as _du_all
+from mirage.core.disk.du import entries as _du_entries
+from mirage.core.disk.du import size as _du_size
 from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.find import find as _find
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.read import read_bytes as _read
+from mirage.core.disk.read import read_range as _read_range
 from mirage.core.disk.readdir import readdir as _readdir
 from mirage.core.disk.rename import rename as _rename
 from mirage.core.disk.rm import rm_r as _rm_r
@@ -37,6 +38,7 @@ from mirage.core.disk.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read_range,
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: a.root is not None,
@@ -53,8 +55,7 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du=DuOps(size=_du_size, entries=_du_entries),
     append=_append,
     set_attrs=_set_attrs,
 )

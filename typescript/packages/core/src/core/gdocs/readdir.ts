@@ -18,16 +18,11 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { globToModifiedRange } from '../google/date_glob.ts'
-import { GoogleFileSuffix, listAllFiles } from '../google/drive.ts'
+import { listAllFiles } from '../google/drive.ts'
 import { makeFilename } from '../../resource/gdocs/doc_entry.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 const MIME = 'application/vnd.google-apps.document'
-
-export function isDirName(child: string): boolean {
-  // readdir emits only folders and rendered *.gdoc.json files.
-  return !child.endsWith(GoogleFileSuffix.GDOC)
-}
 
 export async function readdir(
   accessor: GDocsAccessor,
@@ -57,7 +52,7 @@ export async function readdir(
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   }
 
-  const files = await listAllFiles(accessor.tokenManager, {
+  const { files, complete } = await listAllFiles(accessor.tokenManager, {
     mimeType: MIME,
     modifiedAfter: modifiedRange ? modifiedRange[0] : null,
     modifiedBefore: modifiedRange ? modifiedRange[1] : null,
@@ -89,7 +84,12 @@ export async function readdir(
   }
 
   if (index !== undefined) {
-    if (modifiedRange !== null) {
+    // A modified-range listing is a filtered view rather than the directory,
+    // and an incomplete all-corpora search is a directory Drive could not
+    // finish reading. Neither may stand in for the directory: caching one
+    // would pin a short listing until it expires. The entries are real
+    // either way, so cache those and let the next readdir re-list.
+    if (modifiedRange !== null || !complete) {
       for (const [name, entry] of entries) {
         await index.put(`${virtualKey}/${name}`, entry)
       }

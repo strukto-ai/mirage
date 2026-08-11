@@ -58,7 +58,7 @@ function spec(virtual: string): PathSpec {
 
 async function runFind(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string[]> {
   const cmd = LINEAR_COMMANDS.find((c) => c.name === 'find')
   if (cmd === undefined) throw new Error('find not registered')
@@ -78,7 +78,7 @@ async function runFind(
 }
 
 describe('linear factory find', () => {
-  it('classifies directories via stat without an isDirName hint', async () => {
+  it('classifies directories via stat', async () => {
     const lines = await runFind([spec('/')], { maxdepth: '2' })
     expect(lines).toContain('/teams')
     expect(lines).toContain(TEAM_DIR)

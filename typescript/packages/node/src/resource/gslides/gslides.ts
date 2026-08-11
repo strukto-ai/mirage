@@ -54,20 +54,11 @@ export class GSlidesResource extends BaseResource implements Resource {
   constructor(config: GSlidesConfig) {
     super()
     this.config = config
-    const tm = new TokenManager({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      refreshToken: config.refreshToken,
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-    })
+    const tm = new TokenManager(config)
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 

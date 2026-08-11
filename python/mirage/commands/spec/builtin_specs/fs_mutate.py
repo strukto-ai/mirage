@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'mkdir':
@@ -21,22 +20,22 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-p", long="--parents"),
             Option(short="-v", long="--verbose"),
-            Option(short="-m", long="--mode", value_kind=OperandKind.TEXT),
+            Option(short="-m", long="--mode", type="str"),
             Option(short="-Z",
                    long="--context",
-                   value_kind=OperandKind.TEXT,
+                   type="str",
                    value_optional=True),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'touch':
     CommandSpec(
         options=(
             Option(short="-c"),
-            Option(short="-r", value_kind=OperandKind.PATH),
-            Option(short="-d", value_kind=OperandKind.TEXT),
+            Option(short="-r", type="path"),
+            Option(short="-d", type="str"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     # chmod/chown/chgrp self-parse their flags in the executor builtins, but
     # they still need a spec so the leading MODE/OWNER/GROUP stays TEXT while
@@ -45,43 +44,91 @@ SPECS: dict[str, CommandSpec] = {
     'chmod':
     CommandSpec(
         options=(Option(short="-R"), Option(short="-v"), Option(short="-f")),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str"), ),
+        rest=Operand(type="path"),
     ),
     'chown':
     CommandSpec(
         options=(Option(short="-R"), Option(short="-v"), Option(short="-f"),
                  Option(short="-h")),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str"), ),
+        rest=Operand(type="path"),
     ),
     'chgrp':
     CommandSpec(
         options=(Option(short="-R"), Option(short="-v"), Option(short="-f"),
                  Option(short="-h")),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(type="str"), ),
+        rest=Operand(type="path"),
     ),
     'cp':
     CommandSpec(
         options=(
             Option(short="-r"),
-            Option(short="-R"),
-            Option(short="-a"),
-            Option(short="-f"),
-            Option(short="-n"),
-            Option(short="-v"),
+            Option(short="-R", long="--recursive"),
+            Option(short="-a", long="--archive"),
+            # Non-interactive control plane (rm precedent): -f/-i are
+            # accepted no-ops — there is no prompt, and an overwrite
+            # proceeds unless -n/--update say otherwise.
+            Option(short="-f", long="--force"),
+            Option(short="-i", long="--interactive"),
+            Option(short="-n", long="--no-clobber"),
+            Option(short="-v", long="--verbose"),
+            # GNU: -u/-b never take an argument; only --update=/--backup=
+            # carry values, so the shorts stay clusterable (-bv).
+            Option(short="-u",
+                   long="--update",
+                   type="str",
+                   value_optional=True,
+                   short_value=False),
+            Option(short="-b",
+                   long="--backup",
+                   type="str",
+                   value_optional=True,
+                   short_value=False),
+            Option(short="-S", long="--suffix", type="str"),
+            Option(short="-t", long="--target-directory", type="path"),
+            Option(short="-T", long="--no-target-directory"),
+            # PathSpec normalizes trailing slashes everywhere, so the GNU
+            # spelling is an accepted no-op.
+            Option(long="--strip-trailing-slashes"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'mv':
     CommandSpec(
         options=(
-            Option(short="-f"),
-            Option(short="-n"),
-            Option(short="-v"),
+            # Non-interactive control plane (rm precedent): -f/-i are
+            # accepted no-ops — there is no prompt, and an overwrite
+            # proceeds unless -n/--update say otherwise.
+            Option(short="-f", long="--force"),
+            Option(short="-i", long="--interactive"),
+            Option(short="-n", long="--no-clobber"),
+            Option(short="-v", long="--verbose"),
+            # GNU: -u/-b never take an argument; only --update=/--backup=
+            # carry values, so the shorts stay clusterable (-bv).
+            Option(short="-u",
+                   long="--update",
+                   type="str",
+                   value_optional=True,
+                   short_value=False),
+            Option(short="-b",
+                   long="--backup",
+                   type="str",
+                   value_optional=True,
+                   short_value=False),
+            Option(short="-S", long="--suffix", type="str"),
+            Option(short="-t", long="--target-directory", type="path"),
+            Option(short="-T", long="--no-target-directory"),
+            Option(long="--exchange"),
+            # Cross-mount moves are copy+remove; --no-copy turns them into
+            # GNU's cross-device refusal instead.
+            Option(long="--no-copy"),
+            # PathSpec normalizes trailing slashes everywhere, so the GNU
+            # spelling is an accepted no-op.
+            Option(long="--strip-trailing-slashes"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'rm':
     CommandSpec(
@@ -104,34 +151,33 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--no-preserve-root"),
             Option(long="--one-file-system"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'rmdir':
     CommandSpec(
         options=(Option(short="-v"), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'unlink':
-    CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+    CommandSpec(rest=Operand(type="path")),
     'truncate':
     CommandSpec(
-        options=(Option(short="-s", long="--size",
-                        value_kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        options=(Option(short="-s", long="--size", type="str"), ),
+        rest=Operand(type="path"),
     ),
     'basename':
     CommandSpec(
         options=(
             Option(short="-a", long="--multiple"),
-            Option(short="-s", long="--suffix", value_kind=OperandKind.TEXT),
+            Option(short="-s", long="--suffix", type="str"),
             Option(short="-z", long="--zero"),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'dirname':
     CommandSpec(
         options=(Option(short="-z", long="--zero"), ),
-        rest=Operand(kind=OperandKind.TEXT),
+        rest=Operand(type="str"),
     ),
     'realpath':
     CommandSpec(
@@ -139,7 +185,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-e"),
             Option(short="-m"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'readlink':
     CommandSpec(
@@ -149,7 +195,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-m"),
             Option(short="-n"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'ln':
     CommandSpec(
@@ -159,6 +205,6 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-n"),
             Option(short="-v"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
 }

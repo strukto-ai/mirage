@@ -19,7 +19,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { pureProvision } from '../generic_bind/provision.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -158,10 +158,13 @@ function dateCommand(
   opts: CommandOpts,
 ): CommandFnResult {
   if (texts.length > 1) throw extraOperandError(CommandName.DATE, texts[1] ?? '')
-  const u = opts.flags.u === true
-  const d = typeof opts.flags.d === 'string' ? opts.flags.d : null
-  const argsI = opts.flags.I === true || opts.flags.args_I === true
-  const R = opts.flags.R === true
+  const fl = new FlagView(opts.flags, specOf('date'))
+  const u = fl.asBool('u')
+  const d = fl.asStr('d') ?? null
+  // -I is short-only, so it lands on the disambiguated `args_I` dest
+  // (`AMBIGUOUS_NAMES`); a plain `I` key is one the parser never emits.
+  const argsI = fl.asBool('args_I')
+  const R = fl.asBool('R')
   const dt = d !== null ? new Date(d) : new Date()
   let fmt: string | null = null
   for (const t of texts) {

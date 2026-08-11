@@ -14,30 +14,62 @@
 
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
 export const FIND_BUILDER: Builder = {
   name: 'find',
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const { find, isDirName } = ops
+    const { find } = ops
+    // Whether a directory start point holds nothing, for `-empty`. Asked
+    // once, for the start point, and only when the expression mentions it.
+    const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
+      (await ops.readdir(accessor, spec, idx)).length === 0
     if (find !== undefined) {
-      return findGeneric(resolved, texts, opts, (root, options) => find(accessor, root, options))
+      // -mtime must see namespace times (touch results, observed
+      // writes), so local backends post-filter through the overlay-
+      // aware stat instead of pushing the window into the core.
+      const stat =
+        ops.local === true
+          ? overlaidStat((spec) => ops.stat(accessor, spec, idx), opts.statOverlay)
+          : undefined
+      return findGeneric(
+        resolved,
+        texts,
+        opts,
+        (root, options) => find(accessor, root, options),
+        stat,
+        dirEmpty,
+      )
     }
-    // No backend find op: walk readdir/stat, classifying directories by the
-    // isDirName hint when the backend provides one.
-    return findGeneric(resolved, texts, opts, (root, options) =>
-      walkFind(
-        root,
-        {
-          readdir: (spec, i) => ops.readdir(accessor, spec, i),
-          stat: (spec, i) => ops.stat(accessor, spec, i),
-          isDirName: isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
-        },
-        options,
-        idx,
-      ),
+    // No backend find op: walk readdir/stat; the walk classifies entries
+    // through stat (see walkFind).
+    return findGeneric(
+      resolved,
+      texts,
+      opts,
+      (root, options) =>
+        walkFind(
+          root,
+          {
+            readdir: (spec, i) => ops.readdir(accessor, spec, i),
+            // -mtime must see namespace times (touch results, observed
+            // writes on mtime-less backends), same as ls.
+            stat: async (spec, i) => {
+              const st = await ops.stat(accessor, spec, i)
+              return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+            },
+            // A namespace symlink is an entry `-empty` must count and no
+            // backend readdir can see.
+            links: opts.links ?? null,
+          },
+          options,
+          idx,
+        ),
+      undefined,
+      dirEmpty,
     )
   },
 }

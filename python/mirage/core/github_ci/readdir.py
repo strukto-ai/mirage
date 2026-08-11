@@ -15,6 +15,7 @@
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.github_ci.artifacts import list_artifacts
+from mirage.core.github_ci.render import ci_json_bytes
 from mirage.core.github_ci.runs import list_jobs_for_run, list_runs
 from mirage.core.github_ci.workflows import list_workflows
 from mirage.types import PathSpec
@@ -71,6 +72,7 @@ async def readdir(
                 name=wf.get("name", ""),
                 resource_type="ci/workflow",
                 vfs_name=filename,
+                size=len(ci_json_bytes(wf)),
                 remote_time=wf.get("updated_at", ""),
             )
             entries.append((filename, entry))
@@ -98,11 +100,50 @@ async def readdir(
             )
             entries.append((dirname, entry))
             names.append(f"{prefix}/{key}/{dirname}")
+            # run.json renders the run object this listing already fetched,
+            # so its exact size is free here; annotations.jsonl has no length
+            # anywhere in the API and stays size-unknown.
+            await index.set_dir(f"{virtual_key}/{dirname}", [
+                ("run.json",
+                 IndexEntry(
+                     id=str(r["id"]),
+                     name="run.json",
+                     resource_type="ci/run_json",
+                     vfs_name="run.json",
+                     size=len(ci_json_bytes(r)),
+                     remote_time=r.get("updated_at", ""),
+                 )),
+                ("jobs",
+                 IndexEntry(
+                     id=str(r["id"]),
+                     name="jobs",
+                     resource_type="ci/jobs_dir",
+                     vfs_name="jobs",
+                 )),
+                ("annotations.jsonl",
+                 IndexEntry(
+                     id=str(r["id"]),
+                     name="annotations.jsonl",
+                     resource_type="ci/annotations",
+                     vfs_name="annotations.jsonl",
+                     remote_time=r.get("updated_at", ""),
+                 )),
+                ("artifacts",
+                 IndexEntry(
+                     id=str(r["id"]),
+                     name="artifacts",
+                     resource_type="ci/artifacts_dir",
+                     vfs_name="artifacts",
+                 )),
+            ])
         await index.set_dir(virtual_key, entries)
         return names
 
     # /runs/<workflow>_<run-id>
     if len(parts) == 2 and parts[0] == "runs":
+        listing = await index.list_dir(virtual_key)
+        if listing.entries is not None:
+            return listing.entries
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             parent = PathSpec(
@@ -114,6 +155,9 @@ async def readdir(
             lookup = await index.get(virtual_key)
         if lookup.entry is None:
             raise enoent(virtual)
+        listing = await index.list_dir(virtual_key)
+        if listing.entries is not None:
+            return listing.entries
         base = f"{prefix}/{key}"
         return [
             f"{base}/run.json",
@@ -152,6 +196,7 @@ async def readdir(
                 name=j.get("name", ""),
                 resource_type="ci/job",
                 vfs_name=json_filename,
+                size=len(ci_json_bytes(j)),
                 remote_time=j.get("completed_at", ""),
             )
             entry_log = IndexEntry(
@@ -197,6 +242,9 @@ async def readdir(
                 name=a.get("name", ""),
                 resource_type="ci/artifact",
                 vfs_name=filename,
+                # size_in_bytes is the zip archive's exact byte length
+                # (verified live against the GitHub API), not the
+                # uncompressed total.
                 size=a.get("size_in_bytes"),
                 remote_time=a.get("updated_at", ""),
             )
@@ -206,11 +254,3 @@ async def readdir(
         return names
 
     return []
-
-
-def is_dir_name(child: str) -> bool:
-    # Entries are recognized by extension, so classification never needs
-    # the stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    return not (name.endswith(".json") or name.endswith(".jsonl")
-                or name.endswith(".log") or name.endswith(".zip"))

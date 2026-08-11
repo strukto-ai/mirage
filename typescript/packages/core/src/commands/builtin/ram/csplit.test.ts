@@ -26,7 +26,7 @@ async function runCsplit(
   resource: RAMResource,
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_CSPLIT[0]
   if (cmd === undefined) throw new Error('csplit not registered')

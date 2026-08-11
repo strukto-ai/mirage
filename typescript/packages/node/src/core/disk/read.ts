@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { readFile } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { enoent, type PathSpec, record, ResourceName } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
+
+const CHUNK = 1 << 20
 
 export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint8Array> {
   const start = performance.now()
@@ -32,4 +34,63 @@ export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint
   }
   record('read', virtual, ResourceName.DISK, data.byteLength, start)
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+}
+
+/**
+ * Read a byte range, seeking rather than reading the whole file.
+ *
+ * A null size means the rest of the file, which has no length to allocate for
+ * up front, so those reads accumulate fixed chunks until the handle is spent.
+ * A stated size is one positioned read.
+ *
+ * @param accessor the mount's disk handle
+ * @param path the path to read
+ * @param _index listing cache, unused here
+ * @param offset first byte to read
+ * @param size how many bytes, or null for the rest
+ */
+export async function readRange(
+  accessor: DiskAccessor,
+  path: PathSpec,
+  _index: unknown,
+  offset: number,
+  size: number | null,
+): Promise<Uint8Array> {
+  const start = performance.now()
+  const virtual = path.mountPath
+  const full = resolveSafe(accessor.root, virtual)
+  let handle
+  try {
+    handle = await open(full, 'r')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw enoent(path)
+    }
+    throw err
+  }
+  try {
+    if (size !== null) {
+      const buf = Buffer.allocUnsafe(size)
+      const { bytesRead } = await handle.read(buf, 0, size, offset)
+      const out = new Uint8Array(buf.buffer, buf.byteOffset, bytesRead)
+      record('read', virtual, ResourceName.DISK, bytesRead, start)
+      return out
+    }
+    const parts: Buffer[] = []
+    let total = 0
+    let at = offset
+    for (;;) {
+      const buf = Buffer.allocUnsafe(CHUNK)
+      const { bytesRead } = await handle.read(buf, 0, CHUNK, at)
+      if (bytesRead === 0) break
+      parts.push(buf.subarray(0, bytesRead))
+      total += bytesRead
+      at += bytesRead
+    }
+    const joined = Buffer.concat(parts, total)
+    record('read', virtual, ResourceName.DISK, total, start)
+    return new Uint8Array(joined.buffer, joined.byteOffset, joined.byteLength)
+  } finally {
+    await handle.close()
+  }
 }

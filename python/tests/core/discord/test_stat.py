@@ -55,6 +55,18 @@ def index():
                 name="alice",
                 resource_type="discord/member",
                 vfs_name="alice.json",
+                size=42,
+            ),
+        ))
+    asyncio.run(
+        store.put(
+            "/My Server/channels/general/2024-01-15/chat.jsonl",
+            IndexEntry(
+                id="C001:2024-01-15:chat",
+                name="chat.jsonl",
+                resource_type="discord/chat_jsonl",
+                vfs_name="chat.jsonl",
+                size=17,
             ),
         ))
     return store
@@ -106,6 +118,7 @@ async def test_stat_member(accessor, index):
                  directory="/My Server/members/alice.json"), index)
     assert result.type == FileType.JSON
     assert result.extra["user_id"] == "U001"
+    assert result.size == 42
 
 
 @pytest.mark.asyncio
@@ -128,6 +141,7 @@ async def test_stat_chat_jsonl(accessor, index):
         index)
     assert result.type == FileType.TEXT
     assert result.name == "chat.jsonl"
+    assert result.size == 17
 
 
 @pytest.mark.asyncio

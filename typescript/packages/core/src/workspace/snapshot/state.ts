@@ -18,8 +18,28 @@ import type { Resource } from '../../resource/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMResource, type RAMResourceState } from '../../resource/ram/ram.ts'
+import { z } from 'zod'
+
+import type { CLIInstall } from '../cli/types.ts'
+import { CLISpec } from '../../commands/cli/types.ts'
+import { ScriptSource } from '../../runtime/policy/types.ts'
+
+/**
+ * Per-name overrides for restoring installed CLIs: a plain mapping is a
+ * fresh config (the spec resolves from the snapshot's registry key); a
+ * [spec, config] tuple carries a live spec too, which is how copy()
+ * shares directly installed programs.
+ */
+export type CLIOverrides = Record<
+  string,
+  Record<string, unknown> | [CLISpec, Record<string, unknown> | null]
+>
 import { HISTORY_PREFIX } from '../../resource/history/history.ts'
-import { resourceStateRequiresOverride } from '../../resource/secrets.ts'
+import {
+  hasRedactedSecret,
+  redactConfigWithSchema,
+  resourceStateRequiresOverride,
+} from '../../resource/secrets.ts'
 import { Job, JobStatus } from '../../shell/job_table.ts'
 import {
   Channel,
@@ -38,6 +58,7 @@ import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
 import type {
   CacheEntrySnapshot,
+  CLISnapshot,
   FingerprintEntrySnapshot,
   JobSnapshot,
   MountSnapshot,
@@ -108,6 +129,26 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
         session_id: j.sessionId,
       })),
   )
+  const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) => {
+    const entry: CLISnapshot = {
+      name,
+      spec: install.spec.name,
+      config: captureCliConfig(install),
+    }
+    // A script install has no name to resolve (the spec is synthesized
+    // from a yaml `script:`), so its embedded program rides along and
+    // load rebuilds the spec from it.
+    const script = install.spec.script
+    if (script !== null) {
+      entry.script = {
+        source: script.source,
+        language: script.language,
+        module: script.module,
+      }
+      entry.runtime = install.spec.runtime
+    }
+    return entry
+  })
   const historyEvents = (await ws.observer.events()).filter(
     (e) => e.type === EVENT_COMMAND || e.type === EVENT_CLEAR || e.type === EVENT_DELETE,
   )
@@ -142,12 +183,46 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     fingerprints,
     live_only_mounts: liveOnly,
     nodes,
+    clis: clisState,
   }
+}
+
+/**
+ * The spec a snapshot entry restores: a registry key or a program.
+ *
+ * Throws when the captured script names a language no runtime can
+ * speak. The value comes from a file, so it is checked here rather than
+ * carried to the selector, which would report the world's runtimes for
+ * a language that never existed.
+ */
+function cliSpecFromEntry(entry: CLISnapshot): string | CLISpec {
+  if (entry.script === undefined) return entry.spec
+  const language = entry.script.language
+  if (language !== 'python' && language !== 'js') {
+    throw new Error(`snapshot cli '${entry.spec}': unknown script language '${language}'`)
+  }
+  return new CLISpec({
+    name: entry.spec,
+    script: new ScriptSource(entry.script.source, language, entry.script.module),
+    runtime: entry.runtime ?? null,
+  })
+}
+
+function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
+  const model = install.spec.configModel
+  if (model instanceof z.ZodObject) {
+    return redactConfigWithSchema(model, install.config)
+  }
+  if (install.config !== null && typeof install.config === 'object') {
+    return install.config as Record<string, unknown>
+  }
+  return null
 }
 
 export function buildMountArgs(
   state: WorkspaceStateDict,
   overrides: Record<string, Resource> = {},
+  cliOverrides: CLIOverrides = {},
 ): MountArgs {
   if (state.version < FORMAT_VERSION) {
     throw new Error(
@@ -183,11 +258,35 @@ export function buildMountArgs(
       m.mode as MountMode,
     ]
   }
+  const cliEntries = state.clis ?? []
+  const missingClis = cliEntries
+    .filter((e) => hasRedactedSecret(e.config) && !(e.name in cliOverrides))
+    .map((e) => e.name)
+  if (missingClis.length > 0) {
+    throw new Error(
+      `Workspace.load: clis= must include fresh configs for: ${missingClis.join(', ')}. ` +
+        `These CLIs were saved with redacted config secrets.`,
+    )
+  }
+  const cliArgs: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
+  for (const e of cliEntries) {
+    const override = cliOverrides[e.name]
+    if (Array.isArray(override)) {
+      // copy() shares the live spec alongside the revealed config, so a
+      // directly installed (never registry-named) spec survives the
+      // round trip like a shared live resource.
+      cliArgs[e.name] = override
+    } else {
+      cliArgs[e.name] = [cliSpecFromEntry(e), override ?? e.config]
+    }
+  }
+
   return {
     mountArgs,
     consistency: ConsistencyPolicy.LAZY,
     defaultSessionId: state.default_session_id,
     defaultAgentId: state.default_agent_id,
+    ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
   }
 }
 

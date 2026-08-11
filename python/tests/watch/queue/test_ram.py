@@ -15,6 +15,13 @@ def _change(kind: FileChangeKind, virtual: str) -> FileEvent:
                      timestamp=_TS)
 
 
+def _move(src: str, dst: str) -> FileEvent:
+    return FileEvent(kind=FileChangeKind.MOVE,
+                     path=PathSpec.from_str_path(dst),
+                     previous_path=PathSpec.from_str_path(src),
+                     timestamp=_TS)
+
+
 def _root() -> PathSpec:
     return PathSpec.from_str_path("/nc")
 
@@ -71,6 +78,79 @@ async def test_distinct_paths_do_not_coalesce():
     await q.push(_change(FileChangeKind.CREATE, "/nc/a.txt"))
     await q.push(_change(FileChangeKind.CREATE, "/nc/b.txt"))
     assert await q.pending() == 2
+
+
+@pytest.mark.asyncio
+async def test_move_absorbs_unobserved_create_of_its_source():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(FileChangeKind.CREATE, "/nc/a.txt"))
+    await q.push(_move("/nc/a.txt", "/nc/b.txt"))
+    assert await q.pending() == 1
+    change = await q.pop()
+    assert change.kind is FileChangeKind.CREATE
+    assert change.path.virtual == "/nc/b.txt"
+
+
+@pytest.mark.asyncio
+async def test_move_drops_stale_pending_state_of_its_source():
+    q = RAMWatchQueue(_root())
+    await q.push(_change(FileChangeKind.UPDATE, "/nc/a.txt"))
+    await q.push(_move("/nc/a.txt", "/nc/b.txt"))
+    assert await q.pending() == 1
+    change = await q.pop()
+    assert change.kind is FileChangeKind.MOVE
+    assert change.previous_path is not None
+    assert change.previous_path.virtual == "/nc/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_chained_moves_collapse_to_one_move():
+    q = RAMWatchQueue(_root())
+    await q.push(_move("/nc/a.txt", "/nc/b.txt"))
+    await q.push(_move("/nc/b.txt", "/nc/c.txt"))
+    assert await q.pending() == 1
+    change = await q.pop()
+    assert change.path.virtual == "/nc/c.txt"
+    assert change.previous_path is not None
+    assert change.previous_path.virtual == "/nc/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_move_then_update_stays_move():
+    q = RAMWatchQueue(_root())
+    await q.push(_move("/nc/a.txt", "/nc/b.txt"))
+    await q.push(_change(FileChangeKind.UPDATE, "/nc/b.txt"))
+    change = await q.pop()
+    assert change.kind is FileChangeKind.MOVE
+    assert change.previous_path is not None
+    assert change.previous_path.virtual == "/nc/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_move_then_delete_of_destination_keeps_source_delete():
+    q = RAMWatchQueue(_root())
+    await q.push(_move("/nc/a.txt", "/nc/b.txt"))
+    await q.push(_change(FileChangeKind.DELETE, "/nc/b.txt"))
+    assert await q.pending() == 1
+    change = await q.pop()
+    assert change.kind is FileChangeKind.DELETE
+    assert change.path.virtual == "/nc/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_overflow_marker_survives_later_changes():
+    q = RAMWatchQueue(_root(),
+                      max_pending=2,
+                      on_overflow=OverflowPolicy.COLLAPSE)
+    for i in range(3):
+        await q.push(_change(FileChangeKind.CREATE, f"/nc/f{i}.txt"))
+    await q.push(_change(FileChangeKind.UPDATE, "/nc"))
+    assert await q.pending() == 1
+    await q.push(_move("/nc", "/nc/moved.txt"))
+    assert await q.pending() == 2
+    change = await q.pop()
+    assert change.kind is FileChangeKind.UNKNOWN
+    assert change.path.virtual == "/nc"
 
 
 @pytest.mark.asyncio

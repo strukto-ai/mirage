@@ -73,6 +73,15 @@ export async function readdir(
       sizes.set(base, length !== null ? Number(length) : null)
     }
   }
+  // The Hub tree API carries a size for every file (for LFS files it is
+  // the object size, not the pointer's); when the lister omits the
+  // metadata, one stat per affected file fills the gap so the index
+  // never caches an unknown size.
+  for (const [base, size] of sizes) {
+    if (size !== null) continue
+    const md = await op.stat(stripSlash(base))
+    sizes.set(base, md.contentLength !== null ? Number(md.contentLength) : null)
+  }
   names.sort()
   if (names.length > SCOPE_ERROR) {
     console.warn(

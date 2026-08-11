@@ -23,8 +23,10 @@ from mirage.core.github._client import github_headers, github_url
 async def ci_get(token: SecretStr,
                  path: str,
                  params: dict[str, Any] | None = None,
+                 *,
+                 base_url: str | None = None,
                  **kwargs: str) -> dict[str, Any]:
-    url = github_url(path, **kwargs)
+    url = github_url(path, base_url, **kwargs)
     headers = github_headers(token)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
@@ -32,8 +34,12 @@ async def ci_get(token: SecretStr,
             return await resp.json()
 
 
-async def ci_get_bytes(token: SecretStr, path: str, **kwargs: str) -> bytes:
-    url = github_url(path, **kwargs)
+async def ci_get_bytes(token: SecretStr,
+                       path: str,
+                       *,
+                       base_url: str | None = None,
+                       **kwargs: str) -> bytes:
+    url = github_url(path, base_url, **kwargs)
     headers = github_headers(token)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers,
@@ -47,12 +53,14 @@ async def ci_get_paginated(token: SecretStr,
                            list_key: str,
                            params: dict[str, Any] | None = None,
                            max_results: int | None = None,
+                           *,
+                           base_url: str | None = None,
                            **kwargs: str) -> list[dict[str, Any]]:
     params = dict(params or {})
     params.setdefault("per_page", 100)
     page = 1
     results: list[dict[str, Any]] = []
-    url = github_url(path, **kwargs)
+    url = github_url(path, base_url, **kwargs)
     headers = github_headers(token)
     async with aiohttp.ClientSession() as session:
         while True:

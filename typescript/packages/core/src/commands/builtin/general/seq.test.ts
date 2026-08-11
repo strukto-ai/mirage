@@ -21,7 +21,7 @@ const DEC = new TextDecoder()
 
 async function runSeq(
   texts: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const resource = new RAMResource()
   const cmd = GENERAL_SEQ[0]

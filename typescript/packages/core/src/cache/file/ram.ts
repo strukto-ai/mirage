@@ -136,6 +136,23 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     return placed
   }
 
+  async evictPrefix(prefix: string): Promise<void> {
+    // Snapshot first: remove() mutates entries as it goes.
+    const keys = [...this.entries.keys()].filter((k) => k.startsWith(prefix))
+    for (const key of keys) await this.remove(key)
+  }
+
+  evictPaths(paths: Iterable<string>): void {
+    for (const key of paths) {
+      const entry = this.entries.get(key)
+      if (entry !== undefined) {
+        this.size -= entry.size
+        this.entries.delete(key)
+      }
+      this.store.files.delete(key)
+    }
+  }
+
   remove(key: string): Promise<void> {
     this.drainTasks.delete(key)
     return this.lock.withLock(key, () => {

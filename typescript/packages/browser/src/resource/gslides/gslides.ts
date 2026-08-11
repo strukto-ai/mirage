@@ -54,12 +54,7 @@ export class GSlidesResource implements Resource {
 
   constructor(config: GSlidesConfig) {
     this.config = config
-    const tm = new TokenManager({
-      clientId: config.clientId,
-      ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
-      refreshToken: config.refreshToken,
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-    })
+    const tm = new TokenManager(config)
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
     this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }

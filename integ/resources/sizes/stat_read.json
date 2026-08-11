@@ -1,0 +1,1529 @@
+{
+  "cases": [
+    {
+      "id": "sz_stat_poem",
+      "seq": 680001,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "stat -c %s /data/poem.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_read_poem",
+      "seq": 680002,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "cat /data/poem.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_stat_empty",
+      "seq": 680003,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "stat -c %s /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_read_empty",
+      "seq": 680004,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "cat /data/empty.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_stat_nested",
+      "seq": 680005,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "stat -c %s /data/sub/nested.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "15\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_read_nested",
+      "seq": 680006,
+      "targets": [
+        "s3",
+        "box",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "hf",
+        "databricks"
+      ],
+      "command": "cat /data/sub/nested.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "15\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ssh_symlink_stat_follows_target",
+      "seq": 680010,
+      "targets": [
+        "ssh"
+      ],
+      "command": "stat -c %s /links/poem_link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ssh_symlink_read",
+      "seq": 680011,
+      "targets": [
+        "ssh"
+      ],
+      "command": "cat /links/poem_link.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_box_weblink_hidden_from_listing",
+      "seq": 680012,
+      "targets": [
+        "box"
+      ],
+      "command": "find /data -name homepage",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_box_weblink_direct_stat_enoent",
+      "seq": 680013,
+      "targets": [
+        "box"
+      ],
+      "command": "stat /data/homepage",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /data/homepage: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sz_github_stat_readme",
+      "seq": 680020,
+      "targets": [
+        "github"
+      ],
+      "command": "stat -c %s /repo/README.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_read_readme",
+      "seq": 680021,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /repo/README.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_submodule_hidden_from_listing",
+      "seq": 680022,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo -name extern",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_submodule_stat_enoent",
+      "seq": 680023,
+      "targets": [
+        "github"
+      ],
+      "command": "stat /repo/extern",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /repo/extern: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sz_github_trunc_ls_root",
+      "seq": 680030,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /trunc",
+      "expect": {
+        "exit": 0,
+        "stdout": "README.md\ndocs\npyproject.toml\nsrc\ntests\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_ls_docs",
+      "seq": 680031,
+      "targets": [
+        "github"
+      ],
+      "command": "ls /trunc/docs",
+      "expect": {
+        "exit": 0,
+        "stdout": "architecture.md\ncontributing.md\nrelease.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_stat_doc",
+      "seq": 680032,
+      "targets": [
+        "github"
+      ],
+      "command": "stat -c %s /trunc/docs/architecture.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_read_doc",
+      "seq": 680033,
+      "targets": [
+        "github"
+      ],
+      "command": "cat /trunc/docs/architecture.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "77\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_github_trunc_submodule_stat_enoent",
+      "seq": 680034,
+      "targets": [
+        "github"
+      ],
+      "command": "stat /trunc/docs/vendored",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /trunc/docs/vendored: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sz_mem0_stat_matches_wc",
+      "seq": 680040,
+      "targets": [
+        "mem0"
+      ],
+      "command": "stat -c %s /memories/mem-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "193\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_chat_stat",
+      "seq": 680050,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/general__C1/2025-12-19/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "366\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_chat_read",
+      "seq": 680051,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-19/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "366\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_user_stat",
+      "seq": 680052,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/users/priya__U7.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "178\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_user_read",
+      "seq": 680053,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/users/priya__U7.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "178\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_message_stat",
+      "seq": 680054,
+      "targets": [
+        "gmail"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "624\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_message_read",
+      "seq": 680055,
+      "targets": [
+        "gmail"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "624\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_file_stat",
+      "seq": 680056,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "104\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_file_read",
+      "seq": 680057,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "104\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_dm_chat_stat",
+      "seq": 680058,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/dms/dave__D7/2026-03-10/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "92\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_dm_chat_read",
+      "seq": 680059,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/dms/dave__D7/2026-03-10/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "92\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_empty_chat_stat",
+      "seq": 680060,
+      "targets": [
+        "slack"
+      ],
+      "command": "stat -c %s /slack/channels/general__C1/2025-12-14/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_empty_chat_read",
+      "seq": 680061,
+      "targets": [
+        "slack"
+      ],
+      "command": "cat /slack/channels/general__C1/2025-12-14/chat.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_attachment_stat",
+      "seq": 680062,
+      "targets": [
+        "gmail"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_attachment_read",
+      "seq": 680063,
+      "targets": [
+        "gmail"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001/budget.csv | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "36\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_workspace_stat",
+      "seq": 680064,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/workspace.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "66\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_workspace_read",
+      "seq": 680065,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/workspace.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "66\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_board_stat",
+      "seq": 680066,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "169\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_board_read",
+      "seq": 680067,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "169\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_list_stat",
+      "seq": 680068,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/list.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "115\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_list_read",
+      "seq": 680069,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/To_Do__lst_todo/list.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "115\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_card_stat",
+      "seq": 680070,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "402\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_card_read",
+      "seq": 680071,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/card.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "402\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_member_stat",
+      "seq": 680072,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Sam_Rivera__mem_sam.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "84\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_member_read",
+      "seq": 680073,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Sam_Rivera__mem_sam.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "84\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_label_stat",
+      "seq": 680074,
+      "targets": [
+        "trello"
+      ],
+      "command": "stat -c %s /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/labels/bug__lbl_bug.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "97\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_label_read",
+      "seq": 680075,
+      "targets": [
+        "trello"
+      ],
+      "command": "cat /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/labels/bug__lbl_bug.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "97\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_database_stat",
+      "seq": 680076,
+      "targets": [
+        "notion"
+      ],
+      "command": "stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/database.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "463\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_database_read",
+      "seq": 680077,
+      "targets": [
+        "notion"
+      ],
+      "command": "cat /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/database.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "463\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_workflow_stat",
+      "seq": 680078,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/workflows/CI_101.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "192\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_workflow_read",
+      "seq": 680079,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/workflows/CI_101.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "192\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_run_stat",
+      "seq": 680080,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/runs/CI_9001/run.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "228\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_run_read",
+      "seq": 680081,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/run.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "228\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_job_stat",
+      "seq": 680082,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/runs/CI_9001/jobs/build_7001.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "321\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_job_read",
+      "seq": 680083,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/jobs/build_7001.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "321\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_artifact_stat",
+      "seq": 680084,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "stat -c %s /ci/runs/CI_9001/artifacts/dist_5001.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "148\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_artifact_read",
+      "seq": 680085,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/artifacts/dist_5001.zip | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "148\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_log_read",
+      "seq": 680086,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/jobs/build_7001.log | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "71\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_annotations_read",
+      "seq": 680087,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "cat /ci/runs/CI_9001/annotations.jsonl | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "105\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_json_stat",
+      "seq": 680088,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "stat -c %s /db/cat/big/1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_json_read",
+      "seq": 680089,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "62\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_txt_stat",
+      "seq": 680090,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "stat -c %s /db/cat/big/1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "17\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_txt_read",
+      "seq": 680091,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "17\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_lancedb_card_stat",
+      "seq": 680092,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "stat -c %s /db/animals/cat/big/1.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "70\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_lancedb_card_read",
+      "seq": 680093,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "cat /db/animals/cat/big/1.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "70\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_stat",
+      "seq": 680094,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1530\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_read",
+      "seq": 680095,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "1530\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_small_stat",
+      "seq": 680096,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/search-api/traces/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "721\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_small_read",
+      "seq": 680097,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/search-api/traces/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "721\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_multi_service_stat",
+      "seq": 680098,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2505\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_trace_multi_service_read",
+      "seq": 680099,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/web-frontend/traces/ccccccccccccccccccccccccccccccc3.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "2505\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_blob_stat",
+      "seq": 680100,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "stat -c %s /db/cat/big/1.png",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_row_blob_read",
+      "seq": 680101,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "cat /db/cat/big/1.png | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_stat",
+      "seq": 680102,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/checkout-api/operations.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_read",
+      "seq": 680103,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/checkout-api/operations.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_single_stat",
+      "seq": 680104,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %s /j/services/search-api/operations.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "63\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_operations_single_read",
+      "seq": 680105,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cat /j/services/search-api/operations.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "63\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_page_stat",
+      "seq": 680106,
+      "targets": [
+        "chroma"
+      ],
+      "command": "stat -c %s /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "188\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_page_read",
+      "seq": 680107,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/auth.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "188\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_undeclared_stat",
+      "seq": 680108,
+      "targets": [
+        "chroma"
+      ],
+      "command": "stat -c %s /knowledge/policies/archived.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "37\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_undeclared_read",
+      "seq": 680109,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/policies/archived.md | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "37\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_message_stat",
+      "seq": 680110,
+      "targets": [
+        "email"
+      ],
+      "command": "stat -c %s /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "581\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_message_read",
+      "seq": 680111,
+      "targets": [
+        "email"
+      ],
+      "command": "cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "581\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_items_stat_matches_read",
+      "seq": 680112,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "test \"$(stat -c %s /lf/datasets/eval-basic/items.jsonl)\" = \"$(cat /lf/datasets/eval-basic/items.jsonl | wc -c)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_items_empty_stat",
+      "seq": 680113,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "stat -c %s /lf/datasets/eval-empty/items.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_run_stat_matches_read",
+      "seq": 680114,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "test \"$(stat -c %s /lf/datasets/eval-basic/runs/run-alpha.jsonl)\" = \"$(cat /lf/datasets/eval-basic/runs/run-alpha.jsonl | wc -c)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_chat_stat",
+      "seq": 690050,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl'",
+      "expect": {
+        "exit": 0,
+        "stdout": "374\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_chat_read",
+      "seq": 690051,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-02/chat.jsonl' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "374\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_chat_with_attachment_stat_matches_read",
+      "seq": 690052,
+      "targets": [
+        "discord"
+      ],
+      "command": "test \"$(stat -c %s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl')\" = \"$(cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl' | wc -c)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_member_stat",
+      "seq": 690053,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %s '/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json'",
+      "expect": {
+        "exit": 0,
+        "stdout": "205\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_member_read",
+      "seq": 690054,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/members/alice__300000000000000001.json' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "205\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_attachment_stat",
+      "seq": 690055,
+      "targets": [
+        "discord"
+      ],
+      "command": "stat -c %s '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "29\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_attachment_read",
+      "seq": 690056,
+      "targets": [
+        "discord"
+      ],
+      "command": "cat '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/files/budget__500000000000000001.csv' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "29\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_every_user_size_matches_read",
+      "seq": 700100,
+      "targets": [
+        "slack"
+      ],
+      "command": "n=0; for f in /slack/users/*.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "11 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_slack_every_channel_day_size_matches_read",
+      "seq": 700101,
+      "targets": [
+        "slack"
+      ],
+      "command": "n=0; for f in /slack/channels/general__C1/*/chat.jsonl; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "90 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_every_member_size_matches_read",
+      "seq": 700102,
+      "targets": [
+        "discord"
+      ],
+      "command": "n=0; for f in /discord/*/members/*.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_every_chat_day_size_matches_read",
+      "seq": 700103,
+      "targets": [
+        "discord"
+      ],
+      "command": "n=0; for f in /discord/*/channels/*/*/chat.jsonl; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "60 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_discord_every_attachment_size_matches_read",
+      "seq": 700104,
+      "targets": [
+        "discord"
+      ],
+      "command": "n=0; for f in /discord/*/channels/*/*/files/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_every_message_size_matches_read",
+      "seq": 700105,
+      "targets": [
+        "email"
+      ],
+      "command": "n=0; for f in /mail/INBOX/*/*.email.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_email_every_attachment_size_matches_read",
+      "seq": 700106,
+      "targets": [
+        "email"
+      ],
+      "command": "n=0; for f in /mail/INBOX/*/*/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_every_message_size_matches_read",
+      "seq": 700107,
+      "targets": [
+        "gmail"
+      ],
+      "command": "n=0; for f in /mail/*/*/*.gmail.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "11 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_gmail_every_attachment_size_matches_read",
+      "seq": 700108,
+      "targets": [
+        "gmail"
+      ],
+      "command": "n=0; for f in /mail/*/*/*/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "6 match\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_linear_every_file_size_matches_read",
+      "seq": 700109,
+      "targets": [
+        "linear"
+      ],
+      "command": "n=0; t=0; for f in $(find /issues -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "17/17\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_ci_every_json_size_matches_read",
+      "seq": 700111,
+      "targets": [
+        "github_ci"
+      ],
+      "command": "n=0; t=0; for f in /ci/workflows/*.json /ci/runs/*/run.json /ci/runs/*/jobs/*.json; do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3/3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_sized_kinds_size_matches_read",
+      "seq": 700112,
+      "targets": [
+        "trello"
+      ],
+      "command": "n=0; t=0; for f in $(find /board -type f -name '*.json'); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "19/19\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_trello_comments_jsonl_is_size_unknown_until_read",
+      "seq": 700113,
+      "targets": [
+        "trello"
+      ],
+      "command": "f=/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/comments.jsonl; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cold=0\nread=186\nwarm=186\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_lancedb_every_file_size_matches_read",
+      "seq": 700114,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "n=0; t=0; for f in $(find /db -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "4/4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_chroma_every_file_size_matches_read",
+      "seq": 700115,
+      "targets": [
+        "chroma"
+      ],
+      "command": "n=0; t=0; for f in $(find /knowledge -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "6/6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_qdrant_every_file_size_matches_read",
+      "seq": 700116,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "n=0; t=0; for f in $(find /db -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "12/12\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_jaeger_seeded_services_size_matches_read",
+      "seq": 700117,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "n=0; t=0; for f in $(find /j/services/checkout-api /j/services/orders-api /j/services/search-api /j/services/web-frontend -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "8/8\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_database_json_size_matches_read",
+      "seq": 700118,
+      "targets": [
+        "notion"
+      ],
+      "command": "n=0; t=0; for f in $(find /notion -name 'database.json' -type f); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1/1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_notion_page_json_is_size_unknown_until_read",
+      "seq": 700119,
+      "targets": [
+        "notion"
+      ],
+      "command": "f=/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cold=0\nread=1466\nwarm=1466\n",
+        "stderr": ""
+      },
+      "clear_cache": true
+    },
+    {
+      "id": "sz_langfuse_jsonl_size_matches_read",
+      "seq": 700120,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "n=0; t=0; for f in $(find /lf -name \"*.jsonl\"); do t=$((t+1)); test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n/$t\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "3/3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sz_langfuse_trace_json_is_size_unknown_until_read",
+      "seq": 700121,
+      "targets": [
+        "langfuse"
+      ],
+      "clear_cache": true,
+      "command": "f=/lf/traces/trace-beta.json; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cold=0\nread=694\nwarm=694\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

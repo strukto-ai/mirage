@@ -14,7 +14,7 @@
 
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
-import type { OperandKind } from '../../commands/spec/types.ts'
+import type { ValueType } from '../../commands/spec/types.ts'
 import { type CommandSpec } from '../../commands/spec/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
@@ -36,16 +36,31 @@ export function specForCommand(
 // Classify argv words into per-position operand kinds.
 //
 // Delegates to parseCommand so flag syntax (clusters, --flag=value,
-// repeatable flags, providedBy) classifies identically to dispatch. Kinds
+// multiple flags, providedBy) classifies identically to dispatch. Kinds
 // are positional, not value sets, so the same word can be TEXT in one slot
 // and PATH in another (`grep '*.txt' *.txt`). Null marks flag tokens and
 // ignored words (default classification applies).
-export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (OperandKind | null)[] {
+export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (ValueType | null)[] {
   const parsed = parseCommand(spec, [...argv], '/')
-  const kinds: (OperandKind | null)[] = [...parsed.wordKinds]
+  const kinds: (ValueType | null)[] = [...parsed.wordKinds]
   for (let i = 0; i < argv.length; i++) {
     const word = argv[i]
     if (word !== undefined && spec.ignoreTokens.has(word)) kinds[i] = null
   }
   return kinds
+}
+
+// Per-position base directories for a spec that declares one. tar's -C
+// is a chdir for the operands typed after it, so those words are not
+// relative to the session cwd at all. The parser already walks the line
+// positionally, so it is what says where each word stood; this asks it,
+// and only for the one command family that can answer (null everywhere
+// else, so 92 of 93 specs pay nothing).
+export function specWordBases(
+  spec: CommandSpec,
+  argv: readonly string[],
+  cwd: string,
+): (string | null)[] | null {
+  if (spec.operandBase === null) return null
+  return [...parseCommand(spec, [...argv], cwd).wordBases]
 }

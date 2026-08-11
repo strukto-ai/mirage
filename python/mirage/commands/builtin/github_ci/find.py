@@ -16,16 +16,19 @@ from functools import partial
 
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
+from mirage.commands.builtin.generic.find import (is_link, parse_find_args,
+                                                  resolve_start, walk_find)
 from mirage.commands.builtin.github_ci._provision import metadata_provision
 from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.github_ci.readdir import is_cross_run_root, is_dir_name
+from mirage.commands.spec.types import FlagValue
+from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -34,7 +37,7 @@ async def find_provision(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("find " + " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
@@ -60,7 +63,10 @@ async def find(
     empty: bool = False,
     prefix: str = "",
     index: IndexCacheStore,
-    **_extra: object,
+    L: bool = False,
+    links: LinkView | None = None,
+    stat_path: StatPath | None = None,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     # The wrapper only exists for the cross-run guard: walking every run
     # would fetch every run's logs. Filtering is the shared generic walk.
@@ -80,13 +86,23 @@ async def find(
                            empty=empty)
     results: list[str] = []
     for search in searches:
+        # Same start-point rule as every other find path: only a
+        # directory has a subtree to walk.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if not start.walk:
+            results.extend(start.results)
+            continue
         if is_cross_run_root(search):
             raise ValueError("find: recursive search across runs is disabled;"
                              " target a specific run (e.g. /ci/runs/<run>)")
         results.extend(await walk_find(search,
                                        readdir=partial(_readdir, accessor),
                                        stat=partial(_stat, accessor),
-                                       is_dir_name=is_dir_name,
                                        index=index,
-                                       args=args))
+                                       args=args,
+                                       links=links,
+                                       follow=L))
     return format_records(results), IOResult()

@@ -14,19 +14,10 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.optional import try_load_command
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
-
-FILETYPE_CATS: dict[str, OpFn | None] = {
-    ".parquet": try_load_command("mirage.core.filetype.parquet", "cat",
-                                 "parquet"),
-    ".feather": try_load_command("mirage.core.filetype.feather", "cat",
-                                 "parquet"),
-    ".orc": try_load_command("mirage.core.filetype.orc", "cat", "parquet"),
-    ".hdf5": try_load_command("mirage.core.filetype.hdf5", "cat", "hdf5"),
-}
+from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 
 
 def _make_read(fn: OpFn) -> OpFn:
@@ -41,15 +32,51 @@ def _make_read(fn: OpFn) -> OpFn:
     return read
 
 
-def _make_filetype_read(fn: OpFn, cat: OpFn) -> OpFn:
+def _make_ranged_read(table: OpsTable) -> OpFn:
+    """Build the ``read`` op, honoring a byte range when one is asked for.
+
+    A backend that can fetch a range natively does so, which is the whole
+    point on an object store: one ranged GET instead of the whole file.
+    Every other backend falls back to reading and slicing, which is the
+    same answer at the same cost as before, and is the only meaningful
+    behavior for a backend that renders its content rather than storing
+    it, since there is no remote range to ask for.
+
+    A zero-length read is answered here rather than sent anywhere: no
+    store can express an empty range, and the answer is known.
+
+    A window starting at or past EOF is the one case where the two paths
+    do not agree on their own: slicing yields empty, the POSIX answer,
+    while an HTTP store refuses with 416. Normalizing here rather than in
+    each reader keeps the op's contract one thing, and keeps a backend
+    from becoming the odd one out the day it grows a native range.
+
+    Args:
+        table (OpsTable): the backend's op table.
+    """
 
     async def read(accessor: Accessor,
                    path: PathSpec,
                    *,
                    index: IndexCacheStore | None = None,
+                   offset: int = 0,
+                   size: int | None = None,
                    **kwargs) -> bytes:
-        raw = await fn(accessor, path, index)
-        return cat(raw)
+        if size == 0:
+            return b""
+        whole = not offset and size is None
+        native = table.read_range
+        if native is not None and not whole:
+            try:
+                return await native(accessor, path, index, offset, size)
+            except Exception as exc:
+                if not is_unsatisfiable_range(exc):
+                    raise
+                return b""
+        data = await table.read_bytes(accessor, path, index)
+        if whole:
+            return data
+        return slice_window(data, offset, size)
 
     return read
 
@@ -152,7 +179,6 @@ def make_generic_ops(
     resource: str | list[str],
     table: OpsTable,
     *,
-    filetype_read: bool = False,
     emulate_truncate: bool = False,
     mkdir_parents: bool = False,
     overrides: set[str] | None = None,
@@ -166,26 +192,24 @@ def make_generic_ops(
     once. Ops whose table field is None are omitted, mirroring how the
     command factory skips write commands on read-only backends.
 
-    Parity with TS ``makeGenericOps``: there is deliberately no
-    ``forward_index`` knob here — Python cores invalidate the index
-    store through the cache context on mutation, so forwarding
-    ``index`` into read/readdir/stat is always safe, whereas the TS
-    ram/disk/redis/ssh cores cache listings that mutations never
-    invalidate and need ``forwardIndex: false``. Likewise
-    ``filetype_read`` is a bool (every backend that opts in gets the
-    full cat set, with missing optional deps skipped at import) while
-    TS takes an explicit ``filetypeRead`` extension list (TS has no ORC
-    support and its backends opt in per extension).
+    ``index`` is forwarded into read/readdir/stat for every backend, so
+    there is deliberately no ``forward_index`` knob here. Both write
+    paths evict the parent listing: ``dispatch`` through
+    :meth:`Dispatcher.invalidate_after_write`, and the VFS/FUSE surface
+    through the ``on_write`` hook :class:`Ops` is built with. TS keeps a
+    ``forwardIndex: false`` for ram/disk/redis/ssh because its
+    ``WorkspaceFS`` has no equivalent of that hook and reaches the ops
+    registry directly, so a forwarded index there is never evicted.
+
+    Every op emitted here is filetype-agnostic. To serve one extension
+    differently, register a filetype-scoped op on the mount; the mount
+    resolves ``(name, filetype)`` before ``(name, resource)``.
 
     Args:
         resource (str | list[str]): resource name(s) the ops register
             under; a list fans out one ``RegisteredOp`` per name (the
             HF family registers one surface for four resources).
         table (OpsTable): the backend's IO table (its ``CommandIO``).
-        filetype_read (bool): emit ``read`` ops for ``.parquet`` /
-            ``.feather`` / ``.orc`` / ``.hdf5`` rendered through the
-            shared filetype cats; formats whose optional dependency is
-            missing are skipped like ``try_load_command`` does.
         emulate_truncate (bool): synthesize ``truncate`` from
             ``read_bytes`` + ``write`` for backends with no native
             partial write (s3/ssh/ram/redis today).
@@ -198,18 +222,10 @@ def make_generic_ops(
     skip = overrides or set()
     ops: list[RegisteredOp] = []
 
-    _emit(ops, resources, "read", _make_read(table.read_bytes), False, None,
-          skip)
+    _emit(ops, resources, "read", _make_ranged_read(table), False, None, skip)
     _emit(ops, resources, "readdir", _make_read(table.readdir), False, None,
           skip)
     _emit(ops, resources, "stat", _make_read(table.stat), False, None, skip)
-
-    if filetype_read:
-        for ext, cat in FILETYPE_CATS.items():
-            if cat is None:
-                continue
-            _emit(ops, resources, "read",
-                  _make_filetype_read(table.read_bytes, cat), False, ext, skip)
 
     if table.write is not None:
         _emit(ops, resources, "write", _make_data_write(table.write), True,

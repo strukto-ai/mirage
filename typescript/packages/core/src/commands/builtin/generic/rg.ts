@@ -17,9 +17,11 @@ import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
-import { fsStrerror, isFsError } from '../../../utils/errors.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
+import { fsStrerror, isFsError, isWalkError } from '../../../utils/errors.ts'
+import { respellRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import {
   compilePattern,
   grepStream,
@@ -56,29 +58,27 @@ interface RgFlags {
   hidden: boolean
 }
 
-function parseRgFlags(flags: Record<string, string | boolean | string[]>): RgFlags {
-  const toInt = (v: string | boolean | string[] | undefined): number | null =>
-    typeof v === 'string' ? Number.parseInt(v, 10) : null
-  const a = toInt(flags.A)
-  const b = toInt(flags.B)
-  const c = toInt(flags.C)
+function parseRgFlags(fl: FlagView): RgFlags {
+  const a = fl.asInt('A')
+  const b = fl.asInt('B')
+  const c = fl.asInt('C')
   return {
-    ignoreCase: flags.i === true,
-    invert: flags.v === true,
-    lineNumbers: flags.n === true,
-    countOnly: flags.c === true,
-    filesOnly: flags.args_l === true,
-    wholeWord: flags.w === true,
-    fixedString: flags.F === true,
-    onlyMatching: flags.o === true,
-    withFilename: flags.H === true,
-    noFilename: flags.args_I === true,
-    maxCount: toInt(flags.m),
+    ignoreCase: fl.asBool('i'),
+    invert: fl.asBool('v'),
+    lineNumbers: fl.asBool('n'),
+    countOnly: fl.asBool('c'),
+    filesOnly: fl.asBool('args_l'),
+    wholeWord: fl.asBool('w'),
+    fixedString: fl.asBool('F'),
+    onlyMatching: fl.asBool('o'),
+    withFilename: fl.asBool('H'),
+    noFilename: fl.asBool('args_I'),
+    maxCount: fl.asInt('m') ?? null,
     afterContext: a ?? c ?? 0,
     beforeContext: b ?? c ?? 0,
-    fileType: typeof flags.type === 'string' ? flags.type : null,
-    globPattern: typeof flags.glob === 'string' ? flags.glob : null,
-    hidden: flags.hidden === true,
+    fileType: fl.asStr('type') ?? null,
+    globPattern: fl.asStr('glob') ?? null,
+    hidden: fl.asBool('hidden'),
   }
 }
 
@@ -118,7 +118,7 @@ export async function rgGeneric(
       new IOResult({ exitCode: 2, stderr: ENC.encode('rg: usage: rg [flags] pattern [path]\n') }),
     ]
   }
-  const flags = parseRgFlags(opts.flags)
+  const flags = parseRgFlags(new FlagView(opts.flags, specOf('rg')))
   if (resolution.neverMatch) flags.fixedString = false
   // ripgrep labels when searching multiple files; -H forces the label for a
   // single file and -I suppresses it (cross-mount fanout forces -H so
@@ -152,11 +152,13 @@ export async function rgGeneric(
   try {
     const s = await stat(first)
     isDir = s.type === FileType.DIRECTORY
-  } catch {
+  } catch (err) {
+    if (!isWalkError(err)) throw err
     try {
       await readdir(first)
       isDir = true
-    } catch {
+    } catch (probeErr) {
+      if (!isWalkError(probeErr)) throw probeErr
       // not readable
     }
   }
@@ -246,7 +248,7 @@ export async function rgGeneric(
         warnings,
         label ? p.rawPath : null,
       )
-      results.push(...rebaseRaw(hitsFull, p.virtual, p.rawPath))
+      results.push(...respellRaw(hitsFull, p.virtual, p.rawPath))
     }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {

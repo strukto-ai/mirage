@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import { isoToEpoch } from '../../../utils/dates.ts'
@@ -26,6 +28,7 @@ const DEFAULT_OWNER = 'user'
 
 const TYPE_LABELS: Record<string, string> = {
   [FileType.DIRECTORY]: 'directory',
+  [FileType.SYMLINK]: 'symbolic link',
   [FileType.TEXT]: 'regular file',
   [FileType.BINARY]: 'regular file',
   [FileType.JSON]: 'regular file',
@@ -38,11 +41,16 @@ function typeLabel(s: FileStat): string {
 
 function effectiveMode(s: FileStat): number {
   if (s.mode !== null) return s.mode & 0o7777
-  return s.type === FileType.DIRECTORY ? 0o755 : 0o644
+  if (s.type === FileType.DIRECTORY) return 0o755
+  // A symlink carries no permission bits of its own; GNU reports 0777.
+  if (s.type === FileType.SYMLINK) return 0o777
+  return 0o644
 }
 
 function typeBits(s: FileStat): number {
-  return s.type === FileType.DIRECTORY ? 0o040000 : 0o100000
+  if (s.type === FileType.DIRECTORY) return 0o040000
+  if (s.type === FileType.SYMLINK) return 0o120000
+  return 0o100000
 }
 
 function owner(value: number | string | null): string {
@@ -56,6 +64,15 @@ function epoch(iso: string | null): string {
 }
 
 const STR_DIRECTIVES = new Set(['n', 'N', 'F'])
+const FORMAT_FLAGS = new Set(['#', '0', ' ', '+', '-'])
+
+interface FormatDirective {
+  end: number
+  flags: string
+  width: string
+  precision: string | undefined
+  spec: string
+}
 
 // Shell-safe quoting for %N, mirroring GNU's default: a name with no
 // apostrophe is single-quoted; one containing an apostrophe (but no double
@@ -114,18 +131,80 @@ function directiveValue(spec: string, s: FileStat, name: string): string {
   return '?'
 }
 
-// GNU printf-style directive: %[flags][width][.precision]conversion, where the
-// conversion is a letter (optionally H/L-prefixed for device major/minor) or a
-// literal %. Parsing flags/width/precision up front stops them being mistaken
-// for the conversion char (e.g. %04a must not read as directive "0").
-const FORMAT_RE = /%([#0 +-]*)(\d*)(?:\.(\d*))?([HL]?[A-Za-z%])/g
+function isAsciiDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= '0' && char <= '9'
+}
+
+function isConversion(char: string | undefined): boolean {
+  return (
+    char === '%' ||
+    (char !== undefined && ((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')))
+  )
+}
+
+function parseFormatDirective(fmt: string, start: number): FormatDirective | null {
+  let cursor = start + 1
+  let flags = ''
+  while (cursor < fmt.length && FORMAT_FLAGS.has(fmt[cursor] ?? '')) {
+    flags += fmt.charAt(cursor)
+    cursor += 1
+  }
+
+  let width = ''
+  while (isAsciiDigit(fmt[cursor])) {
+    width += fmt.charAt(cursor)
+    cursor += 1
+  }
+
+  let precision: string | undefined
+  if (fmt[cursor] === '.') {
+    cursor += 1
+    precision = ''
+    while (isAsciiDigit(fmt[cursor])) {
+      precision += fmt.charAt(cursor)
+      cursor += 1
+    }
+  }
+
+  const first = fmt.charAt(cursor)
+  if (!isConversion(first)) return null
+  let spec = first
+  cursor += 1
+  if ((first === 'H' || first === 'L') && isConversion(fmt[cursor])) {
+    spec += fmt.charAt(cursor)
+    cursor += 1
+  }
+  return { end: cursor, flags, width, precision, spec }
+}
 
 function formatStat(fmt: string, s: FileStat, name: string): string {
-  return fmt.replace(
-    FORMAT_RE,
-    (_m, flags: string, width: string, precision: string | undefined, spec: string) =>
-      applyFlags(directiveValue(spec, s, name), flags, width, precision, spec),
-  )
+  const parts: string[] = []
+  let cursor = 0
+  while (cursor < fmt.length) {
+    const start = fmt.indexOf('%', cursor)
+    if (start === -1) {
+      parts.push(fmt.slice(cursor))
+      break
+    }
+    parts.push(fmt.slice(cursor, start))
+    const directive = parseFormatDirective(fmt, start)
+    if (directive === null) {
+      parts.push('%')
+      cursor = start + 1
+      continue
+    }
+    parts.push(
+      applyFlags(
+        directiveValue(directive.spec, s, name),
+        directive.flags,
+        directive.width,
+        directive.precision,
+        directive.spec,
+      ),
+    )
+    cursor = directive.end
+  }
+  return parts.join('')
 }
 
 export async function statGeneric(
@@ -133,18 +212,31 @@ export async function statGeneric(
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('stat'))
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('stat: missing operand\n') })]
   }
-  const fmt =
-    typeof opts.flags.c === 'string'
-      ? opts.flags.c
-      : typeof opts.flags.f === 'string'
-        ? opts.flags.f
-        : null
+  const fmt = fl.asStr('c') ?? fl.asStr('f') ?? null
   const lines: string[] = []
   let err = ''
+  const links = fl.asBool('L') ? null : (opts.links ?? null)
   for (const p of paths) {
+    // GNU stat lstats: a symlink operand reports the link itself, not
+    // its target, unless -L asks to dereference. A link has no backend
+    // inode, so the namespace is the only authority for it.
+    const linked = links?.statAt(p.virtual) ?? null
+    if (linked !== null) {
+      if (fmt !== null) {
+        lines.push(formatStat(fmt, linked, p.rawPath))
+      } else {
+        const sizeStr = linked.size === null ? 'None' : String(linked.size)
+        const modStr = linked.modified ?? 'None'
+        lines.push(
+          `name=${linked.name} size=${sizeStr} modified=${modStr} type=${linked.type ?? 'None'}`,
+        )
+      }
+      continue
+    }
     let s: FileStat
     try {
       s = await stat(p)

@@ -44,6 +44,13 @@ function runNative(cwd: string, cmd: string, stdin: Uint8Array | null): Promise<
     child.on('close', () => {
       resolve(Buffer.concat(out).toString('utf8'))
     })
+    // A program that never reads its stdin (`jq -n`) can exit before the
+    // write below lands, and a pipe with no reader left answers EPIPE.
+    // That is the program's own behavior, not a failed run; anything else
+    // still fails the test.
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE') reject(err)
+    })
     if (stdin !== null) child.stdin.write(Buffer.from(stdin))
     child.stdin.end()
   })
@@ -67,6 +74,9 @@ function makeRamEnv(): NativeEnv {
         resource.store.dirs.add('/' + parts.slice(0, i).join('/'))
       }
       resource.store.files.set(remote, content)
+      // Mirror the native side: files on the tmp filesystem carry an
+      // mtime, and -mtime windows exclude unknown-mtime entries.
+      resource.store.modified.set(remote, new Date().toISOString())
     },
     native(cmd, stdin = null) {
       return runNative(tmp, cmd, stdin)
@@ -160,6 +170,7 @@ function writeToMount(mount: MountHandle, relative: string, content: Uint8Array)
       ram.store.dirs.add('/' + parts.slice(0, i).join('/'))
     }
     ram.store.files.set('/' + relative, content)
+    ram.store.modified.set('/' + relative, new Date().toISOString())
     return
   }
   if (mount.diskRoot === null) throw new Error('disk mount missing root')

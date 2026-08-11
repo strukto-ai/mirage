@@ -16,7 +16,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -35,7 +35,7 @@ interface UniqFlags {
   zeroTerminated: boolean
 }
 
-function parseCount(value: string | boolean | string[] | undefined): number | null {
+function parseCount(value: string | boolean | number | string[] | undefined): number | null {
   if (value === undefined || value === false) return null
   if (typeof value !== 'string') throw new Error(`uniq: invalid count: '${String(value)}'`)
   const normalized = value.trim()
@@ -46,15 +46,15 @@ function parseCount(value: string | boolean | string[] | undefined): number | nu
 }
 
 function stringAlias(
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, FlagValue>,
   short: string,
   long: string,
-): string | boolean | string[] | undefined {
+): string | boolean | number | string[] | undefined {
   return flags[short] ?? flags[long]
 }
 
 function optionalMethod(
-  value: string | boolean | string[] | undefined,
+  value: string | boolean | number | string[] | undefined,
   defaultValue: string,
   allowed: string[],
   option: string,
@@ -67,10 +67,10 @@ function optionalMethod(
   return normalized
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): UniqFlags {
-  const count = flags.c === true || flags.count === true
-  const duplicatesOnly = flags.d === true || flags.repeated === true
-  const uniqueOnly = flags.u === true || flags.unique === true
+function parseFlags(flags: Record<string, FlagValue>): UniqFlags {
+  const count = flags.count === true
+  const duplicatesOnly = flags.repeated === true
+  const uniqueOnly = flags.unique === true
   const allRepeated = optionalMethod(
     flags.D === true ? true : flags.all_repeated,
     'none',
@@ -96,10 +96,10 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): UniqFla
     skipFields: parseCount(stringAlias(flags, 'f', 'skip_fields')) ?? 0,
     skipChars: parseCount(stringAlias(flags, 's', 'skip_chars')) ?? 0,
     checkChars: parseCount(stringAlias(flags, 'w', 'check_chars')),
-    ignoreCase: flags.i === true || flags.ignore_case === true,
+    ignoreCase: flags.ignore_case === true,
     allRepeated,
     group,
-    zeroTerminated: flags.z === true || flags.zero_terminated === true,
+    zeroTerminated: flags.zero_terminated === true,
   }
 }
 

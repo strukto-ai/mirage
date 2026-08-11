@@ -15,6 +15,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
@@ -28,32 +29,56 @@ import {
   BackblazeResource,
   BoxResource,
   CephResource,
+  ChromaResource,
   DatabricksVolumeResource,
   DifyResource,
   DigitalOceanResource,
+  DiscordResource,
   DiskResource,
   DropboxResource,
   EmailResource,
   GDocsResource,
   GDriveResource,
   GmailResource,
+  GCalResource,
   GCSResource,
+  GitHubResource,
+  GitHubCIResource,
   GridFSResource,
   GSheetsResource,
   GSlidesResource,
+  DISCORD,
+  GWS,
+  HIMALAYA,
+  GIT,
+  LINEAR,
+  NTN,
+  SLACK,
   HfBucketsResource,
+  JaegerResource,
+  LanceDBResource,
+  LangfuseResource,
   LinearResource,
   MinIOResource,
+  Mem0Resource,
+  MongoDBResource,
+  NotionResource,
+  ConsistencyPolicy,
   MountMode,
   NextcloudResource,
   OCIResource,
+  OneDriveResource,
+  PostgresResource,
+  QdrantResource,
   QingStorResource,
   R2Resource,
   RAMResource,
   RedisResource,
+  type Resource,
   S3Resource,
   ScalewayResource,
   SeaweedFSResource,
+  SharePointResource,
   SlackResource,
   SSHResource,
   SupabaseResource,
@@ -62,15 +87,25 @@ import {
   WasabiResource,
   Workspace,
 } from '@struktoai/mirage-node'
+import * as lancedb from '@lancedb/lancedb'
+import { QdrantClient } from '@qdrant/js-client-rest'
+import { ChromaClient } from 'chromadb'
 import { ImapFlow } from 'imapflow'
+import { Double, MongoClient } from 'mongodb'
+import pg from 'pg'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
 import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
 import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
+import { startPythonServer } from './server_process.ts'
 
 export interface Open {
   ws: ExecWorkspace
   cleanup: () => Promise<void>
+}
+
+export interface OpenConsistency extends Open {
+  mutate: (path: string, content: Uint8Array) => Promise<void>
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
@@ -83,56 +118,42 @@ const DATABRICKS_ENDPOINT = process.env.DATABRICKS_ENDPOINT
 const NEXTCLOUD_URL = process.env.NEXTCLOUD_URL
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME ?? 'admin'
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD ?? 'admin123'
-const GOOGLE_API_HOSTS = new Set([
-  'oauth2.googleapis.com',
-  'www.googleapis.com',
-  'docs.googleapis.com',
-  'slides.googleapis.com',
-  'sheets.googleapis.com',
-  'gmail.googleapis.com',
-])
-
-type FetchInput = Parameters<typeof globalThis.fetch>[0]
-type FetchInit = Parameters<typeof globalThis.fetch>[1]
-
-let realFetch: typeof globalThis.fetch | null = null
-let fakeGoogleBase = ''
-
-function redirectGoogleUrl(input: FetchInput): FetchInput {
-  if (typeof input !== 'string' && !(input instanceof URL)) return input
-  const raw = input instanceof URL ? input.href : input
-  if (!raw.startsWith('http://') && !raw.startsWith('https://')) return input
-  const url = new URL(raw)
-  if (!GOOGLE_API_HOSTS.has(url.hostname)) return input
-  return `${fakeGoogleBase}${url.pathname}${url.search}`
-}
-
-function fakeGoogleFetch(input: FetchInput, init?: FetchInit): Promise<Response> {
-  if (realFetch === null) throw new Error('fake Google fetch is not installed')
-  return realFetch(redirectGoogleUrl(input), init)
-}
-
-function useFakeGoogleEndpoints(base: string): void {
-  fakeGoogleBase = base
-  if (realFetch !== null) return
-  realFetch = globalThis.fetch
-  globalThis.fetch = fakeGoogleFetch
-}
-
 function runId(): string {
   return `${String(process.pid)}-${String(Date.now())}`
 }
 
+/**
+ * Install the CLIs a mount-backed target declares.
+ *
+ * `git` is the first CLI here that talks to no API: it reads a repository out of
+ * a mount, which is what makes it installable from a bare name with no config at
+ * all, where every other one needs its mock service to hand over both the tree
+ * and the credentials pointing at itself.
+ */
+function installLocalClis(ws: { registerCli: (name: string, spec: unknown) => void }, target: Target): void {
+  if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
+}
+
 async function openRam(target: Target): Promise<Open> {
   const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
+  const built: Record<string, RAMResource> = {}
   for (const m of target.mounts) {
-    const resource = new RAMResource()
+    // alias_of gives two prefixes one store: the shape that made
+    // cross-mount mv copy an object onto itself and then unlink the
+    // source. Every other path here allocates fresh storage.
+    const existing = m.alias_of !== undefined ? built[m.alias_of] : undefined
+    if (m.alias_of !== undefined && existing === undefined) {
+      throw new Error(`alias_of names no built mount: ${m.alias_of}`)
+    }
+    const resource = existing ?? new RAMResource()
+    built[m.path] = resource
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
     ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
   })
+  installLocalClis(ws, target)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -146,6 +167,7 @@ async function openDisk(target: Target): Promise<Open> {
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     for (const root of roots) rmSync(root, { recursive: true, force: true })
@@ -341,6 +363,8 @@ const EMAIL_SMTP_PORT = Number(process.env.EMAIL_SMTP_PORT ?? '3025')
 const EMAIL_API_PORT = Number(process.env.EMAIL_API_PORT ?? '8080')
 const EMAIL_USERNAME = 'integ@example.com'
 const EMAIL_PASSWORD = 'secret'
+// Doubles as the workspace id on the fake notion server.
+const NOTION_TOKEN = 'integ-test'
 
 // The GreenMail server is external and shared; its REST API purges every
 // mailbox between runs. Seeding appends RFC822 payloads over IMAP so folder
@@ -398,6 +422,21 @@ async function openEmail(target: Target): Promise<Open> {
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('himalaya') === true) {
+    // Every registerCli in this file installs the same snake_case block
+    // the Python runner does, so the cli facet proves one YAML config
+    // serves both hosts rather than only that each host has some config
+    // it accepts. The registry camelizes onto declared fields.
+    ws.registerCli('himalaya', HIMALAYA, {
+      imap_host: host,
+      imap_port: EMAIL_IMAP_PORT,
+      smtp_host: host,
+      smtp_port: EMAIL_SMTP_PORT,
+      username: EMAIL_USERNAME,
+      password: EMAIL_PASSWORD,
+      use_ssl: false,
+    })
+  }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -421,6 +460,20 @@ async function openHf(target: Target): Promise<Open> {
 }
 
 const BOX_AUTH = { Authorization: 'Bearer integ-box-token' }
+
+async function boxCreateWebLink(
+  endpoint: string,
+  parentId: string,
+  name: string,
+  url: string,
+): Promise<void> {
+  const r = await fetch(`${endpoint}/2.0/web_links`, {
+    method: 'POST',
+    headers: { ...BOX_AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, url, parent: { id: parentId } }),
+  })
+  if (r.status !== 201) throw new Error(`box web_link seed failed: ${String(r.status)}`)
+}
 
 async function boxCreateFolder(endpoint: string, parentId: string, name: string): Promise<string> {
   const r = await fetch(`${endpoint}/2.0/folders`, {
@@ -488,6 +541,11 @@ async function openBox(target: Target): Promise<Open> {
         )
       }
     }
+    if (m.seed === 'files/v1') {
+      // A weblink beside the fixture: sizeless and content-free, so
+      // listings must hide it and a direct stat must ENOENT.
+      await boxCreateWebLink(endpoint, folderId, 'homepage', 'https://example.com/')
+    }
     mounts[m.path] = new BoxResource({
       accessToken: 'integ-box-token',
       endpoint,
@@ -533,6 +591,409 @@ async function openDropbox(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+async function openOneDrive(target: Target): Promise<Open> {
+  const server = await startPythonServer('onedrive_server.py', {
+    MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
+  })
+  const mounts: Record<string, OneDriveResource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new OneDriveResource({
+      accessToken: 'integ-token',
+      graphBaseUrl: server.endpoint,
+      ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openSharePoint(target: Target): Promise<Open> {
+  const server = await startPythonServer('onedrive_server.py', {
+    MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
+  })
+  const mounts: Record<string, SharePointResource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new SharePointResource({
+      accessToken: 'integ-token',
+      graphBaseUrl: server.endpoint,
+      site: 'Main',
+      drive: mount.drive,
+      ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openGraphConsistency(
+  target: Target,
+  consistency: ConsistencyPolicy,
+): Promise<OpenConsistency> {
+  const server = await startPythonServer('onedrive_server.py', {
+    MIRAGE_GRAPH_DRIVES: 'data,xm2,res,shared',
+  })
+  const readMounts: Record<string, OneDriveResource | SharePointResource> = {}
+  const shadowMounts: Record<string, OneDriveResource | SharePointResource> = {}
+  for (const mount of target.mounts) {
+    if (mount.resource === 'onedrive') {
+      const config = {
+        accessToken: 'integ-token',
+        graphBaseUrl: server.endpoint,
+        ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+      }
+      readMounts[mount.path] = new OneDriveResource(config)
+      shadowMounts[mount.path] = new OneDriveResource(config)
+    } else {
+      const config = {
+        accessToken: 'integ-token',
+        graphBaseUrl: server.endpoint,
+        site: 'Main',
+        drive: mount.drive,
+        ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
+      }
+      readMounts[mount.path] = new SharePointResource(config)
+      shadowMounts[mount.path] = new SharePointResource(config)
+    }
+  }
+  const ws = new Workspace(readMounts, { mode: MountMode.WRITE, consistency })
+  const shadow = new Workspace(shadowMounts, { mode: MountMode.WRITE })
+  const mutate = async (path: string, content: Uint8Array): Promise<void> => {
+    const result = await shadow.execute(`tee ${path} > /dev/null`, { stdin: content })
+    if (result.exitCode !== 0) {
+      throw new Error(new TextDecoder().decode(result.stderr))
+    }
+  }
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await shadow.close()
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, mutate, cleanup }
+}
+
+async function openNotion(target: Target): Promise<Open> {
+  let base = process.env.NOTION_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('notion target requires NOTION_URL')
+  const reset = await fetch(`${base}/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspace: NOTION_TOKEN }),
+  })
+  if (!reset.ok) throw new Error(`notion /reset failed: ${String(reset.status)}`)
+  const mounts: Record<string, NotionResource | RAMResource | [NotionResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    if (mount.resource === 'ram') {
+      mounts[mount.path] = new RAMResource()
+      continue
+    }
+    const resource = new NotionResource({
+      apiKey: NOTION_TOKEN,
+      baseUrl: `${base}/v1`,
+    })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('ntn') === true) {
+    ws.registerCli('ntn', NTN, {
+      api_key: NOTION_TOKEN,
+      base_url: `${base}/v1`,
+    })
+  }
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const LANCEDB_ROWS: ReadonlyArray<Record<string, unknown>> = [
+  { id: 1, label: 'cat', kind: 'big', name: 'a big orange cat' },
+  { id: 2, label: 'cat', kind: 'small', name: 'a small grey cat' },
+  { id: 3, label: 'dog', kind: 'big', name: 'a big brown dog' },
+  { id: 4, label: 'dog', kind: 'small', name: 'a small white dog' },
+]
+
+async function openLancedb(target: Target): Promise<Open> {
+  const uri = mkdtempSync(join(tmpdir(), 'mirage-integ-lancedb-'))
+  const db = await lancedb.connect(uri)
+  await db.createTable('animals', LANCEDB_ROWS as Record<string, unknown>[])
+  const mounts: Record<string, LanceDBResource | [LanceDBResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new LanceDBResource({
+      uri,
+      groupBy: ['label', 'kind'],
+      idColumn: 'id',
+      titleColumn: 'name',
+      textColumn: 'name',
+    })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    rmSync(uri, { recursive: true, force: true })
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const QDRANT_EMBED_DIM = 8
+
+const QDRANT_ROWS: ReadonlyArray<readonly [number, string, string, string]> = [
+  [1, 'cat', 'big', 'a big orange cat'],
+  [2, 'cat', 'small', 'a small grey cat'],
+  [3, 'dog', 'big', 'a big brown dog'],
+  [4, 'dog', 'small', 'a small white dog'],
+]
+
+async function openQdrant(target: Target): Promise<Open> {
+  const host = process.env.QDRANT_HOST ?? 'localhost'
+  const port = Number.parseInt(process.env.QDRANT_PORT ?? '6333', 10)
+  const collection = `mirage-integ-${runId()}`
+  const client = new QdrantClient({ host, port })
+  await client.createCollection(collection, {
+    vectors: { size: QDRANT_EMBED_DIM, distance: 'Cosine' },
+  })
+  await client.upsert(collection, {
+    points: QDRANT_ROWS.map(([id, label, kind, name]) => ({
+      id,
+      vector: Array<number>(QDRANT_EMBED_DIM).fill(0.1),
+      payload: { label, kind, name, image_bytes: btoa(`PNG-${String(id)}`) },
+    })),
+  })
+  for (const field of ['label', 'kind']) {
+    await client.createPayloadIndex(collection, { field_name: field, field_schema: 'keyword' })
+  }
+  await new Promise((r) => setTimeout(r, 2000))
+  const mounts: Record<string, QdrantResource | [QdrantResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new QdrantResource({
+      host,
+      port,
+      collection,
+      groupBy: ['label', 'kind'],
+      idField: 'id',
+      textField: 'name',
+      blobField: 'image_bytes',
+      blobExt: 'png',
+    })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await new QdrantClient({ host, port }).deleteCollection(collection)
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const CHROMA_EMBED_DIM = 8
+
+interface ChromaChunk {
+  document: string
+  metadata: { page_slug: string; chunk_index: number }
+}
+
+interface ChromaSeed {
+  path_tree: Record<string, unknown>
+  chunks: Record<string, ChromaChunk[]>
+}
+
+function chromaEmbedding(position: number): number[] {
+  const vector = new Array<number>(CHROMA_EMBED_DIM).fill(0)
+  vector[position % CHROMA_EMBED_DIM] = 1
+  return vector
+}
+
+async function seedChroma(host: string, port: number, collectionName: string): Promise<void> {
+  const seed = JSON.parse(
+    readFileSync(join(integRoot(), 'server', 'chroma_seed.json'), 'utf8'),
+  ) as ChromaSeed
+  const encoded = gzipSync(Buffer.from(JSON.stringify(seed.path_tree))).toString('base64')
+  const ids = ['__path_tree__']
+  const documents = [encoded]
+  const metadatas: Record<string, string | number>[] = [{ kind: 'path_tree' }]
+  const embeddings = [chromaEmbedding(0)]
+  let position = 1
+  for (const chunks of Object.values(seed.chunks)) {
+    for (const chunk of chunks) {
+      ids.push(`${chunk.metadata.page_slug}#${String(chunk.metadata.chunk_index)}`)
+      documents.push(chunk.document)
+      metadatas.push(chunk.metadata)
+      embeddings.push(chromaEmbedding(position))
+      position += 1
+    }
+  }
+  const client = new ChromaClient({ host, port })
+  const collection = await client.createCollection({ name: collectionName, embeddingFunction: null })
+  await collection.add({ ids, documents, metadatas, embeddings })
+}
+
+async function openChroma(target: Target): Promise<Open> {
+  const host = process.env.CHROMA_HOST ?? 'localhost'
+  const port = Number.parseInt(process.env.CHROMA_PORT ?? '8000', 10)
+  const collectionName = `mirage-integ-${runId()}`
+  await seedChroma(host, port, collectionName)
+  const mounts: Record<string, ChromaResource | [ChromaResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new ChromaResource({ host, port, collectionName })
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await new ChromaClient({ host, port }).deleteCollection({ name: collectionName })
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const MONGODB_DB = 'mirage_integ'
+
+const MONGODB_BOOKS: ReadonlyArray<Record<string, unknown>> = [
+  { _id: 1, title: 'alpha', author: 'ada', year: 2020, tags: ['fiction', 'classic'], rating: 4.5 },
+  { _id: 2, title: 'beta', author: 'ben', year: 2021, tags: ['fiction'], rating: 3.2 },
+  { _id: 3, title: 'gamma', author: 'cara', year: 2022, rating: 5.0 },
+  { _id: 4, title: 'delta', author: 'ada', year: 2023, tags: ['history'], rating: 4.0 },
+  { _id: 5, title: 'epsilon', author: 'ben', year: 2024, rating: 2.5 },
+]
+
+const MONGODB_AUTHORS: ReadonlyArray<Record<string, unknown>> = [
+  { _id: 1, name: 'ada', books: 2 },
+  { _id: 2, name: 'ben', books: 2 },
+  { _id: 3, name: 'cara', books: 1 },
+]
+
+async function seedMongodb(uri: string): Promise<void> {
+  const client = new MongoClient(uri)
+  await client.connect()
+  try {
+    const db = client.db(MONGODB_DB)
+    await db.dropDatabase()
+    // Python seeds floats (BSON double); insert Double so the inferred schema
+    // and rendered documents match byte-for-byte across languages.
+    await db
+      .collection('books')
+      .insertMany(MONGODB_BOOKS.map((d) => ({ ...d, rating: new Double(d.rating as number) })))
+    await db.collection('authors').insertMany(MONGODB_AUTHORS.map((d) => ({ ...d })))
+    await db.createCollection('recent_books', {
+      viewOn: 'books',
+      pipeline: [{ $match: { year: { $gte: 2022 } } }],
+    })
+  } finally {
+    await client.close()
+  }
+}
+
+async function openMongodb(target: Target): Promise<Open> {
+  const uri = process.env.MONGODB_URI
+  if (uri === undefined) throw new Error('mongodb target requires MONGODB_URI')
+  await seedMongodb(uri)
+  const resources: MongoDBResource[] = []
+  const mounts: Record<string, MongoDBResource | [MongoDBResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new MongoDBResource({ uri, databases: [MONGODB_DB] })
+    resources.push(resource)
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    for (const resource of resources) await resource.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+const POSTGRES_BOOKS: ReadonlyArray<readonly [number, string, string, number, number]> = [
+  [1, 'alpha', 'ada', 2020, 4.5],
+  [2, 'beta', 'ben', 2021, 3.2],
+  [3, 'gamma', 'cara', 2022, 5.0],
+  [4, 'delta', 'ada', 2023, 4.0],
+  [5, 'epsilon', 'ben', 2024, 2.5],
+]
+
+const POSTGRES_AUTHORS: ReadonlyArray<readonly [number, string, number]> = [
+  [1, 'ada', 2],
+  [2, 'ben', 2],
+  [3, 'cara', 1],
+]
+
+async function seedPostgres(dsn: string): Promise<void> {
+  const client = new pg.Client({ connectionString: dsn })
+  await client.connect()
+  try {
+    await client.query('DROP VIEW IF EXISTS recent_books')
+    await client.query('DROP TABLE IF EXISTS books')
+    await client.query('DROP TABLE IF EXISTS authors')
+    await client.query(
+      'CREATE TABLE books (id int PRIMARY KEY, title text, author text, year int, rating double precision)',
+    )
+    await client.query('CREATE TABLE authors (id int PRIMARY KEY, name text, books int)')
+    for (const [id, title, author, year, rating] of POSTGRES_BOOKS) {
+      await client.query(
+        'INSERT INTO books (id, title, author, year, rating) VALUES ($1, $2, $3, $4, $5)',
+        [id, title, author, year, rating],
+      )
+    }
+    for (const [id, name, books] of POSTGRES_AUTHORS) {
+      await client.query('INSERT INTO authors (id, name, books) VALUES ($1, $2, $3)', [
+        id,
+        name,
+        books,
+      ])
+    }
+    await client.query('CREATE VIEW recent_books AS SELECT * FROM books WHERE year >= 2022')
+    await client.query('ANALYZE books')
+    await client.query('ANALYZE authors')
+  } finally {
+    await client.end()
+  }
+}
+
+async function openPostgres(target: Target): Promise<Open> {
+  const dsn = process.env.POSTGRES_DSN
+  if (dsn === undefined) throw new Error('postgres target requires POSTGRES_DSN')
+  await seedPostgres(dsn)
+  const resources: PostgresResource[] = []
+  const mounts: Record<string, PostgresResource | [PostgresResource, MountMode]> = {}
+  for (const mount of target.mounts) {
+    const resource = new PostgresResource({ dsn, maxReadRows: 200 })
+    resources.push(resource)
+    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    for (const resource of resources) await resource.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openMem0(target: Target): Promise<Open> {
+  const server = await startPythonServer('mem0_server.py')
+  const mounts: Record<string, Mem0Resource> = {}
+  for (const mount of target.mounts) {
+    mounts[mount.path] = new Mem0Resource({
+      apiKey: 'integ-key',
+      host: server.endpoint,
+      userId: 'integ-user',
+      defaultPageSize: 2,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await server.close()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
 async function adminExec(ws: Workspace, command: string): Promise<void> {
   const result = await ws.execute(command)
   if (result.exitCode !== 0) {
@@ -545,12 +1006,24 @@ async function openSsh(target: Target): Promise<Open> {
   if (!host) throw new Error('ssh target requires SSH_HOST')
   const port = Number(process.env.SSH_PORT ?? '22')
   const base = `mirage-integ-${runId()}`
-  const admin = new Workspace(
-    { '/admin': new SSHResource({ host, port, username: 'integ' }) },
-    { mode: MountMode.WRITE },
-  )
+  const adminResource = new SSHResource({ host, port, username: 'integ' })
+  const admin = new Workspace({ '/admin': adminResource }, { mode: MountMode.WRITE })
   const paths = target.mounts.map((m) => `/admin/${base}/${String(m.root)}`).join(' ')
   await adminExec(admin, `mkdir -p ${paths}`)
+  // A server-side symlink in the /links mount: mirage's shell ln -s only
+  // makes namespace links, so the battery needs one created over SFTP to
+  // pin that ssh stat follows links (target size, not link-text length).
+  // Dangling until the fixture seeds poem.txt.
+  const sftp = await adminResource.accessor.sftp()
+  for (const m of target.mounts) {
+    if (m.root !== 'links') continue
+    await new Promise<void>((resolveFn, rejectFn) => {
+      sftp.symlink('../data/poem.txt', `/${base}/${String(m.root)}/poem_link.txt`, (err) => {
+        if (err !== undefined) rejectFn(err)
+        else resolveFn()
+      })
+    })
+  }
   const mounts: Record<string, SSHResource> = {}
   for (const m of target.mounts) {
     mounts[m.path] = new SSHResource({
@@ -639,6 +1112,41 @@ async function seedGwsApps(base: string, entries: GwsAppEntry[]): Promise<void> 
   }
 }
 
+interface CalendarEntry {
+  summary: string
+  // A timed event carries dateTime with a mandatory offset; an all-day one
+  // carries a floating date and no zone at all.
+  start: { date?: string; dateTime?: string }
+  end: { date?: string; dateTime?: string }
+}
+
+interface SeedCalendar {
+  id: string
+  summary: string
+  timeZone?: string
+  accessRole?: string
+  hidden?: boolean
+  events?: CalendarEntry[]
+}
+
+interface SeedForm {
+  title: string
+  documentTitle?: string
+  description?: string
+  items?: Record<string, unknown>[]
+  responses?: Record<string, unknown>[]
+}
+
+interface CalendarFixture {
+  events: CalendarEntry[]
+  calendars?: SeedCalendar[]
+}
+
+function gwsManifest<T>(name: string | undefined): T | undefined {
+  if (name === undefined) return undefined
+  return JSON.parse(readFileSync(join(integRoot(), 'fixtures', `${name}.json`), 'utf8')) as T
+}
+
 interface MailEntry {
   from: string
   to: string
@@ -706,13 +1214,32 @@ async function seedGwsMail(base: string, entries: MailEntry[]): Promise<void> {
   }
 }
 
+// Events are API objects, so they seed through events.insert and take the
+// ids the server mints; the manifest pins the times, which is what the day
+// directories are derived from.
+async function seedGwsCalendar(base: string, entries: CalendarEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await gwsJson(`${base}/calendar/v3/calendars/primary/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    })
+  }
+}
+
 function gwsNativeResource(
   resource: string,
-): GDocsResource | GSheetsResource | GSlidesResource | GmailResource {
-  const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ' }
+  base: string,
+): GDocsResource | GSheetsResource | GSlidesResource | GmailResource | GCalResource {
+  // apiBase points the backend at the fake server through the same
+  // config field a real embedder uses; nothing is monkey-patched.
+  const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
   if (resource === 'gdocs') return new GDocsResource(config)
   if (resource === 'gsheets') return new GSheetsResource(config)
   if (resource === 'gmail') return new GmailResource(config)
+  // today is pinned so the rolling window is the same on both hosts and
+  // lands on the seeded events.
+  if (resource === 'gcal') return new GCalResource({ ...config, today: '2026-02-11' })
   return new GSlidesResource(config)
 }
 
@@ -720,26 +1247,35 @@ async function openGws(target: Target): Promise<Open> {
   let base = process.env.GWS_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('gdrive target requires GWS_URL')
-  useFakeGoogleEndpoints(base)
   // Native mounts (gdocs/gsheets/gslides) render the modified date into
-  // filenames, so those targets pin the server clock.
+  // filenames, so those targets pin the server clock. Secondary calendars
+  // and seeded form responses ride the same call rather than being
+  // inserted: a calendar's accessRole and a form response are both states
+  // no API call can produce.
+  const calendar = gwsManifest<CalendarFixture>(target.calendar)
+  const forms = gwsManifest<SeedForm[]>(target.forms)
+  const reset: Record<string, unknown> = {}
+  if (target.epoch !== undefined) reset.epoch = target.epoch
+  if (calendar?.calendars !== undefined) reset.calendars = calendar.calendars
+  if (forms !== undefined) reset.forms = forms
   await gwsJson(`${base}/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(target.epoch !== undefined ? { epoch: target.epoch } : {}),
+    body: JSON.stringify(reset),
   })
   const mounts: Record<
     string,
     GDriveResource | GDocsResource | GSheetsResource | GSlidesResource | GmailResource | RAMResource
   > = {}
   const driveIds: Record<string, string> = {}
+  const folderIds: Record<string, string> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
       mounts[m.path] = new RAMResource()
       continue
     }
     if (m.resource !== 'gdrive') {
-      mounts[m.path] = gwsNativeResource(m.resource)
+      mounts[m.path] = gwsNativeResource(m.resource, base)
       continue
     }
     // A mount may live inside a Shared Drive: the drive is created once
@@ -761,18 +1297,29 @@ async function openGws(target: Target): Promise<Open> {
       clientId: 'integ',
       clientSecret: 'integ',
       refreshToken: 'integ',
+      apiBase: base,
       folderId: parent,
     })
+    folderIds[m.path] = parent
   }
-  if (target.apps !== undefined) {
-    const manifest = join(integRoot(), 'fixtures', `${target.apps}.json`)
-    await seedGwsApps(base, JSON.parse(readFileSync(manifest, 'utf8')) as GwsAppEntry[])
-  }
-  if (target.mail !== undefined) {
-    const manifest = join(integRoot(), 'fixtures', `${target.mail}.json`)
-    await seedGwsMail(base, JSON.parse(readFileSync(manifest, 'utf8')) as MailEntry[])
-  }
+  const apps = gwsManifest<GwsAppEntry[]>(target.apps)
+  if (apps !== undefined) await seedGwsApps(base, apps)
+  const mail = gwsManifest<MailEntry[]>(target.mail)
+  if (mail !== undefined) await seedGwsMail(base, mail)
+  if (calendar !== undefined) await seedGwsCalendar(base, calendar.events)
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('gws') === true) {
+    // A target may scope the gws install to one mount's folder, the
+    // configuration where the CLI and the mount are the same folder.
+    const scope = target.cli_scope
+    ws.registerCli('gws', GWS, {
+      client_id: 'integ',
+      client_secret: 'integ',
+      refresh_token: 'integ',
+      api_base: base,
+      ...(scope !== undefined ? { folder_id: folderIds[scope] } : {}),
+    })
+  }
   const cleanup = async (): Promise<void> => {
     await ws.close()
   }
@@ -788,8 +1335,12 @@ async function openSlack(target: Target): Promise<Open> {
   if (base === '') throw new Error('slack target requires SLACK_URL')
   const reset = await fetch(`${base}/reset`, { method: 'POST' })
   if (!reset.ok) throw new Error(`slack /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, SlackResource> = {}
+  const mounts: Record<string, SlackResource | RAMResource> = {}
   for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
     mounts[m.path] = new SlackResource({
       token: 'xoxb-integ',
       searchToken: 'xoxp-integ-search',
@@ -797,10 +1348,62 @@ async function openSlack(target: Target): Promise<Open> {
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('slack') === true) {
+    ws.registerCli('slack', SLACK, {
+      token: 'xoxb-integ',
+      search_token: 'xoxp-integ-search',
+      base_url: `${base}/api`,
+    })
+  }
   const cleanup = async (): Promise<void> => {
     await ws.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+// The fake api.github.com server (integ/server/github_server.py) is external
+// and shared across both hosts, mirroring the fake Slack server. It used to
+// have to be out of process for the python host, whose GitHubResource
+// fetched the repo tree with a blocking urlopen from its constructor; that
+// fetch is awaited now, so being shared is the only reason left.
+async function openGitHub(target: Target): Promise<Open> {
+  let base = process.env.GITHUB_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('github target requires GITHUB_URL')
+  const mounts: Record<string, GitHubResource | [GitHubResource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const [owner, repo] = String(m.repo).split('/')
+    const resource = await GitHubResource.create({
+      token: 'ghp-integ',
+      owner: owner ?? '',
+      repo: repo ?? '',
+      baseUrl: base,
+    })
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+// Reuses the external github_server.py process on GITHUB_URL, which also
+// serves the fixed Actions dataset (workflows/runs/jobs/artifacts).
+async function openGitHubCI(target: Target): Promise<Open> {
+  let base = process.env.GITHUB_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('github_ci target requires GITHUB_URL')
+  const mounts: Record<string, GitHubCIResource | [GitHubCIResource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const [owner, repo] = String(m.repo).split('/')
+    const resource = new GitHubCIResource({
+      token: 'ghp-integ',
+      owner: owner ?? '',
+      repo: repo ?? '',
+      baseUrl: base,
+    })
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
 async function openDify(target: Target): Promise<Open> {
@@ -821,6 +1424,11 @@ async function openDify(target: Target): Promise<Open> {
 async function openTrello(target: Target): Promise<Open> {
   const endpoint = process.env.TRELLO_ENDPOINT
   if (!endpoint) throw new Error('trello target requires TRELLO_ENDPOINT')
+  // The server outlives a single run here, so cards and comments the write
+  // cases create have to be rolled back to the fixture before they run
+  // again -- and before the other host's run, which shares this server.
+  const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
+  if (!reset.ok) throw new Error(`trello /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, TrelloResource | RAMResource> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
@@ -837,9 +1445,43 @@ async function openTrello(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
+async function openDiscord(target: Target): Promise<Open> {
+  const endpoint = process.env.DISCORD_ENDPOINT
+  if (!endpoint) throw new Error('discord target requires DISCORD_ENDPOINT')
+  // The server outlives a single run here, so posted messages have to be
+  // rolled back to the fixture before the write cases run again.
+  const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
+  if (!reset.ok) throw new Error(`discord /reset failed: ${String(reset.status)}`)
+  const mounts: Record<string, DiscordResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new DiscordResource({
+      token: 'integ-bot-token',
+      baseUrl: `${endpoint}/api/v10`,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('discord') === true) {
+    ws.registerCli('discord', DISCORD, {
+      token: 'integ-bot-token',
+      base_url: `${endpoint}/api/v10`,
+    })
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
 async function openLinear(target: Target): Promise<Open> {
   const endpoint = process.env.LINEAR_ENDPOINT
   if (!endpoint) throw new Error('linear target requires LINEAR_ENDPOINT')
+  // The server outlives a single run here, so mutations from the CLI
+  // write cases have to be rolled back to the fixture before the read
+  // goldens run again.
+  const resetUrl = `${endpoint.replace(/\/graphql$/, '')}/reset`
+  const reset = await fetch(resetUrl, { method: 'POST' })
+  if (!reset.ok) throw new Error(`linear /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, LinearResource | RAMResource> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
@@ -850,6 +1492,115 @@ async function openLinear(target: Target): Promise<Open> {
       apiKey: 'integ-key',
       baseUrl: endpoint,
     })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('linear') === true) {
+    ws.registerCli('linear', LINEAR, { api_key: 'integ-key', base_url: endpoint })
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+// The jaeger stack is a real jaeger all-in-one container, seeded over OTLP by
+// integ/server/jaeger_seed.py so trace ids and timestamps are fixed.
+async function openJaeger(target: Target): Promise<Open> {
+  const host = process.env.JAEGER_URL
+  if (!host) throw new Error('jaeger target requires JAEGER_URL')
+  const mounts: Record<string, JaegerResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new JaegerResource({ host })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+// The langfuse stack is a real self-hosted Langfuse (integ/server/
+// langfuse_compose.yml), seeded by integ/server/langfuse_seed.py. The project
+// keys come from LANGFUSE_INIT_* headless initialization, so they are fixed.
+async function openLangfuse(target: Target): Promise<Open> {
+  const host = process.env.LANGFUSE_URL
+  if (!host) throw new Error('langfuse target requires LANGFUSE_URL')
+  const mounts: Record<string, LangfuseResource | RAMResource> = {}
+  for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
+    mounts[m.path] = new LangfuseResource({
+      publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? 'pk-lf-mirage-integ',
+      secretKey: process.env.LANGFUSE_SECRET_KEY ?? 'sk-lf-mirage-integ',
+      host,
+    })
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+}
+
+// Backends reachable with dummy credentials and no server, for the arg-error
+// battery: an invalid -maxdepth/-mindepth/-size/-mtime must be rejected while
+// flags are parsed, before any network call, so construction is all these
+// targets ever need. github, notion and hf_buckets are absent on purpose:
+// github needs a live repo at construct, notion an OAuth provider, and
+// hf_buckets validates the bucket id.
+const ARG_ERROR_RESOURCES: Record<string, () => Resource> = {
+  databricks: () =>
+    new DatabricksVolumeResource({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
+  discord: () => new DiscordResource({ token: 'x' }),
+  email: () =>
+    new EmailResource({
+      imapHost: 'h',
+      imapPort: 993,
+      smtpHost: 'h',
+      smtpPort: 587,
+      username: 'u',
+      password: 'p',
+      useSsl: true,
+      maxMessages: 200,
+    }),
+  gdocs: () => new GDocsResource({ clientId: 'c', refreshToken: 'r' }),
+  gdrive: () => new GDriveResource({ clientId: 'c', refreshToken: 'r' }),
+  github_ci: () => new GitHubCIResource({ token: 't', owner: 'o', repo: 'r' }),
+  gmail: () => new GmailResource({ clientId: 'c', refreshToken: 'r' }),
+  gsheets: () => new GSheetsResource({ clientId: 'c', refreshToken: 'r' }),
+  gslides: () => new GSlidesResource({ clientId: 'c', refreshToken: 'r' }),
+  langfuse: () => new LangfuseResource({ publicKey: 'p', secretKey: 's' }),
+  linear: () => new LinearResource({ apiKey: 'k' }),
+  mem0: () => new Mem0Resource({ apiKey: 'k', userId: 'u' }),
+  onedrive: () => new OneDriveResource({ accessToken: 't' }),
+  sharepoint: () => new SharePointResource({ accessToken: 't' }),
+  slack: () => new SlackResource({ token: 'x' }),
+  trello: () => new TrelloResource({ apiKey: 'k', apiToken: 't' }),
+}
+
+// The fixture web server curl and wget fetch from. Exported through
+// HTTP_ENDPOINT rather than a mount, because the cases name it as a URL in the
+// command text (the {http} token) instead of a path. Owning the process here
+// means --facet http needs no CI setup.
+async function openHttp(target: Target): Promise<Open> {
+  const server = await startPythonServer('http_server.py')
+  process.env.HTTP_ENDPOINT = server.endpoint.replace(/^HTTP_ENDPOINT=/, '')
+  const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const resource = new RAMResource()
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await server.close()
+    delete process.env.HTTP_ENDPOINT
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
+}
+
+async function openArgError(target: Target): Promise<Open> {
+  const mounts: Record<string, Resource | [Resource, MountMode]> = {}
+  for (const m of target.mounts) {
+    const resource = ARG_ERROR_RESOURCES[m.backend]()
+    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
@@ -865,6 +1616,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   nextcloud: openNextcloud,
   gridfs: openGridfs,
   ssh: openSsh,
+  gcal: openGws,
   gdrive: openGws,
   gdocs: openGws,
   gsheets: openGws,
@@ -874,8 +1626,32 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   hf: openHf,
   box: openBox,
   dropbox: openDropbox,
+  onedrive: openOneDrive,
+  sharepoint: openSharePoint,
+  mem0: openMem0,
+  postgres: openPostgres,
+  mongodb: openMongodb,
+  chroma: openChroma,
+  qdrant: openQdrant,
+  lancedb: openLancedb,
+  notion: openNotion,
+  github: openGitHub,
+  github_ci: openGitHubCI,
   slack: openSlack,
   trello: openTrello,
+  discord: openDiscord,
   linear: openLinear,
+  langfuse: openLangfuse,
+  jaeger: openJaeger,
   dify: openDify,
+  arg_error: openArgError,
+  http_fixture: openHttp,
+}
+
+export const CONSISTENCY_ADAPTERS: Record<
+  string,
+  (target: Target, consistency: ConsistencyPolicy) => Promise<OpenConsistency>
+> = {
+  onedrive: openGraphConsistency,
+  sharepoint: openGraphConsistency,
 }

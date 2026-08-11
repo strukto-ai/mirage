@@ -16,10 +16,6 @@ import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { DISCORD_ADD_REACTION } from './discord_add_reaction.ts'
-import { DISCORD_GET_SERVER_INFO } from './discord_get_server_info.ts'
-import { DISCORD_LIST_MEMBERS } from './discord_list_members.ts'
-import { DISCORD_SEND_MESSAGE } from './discord_send_message.ts'
 import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
 import { DISCORD_IO } from './io.ts'
@@ -34,8 +30,4 @@ export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
   ...DISCORD_GREP,
   ...DISCORD_RG,
   ...DISCORD_HEAD,
-  ...DISCORD_SEND_MESSAGE,
-  ...DISCORD_ADD_REACTION,
-  ...DISCORD_GET_SERVER_INFO,
-  ...DISCORD_LIST_MEMBERS,
 ]

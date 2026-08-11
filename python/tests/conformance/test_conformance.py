@@ -29,7 +29,7 @@ CONFORMANCE_DIR = REPO_ROOT / "conformance"
 REDIS_URL = os.environ.get("REDIS_URL", "")
 SUPPORTED_MATRIX = {
     "python": {"ram", "disk", "redis"},
-    "typescript": {"ram"},
+    "typescript": {"ram", "disk", "redis"},
 }
 
 
@@ -161,7 +161,7 @@ async def test_conformance(backend: str, case: dict, tmp_path: Path) -> None:
             "pyhton": ["ram"]
         }, "unknown matrix language"),
         ({
-            "typescript": ["disk"]
+            "typescript": ["s3"]
         }, "unsupported typescript backend"),
         ({
             "python": [],
@@ -181,7 +181,7 @@ def test_validate_matrix_accepts_supported_targets() -> None:
         "id": "valid_matrix",
         "matrix": {
             "python": ["ram", "disk", "redis"],
-            "typescript": ["ram"],
+            "typescript": ["ram", "disk", "redis"],
         },
     }
     _validate_matrix(case, "valid.json")

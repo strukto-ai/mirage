@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -71,10 +73,10 @@ export async function unexpandGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const tabsValue = opts.flags.t ?? opts.flags.tabs
-  const tabsize = typeof tabsValue === 'string' ? Number.parseInt(tabsValue, 10) : 8
-  const allSpaces =
-    (opts.flags.a === true || opts.flags.all === true) && opts.flags.first_only !== true
+  const fl = new FlagView(opts.flags, specOf('unexpand'))
+  const tabsValue = fl.asStr('tabs')
+  const tabsize = tabsValue === undefined ? 8 : Number.parseInt(tabsValue, 10)
+  const allSpaces = fl.asBool('all') && !fl.asBool('first_only')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still unexpand (GNU unexpand).

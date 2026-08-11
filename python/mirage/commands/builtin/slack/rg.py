@@ -24,7 +24,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.slack.formatters import (build_query,
                                           format_file_grep_results,
                                           format_grep_results)
@@ -49,7 +49,7 @@ async def rg(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
@@ -62,7 +62,12 @@ async def rg(
         if not scope.use_native:
             scope = coalesce_scopes(paths) or scope
 
-        if (scope.use_native and getattr(scope, "target", None) != "files"
+        # Slack search matches whole words while grep matches substrings,
+        # so native results are a strict subset of the real matches for a
+        # bare literal. Only -w makes the two agree; otherwise fall
+        # through to the per-message scan.
+        if (scope.use_native and fl.as_bool("w")
+                and getattr(scope, "target", None) != "files"
                 and search_available(accessor.config)):
             file_prefix = mount_prefix_of(paths[0].virtual,
                                           paths[0].resource_path) or ""

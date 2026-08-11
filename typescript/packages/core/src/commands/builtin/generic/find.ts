@@ -12,16 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isEnoent } from '../../../core/generic/find.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
+import { modifiedTs } from '../../../core/generic/find.ts'
+import { isEnoent } from '../../../utils/errors.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { optionsTree, prefixPathNodes } from '../findEval.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { respellRaw } from '../../../utils/path.ts'
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
+import {
+  emitStartPath,
+  hasLinkChildren,
+  keep,
+  optionsTree,
+  prefixPathNodes,
+  startBasename,
+  type FindEntry,
+  type PredNode,
+} from '../findEval.ts'
+import type { LinkView } from '../../../ops/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,6 +58,38 @@ function parseMtime(spec: string): [number | null, number | null] {
 }
 
 const nan = (v: number | null): boolean => v !== null && Number.isNaN(v)
+
+async function applyMtimeFilter(
+  results: string[],
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+  stat: (spec: PathSpec) => Promise<FileStat>,
+  mountPrefix: string,
+): Promise<string[]> {
+  if (mtimeMin === null && mtimeMax === null) return results
+  const filtered: string[] = []
+  for (const r of results) {
+    const spec = new PathSpec({
+      virtual: r,
+      directory: r,
+      resolved: false,
+      resourcePath: mountKey(r, mountPrefix),
+    })
+    let st: FileStat
+    try {
+      st = await stat(spec)
+    } catch (err) {
+      if (isEnoent(err)) continue
+      throw err
+    }
+    const mt = modifiedTs(st.modified)
+    if (mt === null) continue
+    if (mtimeMin !== null && mt < mtimeMin) continue
+    if (mtimeMax !== null && mt > mtimeMax) continue
+    filtered.push(r)
+  }
+  return filtered
+}
 
 // Reject malformed -size/-mtime on backends that do not implement those
 // predicates, so a typo errors instead of being silently ignored. Returns the
@@ -91,20 +136,189 @@ function extractOrNames(name: string | null, texts: readonly string[]): string[]
   return names
 }
 
+// Namespace symlinks under the search root that match the expression.
+//
+// Symlinks live in the namespace, not in any backend, so a backend's
+// find never sees them. Merging them here, above every backend, is what
+// keeps a mount's symlink behavior from depending on its backend.
+//
+// GNU find without -L reports the link itself and never walks through
+// it, so a link is kind 'l'. Its size is the target string's length,
+// which is what -size compares, and it carries the link's own mtime.
+//
+// Under -L a link is classified by what it points at instead: a link to
+// a file tests as 'f', a link to a directory as 'd', and only a dangling
+// link stays 'l' (GNU reports the link itself when the target cannot be
+// stat'd). -size and -mtime then compare the target's stat, since that
+// is the file being reported.
+export async function linkResults(
+  links: LinkView | null,
+  searchRoot: string,
+  prefix: string,
+  searchKey: string,
+  tree: PredNode,
+  minDepth: number | null,
+  maxDepth: number | null,
+  minSize: number | null,
+  maxSize: number | null,
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+  follow: boolean,
+): Promise<string[]> {
+  if (links === null) return []
+  const out: string[] = []
+  // GNU find's default is -P: a start point that is itself a symlink is
+  // reported as the link and never walked through. The backend cannot
+  // see it at all, so the subtree scan (which only covers entries
+  // *under* the root) would miss it.
+  const entries = [...links.subtree(searchRoot)]
+  const own = links.statAt(searchRoot)
+  if (own !== null) entries.push([searchRoot, own])
+  for (const [path, ownStat] of entries) {
+    let st = ownStat
+    let kind: FindEntry['kind'] = 'l'
+    if (follow) {
+      const target = await links.targetStat(path)
+      if (target !== null) {
+        kind = target.type === FileType.DIRECTORY ? 'd' : 'f'
+        st = target
+      }
+    }
+    const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
+    const rel = stripSlash(key)
+    const depth =
+      searchKey !== ''
+        ? rel === searchKey
+          ? 0
+          : rel.split('/').length - searchKey.split('/').length
+        : rel === ''
+          ? 0
+          : rel.split('/').length
+    if (maxDepth !== null && depth > maxDepth) continue
+    const entry: FindEntry = { key, name: path.split('/').pop() ?? path, kind, depth }
+    if (!keep(entry, tree, minDepth)) continue
+    const size = st.size ?? 0
+    if (minSize !== null && size < minSize) continue
+    if (maxSize !== null && size > maxSize) continue
+    if (mtimeMin !== null || mtimeMax !== null) {
+      const ts = st.modified !== null ? Date.parse(st.modified) / 1000 : null
+      if (ts === null) continue
+      if (mtimeMin !== null && ts < mtimeMin) continue
+      if (mtimeMax !== null && ts > mtimeMax) continue
+    }
+    out.push(path)
+  }
+  return out
+}
+
+// Results for a start point that is not a directory.
+//
+// GNU reports a non-directory start point when it matches the expression
+// and walks nothing, because there is no subtree to descend. The entry
+// sits at depth 0 and tests as `f`, offering its own size and mtime to
+// -size, -mtime and -empty.
+//
+// Asking a backend to walk one instead is what this replaces, and every
+// backend answered differently: an object store listed the key as a
+// prefix and returned nothing, Graph 404'd on the children of a file, and
+// Box raised ENOTDIR.
+function startPointResults(
+  root: PathSpec,
+  start: FileStat,
+  options: FindOptions,
+  tree: PredNode,
+  usesEmpty: boolean,
+  mtimeMin: number | null,
+  mtimeMax: number | null,
+): string[] {
+  const results: string[] = []
+  if (mtimeMin !== null || mtimeMax !== null) {
+    const ts = modifiedTs(start.modified ?? null)
+    if (ts === null || Number.isNaN(ts)) return results
+    if (mtimeMin !== null && ts < mtimeMin) return results
+    if (mtimeMax !== null && ts > mtimeMax) return results
+  }
+  emitStartPath(results, rstripSlash(root.mountPath) || '/', startBasename(root.virtual), {
+    kind: 'f',
+    isEmpty: usesEmpty ? (start.size ?? 0) === 0 : null,
+    exists: true,
+    tree,
+    maxDepth: options.maxDepth ?? null,
+    minDepth: options.minDepth ?? null,
+    size: start.size ?? null,
+    minSize: options.minSize ?? null,
+    maxSize: options.maxSize ?? null,
+  })
+  return results
+}
+
+// Results for the directory start point itself, at depth 0.
+//
+// GNU lists a directory start point before descending into it, so
+// `find <dir>` names the directory even when it holds nothing. The generic
+// already statted the start point to get here, so it decides this row and
+// the backend only has to answer for descendants (see withRootRow for why
+// the backend's own row is dropped).
+//
+// -mtime is deliberately not applied here: the caller either filters every
+// row against namespace-aware times afterwards, or pushed the window into
+// the backend, and re-testing it against the probe's own stat would drop
+// rows a touch had just matched.
+function rootDirResults(
+  root: PathSpec,
+  options: FindOptions,
+  tree: PredNode,
+  isEmpty: boolean | null,
+): string[] {
+  const results: string[] = []
+  emitStartPath(results, rstripSlash(root.mountPath) || '/', startBasename(root.virtual), {
+    kind: 'd',
+    isEmpty,
+    exists: true,
+    tree,
+    maxDepth: options.maxDepth ?? null,
+    minDepth: options.minDepth ?? null,
+    minSize: options.minSize ?? null,
+    maxSize: options.maxSize ?? null,
+  })
+  return results
+}
+
+// Replace the backend's row for the start point with the generic's.
+//
+// Most native find ops emit the start path themselves, and each judged it
+// on the only facts it had: ssh calls every directory non-empty, an object
+// store calls one empty only when its own listing was empty, and a store
+// holding no directory marker reported nothing at all. Merging instead of
+// replacing would keep whichever of those a backend happened to say, so the
+// row is dropped and the generic's takes its place. Descendants are still
+// entirely the backend's answer.
+//
+// Compared with trailing slashes stripped, because a directory key is
+// spelled both ways across backends (chroma reports the root as `<root>/`).
+function withRootRow(rows: string[], display: string, root: string[]): string[] {
+  return rows
+    .filter((r) => (rstripSlash(r) || '/') !== display)
+    .concat(root.length > 0 ? [display] : [])
+}
+
 export async function findGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   find: (root: PathSpec, options: FindOptions) => Promise<string[]>,
+  stat?: (spec: PathSpec) => Promise<FileStat>,
+  dirEmpty?: (spec: PathSpec) => Promise<boolean>,
 ): Promise<CommandFnResult> {
-  const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
-  const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
-  const typeFlag = typeof opts.flags.type === 'string' ? opts.flags.type : null
-  const pathFlag = typeof opts.flags.path === 'string' ? opts.flags.path : null
-  const maxDepthFlag = typeof opts.flags.maxdepth === 'string' ? opts.flags.maxdepth : null
-  const minDepthFlag = typeof opts.flags.mindepth === 'string' ? opts.flags.mindepth : null
-  const sizeFlag = typeof opts.flags.size === 'string' ? opts.flags.size : null
-  const mtimeFlag = typeof opts.flags.mtime === 'string' ? opts.flags.mtime : null
+  const fl = new FlagView(opts.flags, specOf('find'))
+  const nameFlag = fl.asStr('name') ?? null
+  const inameFlag = fl.asStr('iname') ?? null
+  const typeFlag = fl.asStr('type') ?? null
+  const pathFlag = fl.asStr('path') ?? null
+  const maxDepthFlag = fl.asStr('maxdepth') ?? null
+  const minDepthFlag = fl.asStr('mindepth') ?? null
+  const sizeFlag = fl.asStr('size') ?? null
+  const mtimeFlag = fl.asStr('mtime') ?? null
   const targets =
     paths.length > 0
       ? paths
@@ -116,7 +330,10 @@ export async function findGeneric(
             resolved: false,
           }),
         ]
-  const findType: 'f' | 'd' | null = typeFlag === 'f' ? 'f' : typeFlag === 'd' ? 'd' : null
+  // Passed through rather than narrowed to f/d: `-type l` is a real value
+  // (namespace symlinks), and collapsing anything else to "no filter" would
+  // make the flag form print every entry where python prints none.
+  const findType: string | null = typeFlag
   const maxDepth = maxDepthFlag !== null ? Number.parseInt(maxDepthFlag, 10) : null
   const minDepth = minDepthFlag !== null ? Number.parseInt(minDepthFlag, 10) : null
   const [minSize, maxSize] = sizeFlag !== null ? parseSize(sizeFlag) : [null, null]
@@ -131,8 +348,15 @@ export async function findGeneric(
   if (badArg !== null) return invalidFindArg(badArg[0], badArg[1])
   const nameExclude = extractNotName(texts)
   const orNames = extractOrNames(nameFlag, texts)
-  const emptyFlag = opts.flags.empty === true
+  const emptyFlag = fl.asBool('empty')
   const expr = texts.length > 0 ? parseFindExpression(texts) : null
+  // With a stat wired, the mtime window is applied by the overlay-
+  // aware post-filter below, not pushed into the core: backend cores
+  // only see native times and would drop files whose mtime lives in
+  // the namespace (touch results, observed writes).
+  const pushMtime = stat === undefined
+  const effMtimeMin = expr !== null ? expr.mtimeMin : mtimeMin
+  const effMtimeMax = expr !== null ? expr.mtimeMax : mtimeMax
   const options: FindOptions =
     expr !== null
       ? {
@@ -141,8 +365,8 @@ export async function findGeneric(
           ...(expr.minDepth !== null ? { minDepth: expr.minDepth } : {}),
           ...(expr.minSize !== null ? { minSize: expr.minSize } : {}),
           ...(expr.maxSize !== null ? { maxSize: expr.maxSize } : {}),
-          ...(expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
-          ...(expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
+          ...(pushMtime && expr.mtimeMin !== null ? { mtimeMin: expr.mtimeMin } : {}),
+          ...(pushMtime && expr.mtimeMax !== null ? { mtimeMax: expr.mtimeMax } : {}),
           ...(expr.usesEmpty ? { empty: true } : {}),
         }
       : {
@@ -153,14 +377,15 @@ export async function findGeneric(
           ...(minDepth !== null ? { minDepth } : {}),
           ...(minSize !== null ? { minSize } : {}),
           ...(maxSize !== null ? { maxSize } : {}),
-          ...(mtimeMin !== null ? { mtimeMin } : {}),
-          ...(mtimeMax !== null ? { mtimeMax } : {}),
+          ...(pushMtime && mtimeMin !== null ? { mtimeMin } : {}),
+          ...(pushMtime && mtimeMax !== null ? { mtimeMax } : {}),
           ...(nameExclude !== null ? { nameExclude } : {}),
           ...(pathFlag !== null ? { pathPattern: pathFlag } : {}),
           ...(orNames.length > 1 ? { orNames } : {}),
           ...(emptyFlag ? { empty: true } : {}),
         }
   const matches: string[] = []
+  const missing: string[] = []
   for (const root of targets) {
     // `-path` matches the display path as printed; stamp the mount
     // prefix onto path nodes before the backend walks mount-relative
@@ -170,9 +395,53 @@ export async function findGeneric(
       ...options,
       tree: prefixPathNodes(optionsTree(options), prefix),
     }
+    const rootIsLink = (opts.links ?? null)?.statAt(root.virtual) != null
+    // What the start point is decides which walk is even possible, so it
+    // is resolved once, ahead of all of them: a symlink has no backend
+    // inode (linkResults reports it), a non-directory has no subtree, and
+    // nothing at all is GNU's diagnostic. Statted through the dispatcher,
+    // so a start point the router already resolved into another mount
+    // answers there rather than on this command's mount.
+    // The probe asks both channels a backend can answer on, so a directory
+    // that exists only as its children still reports as one and null means
+    // nothing is there (see resolvePathStat). That is what makes the
+    // missing case answerable above every backend rather than only where
+    // one wires a stat.
+    const startStat = opts.statPath
+    let startIsDir = false
+    if (startStat !== undefined && !rootIsLink) {
+      const start = await startStat(root.virtual)
+      if (start === null) {
+        // GNU names each start point it cannot stat, keeps going with the
+        // rest, and exits 1. Reported as the operand was typed, falling
+        // back to the resolved path for a synthesized root.
+        const label = root.rawPath !== '' ? root.rawPath : root.virtual
+        missing.push(`find: '${label}': No such file or directory`)
+        continue
+      }
+      if (start.type !== FileType.DIRECTORY) {
+        const rows = startPointResults(
+          root,
+          start,
+          rootOptions,
+          optionsTree(rootOptions),
+          expr !== null ? expr.usesEmpty : emptyFlag,
+          effMtimeMin,
+          effMtimeMax,
+        )
+        // The only row possible is the start point itself, so its display
+        // path is the operand, not a key that needs rebasing.
+        if (rows.length > 0) {
+          const display = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
+          matches.push(...respellRaw([display], root.virtual, root.rawPath))
+        }
+        continue
+      }
+      startIsDir = true
+    }
     let keys: string[]
     try {
-      keys = await find(root, rootOptions)
+      keys = rootIsLink ? [] : await find(root, rootOptions)
     } catch (err) {
       // GNU find reports missing roots and moves on; anything else
       // (rate limits, auth failures) must surface.
@@ -190,9 +459,60 @@ export async function findGeneric(
             : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
-    matches.push(...rebaseRaw(rootMatches, root.virtual, root.rawPath))
+    // GNU lists a directory start point itself before descending into it, so
+    // it is named even when it holds nothing. Decided here rather than by
+    // each backend, which read existence off its own listing. A pushed-down
+    // mtime window is the one case left to the backend: this row never
+    // passed through it.
+    const mtimePushed = pushMtime && (effMtimeMin !== null || effMtimeMax !== null)
+    // Emptiness is the one fact this row needs that a caller can decline to
+    // offer (a bespoke wrapper wires no readdir), and that caller's op may
+    // know it. Left alone in that case, so a backend's answer is never
+    // traded for "unknown".
+    const usesEmpty = expr !== null ? expr.usesEmpty : emptyFlag
+    const canProbe = !usesEmpty || dirEmpty !== undefined
+    let rows = rootMatches
+    if (startIsDir && !mtimePushed && canProbe) {
+      let rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
+      // A symlink is namespace state no backend readdir can see, so a
+      // directory holding only one would read as empty. GNU counts the
+      // link as an entry.
+      if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.links, root.virtual)
+      rows = withRootRow(
+        rootMatches,
+        root.virtual === '/' ? '/' : rstripSlash(root.virtual),
+        rootDirResults(root, rootOptions, optionsTree(rootOptions), rootEmpty),
+      )
+    }
+    const filtered =
+      stat !== undefined
+        ? await applyMtimeFilter(rows, effMtimeMin, effMtimeMax, stat, prefix)
+        : rows
+    const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
+    const withLinks = filtered.concat(
+      await linkResults(
+        opts.links ?? null,
+        rootPath,
+        prefix,
+        stripSlash(rootKey),
+        optionsTree(rootOptions),
+        expr !== null ? expr.minDepth : minDepth,
+        expr !== null ? expr.maxDepth : maxDepth,
+        expr !== null ? expr.minSize : minSize,
+        expr !== null ? expr.maxSize : maxSize,
+        effMtimeMin,
+        effMtimeMax,
+        fl.asBool('L'),
+      ),
+    )
+    withLinks.sort()
+    matches.push(...respellRaw(withLinks, root.virtual, root.rawPath))
   }
-  matches.sort()
+  // Start points print in operand order (GNU); each root's rows were
+  // sorted above, and a global sort here would interleave them.
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
+  if (missing.length > 0) {
+    return [out, new IOResult({ stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 })]
+  }
   return [out, new IOResult()]
 }

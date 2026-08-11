@@ -16,9 +16,23 @@ import re
 
 AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
 
+# Stand-in name for a required operand whose slot declares none, so a
+# refusal that has to name the slot always has a word for it. Bare like
+# every operand name: the brackets are the renderer's.
+ARG_PLACEHOLDER = "ARG"
+
 # Numeric shorthand token like `-5` (head/tail count), never a flag
 # cluster or a path.
-NUMERIC_SHORT = re.compile(r"^-\d+$")
+NUMERIC_SHORT = re.compile(r"^-[0-9]+$")
+
+# Value shapes accepted by int- and float-typed options: the portable
+# core of Python int()/float() and argparse (no whitespace, underscores,
+# inf, or nan, so both languages accept exactly the same strings).
+# [0-9] and not \d: python's \d also matches Unicode digits, which
+# JS /\d/ and GNU's C-locale parsers reject.
+INT_VALUE = re.compile(r"^[+-]?[0-9]+$")
+FLOAT_VALUE = re.compile(
+    r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$")
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
 # (plus ripgrep and jq upstream docs). Everything else exits 1. Keys are
@@ -39,7 +53,27 @@ USAGE_EXIT = {
     "awk": 2,
     "jq": 2,
     "tar": 64,
+    "python": 2,
+    "python3": 2,
 }
+
+# The interpreter commands answer option errors in CPython's words, not
+# GNU's: python3 is not a GNU tool, and its refusal names the
+# source-selecting options a reader needs. Plain strings for the same
+# no-cycle reason as USAGE_EXIT above.
+PYTHON_NAMES = frozenset({"python", "python3"})
+
+# Pinned on CPython 3.12.13, including two quirks worth keeping: the
+# hint always spells the program `python` (never `python3`, whichever
+# way it was invoked), and it quotes with a backquote/quote pair.
+PYTHON_USAGE = ("usage: {name} [option] ... [-c cmd | -m mod | file | -] "
+                "[arg] ...\nTry `python -h' for more information.\n")
+
+# An old-style cluster letter left without its argument exits 2, not
+# USAGE_EXIT's 64: tar reads the cluster itself and raises its own fatal
+# error, while 64 (EX_USAGE) is what argp returns for a letter it does
+# not know. Pinned on GNU tar 1.35: `tar xzf` is 2, `tar -Q` is 64.
+OLD_OPTION_EXIT = 2
 
 # Commands whose `Try '--help'` hint line is prefixed with the command
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`).

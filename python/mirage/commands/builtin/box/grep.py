@@ -14,15 +14,13 @@
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.box.io import IO as _IO
 from mirage.commands.builtin.box.narrow import narrow_scope
 from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic_bind import default_provision
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.box.read import read as _read
 from mirage.core.box.read import stream as _stream
 from mirage.core.box.readdir import readdir as _readdir
@@ -31,13 +29,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("grep",
-         resource="box",
-         spec=SPECS["grep"],
-         provision=default_provision("grep",
-                                     _IO.stat,
-                                     resolve_glob=_IO.resolve_glob,
-                                     readdir=_IO.readdir))
+@command("grep", resource="box", spec=SPECS["grep"])
 async def grep(
     accessor: BoxAccessor,
     paths: list[PathSpec],
@@ -45,7 +37,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
@@ -62,6 +54,7 @@ async def grep(
             pattern,
             fixed_string=fl.as_bool("F"),
             recursive=fl.as_bool("r") or fl.as_bool("R"),
+            whole_word=fl.as_bool("w"),
             exact_file_set=fl.as_bool("v") or fl.as_bool("c"),
         )
         if used_search and not resolved:

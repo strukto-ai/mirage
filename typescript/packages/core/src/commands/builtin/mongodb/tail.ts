@@ -32,7 +32,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_helper.ts'
-import { headTailProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(MONGODB_IO)
 
@@ -81,20 +81,21 @@ async function tailCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('tail'))
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   const first = resolved[0]
   if (
-    opts.flags.f === true &&
+    fl.asBool('follow') &&
     resolved.length === 1 &&
     first !== undefined &&
     detectScope(first).level === ScopeLevel.DOCUMENTS
   ) {
     return [watchStream(accessor, first), new IOResult()]
   }
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
+  const nRaw = fl.asStr('n') ?? null
   const [lines, plusMode] = parseN(nRaw)
-  const pushdown = typeof opts.flags.c !== 'string' && !plusMode && lines > 0
+  const pushdown = fl.asStr('c') === undefined && !plusMode && lines > 0
   return tailGeneric(resolved, texts, opts, (p) =>
     tailSource(accessor, p, opts.index ?? undefined, lines, pushdown),
   )
@@ -105,5 +106,4 @@ export const MONGODB_TAIL = command({
   resource: ResourceName.MONGODB,
   spec: specOf('tail'),
   fn: tailCommand,
-  provision: headTailProvision,
 })

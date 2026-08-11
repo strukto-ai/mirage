@@ -1,0 +1,407 @@
+{
+  "cases": [
+    {
+      "id": "jg_read_00",
+      "seq": 611000,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "wc -l /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "68 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_01",
+      "seq": 611001,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "wc -c /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1530 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_02",
+      "seq": 611002,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "wc -w /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "115 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_03",
+      "seq": 611003,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "md5sum /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "83a65c2549691b99373a7c4642902269  /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_04",
+      "seq": 611004,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "sha256sum /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "94b55137aaf3fa9668c2a950ef50c64284fdc551dc1133fde7b5d3f4a209b6d4  /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_05",
+      "seq": 611005,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "head -n 3 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"traceID\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\",\n  \"spans\": [\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_06",
+      "seq": 611006,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "tail -n 2 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"warnings\": null\n}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_07",
+      "seq": 611007,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "head -c 24 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"traceID\": \"aaaaaaaa",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_08",
+      "seq": 611008,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "xxd /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 7b0a 2020 2274 7261 6365 4944 223a 2022  {.  \"traceID\": \"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_09",
+      "seq": 611009,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "base64 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "2067\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_10",
+      "seq": 611010,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "file /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json: json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_11",
+      "seq": 611011,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "strings /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"traceID\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_12",
+      "seq": 611012,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "nl /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t{\n     2\t  \"traceID\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_13",
+      "seq": 611013,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "sed -n 2p /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"traceID\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_14",
+      "seq": 611014,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cut -c1-6 /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"tra\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_15",
+      "seq": 611015,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "tac /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "}  \"warnings\": null\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_16",
+      "seq": 611016,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "rev /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_17",
+      "seq": 611017,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "cmp /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_18",
+      "seq": 611018,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "grep -c traceID /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_19",
+      "seq": 611019,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "grep -n operationName /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "7:      \"operationName\": \"POST /checkout\",\n35:      \"operationName\": \"charge-card\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_20",
+      "seq": 611020,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "grep -o 'charge-card' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "charge-card\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_21",
+      "seq": 611021,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "rg -c operationName /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_22",
+      "seq": 611022,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "sort /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "          \"key\": \"http.method\",\n          \"key\": \"otel.scope.name\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_23",
+      "seq": 611023,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "uniq /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"traceID\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_24",
+      "seq": 611024,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "stat -c %F /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "regular file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_25",
+      "seq": 611025,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "realpath /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_26",
+      "seq": 611026,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "test -f /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_27",
+      "seq": 611027,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "test -s /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_28",
+      "seq": 611028,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "du -sh /j/services/checkout-api/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.5K\t/j/services/checkout-api/traces\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_29",
+      "seq": 611029,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "tree /j/services/checkout-api",
+      "expect": {
+        "exit": 0,
+        "stdout": "/j/services/checkout-api\n|-- operations.json\n`-- traces\n    `-- aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json\n\n2 directories, 2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jg_read_30",
+      "seq": 611030,
+      "targets": [
+        "jaeger"
+      ],
+      "command": "awk 'NR==2' /j/services/checkout-api/traces/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"traceID\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1\",\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

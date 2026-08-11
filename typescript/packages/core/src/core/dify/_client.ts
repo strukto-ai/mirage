@@ -134,6 +134,13 @@ export async function listAllDocuments(accessor: DifyAccessor): Promise<Record<s
   }
 }
 
+export function getDocumentDetail(
+  accessor: DifyAccessor,
+  documentId: string,
+): Promise<Record<string, unknown>> {
+  return difyGet(accessor, `/datasets/${accessor.config.datasetId}/documents/${documentId}`)
+}
+
 export async function* iterSegmentPages(
   accessor: DifyAccessor,
   documentId: string,

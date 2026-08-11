@@ -1,0 +1,130 @@
+---
+title: git
+description: Read and change a git repository that lives on any mount, in git's own vocabulary.
+icon: terminal
+---
+
+Read and change a git repository that lives on any mount, in git's own
+vocabulary. Unlike the account CLIs, `git` needs no credentials and takes
+no config: it is a program tree with nothing to authenticate to, so
+installing it is one line.
+
+## Install
+
+```typescript
+import { GIT } from '@struktoai/mirage-core'
+import { RAMResource, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({ '/repo': new RAMResource() })
+ws.registerCli('git', GIT)
+
+await ws.execute('git -C /repo status --short')
+```
+
+In YAML the same install rides the `clis:` section; see the
+[CLI overview](/typescript/cli/index).
+
+## The repository is read through the mount
+
+`-C` names a directory inside a mount, and everything under it is read
+with the same ops any command uses. The repository is never opened from
+the host filesystem, so a repository on a RAM mount, a disk mount or an
+object store all read the same way, and packfiles, loose objects and the
+index are all read through the mount.
+
+`-C` defaults to the working directory, and the repository is found by
+walking up from there, so a path inside the tree works:
+
+```bash
+git -C /repo/src status
+```
+
+## Verbs
+
+### Inspect
+
+```bash
+git -C /repo status
+git -C /repo status --short
+git -C /repo status --porcelain -b
+git -C /repo status -uall
+git -C /repo log --oneline -n 20
+git -C /repo log --reverse
+git -C /repo log -S delta
+git -C /repo log HEAD~2
+git -C /repo log --all --oneline
+git -C /repo log --format='%h %an %s'
+git -C /repo log --pretty=fuller -n 3
+git -C /repo show 265ec3a
+git -C /repo show --stat HEAD
+git -C /repo show --name-only HEAD
+git -C /repo show -s --format=%H HEAD
+git -C /repo diff HEAD~1 HEAD
+git -C /repo branch
+```
+
+`log` and `show` take `--pretty`/`--format` with git's grammar: the
+`oneline`, `short`, `medium`, `full` and `fuller` presets, plus
+`format:`/`tformat:` placeholder strings (a bare `%` string is
+`tformat:`). Placeholders cover ids (`%H %h %T %t %P %p`), author and
+committer fields (`%an %ae %ad %at %cn %ce %cd %ct`), the message
+(`%s %b %B`), decorations (`%d %D`), and `%n %% %xHH`; an unknown
+placeholder stays verbatim, exactly as git prints it. `log --all` walks
+every ref, tags peeled. `show` takes `--stat` (git's scaled diffstat
+table), `--name-only`, and `-s`/`--no-patch`, which suppresses every
+diff section just as it does in git.
+
+`status` honors `.gitignore` at every level, including negated rules, and
+collapses an untracked directory to one entry the way git does (`-uall`
+descends, `-uno` hides untracked files entirely).
+
+### Change
+
+```bash
+git -C /repo add -A
+git -C /repo add src/main.ts
+git -C /repo add -u
+git -C /repo reset
+git -C /repo reset src/main.ts
+git -C /repo commit -m "message"
+git -C /repo branch topic
+git -C /repo branch -d topic
+git -C /repo branch -D topic
+git -C /repo checkout topic
+```
+
+| Verb       | Notes                                                            |
+| ---------- | ---------------------------------------------------------------- |
+| `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path |
+| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths        |
+| `commit`   | `-m` required, `--author "Name <email>"` optional                 |
+| `branch`   | `-d` deletes a merged branch, `-D` any branch                     |
+| `checkout` | refuses rather than overwrite work you have not committed         |
+
+`commit` records `mirage <mirage@localhost>` unless `--author` says
+otherwise: git reads `user.name` from config files that a mount does not
+serve, and inventing a name would put an unreviewed one into history.
+
+## Deliberate limits
+
+- **No network verbs.** `clone`, `fetch`, `pull` and `push` are absent.
+- **No `reset --hard`.** It destroys uncommitted work with no reflog here
+  to recover it from.
+- **`reset` takes no revision.** Real git resets the index to any commit
+  named as an operand; this build resets it from HEAD only and refuses a
+  revision by name rather than doing nothing quietly.
+- **`checkout` refuses a staged change** rather than merging it into the
+  target, so nothing is silently resolved.
+- **Diff hunk bodies can differ from git's** on the same change. Headers,
+  mode lines and blob abbreviations match; the line grouping inside a
+  hunk comes from a different algorithm than git's xdiff. `show --stat`
+  line counts come from the same algorithm, so a rewritten hunk can
+  count slightly differently than git counts it.
+- **`--pretty` knows the block presets, not the wire formats.** `raw`,
+  `email`, `mboxrd` and `reference` are refused by name (`unsupported
+  --pretty format`), not silently misrendered. `--date=` relative
+  formats and `--decorate` are absent; decorations render only through
+  `%d`/`%D`, matching git's piped default of no decorations.
+- **`log` dates are strict.** `--since`/`--until` read ISO-8601 or an
+  epoch second; git's relative wording (`2 weeks ago`) is refused
+  rather than misread.

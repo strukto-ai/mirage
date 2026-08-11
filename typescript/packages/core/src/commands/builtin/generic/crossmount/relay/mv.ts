@@ -13,24 +13,29 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../../../../types.ts'
-import { mvGeneric } from '../../mv.ts'
+import { mvGeneric, parseMvFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
+import { FlagView } from '../../../../spec/types.ts'
+import { specOf } from '../../../../spec/builtins.ts'
 
 // Move operands that span mounts via the shared generic mv. Pure wiring:
 // copy through the transfer primitives, then unlink the source on its own
 // mount.
 export async function runMv(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
+  // Maps an operand to its storage identity. Without it a move between
+  // two prefixes over one store would copy the object onto itself and
+  // then unlink the source, destroying it.
+  storageKey?: (path: PathSpec) => string,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
   const readBytes = readBytesOp(dispatch)
   const readdir = readdirOp(dispatch)
-  const noClobber = flagKwargs.n === true
-  const verbose = flagKwargs.v === true
   const write = async (p: PathSpec, data: Uint8Array): Promise<void> => {
     await dispatch('write', p, [data])
   }
@@ -43,19 +48,12 @@ export async function runMv(
   const rmdir = async (p: PathSpec): Promise<void> => {
     await dispatch('rmdir', p)
   }
-  const [out, io] = await mvGeneric(
+  return mvGeneric(
     flat,
     stat,
-    {
-      readBytes,
-      write,
-      mkdir,
-      readdir,
-      unlink,
-      rmdir,
-    },
-    noClobber,
-    verbose,
+    { readBytes, write, mkdir, readdir, unlink, rmdir },
+    parseMvFlags(new FlagView(flagKwargs, specOf('mv'))),
+    undefined,
+    storageKey,
   )
-  return [out, io]
 }

@@ -12,23 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.sharepoint._provision import \
-    file_read_provision as _ft_provision
-from mirage.commands.builtin.sharepoint.du import du
 from mirage.commands.builtin.sharepoint.io import IO as _IO
-from mirage.core.sharepoint.read import read_bytes as _read
-
-_SHAREPOINT_OVERRIDES = {"du"}
 
 COMMANDS = [
-    *make_filetype_commands(
-        "sharepoint", _IO.resolve_glob, _read, provision=_ft_provision),
-    *make_generic_commands(
-        "sharepoint",
-        _IO,
-        overrides=_SHAREPOINT_OVERRIDES,
-    ),
-    du,
+    *make_generic_commands("sharepoint", _IO),
 ]

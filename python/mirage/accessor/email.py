@@ -15,7 +15,7 @@
 import aioimaplib
 
 from mirage.accessor.base import Accessor
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 from mirage.resource.secrets import reveal_secret
 
 
@@ -50,3 +50,13 @@ class EmailAccessor(Accessor):
                     f"IMAP login failed for {self.config.username} on "
                     f"{self.config.imap_host}: {detail or response.result}")
         return self._imap
+
+    async def close(self) -> None:
+        """Log out and drop the cached IMAP connection.
+
+        Safe to call when no connection was ever opened; CLI verbs call
+        this in a finally so a per-command accessor never leaks a socket.
+        """
+        if self._imap is not None and self._imap.protocol is not None:
+            await self._imap.logout()
+        self._imap = None

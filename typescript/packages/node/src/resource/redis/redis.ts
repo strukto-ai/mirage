@@ -25,6 +25,7 @@ import {
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
+  stripSlash,
 } from '@struktoai/mirage-core'
 import { REDIS_COMMANDS } from '../../commands/builtin/redis/index.ts'
 import type { RedisClientType } from 'redis'
@@ -33,7 +34,7 @@ import { appendBytes } from '../../core/redis/append.ts'
 import { SCOPE_ERROR } from '../../core/redis/constants.ts'
 import { copy as copyCore } from '../../core/redis/copy.ts'
 import { create as createCore } from '../../core/redis/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/redis/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/redis/du/index.ts'
 import { exists as existsCore } from '../../core/redis/exists.ts'
 import { find as findCore, type FindOptions as RedisFindOptions } from '../../core/redis/find.ts'
 import { mkdir as mkdirCore } from '../../core/redis/mkdir.ts'
@@ -79,6 +80,8 @@ export interface RedisResourceState {
 export class RedisResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.REDIS
   readonly cachesReads: boolean = false
+  // byte store: stat() sizes every file from metadata
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   readonly prompt: string = REDIS_PROMPT
   readonly url: string
@@ -98,8 +101,8 @@ export class RedisResource extends BaseResource implements Resource {
     mkdir: mkdirCore,
     read_stream: streamCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -115,12 +118,22 @@ export class RedisResource extends BaseResource implements Resource {
     this.accessor = new RedisAccessor(this.store)
   }
 
+  // The server URL (host, port and db) plus the key prefix pin the keyspace
+  // two mounts would share. The prefix is joined path-like so nested
+  // prefixes collapse onto one key.
+  override storageId(): string {
+    const prefix = stripSlash(this.keyPrefix)
+    const base = `${this.kind}:${this.url}`
+    return prefix === '' ? base : `${base}/${prefix}`
+  }
+
   async open(): Promise<void> {
     await this.store.client()
   }
 
-  close(): Promise<void> {
-    return this.store.close()
+  override async close(): Promise<void> {
+    await this.store.close()
+    await super.close()
   }
 
   client(): Promise<RedisClientType> {
@@ -196,7 +209,7 @@ export class RedisResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

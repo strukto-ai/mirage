@@ -14,8 +14,7 @@
 
 import { materialize as ioMaterialize } from '../io/types.ts'
 import type { ByteSource } from '../io/types.ts'
-import { OperandKind } from './spec/types.ts'
-import type { CommandSpec } from './spec/types.ts'
+import type { CommandSpec, FlagValue } from './spec/types.ts'
 import { lstripSlash } from '../utils/slash.ts'
 
 export const COMPOUND_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -41,14 +40,14 @@ export async function materializeStdout(stdout: ByteSource | null): Promise<Uint
 }
 
 export function stripPrefixFromPathKwargs(
-  kwargs: Record<string, string | boolean | string[]>,
+  kwargs: Record<string, FlagValue>,
   spec: CommandSpec,
   prefix: string,
-): Record<string, string | boolean | string[]> {
+): Record<string, FlagValue> {
   if (prefix === '') return kwargs
-  const result: Record<string, string | boolean | string[]> = { ...kwargs }
+  const result: Record<string, FlagValue> = { ...kwargs }
   for (const opt of spec.options) {
-    if (opt.valueKind !== OperandKind.PATH) continue
+    if (opt.type !== 'path') continue
     for (const flagName of [opt.short, opt.long]) {
       if (flagName === null) continue
       const clean = flagName.replace(/^-+/, '')

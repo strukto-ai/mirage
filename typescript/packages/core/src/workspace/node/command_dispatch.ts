@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../executor/runtime.ts'
-import type { RoutingDecision } from '../executor/route/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { PolicyDecision } from '../../runtime/policy/index.ts'
+import { mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
   ProcessSubDirection,
@@ -33,10 +35,11 @@ import { classifyBarePath } from '../expand/classify/index.ts'
 import type { Argv } from '../expand/argv.ts'
 import { expandArgv } from '../expand/argv.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
+import { pathFlagScopes, positionalScopes } from '../executor/command/routing.ts'
+import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { resolveLimit } from '../../policy/index.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
@@ -46,6 +49,7 @@ import {
   handleCd,
   handleCommandBuiltin,
   handleType,
+  handleWhich,
   handleEcho,
   handleEnv,
   handleEval,
@@ -83,7 +87,12 @@ import {
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS } from '../route/index.ts'
+import {
+  NO_FOLLOW_COMMANDS,
+  UNSUPPORTED_BUILTINS,
+  dereferences,
+  reportsLink,
+} from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
@@ -156,9 +165,8 @@ export async function executeCommand(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
-  unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -217,7 +225,6 @@ export async function executeCommand(
       callStack,
       jobTable,
       ensureOpen,
-      unmount,
       runtimeBindings,
       routingDecision,
       signal,
@@ -253,19 +260,21 @@ async function runCommandBody(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
-  unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
-  signal?: AbortSignal,
+  routingDecision?: PolicyDecision,
+  signalIn?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
+  // A background job's kill channel rides the session; fold it in so
+  // builtins (sleep) and the mount layer observe the kill.
+  const signal = mergeSignals(signalIn, session.abortSignal)
 
   if (node.parent?.type !== NT.REDIRECTED_STATEMENT) {
     for (const child of node.namedChildren) {
       if (child.type === NT.HERESTRING_REDIRECT) {
         for (const sc of child.namedChildren) {
           const content = await expandNode(sc, session, executeFn, callStack)
-          stdin = new TextEncoder().encode(`${content}\n`)
+          stdin = encodeText(`${content}\n`)
           break
         }
       }
@@ -314,9 +323,9 @@ async function runCommandBody(
 
   const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry)
 
-  // Safeguards resolve against the expanded name, so `$CMD`-style
+  // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
-  const resolved = argv.name !== '' ? resolveSafeguard(argv.name) : null
+  const resolved = argv.name !== '' ? resolveLimit(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands).
@@ -334,7 +343,6 @@ async function runCommandBody(
       callStack,
       jobTable,
       ensureOpen,
-      unmount,
       runtimeBindings,
       routingDecision,
       signal,
@@ -342,6 +350,12 @@ async function runCommandBody(
     timeout,
     argv.name !== '' ? argv.name : '?',
   )
+  if (io.producer === null && argv.name !== '') {
+    // Builtins and other non-mount routes return no rider; stamp the
+    // expanded name here so postExecute policies keyed on a command
+    // (echo, printf, ...) still see it.
+    io.producer = { command: argv.name, prefixes: [], declared: null }
+  }
   if (procSubStderr.length > 0) {
     const stderr = await materialize(io.stderr)
     io.stderr = concatBytes([...procSubStderr, stderr])
@@ -383,14 +397,49 @@ async function runArgv(
   callStack: CallStack | null,
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
-  unmount?: (prefix: string) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
-  routingDecision?: RoutingDecision,
+  routingDecision?: PolicyDecision,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
+
+  // Admission policies. The one chokepoint every command class passes
+  // through: shell builtins, namespace-routed commands (touch/chmod/
+  // ln -s), job builtins, shell functions, and mount commands all
+  // route below, so the hook must fire here, not in handleCommand.
+  // Paths are the operands as typed plus path-valued flags (shuf -o
+  // DEST); refusals win over flag parsing, routing, and runtime
+  // placement.
+  if (name !== '') {
+    const scopes: PathSpec[] = []
+    for (const p of operands) {
+      if (p instanceof PathSpec) scopes.push(p)
+    }
+    scopes.push(...pathFlagScopes(name, args, session.cwd))
+    const deny = await registry.policies.preCommand({
+      command: name,
+      paths: scopes,
+      operands: positionalScopes(name, args, session.cwd, operands),
+      argv: args,
+      cwd: session.cwd,
+      registry,
+    })
+    if (deny !== null) {
+      const err = new TextEncoder().encode(deny.message)
+      const exitCode = deny.exitCode ?? 1
+      return [
+        null,
+        new IOResult({ exitCode, stderr: err }),
+        new ExecutionNode({
+          command: [name, ...args].join(' '),
+          stderr: err,
+          exitCode,
+        }),
+      ]
+    }
+  }
 
   // Unsupported bash builtins. Constructs the parser accepts but the
   // executor cannot honor. Returning a clear error lets LLMs detect a
@@ -517,7 +566,7 @@ async function runArgv(
 
   if (name === SB.EVAL) return handleEval(executeFn, args, session)
   if (name === SB.BASH || name === SB.SH) {
-    return handleBash(executeFn, args, session, stdin)
+    return handleBash(dispatch, executeFn, args, session, stdin, name)
   }
   if (name === SB.EXPORT) return handleExport(args, session)
   if (name === SB.UNSET) return handleUnset(args, session)
@@ -556,14 +605,17 @@ async function runArgv(
   if (name === SB.ECHO) {
     return handleEcho(args)
   }
-  if (name === SB.PRINTF) return handlePrintf(args)
+  if (name === SB.PRINTF) return handlePrintf(args, session)
   if (name === SB.SLEEP) return handleSleep(args, signal)
   if (name === SB.READ) {
     return handleRead(args, session, stdin)
   }
   if (name === SB.SOURCE || name === SB.DOT) {
     const target = operands[0] ?? ''
-    return handleSource(dispatch, executeFn, target, session)
+    // Positional parameters keep the words as typed, so a path operand
+    // contributes its spelling, not its resolved mount path.
+    const sourceArgs = operands.slice(1).map((o) => wordText(o))
+    return handleSource(dispatch, executeFn, target, session, sourceArgs)
   }
   if (name === SB.RETURN) {
     return handleReturn(args, session, callStack)
@@ -582,6 +634,10 @@ async function runArgv(
     return handleType(args, session, registry)
   }
 
+  if (name === SB.WHICH) {
+    return handleWhich(args, session, registry)
+  }
+
   if (name === SB.XARGS) {
     return handleXargs(executeFn, args, session, stdin)
   }
@@ -597,7 +653,7 @@ async function runArgv(
     return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
-    return handleReadlink(namespace, session, operands)
+    return await handleReadlink(namespace, dispatch, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with
@@ -657,7 +713,10 @@ async function runArgv(
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
         if (prepared.early !== null) return prepared.early
-      } else if (!NO_FOLLOW_COMMANDS.has(name)) {
+      } else if (
+        !reportsLink(name, argv.words) &&
+        (!NO_FOLLOW_COMMANDS.has(name) || dereferences(name, argv.words))
+      ) {
         operands = followPaths(namespace, operands)
       }
     } catch (err) {
@@ -687,7 +746,6 @@ async function runArgv(
     callStack,
     jobTable,
     ensureOpen,
-    unmount,
     runtimeBindings,
     namespace,
     routingDecision,

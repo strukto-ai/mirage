@@ -1,0 +1,191 @@
+{
+  "suite": "script_cli",
+  "cases": [
+    {
+      "id": "named_by_its_head_word",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "import os\nif '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('prog', argv[0])\n    print('args', argv[1:])\n    print('config', os.getenv('MIRAGE_CLI_CONFIG'))\n    if stdin:\n        print('stdin', stdin.decode())\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "prog pager\nargs ['report.txt']\nconfig None\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "flags_reach_the_program",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "print('args', argv[1:])\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager --width 80 -n report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "args ['--width', '80', '-n', 'report.txt']\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "program_answers_its_own_help",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "if '--help' in argv[1:]:\n    print('usage:', argv[0], '[--width N] FILE')\nelse:\n    print('ran')\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager --help",
+          "expect": {
+            "exit": 0,
+            "stdout": "usage: pager [--width N] FILE\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "config_arrives_in_the_environment",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "import os\nprint('config', os.getenv('MIRAGE_CLI_CONFIG'))\n",
+            "config": { "width": 80 }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 0,
+            "stdout_contains": "\"width\"",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "config_readable_by_both_env_spellings",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "import os\ncfg = os.getenv('MIRAGE_CLI_CONFIG')\nprint('same', os.environ.get('MIRAGE_CLI_CONFIG') == cfg)\nprint('in', 'MIRAGE_CLI_CONFIG' in os.environ)\nprint('getitem', os.environ['MIRAGE_CLI_CONFIG'] == cfg)\n",
+            "config": { "width": 80 }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 0,
+            "stdout": "same True\nin True\ngetitem True\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "piped_stdin_reaches_the_program",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "if stdin:\n    print('stdin', stdin.decode())\nelse:\n    print('no stdin')\n"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "stdin": "body\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "stdin body\n\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "two_installs_name_themselves_apart",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": { "script": "print('prog', argv[0])\n" },
+          "less": { "script": "print('prog', argv[0])\n" }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": { "exit": 0, "stdout": "prog pager\n", "stderr": "" }
+        },
+        {
+          "command": "less",
+          "expect": { "exit": 0, "stdout": "prog less\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "runtime_pin_is_honored",
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "clis": {
+          "pager": {
+            "script": "print('pinned', argv[0])\n",
+            "runtime": "monty"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": { "exit": 0, "stdout": "pinned pager\n", "stderr": "" }
+        }
+      ]
+    },
+    {
+      "id": "no_runtime_for_the_language_exits_127",
+      "world": {
+        "runtimes": ["vfs"],
+        "clis": {
+          "pager": { "script": "print('unreachable')\n" }
+        }
+      },
+      "steps": [
+        {
+          "command": "pager",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr_contains": "no workspace runtime runs python scripts"
+          }
+        }
+      ]
+    }
+  ]
+}

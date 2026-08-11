@@ -19,13 +19,7 @@ from mirage.core.qdrant.read import read
 from mirage.core.qdrant.scope import (QdrantGroupScope, QdrantRowScope,
                                       ScopeLevel, detect_scope)
 from mirage.types import FileStat, FileType, PathSpec
-
-_IMAGE_TYPES = {
-    "png": FileType.IMAGE_PNG,
-    "jpg": FileType.IMAGE_JPEG,
-    "jpeg": FileType.IMAGE_JPEG,
-    "gif": FileType.IMAGE_GIF,
-}
+from mirage.utils.filetype import image_type_for_extension
 
 
 def _name_of(path: PathSpec) -> str:
@@ -53,9 +47,17 @@ async def stat(
 
     if not isinstance(scope, QdrantRowScope):
         raise FileNotFoundError(path.virtual)
-    data = await read(accessor, path, index)
     if scope.kind == "blob":
-        file_type = _IMAGE_TYPES.get(config.blob_ext, FileType.BINARY)
+        file_type = image_type_for_extension(config.blob_ext)
     else:
         file_type = FileType.TEXT
+    # The row-dir readdir seeds exact rendered sizes; a cold index falls
+    # back to rendering the row, so the size is exact either way.
+    if index is not None:
+        lookup = await index.get(path.virtual.rstrip("/"))
+        if lookup.entry is not None and lookup.entry.size is not None:
+            return FileStat(name=_name_of(path),
+                            size=lookup.entry.size,
+                            type=file_type)
+    data = await read(accessor, path, index)
     return FileStat(name=_name_of(path), size=len(data), type=file_type)

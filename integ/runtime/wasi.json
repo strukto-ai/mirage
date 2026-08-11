@@ -1,0 +1,92 @@
+{
+  "suite": "wasi",
+  "requires": {
+    "python": [
+      "env:MIRAGE_WASI_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "sys_argv",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('argv-len', len(sys.argv))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "argv-len 1\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "read_mount",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(open('/ram/data.txt').read().strip() + '-wasi')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello from ram-wasi\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "write_mount",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/ram/from-wasi.txt', 'w').write('wasi-wrote-this')\" && cat /ram/from-wasi.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "wasi-wrote-this"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "cases": [
+    {
+      "id": "lookup_type_builtin",
+      "seq": 904,
+      "targets": [
+        "ram"
+      ],
+      "command": "type cd",
+      "expect": {
+        "exit": 0,
+        "stdout": "cd is a shell builtin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_t_builtin",
+      "seq": 905,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -t cd",
+      "expect": {
+        "exit": 0,
+        "stdout": "builtin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_keyword",
+      "seq": 906,
+      "targets": [
+        "ram"
+      ],
+      "command": "type if",
+      "expect": {
+        "exit": 0,
+        "stdout": "if is a shell keyword\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_t_keyword",
+      "seq": 907,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -t if",
+      "expect": {
+        "exit": 0,
+        "stdout": "keyword\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_function",
+      "seq": 908,
+      "targets": [
+        "ram"
+      ],
+      "command": "f() { :; }; type -t f",
+      "expect": {
+        "exit": 0,
+        "stdout": "function\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_not_found",
+      "seq": 909,
+      "targets": [
+        "ram"
+      ],
+      "command": "type nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "type: nope-xyz: not found\n"
+      }
+    },
+    {
+      "id": "lookup_type_all_found_exit_rule",
+      "seq": 910,
+      "targets": [
+        "ram"
+      ],
+      "command": "type cd nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "cd is a shell builtin\n",
+        "stderr": "type: nope-xyz: not found\n"
+      }
+    },
+    {
+      "id": "lookup_type_t_not_found_is_silent",
+      "seq": 911,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -t nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_p_prints_no_path",
+      "seq": 912,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -p cd",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_invalid_option",
+      "seq": 913,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -x cd",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "type: -x: invalid option\ntype: usage: type [-afptP] name [name ...]\n"
+      }
+    },
+    {
+      "id": "lookup_type_a_lists_every_layer",
+      "seq": 914,
+      "targets": [
+        "ram"
+      ],
+      "command": "cd() { :; }; type -at cd",
+      "expect": {
+        "exit": 0,
+        "stdout": "builtin\nfunction\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_a_keeps_the_function_under_a_keyword",
+      "seq": 922,
+      "targets": [
+        "ram"
+      ],
+      "command": "then() { echo x; }; type -a then",
+      "expect": {
+        "exit": 0,
+        "stdout": "then is a shell keyword\nthen is a function\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lookup_type_t_time_is_not_a_keyword_here",
+      "seq": 923,
+      "targets": [
+        "ram"
+      ],
+      "command": "type -t time",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

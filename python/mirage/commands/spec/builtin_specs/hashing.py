@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
 SPECS: dict[str, CommandSpec] = {
     'md5':
-    CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+    CommandSpec(rest=Operand(type="path")),
     'diff':
     CommandSpec(
         options=(
@@ -30,8 +29,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-r"),
         ),
         positional=(
-            Operand(kind=OperandKind.PATH),
-            Operand(kind=OperandKind.PATH),
+            Operand(type="path"),
+            Operand(type="path"),
         ),
     ),
     'base64':
@@ -39,10 +38,10 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-d", long="--decode"),
             Option(short="-D"),
-            Option(short="-w", long="--wrap", value_kind=OperandKind.TEXT),
+            Option(short="-w", long="--wrap", type="str"),
             Option(short="-i", long="--ignore-garbage"),
         ),
-        positional=(Operand(kind=OperandKind.PATH), ),
+        positional=(Operand(type="path"), ),
     ),
     'md5sum':
     CommandSpec(
@@ -58,7 +57,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--status"),
             Option(long="--quiet"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'sha1sum':
     CommandSpec(
@@ -74,7 +73,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--status"),
             Option(long="--quiet"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'sha256sum':
     CommandSpec(
@@ -90,7 +89,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--status"),
             Option(long="--quiet"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'sha384sum':
     CommandSpec(
@@ -106,7 +105,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--status"),
             Option(long="--quiet"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'sha512sum':
     CommandSpec(
@@ -122,35 +121,35 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--status"),
             Option(long="--quiet"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
     'xxd':
     CommandSpec(
         options=(
             Option(short="-r"),
             Option(short="-p"),
-            Option(short="-l", value_kind=OperandKind.TEXT),
-            Option(short="-c", value_kind=OperandKind.TEXT),
-            Option(short="-s", value_kind=OperandKind.TEXT),
-            Option(short="-g", value_kind=OperandKind.TEXT),
+            Option(short="-l", type="str"),
+            Option(short="-c", type="str"),
+            Option(short="-s", type="str"),
+            Option(short="-g", type="str"),
             Option(short="-u"),
         ),
         positional=(
-            Operand(kind=OperandKind.PATH),
-            Operand(kind=OperandKind.PATH),
+            Operand(type="path"),
+            Operand(type="path"),
         ),
     ),
     'patch':
     CommandSpec(
         options=(
-            Option(short="-p", value_kind=OperandKind.TEXT),
+            Option(short="-p", type="str"),
             Option(short="-R"),
-            Option(short="-i", value_kind=OperandKind.PATH),
+            Option(short="-i", type="path"),
             Option(short="-N"),
         ),
         positional=(
-            Operand(kind=OperandKind.PATH),
-            Operand(kind=OperandKind.PATH),
+            Operand(type="path"),
+            Operand(type="path"),
         ),
     ),
     'cmp':
@@ -158,23 +157,23 @@ SPECS: dict[str, CommandSpec] = {
         options=(
             Option(short="-l"),
             Option(short="-s"),
-            Option(short="-n", value_kind=OperandKind.TEXT),
+            Option(short="-n", type="str"),
             Option(short="-b"),
-            Option(short="-i", value_kind=OperandKind.TEXT),
+            Option(short="-i", type="str"),
         ),
         positional=(
-            Operand(kind=OperandKind.PATH),
-            Operand(kind=OperandKind.PATH),
+            Operand(type="path"),
+            Operand(type="path"),
         ),
     ),
     'iconv':
     CommandSpec(
         options=(
-            Option(short="-f", value_kind=OperandKind.TEXT),
-            Option(short="-t", value_kind=OperandKind.TEXT),
+            Option(short="-f", type="str"),
+            Option(short="-t", type="str"),
             Option(short="-c"),
-            Option(short="-o", value_kind=OperandKind.PATH),
+            Option(short="-o", type="path"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(type="path"),
     ),
 }

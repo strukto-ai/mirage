@@ -20,7 +20,7 @@ from mirage.cache.index import NULL_INDEX
 from mirage.core.s3.stat import stat
 from mirage.resource.s3 import S3Config
 from mirage.types import PathSpec
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 
 def test_s3_stat_returns_fingerprint_from_etag():

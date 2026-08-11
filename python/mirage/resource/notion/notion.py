@@ -15,11 +15,11 @@
 from typing import Any
 
 from mirage.accessor.notion import NotionAccessor
+from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.read import read
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
 from mirage.resource.base import BaseResource
-from mirage.resource.notion.config import NotionConfig
 from mirage.resource.notion.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
@@ -51,8 +51,8 @@ class NotionResource(BaseResource):
 
         for fn in COMMANDS:
             self.register(fn)
-        for fn in NOTION_VFS_OPS:
-            self.register_op(fn)
+        for op in NOTION_VFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, self._index)

@@ -138,3 +138,48 @@ async def test_cache_key_ignores_trailing_slash(tmp_path):
     first = await readdir(accessor, slashed, index)
     second = await readdir(accessor, bare, index)
     assert first == second == ["/data/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_missing_path_is_not_found(tmp_path):
+    (tmp_path / "sub").mkdir()
+    accessor = DiskAccessor(tmp_path)
+    index = RAMIndexCacheStore(ttl=0)
+    # GNU `ls /nope` -> "No such file or directory", and it stays ENOENT
+    # however deep the missing component is.
+    for virtual in ("/nope", "/sub/nope", "/nope/deeper"):
+        with pytest.raises(FileNotFoundError):
+            await readdir(
+                accessor,
+                PathSpec(resource_path=virtual.lstrip("/"),
+                         virtual=virtual,
+                         directory=virtual), index)
+
+
+@pytest.mark.asyncio
+async def test_file_component_is_not_a_directory(tmp_path):
+    (tmp_path / "file.txt").write_text("x")
+    accessor = DiskAccessor(tmp_path)
+    index = RAMIndexCacheStore(ttl=0)
+    for virtual in ("/file.txt/x", "/file.txt/x/y"):
+        with pytest.raises(NotADirectoryError):
+            await readdir(
+                accessor,
+                PathSpec(resource_path=virtual.lstrip("/"),
+                         virtual=virtual,
+                         directory=virtual), index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_error_reports_the_virtual_path(tmp_path):
+    accessor = DiskAccessor(tmp_path)
+    index = RAMIndexCacheStore(ttl=0)
+    # The real filesystem path under tmp_path must never reach the operand
+    # a user-facing stderr line is built from.
+    with pytest.raises(FileNotFoundError) as excinfo:
+        await readdir(
+            accessor,
+            PathSpec(resource_path="nope", virtual="/nope", directory="/nope"),
+            index)
+    assert str(excinfo.value) == "/nope"
+    assert str(tmp_path) not in str(excinfo.value)

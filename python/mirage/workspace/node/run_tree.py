@@ -15,12 +15,14 @@
 import asyncio
 from typing import Any, Callable
 
-from mirage.commands.builtin.utils.safeguard import apply_safeguard
+from mirage.commands.builtin.utils.limit import guard_output
 from mirage.io import IOResult
-from mirage.io.types import materialize
-from mirage.runtime.route import RoutingDecision
+from mirage.io.stream import materialize
+from mirage.policy import ExecuteResultContext, post_execute_gate
+from mirage.runtime.policy import PolicyDecision
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
+from mirage.types import Producer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.execute_node import execute_node
@@ -39,12 +41,12 @@ async def run_command_tree(
     session: Session,
     stdin: Any,
     cancel: asyncio.Event | None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[IOResult, ExecutionNode]:
     """Run a parsed command tree and finalize its output stream.
 
     Executes the AST root, then applies the value barrier and the
-    command safeguard, folding the safeguard's stderr and exit code
+    command limit, folding the limit's stderr and exit code
     into the result. This is the seam between the Workspace shell
     (sessions, drift, recording) and the command executor: a caller
     hands in a parsed tree plus its dependencies and gets back the
@@ -63,7 +65,7 @@ async def run_command_tree(
         session (Session): shell session state.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.
-        routing_decision (RoutingDecision | None): the typed line's routing
+        routing_decision (PolicyDecision | None): the typed line's routing
             decision, threaded to every command dispatch; None runs on
             the static bindings.
 
@@ -86,12 +88,19 @@ async def run_command_tree(
         routing_decision=routing_decision,
     )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-    if io.safeguard is not None and stdout is not None:
-        stdout, sg_io = await apply_safeguard(stdout, io.safeguard)
-        if sg_io.stderr is not None:
-            existing = await materialize(io.stderr)
-            io.stderr = existing + await materialize(sg_io.stderr)
-        if sg_io.exit_code != 0:
-            io.exit_code = sg_io.exit_code
+    # The boundary consultation: the envelope's producer facts become
+    # the post_execute context; the built-in cap and any user policies
+    # answer with Limits (tightest merged), enforced by guard_output.
+    ctx = ExecuteResultContext(producer=io.producer or Producer(command=""),
+                               exit_code=io.exit_code)
+    deny, bound = await post_execute_gate(registry.policies, ctx)
+    if deny is not None:
+        existing = await materialize(io.stderr) if io.stderr else b""
+        io.stderr = existing + deny.message.encode()
+        io.exit_code = deny.exit_code
+        io.stdout = None
+        return io, exec_node
+    stdout, io.stderr, io.exit_code = await guard_output(
+        stdout, io.stderr, io.exit_code, bound)
     io.stdout = stdout
     return io, exec_node

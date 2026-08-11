@@ -17,7 +17,8 @@ from collections.abc import Iterable
 from typing import Any
 
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
-from mirage.cache.file.utils import default_fingerprint, parse_limit
+from mirage.cache.file.utils import (default_fingerprint, glob_escape,
+                                     parse_limit)
 from mirage.resource.redis.redis import RedisResource
 
 
@@ -111,6 +112,18 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         ):
             keys: list[Any] = []
             async for k in self._cache_client.scan_iter(pattern):
+                keys.append(k)
+            if keys:
+                await self._cache_client.delete(*keys)
+
+    async def evict_prefix(self, prefix: str) -> None:
+        for key in [k for k in self._drain_tasks if k.startswith(prefix)]:
+            task = self._drain_tasks.pop(key)
+            task.cancel()
+        escaped = glob_escape(prefix)
+        for base in (self._data_prefix, self._meta_prefix):
+            keys: list[Any] = []
+            async for k in self._cache_client.scan_iter(f"{base}{escaped}*"):
                 keys.append(k)
             if keys:
                 await self._cache_client.delete(*keys)

@@ -10,6 +10,7 @@ permissions:
       - python/**
       - examples/python/**
       - integ/**
+      - conformance/**
       - .github/workflows/test_python.yml
   pull_request:
     branches: [main]
@@ -36,6 +37,7 @@ jobs:
               - 'python/**'
               - 'examples/python/**'
               - 'integ/**'
+              - 'conformance/**'
               - '.github/workflows/test_python.yml'
 
   test:
@@ -105,6 +107,7 @@ jobs:
           run examples/python/disk/disk.py integ/truth/python/disk.txt
           run examples/python/disk/disk_vfs.py integ/truth/python/disk_vfs.txt
           run examples/python/other/custom_command.py integ/truth/python/custom_command.txt
+          run examples/python/filetype/filetype.py integ/truth/python/filetype.txt
           run examples/python/redis_resource/example_redis.py integ/truth/python/redis.txt
           run examples/python/redis_resource/example_redis_index.py integ/truth/python/redis_index.txt
           run examples/python/redis_resource/example_redis_cache.py integ/truth/python/redis_cache.txt
@@ -243,6 +246,13 @@ jobs:
         env:
           MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: uv run pytest tests/runtime/js/ -v --no-cov
+
+      - name: Run the runtime conformance suite
+        working-directory: python
+        env:
+          MIRAGE_WASI_HOME: /tmp/cpython-wasi
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: uv run pytest tests/runtime/test_conformance.py -v --no-cov
 
       - name: Install base package without the monty extra
         working-directory: python

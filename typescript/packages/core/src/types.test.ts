@@ -58,6 +58,8 @@ describe('ResourceName', () => {
     expect(ResourceName.GSHEETS).toBe('gsheets')
     expect(ResourceName.GSLIDES).toBe('gslides')
     expect(ResourceName.GDRIVE).toBe('gdrive')
+    expect(ResourceName.ONEDRIVE).toBe('onedrive')
+    expect(ResourceName.SHAREPOINT).toBe('sharepoint')
     expect(ResourceName.SLACK).toBe('slack')
     expect(ResourceName.DISCORD).toBe('discord')
     expect(ResourceName.GMAIL).toBe('gmail')
@@ -85,10 +87,69 @@ describe('ResourceName', () => {
     expect(ResourceName.ALIYUN).toBe('aliyun')
     expect(ResourceName.SCALEWAY).toBe('scaleway')
     expect(ResourceName.QINGSTOR).toBe('qingstor')
+    expect(ResourceName.MEM0).toBe('mem0')
   })
 
-  it('contains exactly 50 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(50)
+  it('exposes exactly the documented resource names', () => {
+    // A count would only say "expected 54, got 53"; comparing the set names the
+    // resource that was added or removed, and needs no magic number bumped.
+    expect(Object.values(ResourceName).sort()).toEqual([
+      'aliyun',
+      'backblaze',
+      'box',
+      'ceph',
+      'chroma',
+      'databricks_volume',
+      'dify',
+      'digitalocean',
+      'discord',
+      'disk',
+      'dropbox',
+      'email',
+      'gcal',
+      'gcs',
+      'gdocs',
+      'gdrive',
+      'github',
+      'github_ci',
+      'gmail',
+      'gridfs',
+      'gsheets',
+      'gslides',
+      'hf_buckets',
+      'hf_datasets',
+      'hf_models',
+      'hf_spaces',
+      'history',
+      'jaeger',
+      'lancedb',
+      'langfuse',
+      'linear',
+      'mem0',
+      'minio',
+      'mongodb',
+      'nextcloud',
+      'notion',
+      'oci',
+      'onedrive',
+      'opfs',
+      'postgres',
+      'qdrant',
+      'qingstor',
+      'r2',
+      'ram',
+      'redis',
+      's3',
+      'scaleway',
+      'seaweedfs',
+      'sharepoint',
+      'slack',
+      'ssh',
+      'supabase',
+      'tencent',
+      'trello',
+      'wasabi',
+    ])
   })
 
   it('is frozen at runtime', () => {
@@ -109,10 +170,6 @@ describe('FileType', () => {
     expect(FileType.ZIP).toBe('application/zip')
     expect(FileType.GZIP).toBe('application/gzip')
     expect(FileType.PDF).toBe('application/pdf')
-    expect(FileType.PARQUET).toBe('parquet')
-    expect(FileType.ORC).toBe('orc')
-    expect(FileType.FEATHER).toBe('feather')
-    expect(FileType.HDF5).toBe('hdf5')
   })
 
   it('is frozen at runtime', () => {

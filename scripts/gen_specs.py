@@ -17,26 +17,50 @@ import json
 import logging
 import pkgutil
 import sys
-from dataclasses import asdict
+from dataclasses import MISSING, Field, asdict, fields
 from pathlib import Path
 from typing import Any
 
 import mirage.commands.builtin
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandSpec, Operand, Option
+from mirage.resource.base import BaseResource
+from mirage.resource.registry import REGISTRY, resolve_class
 
 logger = logging.getLogger(__name__)
 
 OUT = Path(__file__).resolve().parent.parent / "spec" / "python" / "general"
 
+BUILTIN = Path(mirage.commands.builtin.__file__).resolve(
+).parent  # type: ignore[arg-type]
 
-def _walk_pkg(pkg: Any) -> None:
+# Slots holding a configuration value rather than an operation. Everything
+# else on the adapter is a wired operation, reported by name.
+IO_VALUE_FIELDS = frozenset({"local", "max_glob_matches", "max_du_entries"})
+
+
+def _walk_pkg(pkg: Any) -> list[str]:
+    """Import every builtin command module, reporting the ones that failed.
+
+    A module that will not import registers nothing, so its resources
+    silently vanish from the dump. That reads as a legitimate deletion in
+    the committed spec rather than as the under-provisioned environment it
+    actually is, so the caller turns any failure into a hard error.
+
+    Args:
+        pkg (Any): the package to walk.
+    """
+    failed: list[str] = []
     for _finder, name, _ispkg in pkgutil.walk_packages(pkg.__path__,
                                                        pkg.__name__ + "."):
         try:
             importlib.import_module(name)
         except ImportError as e:
             logger.debug("skip %s: %s", name, e)
+            failed.append(f"{name}: {e}")
+    return failed
 
 
 def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
@@ -61,6 +85,34 @@ def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
     return out
 
 
+def _by_resource(rcs: list[RegisteredCommand]) -> dict[str, Any]:
+    """Per-registration metadata, keyed by resource.
+
+    The union flags below cannot say *which* resource carries a provision,
+    an aggregate, the write flag or a filetype, so dropping one backend's
+    provision while another keeps it leaves every union unchanged. Key the
+    same facts by resource so the parity check sees that difference.
+
+    Args:
+        rcs (list[RegisteredCommand]): every registration for one command.
+    """
+    out: dict[str, Any] = {}
+    for rc in rcs:
+        entry = out.setdefault(
+            rc.resource if rc.resource is not None else "", {
+                "has_provision": False,
+                "has_aggregate": False,
+                "has_write": False,
+                "filetypes": set(),
+            })
+        entry["has_provision"] |= rc.provision_fn is not None
+        entry["has_aggregate"] |= rc.aggregate is not None
+        entry["has_write"] |= bool(rc.write)
+        if rc.filetype is not None:
+            entry["filetypes"].add(rc.filetype)
+    return out
+
+
 def _meta_for(rcs: list[RegisteredCommand]) -> dict[str, Any]:
     resources = sorted({rc.resource for rc in rcs if rc.resource is not None})
     filetypes = sorted({rc.filetype for rc in rcs if rc.filetype is not None})
@@ -70,6 +122,7 @@ def _meta_for(rcs: list[RegisteredCommand]) -> dict[str, Any]:
         "has_write": any(rc.write for rc in rcs),
         "resources": resources,
         "filetypes": filetypes,
+        "by_resource": _by_resource(rcs),
     }
 
 
@@ -79,21 +132,158 @@ def _default(o: object) -> object:
     raise TypeError(f"unserializable: {type(o)}")
 
 
+def _default_of(f: Field) -> Any:
+    if f.default_factory is not MISSING:
+        return f.default_factory()
+    return f.default
+
+
+def _prune(payload: dict[str, Any], cls: type) -> dict[str, Any]:
+    """``payload`` without the fields ``cls`` would have defaulted anyway.
+
+    A spec dump is a cross-language contract, and restating every
+    default in all 93 files buries the handful of facts each command
+    actually declares. The defaults come from the dataclass rather than
+    a second table, so a field added to a spec type cannot fall out of
+    step with this. ``type`` survives even at its default, because what
+    a token *is* is the first thing a reader looks for.
+
+    The typescript side prunes against a default-constructed instance
+    for the same reason; the two must drop exactly the same keys or the
+    parity gate reports every command.
+
+    Args:
+        payload (dict[str, Any]): one ``asdict`` level, every key
+            present.
+        cls (type): the dataclass the payload came from.
+    """
+    kept: dict[str, Any] = {}
+    for f in fields(cls):
+        value = payload[f.name]
+        if f.name != "type" and value == _default_of(f):
+            continue
+        kept[f.name] = value
+    return kept
+
+
+def _spec_payload(spec: Any) -> dict[str, Any]:
+    payload = _prune(asdict(spec), CommandSpec)
+    if "options" in payload:
+        payload["options"] = [_prune(o, Option) for o in payload["options"]]
+    if "positional" in payload:
+        payload["positional"] = [
+            _prune(p, Operand) for p in payload["positional"]
+        ]
+    if payload.get("rest") is not None:
+        payload["rest"] = _prune(payload["rest"], Operand)
+    return payload
+
+
 def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
-    payload = asdict(spec)
+    payload = _spec_payload(spec)
     payload["_meta"] = _meta_for(rcs)
     path = OUT / f"{name}.json"
     path.write_text(
         json.dumps(payload, indent=2, sort_keys=True, default=_default) + "\n")
 
 
+def _capabilities() -> dict[str, dict[str, Any]]:
+    """Per-resource behavior values, read off the class, never an instance.
+
+    Registry membership only says a backend can be built. How it behaves
+    once mounted is a second hand-maintained surface that drifted just as
+    quietly: python kept the 600 s ``index_ttl`` default for postgres and
+    mongodb where typescript pins 0, so an ``ls`` of a live schema could
+    be ten minutes stale. ``storage_id`` and ``statfs`` are reported as
+    "does this class override the base" rather than by value, because the
+    base answers are per-instance identity and UNKNOWN.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for name in sorted(REGISTRY):
+        cls = resolve_class(REGISTRY[name].resource_path)
+        out[name] = {
+            "index_ttl": cls.index_ttl,
+            "caches_reads": cls.caches_reads,
+            "supports_snapshot": cls.SUPPORTS_SNAPSHOT,
+            "sizes_always_known": cls.SIZES_ALWAYS_KNOWN,
+            "storage_id": cls.storage_id is not BaseResource.storage_id,
+            "statfs": cls.statfs is not BaseResource.statfs,
+        }
+    return out
+
+
+def _command_io() -> dict[str, dict[str, Any]]:
+    """The wired ``CommandIO`` slots per backend command package.
+
+    The adapter's slot set is a hand-filled literal that no gate reads, so
+    a backend can omit ``du`` or ``find`` and quietly fall back to the
+    capped readdir walk while its twin pushes the work down to the API.
+    Dumping the key set turns that omission into a spec diff.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for path in sorted(BUILTIN.glob("*/io.py")):
+        backend = path.parent.name
+        mod = importlib.import_module(f"mirage.commands.builtin.{backend}.io")
+        io = getattr(mod, "IO", None)
+        if not isinstance(io, CommandIO):
+            continue
+        slots = sorted(f.name for f in fields(CommandIO)
+                       if f.name not in IO_VALUE_FIELDS
+                       and getattr(io, f.name) is not None)
+        out[backend] = {
+            "slots": slots,
+            "local": io.local,
+            "max_glob_matches": io.max_glob_matches,
+            "max_du_entries": io.max_du_entries,
+        }
+    return out
+
+
+def _emit_resources(registry: dict[str, list[RegisteredCommand]]) -> None:
+    """Dump the two resource-name sets the parity gate compares.
+
+    ``registry`` is what ``build_resource`` can construct by name — the
+    hand-maintained table workspace YAML and snapshots go through.
+    ``command_resources`` is what the spec tree already knew: every
+    resource registering at least one builtin command. A name in the
+    second but not the first registers commands yet cannot be mounted by
+    name, which is how SharePoint stayed unconstructible in python while
+    appearing in every command's ``_meta``.
+
+    Args:
+        registry (dict[str, list[RegisteredCommand]]): registrations keyed
+            by command name, as collected for the spec dump.
+    """
+    command_resources: set[str] = set()
+    for rcs in registry.values():
+        for rc in rcs:
+            if rc.resource is not None:
+                command_resources.add(str(rc.resource))
+    payload = {
+        "registry": sorted(REGISTRY),
+        "command_resources": sorted(command_resources),
+        "capabilities": _capabilities(),
+        "command_io": _command_io(),
+    }
+    path = OUT.parent / "resources.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(f"emitted {len(payload['registry'])} registry names to {path}")
+
+
 def main() -> None:
-    _walk_pkg(mirage.commands.builtin)
+    failed = _walk_pkg(mirage.commands.builtin)
+    if failed:
+        raise SystemExit(
+            "command modules failed to import, so their registrations would "
+            "be missing from the dump:\n  " + "\n  ".join(failed) +
+            "\n\nInstall the optional dependencies first:\n"
+            "  cd python && uv sync --all-extras --no-extra camel")
     registry = _collect_registrations()
     OUT.mkdir(parents=True, exist_ok=True)
     for name, spec in sorted(SPECS.items()):
         _emit_one(name, spec, registry.get(name, []))
     print(f"emitted {len(SPECS)} specs to {OUT}")
+    _emit_resources(registry)
 
 
 if __name__ == "__main__":

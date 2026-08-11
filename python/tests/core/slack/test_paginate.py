@@ -16,8 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
-from mirage.resource.slack.config import SlackConfig
 
 
 @pytest.mark.asyncio

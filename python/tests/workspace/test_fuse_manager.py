@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
 import subprocess
+import sys
+import tempfile
 
 import pytest
 
-from mirage import FuseManager, Mount, MountMode, Workspace
+from mirage import FuseManager, Mount, MountBackend, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 
@@ -27,9 +30,9 @@ class _FakeThread:
 
 
 def _fake_mount(monkeypatch):
-    monkeypatch.setattr(
-        "mirage.workspace.fuse.mount_background",
-        lambda ops, mountpoint, root_prefix="", session=None: _FakeThread())
+    monkeypatch.setattr("mirage.workspace.fuse.mount_background",
+                        lambda ops, mountpoint, root_prefix="", session=None,
+                        backend=None: _FakeThread())
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
 
 
@@ -61,17 +64,18 @@ def test_multiple_fuse_mounts_are_independent(monkeypatch):
     ws.add_fuse_mount("/a/", "/tmp/mp-a")
     ws.add_fuse_mount("/b/", "/tmp/mp-b")
     assert ws.fuse_mountpoints == {"/a/": "/tmp/mp-a", "/b/": "/tmp/mp-b"}
-    assert set(ws._fuse_managers) == {"/a/", "/b/"}
+    assert set(ws._kernel_mounts._managers) == {"/a/", "/b/"}
     ws.remove_fuse_mount("/a/")
     assert ws.fuse_mountpoints == {"/b/": "/tmp/mp-b"}
-    assert set(ws._fuse_managers) == {"/b/"}
+    assert set(ws._kernel_mounts._managers) == {"/b/"}
 
 
 def test_collision_rejected_before_mount(monkeypatch):
     calls = []
-    monkeypatch.setattr("mirage.workspace.fuse.mount_background",
-                        lambda ops, mountpoint, root_prefix="", session=None:
-                        (calls.append(mountpoint) or _FakeThread()))
+    monkeypatch.setattr(
+        "mirage.workspace.fuse.mount_background",
+        lambda ops, mountpoint, root_prefix="", session=None, backend=None:
+        (calls.append(mountpoint) or _FakeThread()))
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
     ws = Workspace({
         "/a/": RAMResource(),
@@ -97,8 +101,9 @@ def test_double_unmount_is_idempotent(monkeypatch):
 
 def test_mount_spec_fuse_true_single(monkeypatch):
     _fake_mount(monkeypatch)
-    ws = Workspace({"/gdocs/": Mount(RAMResource(), fuse=True)},
-                   mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/gdocs/": Mount(RAMResource(), backend=MountBackend.FUSE)},
+        mode=MountMode.WRITE)
     mps = ws.fuse_mountpoints
     assert set(mps) == {"/gdocs/"}
     assert mps["/gdocs/"]
@@ -107,8 +112,14 @@ def test_mount_spec_fuse_true_single(monkeypatch):
 
 def test_mount_spec_fuse_pinned_path(monkeypatch):
     _fake_mount(monkeypatch)
-    ws = Workspace({"/whatever/": Mount(RAMResource(), fuse="/tmp/pinned-x")},
-                   mode=MountMode.WRITE)
+    ws = Workspace(
+        {
+            "/whatever/":
+            Mount(RAMResource(),
+                  backend=MountBackend.FUSE,
+                  mountpoint="/tmp/pinned-x")
+        },
+        mode=MountMode.WRITE)
     assert ws.fuse_mountpoints["/whatever/"] == "/tmp/pinned-x"
 
 
@@ -116,8 +127,8 @@ def test_mount_spec_fuse_each_of_multiple(monkeypatch):
     _fake_mount(monkeypatch)
     ws = Workspace(
         {
-            "/a/": Mount(RAMResource(), fuse=True),
-            "/b/": Mount(RAMResource(), fuse=True)
+            "/a/": Mount(RAMResource(), backend=MountBackend.FUSE),
+            "/b/": Mount(RAMResource(), backend=MountBackend.FUSE)
         },
         mode=MountMode.WRITE)
     assert set(ws.fuse_mountpoints) == {"/a/", "/b/"}
@@ -150,7 +161,92 @@ def test_no_fuse_when_bare_or_tuple(monkeypatch):
 
 def test_mount_spec_fuse_unmounts_on_close(monkeypatch):
     _fake_mount(monkeypatch)
-    with Workspace({"/gdocs/": Mount(RAMResource(), fuse=True)},
-                   mode=MountMode.WRITE) as ws:
+    with Workspace(
+        {"/gdocs/": Mount(RAMResource(), backend=MountBackend.FUSE)},
+            mode=MountMode.WRITE) as ws:
         assert set(ws.fuse_mountpoints) == {"/gdocs/"}
     assert ws.fuse_mountpoints == {}
+
+
+def _capture_mount(monkeypatch):
+    """Record what FuseManager hands to mount_background."""
+    seen = {}
+
+    def _fake(ops, mountpoint, root_prefix="", session=None, backend=None):
+        seen["mountpoint"] = mountpoint
+        seen["backend"] = backend
+        return _FakeThread()
+
+    monkeypatch.setattr("mirage.workspace.fuse.mount_background", _fake)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: None)
+    return seen
+
+
+def _as_macos(monkeypatch):
+    """Let fskit past check_platform on a Linux runner."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+
+def test_fskit_auto_mountpoint_is_named_not_created(monkeypatch):
+    # /Volumes is root-owned (drwxr-xr-x root:wheel), so mkdtemp there raises
+    # PermissionError for every non-root user. An FSKit mount is a volume:
+    # the system creates the directory when the filesystem goes live, so
+    # mirage only names it. Creating it here would break every fskit mount.
+    _as_macos(monkeypatch)
+    _capture_mount(monkeypatch)
+    made = []
+    monkeypatch.setattr(tempfile, "mkdtemp",
+                        lambda *a, **k: made.append(k) or "/tmp/should-not")
+    fm = FuseManager()
+    mp = fm.setup(Workspace({
+        "/": RAMResource()
+    }, mode=MountMode.WRITE)._ops,
+                  "/",
+                  backend=MountBackend.FSKIT)
+    assert mp.startswith("/Volumes/mirage-")
+    assert not os.path.exists(mp)
+    assert made == []
+
+
+def test_fskit_pinned_mountpoint_is_not_created(monkeypatch):
+    _as_macos(monkeypatch)
+    seen = _capture_mount(monkeypatch)
+    calls = []
+    monkeypatch.setattr(os, "makedirs", lambda *a, **k: calls.append(a))
+    fm = FuseManager()
+    fm.setup(Workspace({
+        "/": RAMResource()
+    }, mode=MountMode.WRITE)._ops,
+             "/",
+             mountpoint="/Volumes/pinned-vol",
+             backend=MountBackend.FSKIT)
+    assert calls == []
+    assert seen["mountpoint"] == "/Volumes/pinned-vol"
+
+
+def test_fuse_auto_mountpoint_still_uses_tempdir(monkeypatch):
+    _capture_mount(monkeypatch)
+    fm = FuseManager()
+    mp = fm.setup(
+        Workspace({
+            "/": RAMResource()
+        }, mode=MountMode.WRITE)._ops, "/")
+    assert not mp.startswith("/Volumes/")
+    assert os.path.isdir(mp)
+    os.rmdir(mp)
+
+
+def test_unmount_never_rmdirs_a_volumes_entry(monkeypatch):
+    # The /Volumes entry belongs to the system; rmdir would fail anyway.
+    _as_macos(monkeypatch)
+    _capture_mount(monkeypatch)
+    removed = []
+    monkeypatch.setattr(os, "rmdir", lambda p: removed.append(p))
+    fm = FuseManager()
+    fm.setup(Workspace({
+        "/": RAMResource()
+    }, mode=MountMode.WRITE)._ops,
+             "/",
+             backend=MountBackend.FSKIT)
+    fm.unmount()
+    assert removed == []

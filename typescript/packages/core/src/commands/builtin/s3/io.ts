@@ -16,7 +16,7 @@ import type { S3Accessor } from '../../../accessor/s3.ts'
 import { SCOPE_ERROR } from '../../../core/s3/constants.ts'
 import { copy as s3Copy } from '../../../core/s3/copy.ts'
 import { create as s3Create } from '../../../core/s3/create.ts'
-import { du as s3Du, duAll as s3DuAll } from '../../../core/s3/du.ts'
+import { size as s3Du, entries as s3DuAll } from '../../../core/s3/du/index.ts'
 import { exists as s3Exists } from '../../../core/s3/exists.ts'
 import { find as s3Find } from '../../../core/s3/find.ts'
 import { mkdir as s3Mkdir } from '../../../core/s3/mkdir.ts'
@@ -26,7 +26,7 @@ import { rename as s3Rename } from '../../../core/s3/rename.ts'
 import { rmR as s3RmR } from '../../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../../core/s3/rmdir.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
-import { stream as s3Stream } from '../../../core/s3/stream.ts'
+import { readRange as s3ReadRange, stream as s3Stream } from '../../../core/s3/stream.ts'
 import { truncate as s3Truncate } from '../../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../../core/s3/unlink.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
@@ -35,6 +35,7 @@ import type { CommandIO } from '../generic_bind/index.ts'
 export const S3_IO: CommandIO<S3Accessor> = {
   readdir: s3Readdir,
   readBytes: s3Read,
+  readRange: s3ReadRange,
   readStream: s3Stream,
   stat: s3Stat,
   isMounted: () => true,
@@ -51,6 +52,5 @@ export const S3_IO: CommandIO<S3Accessor> = {
   create: s3Create,
   truncate: s3Truncate,
   find: s3Find,
-  duTotal: s3Du,
-  duAll: s3DuAll,
+  du: { size: s3Du, entries: s3DuAll },
 }

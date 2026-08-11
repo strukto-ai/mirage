@@ -14,6 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { StatOverlay } from '../../../ops/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import {
   FileType,
@@ -31,6 +32,7 @@ import { eisdir } from '../../../utils/errors.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
+import type { DuEntries } from '../generic/du.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
@@ -73,19 +75,17 @@ type FindOp<A extends Accessor = Accessor> = FindFn<
   [accessor: A, path: PathSpec, options: FindOptions]
 >
 
-type IsDirNameOp<A extends Accessor = Accessor> = (accessor: A, child: string) => boolean | null
-
-type DuTotalOp<A extends Accessor = Accessor> = (
+type DuSizeOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ) => Promise<number>
 
-type DuAllOp<A extends Accessor = Accessor> = (
+type DuEntriesOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-) => Promise<[[string, number][], number]>
+) => Promise<DuEntries>
 
 export type ResolveGlobOp<A extends Accessor = Accessor> = (
   accessor: A,
@@ -101,9 +101,29 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
     resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches)
 }
 
+// A backend's native du, both halves at once. The generic derives its
+// per-directory rows from `entries`, so a backend offering only the
+// cheaper `size` would silently print operand totals with no directory
+// rows and an inert `-a`. Pairing them makes native du all-or-nothing,
+// so that degraded shape cannot be reached by omission (#645).
+export interface DuOps<A extends Accessor = Accessor> {
+  size: DuSizeOp<A>
+  entries: DuEntriesOp<A>
+}
+
 export interface CommandIO<A extends Accessor = Accessor> {
   readdir: ReaddirOp<A>
   readBytes: ReadBytesOp<A>
+  // A byte window without reading the whole file. Optional: a backend that
+  // renders its content has no remote range to ask for, and the generic ops
+  // factory reads and slices for anything that omits it.
+  readRange?: (
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore | undefined,
+    offset: number,
+    size: number | null,
+  ) => Promise<Uint8Array>
   readStream: ReadStreamOp<A>
   stat: StatOp<A>
   isMounted: (accessor: A) => boolean
@@ -121,17 +141,44 @@ export interface CommandIO<A extends Accessor = Accessor> {
   create?: PathOp<A>
   truncate?: (accessor: A, path: PathSpec, length: number) => Promise<void>
   find?: FindOp<A>
-  isDirName?: IsDirNameOp<A>
-  duTotal?: DuTotalOp<A>
-  duAll?: DuAllOp<A>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  append?: (...args: any[]) => unknown
+  du?: DuOps<A>
+  maxDuEntries?: number
+  // Typed like `write`, now that the tee generic actually calls it. It stayed
+  // an `any` bag for as long as nothing read it, which is what let five
+  // backends wire a slot no builder could consume.
+  append?: (accessor: A, path: PathSpec, data: Uint8Array) => Promise<void>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setAttrs?: (...args: any[]) => unknown
 }
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+}
+
+/**
+ * A `readRange` slot built from a backend read that already takes a byte
+ * window as its options argument.
+ *
+ * Without the slot the ops factory reads the whole object and slices, so
+ * `head -c 100` on a 2 GiB S3 key downloads 2 GiB. Python has pushed the
+ * window down on every one of these backends since the slot existed by
+ * pointing `read_range` at its own `read_bytes`; this is the same move,
+ * spelled for a read whose window arrives in an options object.
+ *
+ * Args:
+ *   read: the backend's whole-file read, whose fourth argument is an
+ *     `{offset?, size?}` window.
+ */
+export function rangeOf<A extends Accessor = Accessor>(
+  read: (
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore | undefined,
+    options: { offset?: number; size?: number },
+  ) => Promise<Uint8Array>,
+): NonNullable<CommandIO<A>['readRange']> {
+  return (accessor, path, index, offset, size) =>
+    read(accessor, path, index, size === null ? { offset } : { offset, size })
 }
 
 // Whether a path that failed with ENOENT is an implicit directory. Keyed
@@ -203,6 +250,20 @@ export function dirAwareStat<A extends Accessor>(
   }
 }
 
+// Stat through the backend, then merge the namespace attr overlay, so the
+// stat-rendering commands (ls -l, stat -c) show the chmod/chown/touch state a
+// backend without an attribute slot cannot hold itself. Returns the plain stat
+// unchanged when the executor injected no overlay. Mirrors the Python
+// `overlaid_stat`; every stat-rendering command binds through here so no
+// backend can quietly skip the merge and disagree with the ops facade.
+export function overlaidStat(
+  stat: (p: PathSpec) => Promise<FileStat>,
+  overlay: StatOverlay | undefined,
+): (p: PathSpec) => Promise<FileStat> {
+  if (overlay === undefined) return stat
+  return async (p) => overlay(p.virtual, await stat(p))
+}
+
 async function* streamRefusingDirs<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
@@ -246,6 +307,23 @@ export type BuilderFn<A extends Accessor = Accessor> = (
   opts: CommandOpts,
 ) => Promise<CommandFnResult> | CommandFnResult
 
+export type Operation =
+  | 'write'
+  | 'exists'
+  | 'mkdir'
+  | 'unlink'
+  | 'rmdir'
+  | 'rename'
+  | 'copy'
+  | 'truncate'
+
+export function supports<A extends Accessor = Accessor>(
+  ops: CommandIO<A>,
+  requirements: readonly Operation[],
+): boolean {
+  return requirements.every((op) => ops[op] !== undefined)
+}
+
 export interface Builder<A extends Accessor = Accessor> {
   name: string
   fn: BuilderFn<A>
@@ -253,4 +331,12 @@ export interface Builder<A extends Accessor = Accessor> {
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean
+  /**
+   * Backend ops the command cannot run without. A backend missing any of
+   * them does not get the command registered at all, rather than getting a
+   * command that throws on every invocation. `write: true` is not enough on
+   * its own: rmdir needs `rmdir`, truncate needs `truncate`, and a backend
+   * can have `write` without either.
+   */
+  requirements?: readonly Operation[]
 }

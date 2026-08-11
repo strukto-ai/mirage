@@ -12,8 +12,74 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import type { ShellArray } from '../../shell/array.ts'
 import type { MountMode } from '../../types.ts'
+
+/**
+ * What a child shell gets its own copy of, and the parent gets back
+ * afterwards. A `( … )` subshell and a nested `bash`/`sh` are both child
+ * shells and both read this shape, so neither can drift into isolating a
+ * field the other leaks, and adding a field here is a compile error
+ * until `snapshot` and `restore` both carry it. `lastExitCode` is
+ * deliberately absent: `$?` after a child shell is the child's status,
+ * which is the one thing it reports back. `sourceDepth` is here because a
+ * child shell starts outside any `source` its caller is inside.
+ */
+export interface ChildShellState {
+  cwd: string
+  sourceDepth: number
+  env: Record<string, string>
+  functions: Record<string, unknown>
+  shellOptions: Record<string, boolean>
+  readonlyVars: Set<string>
+  arrays: Record<string, ShellArray>
+  positionalArgs: string[]
+  scriptName: string | null
+  lastBgJobId: number | null
+  getoptsPos: number
+  getoptsOptind: number | null
+}
+
+/**
+ * Read one entry of a session record, ignoring anything inherited from
+ * `Object.prototype`. Shell names are script-controlled, so a plain
+ * `record[name]` lookup would hand back `Object.prototype` (or one of
+ * its methods) for a name like `__proto__` or `toString`; Python's dicts
+ * have no such shadow, so this guard is the TypeScript side only.
+ */
+export function sessionEntry<T>(record: Record<string, T>, name: string): T | undefined {
+  return Object.hasOwn(record, name) ? record[name] : undefined
+}
+
+/**
+ * Write one entry of a session record as an own property. A plain
+ * `record[name] = value` on the name `__proto__` runs the inherited
+ * setter instead: it silently drops a string value and rewrites the
+ * record's prototype for an array one.
+ */
+export function setSessionEntry<T>(record: Record<string, T>, name: string, value: T): void {
+  Object.defineProperty(record, name, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  })
+}
+
+/**
+ * A copy of `record` with a null prototype. Session records (env,
+ * functions, arrays) hold script-controlled names, so they must not
+ * inherit from `Object.prototype`: on a plain object, reading a name
+ * like `toString` hands back an inherited function and assigning
+ * `__proto__` runs the inherited setter instead of storing the value.
+ * With no prototype, every name is an ordinary key. Python's dicts
+ * need no equivalent.
+ */
+export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null) as Record<string, T>, record)
+}
 
 export interface SessionInit {
   sessionId: string
@@ -23,9 +89,10 @@ export interface SessionInit {
   functions?: Record<string, unknown>
   lastExitCode?: number
   positionalArgs?: string[]
+  scriptName?: string | null
   shellOptions?: Record<string, boolean>
   readonlyVars?: Set<string>
-  arrays?: Record<string, string[]>
+  arrays?: Record<string, ShellArray>
   /**
    * Per-mount mode caps for this session. `null` (the default) means
    * no restriction: every mount in the workspace is reachable at its own
@@ -49,9 +116,13 @@ export class Session {
   functions: Record<string, unknown>
   lastExitCode: number
   positionalArgs: string[]
+  // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
+  // sets it to the script file it is running, or to the name given after
+  // `-c`, and restores it afterwards.
+  scriptName: string | null
   shellOptions: Record<string, boolean>
   readonlyVars: Set<string>
-  arrays: Record<string, string[]>
+  arrays: Record<string, ShellArray>
   // Transient `set -e` marker: true when the failure just returned
   // came from a short-circuited &&/|| branch or a `!`-negated command,
   // which bash exempts from errexit. Reset on every node execution.
@@ -62,12 +133,30 @@ export class Session {
   stdinBuffer: AsyncLineIterator | null = null
   stdinSource: unknown = null
   localVars: Map<string, string | null> | null = null
+  // Arrays shadowed by `local -a` / `declare -a` in the running
+  // function; null means the caller had no array of that name.
+  localArrays: Map<string, ShellArray | null> | null = null
   // Hidden `getopts` state: the char offset within the word being
   // scanned (0 = positioned at the word's leading dash), plus the OPTIND
   // that offset belongs to. A caller resetting OPTIND makes the seen
   // value stale, restarting the scan, matching bash's char pointer.
   getoptsPos = 0
   getoptsOptind: number | null = null
+  // The cancel channel for work running under this shell: killing a
+  // background job aborts it, and the mount layer folds it into the
+  // signal handed to runtimes. Never part of SessionInit (transient,
+  // not persisted); fork() carries it so a job's whole subtree shares
+  // one channel. Python needs no equivalent: kill cancels the asyncio
+  // task and cancellation is ambient.
+  abortSignal: AbortSignal | null = null
+  // Command-substitution tracking for assignment statements: how many
+  // substitutions have run in this session, and the status of the
+  // most recent one. An assignment statement snapshots the count
+  // before expanding its value and, when it grew, reports the last
+  // substitution's status as its own (bash: `x=$(false)` exits 1,
+  // `x=abc` exits 0).
+  cmdsubSeq = 0
+  cmdsubStatus = 0
   mountModes: ReadonlyMap<string, MountMode> | null
   generation: number
   pipelineTimeoutSeconds: number | null
@@ -77,14 +166,15 @@ export class Session {
     this.sessionId = init.sessionId
     this.errexitImmune = false
     this.cwd = init.cwd ?? '/'
-    this.env = init.env ?? {}
+    this.env = ownRecord(init.env)
     this.createdAt = init.createdAt ?? Date.now() / 1000
-    this.functions = init.functions ?? {}
+    this.functions = ownRecord(init.functions)
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
+    this.scriptName = init.scriptName ?? null
     this.shellOptions = init.shellOptions ?? {}
     this.readonlyVars = init.readonlyVars ?? new Set()
-    this.arrays = init.arrays ?? {}
+    this.arrays = ownRecord(init.arrays)
     this.mountModes = init.mountModes ?? null
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
@@ -108,6 +198,7 @@ export class Session {
       functions: overrides.functions ?? { ...this.functions },
       lastExitCode: overrides.lastExitCode ?? this.lastExitCode,
       positionalArgs: overrides.positionalArgs ?? [...this.positionalArgs],
+      scriptName: overrides.scriptName ?? this.scriptName,
       shellOptions: overrides.shellOptions ?? { ...this.shellOptions },
       readonlyVars: overrides.readonlyVars ?? new Set(this.readonlyVars),
       arrays:
@@ -120,7 +211,60 @@ export class Session {
     })
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
+    forked.abortSignal = this.abortSignal
+    forked.cmdsubSeq = this.cmdsubSeq
+    forked.cmdsubStatus = this.cmdsubStatus
     return forked
+  }
+
+  /**
+   * What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
+   * sets it to the script it is running, or to the name given after
+   * `-c`. An empty name is a name, so it is not folded into the default:
+   * GNU `bash -c 'echo "[$0]"' ""` prints `[]`.
+   */
+  get argv0(): string {
+    return this.scriptName ?? SHELL_ARGV0
+  }
+
+  /**
+   * Copy the state a child shell runs on top of. The records go through
+   * `ownRecord` because they hold script-controlled names and must keep
+   * their null prototype across the round trip.
+   */
+  snapshot(): ChildShellState {
+    const arrays: Record<string, ShellArray> = ownRecord()
+    for (const [name, value] of Object.entries(this.arrays)) arrays[name] = [...value]
+    return {
+      cwd: this.cwd,
+      sourceDepth: this.sourceDepth,
+      env: ownRecord(this.env),
+      functions: ownRecord(this.functions),
+      shellOptions: { ...this.shellOptions },
+      readonlyVars: new Set(this.readonlyVars),
+      arrays,
+      positionalArgs: [...this.positionalArgs],
+      scriptName: this.scriptName,
+      lastBgJobId: this.lastBgJobId,
+      getoptsPos: this.getoptsPos,
+      getoptsOptind: this.getoptsOptind,
+    }
+  }
+
+  /** Put back a snapshot, ending a child shell. */
+  restore(state: ChildShellState): void {
+    this.cwd = state.cwd
+    this.sourceDepth = state.sourceDepth
+    this.env = state.env
+    this.functions = state.functions
+    this.shellOptions = state.shellOptions
+    this.readonlyVars = state.readonlyVars
+    this.arrays = state.arrays
+    this.positionalArgs = state.positionalArgs
+    this.scriptName = state.scriptName
+    this.lastBgJobId = state.lastBgJobId
+    this.getoptsPos = state.getoptsPos
+    this.getoptsOptind = state.getoptsOptind
   }
 
   /**

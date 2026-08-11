@@ -20,7 +20,7 @@ from mirage.core.dropbox.api import search_files
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,6 @@ async def narrow_paths(
                          directory="",
                          resource_path=mount_key(virtual, mount_prefix),
                          resolved=True,
-                         raw_path=rebase_raw([virtual], p.virtual,
-                                             p.raw_path)[0]))
+                         raw_path=respell_raw([virtual], p.virtual,
+                                              p.raw_path)[0]))
     return narrowed

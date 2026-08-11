@@ -33,7 +33,7 @@ import { PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
 import * as drive from '../google/drive.ts'
 import * as client from '../google/_client.ts'
-import { read } from './read.ts'
+import { read, readSpreadsheet } from './read.ts'
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -45,14 +45,17 @@ function makeAccessor(): GSheetsAccessor {
 
 describe('gsheets read auto-bootstrap', () => {
   it('refetches owned listing when entry is evicted from index', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue([
-      {
-        id: 'sheet1',
-        name: 'Budget',
-        modifiedTime: '2026-04-01T00:00:00.000Z',
-        owners: [{ me: true }],
-      },
-    ])
+    vi.mocked(drive.listAllFiles).mockResolvedValue({
+      files: [
+        {
+          id: 'sheet1',
+          name: 'Budget',
+          modifiedTime: '2026-04-01T00:00:00.000Z',
+          owners: [{ me: true }],
+        },
+      ],
+      complete: true,
+    })
     vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 'sheet1' })
 
     const accessor = makeAccessor()
@@ -67,7 +70,7 @@ describe('gsheets read auto-bootstrap', () => {
   })
 
   it('throws ENOENT when file missing even after recursion', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue([])
+    vi.mocked(drive.listAllFiles).mockResolvedValue({ files: [], complete: true })
     vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
 
     const accessor = makeAccessor()
@@ -78,5 +81,12 @@ describe('gsheets read auto-bootstrap', () => {
       resourcePath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('asks for grid data, which spreadsheets.get omits by default', async () => {
+    vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 's1' })
+    await readSpreadsheet(STUB_TOKEN_MANAGER, 's1')
+    expect(vi.mocked(client.googleGet).mock.lastCall?.[1]).toMatch(/\/spreadsheets\/s1$/)
+    expect(vi.mocked(client.googleGet).mock.lastCall?.[2]).toEqual({ includeGridData: 'true' })
   })
 })

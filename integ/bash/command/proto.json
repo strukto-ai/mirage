@@ -1,0 +1,159 @@
+{
+  "cases": [
+    {
+      "id": "proto_name_command_not_found",
+      "seq": 503150,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "toString 2>&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "toString: command not found\nrc=127\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "proto_name_command_v_misses",
+      "seq": 503151,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "command -v toString; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "proto_name_prefix_assign_no_leak",
+      "seq": 503152,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "X=7 toString 2>/dev/null; echo \"[$X]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "proto_name_variable",
+      "seq": 503153,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "__proto__=5; echo \"[$__proto__]\"; unset __proto__; echo \"[$__proto__]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[5]\n[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "proto_name_function",
+      "seq": 503154,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "toString() { echo ran; }; toString; unset -f toString; toString 2>&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "ran\ntoString: command not found\nrc=127\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

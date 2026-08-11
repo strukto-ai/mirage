@@ -12,7 +12,8 @@ _FIRST_FIELD_RE = re.compile(r"(\s*)(\S+)([\s\S]*)")
 
 
 def _parse_number(value: str, from_mode: str) -> Decimal:
-    match = re.fullmatch(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))([A-Za-z]*)", value)
+    match = re.fullmatch(r"([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))([A-Za-z]*)",
+                         value)
     if match is None:
         raise InvalidOperation(value)
     number = Decimal(match.group(1))

@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.agents.openai_agents import MirageSandboxClient
+from mirage.commands.cli.builtin.linear import LINEAR
 from mirage.resource.github import GitHubConfig, GitHubResource
 from mirage.resource.linear import LinearConfig, LinearResource
 from mirage.resource.ram import RAMResource
@@ -46,7 +47,7 @@ async def main() -> None:
         token=os.environ["SLACK_BOT_TOKEN"],
         search_token=os.environ.get("SLACK_USER_TOKEN"),
     ))
-    github = GitHubResource(
+    github = await GitHubResource.build(
         config=GitHubConfig(token=os.environ["GITHUB_TOKEN"]),
         owner=GITHUB_OWNER,
         repo=GITHUB_REPO,
@@ -61,6 +62,9 @@ async def main() -> None:
         "/github": (github, MountMode.READ),
         "/linear": (linear, MountMode.WRITE),
     })
+    ws.register_cli(
+        "linear", LINEAR,
+        LinearConfig(api_key=os.environ["LINEAR_API_KEY"]).model_dump())
 
     _orig_exec = ws.execute
 

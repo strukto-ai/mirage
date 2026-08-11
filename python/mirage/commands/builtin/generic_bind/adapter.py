@@ -20,7 +20,8 @@ from typing import Any, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.ops.config import StatOverlay
+from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
+from mirage.ops.types import StatOverlay
 from mirage.types import FileStat, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 
@@ -88,6 +89,26 @@ class Operation(StrEnum):
     TRUNCATE = "truncate"
 
 
+@dataclass(frozen=True, slots=True)
+class DuOps:
+    """A backend's native ``du`` implementation, both halves at once.
+
+    ``size`` and ``entries`` are not independent: the generic derives its
+    per-directory rows from ``entries``, so a backend offering only the
+    cheaper ``size`` would silently print operand totals with no
+    directory rows and an inert ``-a``. Pairing them in one value makes
+    native du all-or-nothing, so that degraded shape cannot be reached
+    by omission.
+
+    Args:
+        size (OperationFn): recursive byte total for one path.
+        entries (OperationFn): per-file breakdown, leaf files only.
+    """
+
+    size: OperationFn
+    entries: OperationFn
+
+
 @dataclass(frozen=True)
 class Builder:
     name: str
@@ -108,6 +129,15 @@ class CommandIO:
     is_mounted: OperationFn
     local: bool = True
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
+    # Fetch a byte range without pulling the whole object. Absent means
+    # the generic read fetches everything and slices, which is correct
+    # everywhere and is the only meaningful behavior for a backend that
+    # renders its content rather than storing it: there is no remote
+    # range to ask for when the bytes do not exist until we make them.
+    # Called as (accessor, path, index, offset, size), so most backends
+    # point it at their own read_bytes, which already takes the window;
+    # disk needs a separate function because its read_bytes does not.
+    read_range: OperationFn | None = None
     write: OperationFn | None = None
     exists: OperationFn | None = None
     mkdir: OperationFn | None = None
@@ -120,9 +150,8 @@ class CommandIO:
     create: OperationFn | None = None
     truncate: OperationFn | None = None
     find: OperationFn | None = None
-    is_dir_name: OperationFn | None = None
-    du_total: OperationFn | None = None
-    du_all: OperationFn | None = None
+    du: DuOps | None = None
+    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
     append: OperationFn | None = None
     set_attrs: OperationFn | None = None
 

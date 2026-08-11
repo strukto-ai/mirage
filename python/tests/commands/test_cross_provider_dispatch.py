@@ -15,14 +15,14 @@
 import asyncio
 
 from mirage.commands.registry import RegisteredCommand
-from mirage.commands.spec import CommandSpec, Operand, OperandKind
+from mirage.commands.spec import CommandSpec, Operand
 from mirage.io.types import IOResult
 from mirage.provision import ProvisionResult
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 
-_SPEC = CommandSpec(rest=Operand(kind=OperandKind.PATH))
+_SPEC = CommandSpec(rest=Operand(type="path"))
 
 
 def _make_ws():

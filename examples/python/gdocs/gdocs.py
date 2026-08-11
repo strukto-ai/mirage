@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
 from mirage.types import PathSpec
 
@@ -34,6 +35,8 @@ resource = GDocsResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/gdocs": resource}, mode=MountMode.WRITE)
+    # The gws verbs are a CLI install, separate from the mounts.
+    ws.register_cli("gws", GWS, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /gdocs/__nf_missing__.txt",
@@ -146,10 +149,10 @@ async def main() -> None:
                          f" --params '{params}' --json '{body}'")
     print(f"Updated: {(await r.stdout_str())[:80]}")
 
-    print("\n=== gws docs +write ===")
-    r = await ws.execute(f'gws docs +write'
+    print("\n=== gws docs write ===")
+    r = await ws.execute(f'gws docs write'
                          f' --document {doc_id}'
-                         f' --text "Appended via gws docs +write."')
+                         f' --text "Appended via gws docs write."')
     print(f"Written: {(await r.stdout_str())[:80]}")
 
     url = f"https://docs.google.com/document/d/{doc_id}/edit"

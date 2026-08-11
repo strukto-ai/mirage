@@ -17,6 +17,9 @@ export {
   NAMESPACE_COMMANDS,
   NO_FOLLOW_COMMANDS,
   UNSUPPORTED_BUILTINS,
+  dereferences,
+  endOptionsAfterProgram,
+  reportsLink,
 } from './constants.ts'
-export { route } from './route.ts'
+export { route, routeAll } from './route.ts'
 export { Consumer, SHELL_CONSUMERS, WordPolicy, wordPolicy } from './types.ts'

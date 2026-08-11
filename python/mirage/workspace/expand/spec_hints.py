@@ -14,7 +14,7 @@
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command
-from mirage.commands.spec.types import CommandSpec, OperandKind
+from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.workspace.mount import MountRegistry
 
 
@@ -45,11 +45,11 @@ def spec_for_command(
 def spec_word_kinds(
     spec: CommandSpec,
     argv: list[str],
-) -> list[OperandKind | None]:
+) -> list[ValueType | None]:
     """Classify argv words into per-position operand kinds.
 
     Delegates to parse_command so flag syntax (clusters, --flag=value,
-    repeatable flags, provided_by) classifies identically to dispatch.
+    multiple flags, provided_by) classifies identically to dispatch.
     Kinds are positional, not value sets, so the same word can be TEXT
     in one slot and PATH in another (`grep '*.txt' *.txt`). None marks
     flag tokens and ignored words (default classification applies).
@@ -63,9 +63,30 @@ def spec_word_kinds(
         spec (CommandSpec): command specification with flags/positional/rest.
         argv (list[str]): command arguments (without command name).
     """
-    parsed = parse_command(spec, argv, cwd="/")
-    kinds: list[OperandKind | None] = list(parsed.word_kinds)
-    for i, word in enumerate(argv):
-        if word in spec.ignore_tokens:
-            kinds[i] = None
-    return kinds
+    # parse_command classifies ignore_tokens as TEXT itself, so there is
+    # nothing to override here: leaving them None sent `find \( ... \)`
+    # back to the shape heuristic, which read "(" as the bare path "/(".
+    return list(parse_command(spec, argv, cwd="/").word_kinds)
+
+
+def spec_word_bases(
+    spec: CommandSpec,
+    argv: list[str],
+    cwd: str,
+) -> list[str | None] | None:
+    """Per-position base directories for a spec that declares one.
+
+    tar's -C is a chdir for the operands typed after it, so those words
+    are not relative to the session cwd at all. The parser already walks
+    the line positionally, so it is what says where each word stood;
+    this asks it, and only for the one command family that can answer
+    (None everywhere else, so 92 of 93 specs pay nothing).
+
+    Args:
+        spec (CommandSpec): command specification.
+        argv (list[str]): command arguments (without command name).
+        cwd (str): the working directory the line was typed under.
+    """
+    if spec.operand_base is None:
+        return None
+    return list(parse_command(spec, argv, cwd=cwd).word_bases)

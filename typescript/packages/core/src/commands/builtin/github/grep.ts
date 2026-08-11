@@ -24,7 +24,8 @@ import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
 import { patternArg } from '../grep_helper.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { filesOnlyShortcircuit, narrowScope } from './narrow.ts'
+import { narrowScope } from './narrow.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -39,14 +40,16 @@ async function grepCommand(
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     const pattern = patternArg(texts, opts.flags)
-    const recursive = opts.flags.r === true || opts.flags.R === true
-    const fixedString = opts.flags.F === true
+    const fl = new FlagView(opts.flags, specOf('grep'))
+    const recursive = fl.asBool('r') || fl.asBool('R')
+    const fixedString = fl.asBool('F')
     const narrowed = await narrowScope(
       accessor,
       paths,
       pattern,
       fixedString,
       recursive,
+      fl.asBool('w'),
       opts.index ?? undefined,
     )
     resolved = narrowed.resolved
@@ -56,14 +59,10 @@ async function grepCommand(
         new IOResult({
           exitCode: 1,
           stderr: ENC.encode(
-            `grep: ${String(narrowed.fileCount)} files in scope, narrow the path\n`,
+            `grep: ${String(narrowed.fileCount)} files in scope, narrow the path, or use -w to enable code search\n`,
           ),
         }),
       ]
-    }
-    if (narrowed.usedSearch) {
-      const short = filesOnlyShortcircuit(opts.flags, pattern, resolved, first)
-      if (short !== null) return short
     }
   }
   const stat = (p: PathSpec): Promise<FileStat> => githubStat(accessor, p, opts.index ?? undefined)

@@ -12,12 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import shutil
 
+import pytest
+
+skip_no_tac = pytest.mark.skipif(
+    shutil.which("tac") is None,
+    reason="tac is GNU coreutils; macOS ships tail -r instead",
+)
+
+
+@skip_no_tac
 def test_tac_stdin(env):
     data = b"a\nb\nc\n"
     assert env.mirage("tac", stdin=data) == env.native("tac", stdin=data)
 
 
+@skip_no_tac
 def test_tac_file(env):
     env.create_file("f.txt", b"1\n2\n3\n")
     assert env.mirage("tac /data/f.txt") == env.native("tac f.txt")

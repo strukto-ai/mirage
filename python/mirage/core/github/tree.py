@@ -15,7 +15,7 @@
 import logging
 from typing import Any
 
-from mirage.core.github._client import github_get, github_get_sync
+from mirage.core.github._client import github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
 
@@ -34,6 +34,10 @@ def _parse_tree_response(
                     ref)
     result: dict[str, TreeEntry] = {}
     for item in data.get("tree", []):
+        # Submodule gitlinks (type "commit") have no size and no blob to
+        # read; exclude them from the tree entirely.
+        if item["type"] == "commit":
+            continue
         result[item["path"]] = TreeEntry(
             path=item["path"],
             type=item["type"],
@@ -43,19 +47,20 @@ def _parse_tree_response(
     return result, truncated
 
 
-def fetch_tree_sync(
+async def fetch_tree(
     config: GitHubConfig,
     owner: str,
     repo: str,
     ref: str,
 ) -> tuple[dict[str, TreeEntry], bool]:
-    data = github_get_sync(
+    data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{ref}",
+        params={"recursive": "1"},
+        base_url=config.base_url,
         owner=owner,
         repo=repo,
         ref=ref,
-        params={"recursive": "1"},
     )
     return _parse_tree_response(data, owner, repo, ref)
 
@@ -73,12 +78,15 @@ async def fetch_dir_tree(
     data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{tree_sha}",
+        base_url=config.base_url,
         owner=owner,
         repo=repo,
         tree_sha=tree_sha,
     )
     result: list[TreeEntry] = []
     for item in data.get("tree", []):
+        if item["type"] == "commit":
+            continue
         result.append(
             TreeEntry(
                 path=item["path"],

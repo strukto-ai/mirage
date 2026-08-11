@@ -21,6 +21,7 @@ from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.observe.context import record, revision_for
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.ranges import range_header
 
 
 def _fp_rev_from_response(
@@ -65,9 +66,9 @@ async def read_bytes(accessor: S3Accessor,
     pinned_revision = revision_for(virtual)
     if pinned_revision is not None:
         kwargs["VersionId"] = pinned_revision
-    if offset or size is not None:
-        end = (offset + size - 1) if size is not None else ""
-        kwargs["Range"] = f"bytes={offset}-{end}"
+    window = range_header(offset, size)
+    if window is not None:
+        kwargs["Range"] = window
     session = async_session(config)
     start_ms = int(time.monotonic() * 1000)
     try:

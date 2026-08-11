@@ -18,8 +18,8 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.readdir import _fetch_day, _latest_message_ts, readdir
-from mirage.resource.slack.config import SlackConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 

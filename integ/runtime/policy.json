@@ -1,0 +1,824 @@
+{
+  "suite": "policy",
+  "cases": [
+    {
+      "id": "runtime_arg_per_line",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(argv[0])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "-c\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('routed-to-local')\"",
+          "runtime": "local",
+          "expect": {
+            "exit": 0,
+            "stdout": "routed-to-local\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(argv[0])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "-c\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "entry_script_fallthrough",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "'use-local' not in ctx['line']"
+          },
+          "local",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(argv[0])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "-c\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('routed-to-local')\" && echo use-local",
+          "expect": {
+            "exit": 0,
+            "stdout": "routed-to-local\nuse-local\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "entry_script_refused",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "False"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"x\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: no runtime accepted this line\n"
+          }
+        },
+        {
+          "command": "echo vfs-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "vfs-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "global_policy",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "'local' if 'go-local' in ctx['line'] else None"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(argv[0])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "-c\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('went-local')\" && echo go-local",
+          "expect": {
+            "exit": 0,
+            "stdout": "went-local\ngo-local\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "add_runtime_local",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"x\"",
+          "runtime": "local",
+          "expect": {
+            "throws_contains": "unknown runtime"
+          }
+        },
+        {
+          "add_runtime": "local"
+        },
+        {
+          "command": "python3 -c \"import sys; print('added-local')\"",
+          "runtime": "local",
+          "expect": {
+            "exit": 0,
+            "stdout": "added-local\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "add_runtime_monty",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"x\"",
+          "runtime": "monty",
+          "expect": {
+            "throws_contains": "unknown runtime"
+          }
+        },
+        {
+          "add_runtime": "monty"
+        },
+        {
+          "command": "python3 -c \"print(40 + 2)\"",
+          "runtime": "monty",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ctx_command_pipeline",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "ctx['command'] == 'python3'"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "pipe.py": "print('came-through-pipe')"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cat /ram/pipe.py | python3",
+          "expect": {
+            "exit": 0,
+            "stdout": "came-through-pipe\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime_arg_uncaptured_inert",
+      "world": {
+        "runtimes": [
+          "monty"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep -r hello",
+          "runtime": "monty",
+          "expect": {
+            "exit": 0,
+            "stdout": "ram/a.txt:hello\n"
+          }
+        },
+        {
+          "command": "grep -r xxx",
+          "runtime": "monty",
+          "expect": {
+            "exit": 1,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "grep -r xxx /ram",
+          "runtime": "monty",
+          "expect": {
+            "exit": 1,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "grep -r hello /ram",
+          "runtime": "monty",
+          "expect": {
+            "exit": 0,
+            "stdout": "/ram/a.txt:hello\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime_arg_vfs_refused",
+      "world": {
+        "runtimes": [
+          "monty"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi",
+          "runtime": "vfs",
+          "expect": {
+            "throws_contains": "not a runtime you can select"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_script_bad_name",
+      "world": {
+        "runtimes": [
+          "monty"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "'nope'"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "throws_contains": "unknown runtime"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captures_narrowed_entry",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "captures": [
+              "python3"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(40 + 2)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_eval_inherits_routing",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "'magic' in ctx['line']"
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo $(python3 -c \"print(42)\") magic",
+          "expect": {
+            "exit": 0,
+            "stdout": "42 magic\n"
+          }
+        },
+        {
+          "command": "echo $(python3 -c \"print(42)\")",
+          "expect": {
+            "exit": 0,
+            "stdout": "\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captures_narrowed_miss",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "captures": [
+              "python3"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python -c \"print(1)\"",
+          "expect": {
+            "exit": 127,
+            "stderr_contains": "python3: command not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_deny_blocks_line",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'deny': 'python3 is blocked here'} if ctx['command'] == 'python3' else None"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "exit": 126,
+            "stderr": "python3: policy denied: python3 is blocked here\n"
+          }
+        },
+        {
+          "command": "echo still-open",
+          "expect": {
+            "exit": 0,
+            "stdout": "still-open\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_verdict_places_runtime",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'runtime': 'monty'}"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(40 + 2)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "policy_script_bad_verdict",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'runtme': 'monty'}"
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "throws_contains": "unknown policy verdict keys"
+          }
+        }
+      ]
+    },
+    {
+      "id": "entry_script_verdict_shape",
+      "world": {
+        "runtimes": [
+          {
+            "name": "monty",
+            "script": "{'deny': 'nope'}"
+          },
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(1)\"",
+          "expect": {
+            "throws_contains": "entry scripts answer a boolean"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_command_custom",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "deny_flag",
+            "command": "grep",
+            "flag": "-r",
+            "message": "grep: recursive search is not allowed here\n"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "grep -r hello /ram",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "grep: recursive search is not allowed here\n"
+          }
+        },
+        {
+          "command": "grep hello /ram/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_ops_write_lock",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "open.txt": "free\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "lock_writes",
+            "prefix": "/ram/locked/"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi > /ram/locked/f.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "/ram/locked/f.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo hi > /ram/note.txt && cat /ram/note.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/open.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "free\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_ops_read_seal",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "x.sealed": "nope\n",
+              "y.txt": "yes\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "seal_reads",
+            "suffix": ".sealed"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/y.txt",
+          "expect": {
+            "content": "yes\n"
+          }
+        },
+        {
+          "read_op": "/ram/x.sealed",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_ops_redact",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "clean.txt": "hello\n",
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "redact_reads",
+            "marker": "TOPSECRET"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/clean.txt",
+          "expect": {
+            "content": "hello\n"
+          }
+        },
+        {
+          "read_op": "/ram/secret.txt",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_ops_cap_and_deny_wins",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "big.log": "abcdefghij\n",
+              "note.txt": "abcdefghij\n",
+              "secret.log": "TOPSECRET plans\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "op_read_cap",
+            "suffix": ".log",
+            "max_bytes": 5
+          },
+          {
+            "name": "redact_reads",
+            "marker": "TOPSECRET"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/big.log",
+          "expect": {
+            "content": "abcde"
+          }
+        },
+        {
+          "read_op": "/ram/note.txt",
+          "expect": {
+            "content": "abcdefghij\n"
+          }
+        },
+        {
+          "read_op": "/ram/secret.log",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_cap_merges_tightest",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "1\n2\n3\n4\n5\n"
+            },
+            "limits": {
+              "cat": {
+                "max_lines": 3
+              }
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "line_cap",
+            "max_lines": 2
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cat /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n2\n",
+            "stderr_contains": "output truncated"
+          }
+        },
+        {
+          "command": "head -n 1 /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_error_mode",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "1\n2\n3\n4\n5\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "line_cap",
+            "max_lines": 2,
+            "on_exceed": "error"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cat /ram/data.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "output truncated"
+          }
+        },
+        {
+          "command": "head -n 1 /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_fail_closed",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "boom"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "policy Boom failed"
+          }
+        }
+      ]
+    }
+  ]
+}

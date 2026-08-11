@@ -44,8 +44,21 @@ describe('core/disk/readdir', () => {
     expect(await readdir(accessor, spec('/sub'))).toEqual(['/sub/x'])
   })
 
-  it('throws "not a directory" on missing path', async () => {
-    await expect(readdir(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOTDIR' })
+  it('throws ENOENT on a missing path', async () => {
+    await expect(readdir(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('throws ENOENT however deep the missing component is', async () => {
+    await mkdir(join(root, 'sub'))
+    await expect(readdir(accessor, spec('/sub/gone/deeper'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('throws ENOTDIR when a path component is a file', async () => {
+    await writeFile(join(root, 'a.txt'), 'a')
+    await expect(readdir(accessor, spec('/a.txt'))).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(readdir(accessor, spec('/a.txt/x'))).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 
   it('cache-hit entries stay clean under a prefixed mount', async () => {

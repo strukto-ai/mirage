@@ -14,13 +14,14 @@
 
 import { FileType } from '../types.ts'
 
-const EXTENSION_MAP: Readonly<Record<string, FileType>> = Object.freeze({
+export const EXTENSION_MAP: Readonly<Record<string, FileType>> = Object.freeze({
   json: FileType.JSON,
   jsonl: FileType.JSON,
   csv: FileType.CSV,
   tsv: FileType.CSV,
   txt: FileType.TEXT,
   md: FileType.TEXT,
+  log: FileType.TEXT,
   py: FileType.TEXT,
   js: FileType.TEXT,
   ts: FileType.TEXT,
@@ -28,19 +29,13 @@ const EXTENSION_MAP: Readonly<Record<string, FileType>> = Object.freeze({
   yml: FileType.TEXT,
   toml: FileType.TEXT,
   png: FileType.IMAGE_PNG,
-  jpg: FileType.IMAGE_PNG,
+  jpg: FileType.IMAGE_JPEG,
   jpeg: FileType.IMAGE_JPEG,
   gif: FileType.IMAGE_GIF,
   zip: FileType.ZIP,
   gz: FileType.GZIP,
+  gzip: FileType.GZIP,
   pdf: FileType.PDF,
-  parquet: FileType.PARQUET,
-  orc: FileType.ORC,
-  feather: FileType.FEATHER,
-  arrow: FileType.FEATHER,
-  ipc: FileType.FEATHER,
-  h5: FileType.HDF5,
-  hdf5: FileType.HDF5,
 })
 
 export function guessType(path: string): FileType {
@@ -50,7 +45,40 @@ export function guessType(path: string): FileType {
   return EXTENSION_MAP[ext] ?? FileType.BINARY
 }
 
-const MIMETYPE_MAP: Readonly<Record<string, FileType>> = Object.freeze({
+// Extension-guessed like upstream mailers' mime_guess, as a deliberate
+// fixed subset: platform MIME tables differ, and the python and
+// TypeScript implementations must guess identically for serialized
+// bytes to match. Anything else is application/octet-stream, which
+// every client treats as "download me".
+export const MIME_BY_EXTENSION: Readonly<Record<string, string>> = Object.freeze({
+  csv: 'text/csv',
+  gif: 'image/gif',
+  gz: 'application/gzip',
+  htm: 'text/html',
+  html: 'text/html',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  json: 'application/json',
+  md: 'text/markdown',
+  pdf: 'application/pdf',
+  png: 'image/png',
+  svg: 'image/svg+xml',
+  tar: 'application/x-tar',
+  txt: 'text/plain',
+  xml: 'text/xml',
+  zip: 'application/zip',
+})
+
+const OCTET_STREAM = 'application/octet-stream'
+
+/** Guesses a MIME content type from the filename's extension. */
+export function mimeTypeFor(filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  if (dot < 0) return OCTET_STREAM
+  return MIME_BY_EXTENSION[filename.slice(dot + 1).toLowerCase()] ?? OCTET_STREAM
+}
+
+export const MIMETYPE_MAP: Readonly<Record<string, FileType>> = Object.freeze({
   'application/pdf': FileType.PDF,
   'application/zip': FileType.ZIP,
   'application/gzip': FileType.GZIP,
@@ -69,4 +97,16 @@ export function filetypeFromMimetype(mime: string): FileType {
   if (mapped !== undefined) return mapped
   if (mime.startsWith('text/')) return FileType.TEXT
   return FileType.BINARY
+}
+
+export const IMAGE_TYPE_BY_EXTENSION: Readonly<Record<string, FileType>> = Object.freeze({
+  png: FileType.IMAGE_PNG,
+  jpg: FileType.IMAGE_JPEG,
+  jpeg: FileType.IMAGE_JPEG,
+  gif: FileType.IMAGE_GIF,
+})
+
+/** FileType for a bare image extension ('png'), BINARY for anything else. */
+export function imageTypeForExtension(ext: string): FileType {
+  return IMAGE_TYPE_BY_EXTENSION[ext.toLowerCase()] ?? FileType.BINARY
 }

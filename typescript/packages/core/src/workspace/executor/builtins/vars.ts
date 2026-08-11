@@ -20,15 +20,160 @@ import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../shell/errors.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
+import { parseOptionWord } from '../../../shell/options.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
+import { arrayIndex } from '../../expand/variable.ts'
+import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
-import { ReturnSignal } from '../command.ts'
+import { ReturnSignal } from '../control.ts'
+import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
 
+const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or export -p\n'
+const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
+const EXPORT_FLAGS = new Set('fnp')
+const READONLY_FLAGS = new Set('aAfp')
+
+const ANSI_C_ESCAPES: Record<string, string> = {
+  '\\': '\\\\',
+  "'": "\\'",
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\t': '\\t',
+  '\n': '\\n',
+  '\v': '\\v',
+  '\f': '\\f',
+  '\r': '\\r',
+  '\x1b': '\\E',
+}
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\x00-\x1f\x7f]/
+
+function isControl(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0
+  return code < 0x20 || code === 0x7f
+}
+
+/**
+ * Quote a value the way bash `declare -p` / `export -p` does.
+ *
+ * A value holding any control character takes the `$'...'` form, with the
+ * named escapes bash uses (`\a \b \t \n \v \f \r`, and `\E` for escape) and
+ * three-digit octal for the rest; `"`, `$` and backtick need no escaping
+ * there because `$'...'` does not expand. Everything else is double-quoted
+ * with escapes for `\`, `"`, `$` and backtick. Non-ASCII printable text
+ * stays literal, which is what bash emits in a UTF-8 locale.
+ */
+function bashDeclareQuote(value: string): string {
+  let out = ''
+  if (CONTROL_RE.test(value)) {
+    for (const ch of value) {
+      const escape = ANSI_C_ESCAPES[ch]
+      if (escape !== undefined) out += escape
+      else if (isControl(ch)) out += `\\${(ch.codePointAt(0) ?? 0).toString(8).padStart(3, '0')}`
+      else out += ch
+    }
+    return `$'${out}'`
+  }
+  for (const ch of value) {
+    if (ch === '\\' || ch === '"' || ch === '$' || ch === '`') out += `\\${ch}`
+    else out += ch
+  }
+  return `"${out}"`
+}
+
+function splitDeclFlags(
+  args: string[],
+  allowed: Set<string>,
+): { flags: Set<string>; names: string[]; bad: string | null } {
+  const flags = new Set<string>()
+  let i = 0
+  while (i < args.length) {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (tok.startsWith('-') && tok.length > 1 && tok !== '-') {
+      const body = tok.slice(1)
+      for (const ch of body) {
+        if (!allowed.has(ch)) return { flags, names: args.slice(i), bad: ch }
+      }
+      for (const ch of body) flags.add(ch)
+      i += 1
+      continue
+    }
+    break
+  }
+  return { flags, names: args.slice(i), bad: null }
+}
+
+function exportLines(session: Session, flags: Set<string>): string[] {
+  // Mirage keeps shell variables in session.env and treats that map as the
+  // exported environment (printenv / env already do), so export -p lists it.
+  // -f selects shell functions; mirage tracks no export attribute on
+  // functions, so that form lists nothing, as bash does with none exported.
+  if (flags.has('f')) return []
+  return Object.keys(session.env)
+    .sort()
+    .map((name) => `declare -x ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
+}
+
+function readonlyLines(session: Session, flags: Set<string>): string[] {
+  // -a narrows to indexed arrays, as bash does. -f selects functions and -A
+  // associative arrays, neither of which mirage carries a readonly attribute
+  // for, so those forms list nothing.
+  if (flags.has('f') || flags.has('A')) return []
+  const arraysOnly = flags.has('a')
+  const lines: string[] = []
+  for (const name of [...session.readonlyVars].sort()) {
+    const arr = session.arrays[name]
+    if (arr !== undefined) {
+      const parts: string[] = []
+      for (let i = 0; i < arr.length; i++) {
+        const v = arr[i]
+        if (v !== null && v !== undefined) {
+          parts.push(`[${String(i)}]=${bashDeclareQuote(v)}`)
+        }
+      }
+      lines.push(`declare -ar ${name}=(${parts.join(' ')})`)
+      continue
+    }
+    if (arraysOnly) continue
+    if (name in session.env) {
+      lines.push(`declare -r ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
+    } else {
+      lines.push(`declare -r ${name}`)
+    }
+  }
+  return lines
+}
+
+/**
+ * Mark names for export, or print them (`export -p` / bare `export`).
+ *
+ * With no name operands, prints every entry in `session.env` as
+ * `declare -x NAME="value"`. Invalid option characters fail with status 2.
+ */
 export function handleExport(assignments: string[], session: Session): Result {
-  for (const assign of assignments) {
+  const { flags, names, bad } = splitDeclFlags(assignments, EXPORT_FLAGS)
+  if (bad !== null) {
+    const err = new TextEncoder().encode(`bash: export: -${bad}: invalid option\n${EXPORT_USAGE}`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'export', exitCode: 2, stderr: err }),
+    ]
+  }
+  if (names.length === 0) {
+    const lines = exportLines(session, flags)
+    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
+  }
+  for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
@@ -48,8 +193,30 @@ export function handleExport(assignments: string[], session: Session): Result {
   return [null, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
 }
 
+/**
+ * Mark names readonly, or print them (`readonly -p` / bare `readonly`).
+ *
+ * With no name operands, prints every readonly name as `declare -r` (or
+ * `declare -ar` for arrays). Invalid options fail with status 2.
+ */
 export function handleReadonly(assignments: string[], session: Session): Result {
-  for (const assign of assignments) {
+  const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
+  if (bad !== null) {
+    const err = new TextEncoder().encode(
+      `bash: readonly: -${bad}: invalid option\n${READONLY_USAGE}`,
+    )
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'readonly', exitCode: 2, stderr: err }),
+    ]
+  }
+  if (names.length === 0) {
+    const lines = readonlyLines(session, flags)
+    const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
+    return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
+  }
+  for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
@@ -70,11 +237,102 @@ export function handleReadonly(assignments: string[], session: Session): Result 
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
 }
 
-export function handleUnset(names: string[], session: Session): Result {
-  for (const name of names) {
-    if (session.readonlyVars.has(name)) {
+/**
+ * Remove a scalar/array variable, or one array element `name[idx]`.
+ *
+ * Clearing an element keeps the indices of the elements after it, as bash
+ * does: it leaves a hole, which neither expands in `${arr[@]}` nor counts
+ * toward `${#arr[@]}` but keeps `${arr[i]}` addressing the same values.
+ * Trailing holes are dropped, so `arr+=(x)` refills the slot a trailing
+ * unset freed.
+ *
+ * A subscript on a scalar names element 0 only: `x[0]` unsets the scalar
+ * and any other subscript reports `notarray`. A subscript on a name that
+ * holds nothing at all is a silent no-op, but on an existing array a
+ * negative subscript still below zero after the extent is added reports
+ * `subscript`.
+ */
+function unsetVariable(session: Session, name: string): 'ok' | 'notarray' | 'subscript' {
+  const match = PRINTF_TARGET_RE.exec(name)
+  if (match?.[2] !== undefined) {
+    const base = match[1] ?? ''
+    const arr = sessionEntry(session.arrays, base)
+    if (arr === undefined) {
+      if (sessionEntry(session.env, base) === undefined) return 'ok'
+      if (arrayIndex(match[2], session.env) !== 0) return 'notarray'
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.env[base]
+      return 'ok'
+    }
+    let idx = arrayIndex(match[2], session.env)
+    if (idx < 0) {
+      idx += arrayExtent(arr)
+      if (idx < 0) return 'subscript'
+    }
+    arrayUnset(arr, idx)
+    return 'ok'
+  }
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.env[name]
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.arrays[name]
+  if (name === 'OPTIND') session.getoptsOptind = null
+  return 'ok'
+}
+
+/**
+ * Unset shell variables, arrays, or functions, with bash's flags.
+ *
+ * `-v` targets a variable only, `-f` a function only, and a bare name a
+ * variable if one exists or else a function. A `name[idx]` operand clears
+ * one element; the readonly guard resolves it to the base name first,
+ * since that is what `readonly` records. `-n` (unset a nameref itself)
+ * has no referent here — mirage has no nameref attribute — so it matches
+ * bash on a non-nameref name and leaves it untouched.
+ */
+export function handleUnset(args: string[], session: Session): Result {
+  let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
+  let i = 0
+  while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
+    const tok = args[i] ?? ''
+    if (tok === '--') {
+      i += 1
+      break
+    }
+    if (/^-[vfn]+$/.test(tok)) {
+      if (tok.includes('f')) mode = 'f'
+      else if (tok.includes('n')) mode = 'n'
+      else mode = 'v'
+      i += 1
+      continue
+    }
+    const err = new TextEncoder().encode(`bash: unset: ${tok}: invalid option\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'unset', exitCode: 2, stderr: err }),
+    ]
+  }
+  for (const name of args.slice(i)) {
+    if (mode === 'n') {
+      // No nameref attribute exists, so this leaves the name untouched,
+      // matching bash on a plain variable.
+      continue
+    }
+    if (mode === 'f') {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+      continue
+    }
+    const match = PRINTF_TARGET_RE.exec(name)
+    const isElement = match?.[2] !== undefined
+    // `readonly arr` records the base name, so an `arr[i]` operand has to
+    // be resolved before the guard, as bash does (which also names the
+    // base, not the element, in the error).
+    const base = match?.[1] ?? name
+    if (session.readonlyVars.has(base)) {
       const err = new TextEncoder().encode(
-        `bash: unset: ${name}: cannot unset: readonly variable\n`,
+        `bash: unset: ${base}: cannot unset: readonly variable\n`,
       )
       return [
         null,
@@ -82,9 +340,26 @@ export function handleUnset(names: string[], session: Session): Result {
         new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
       ]
     }
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.env[name]
-    if (name === 'OPTIND') session.getoptsOptind = null
+    const existed = isElement || name in session.env || name in session.arrays
+    const status = unsetVariable(session, name)
+    if (status !== 'ok') {
+      // bash names the base for "not an array variable" but prints only
+      // the bracketed part for a bad subscript.
+      const detail =
+        status === 'notarray'
+          ? `unset: ${base}: not an array variable`
+          : `unset: ${name.slice(base.length)}: bad array subscript`
+      const err = new TextEncoder().encode(`bash: ${detail}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: 'unset', exitCode: 1, stderr: err }),
+      ]
+    }
+    if (mode === 'auto' && !existed && name in session.functions) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.functions[name]
+    }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'unset', exitCode: 0 })]
 }
@@ -203,7 +478,7 @@ export async function handleEnv(
 
   const dropSet = new Set(unset)
   const source = ignoreEnv ? {} : session.env
-  const base: Record<string, string> = {}
+  const base: Record<string, string> = ownRecord()
   for (const [k, v] of Object.entries(source)) {
     if (!dropSet.has(k)) base[k] = v
   }
@@ -253,6 +528,24 @@ export function handleWhoami(namespace: Namespace): Result {
   }
   const out = new TextEncoder().encode(`${namespace.user}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
+}
+
+/**
+ * Record the caller's array before a function shadows `name`.
+ *
+ * `local -a` / `declare -a` inside a function shadow the caller's array,
+ * so the old value (or its absence) has to be remembered for the teardown
+ * in `executeCommand`. Returns true when a function scope is active, so
+ * the caller should shadow rather than reuse whatever is already there.
+ */
+export function noteLocalArray(session: Session, name: string): boolean {
+  const localArrays = session.localArrays
+  if (localArrays === null) return false
+  if (!localArrays.has(name)) {
+    const existing = sessionEntry(session.arrays, name)
+    localArrays.set(name, existing === undefined ? null : [...existing])
+  }
+  return true
 }
 
 export function handleLocal(assignments: string[], session: Session): Result {
@@ -333,27 +626,18 @@ export function handleSet(
       session.positionalArgs = args.slice(i + 1)
       return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
     }
-    if (tok === '-o' || tok === '+o') {
-      if (i + 1 < args.length) {
-        const optName = args[i + 1] ?? ''
-        session.shellOptions[optName] = tok === '-o'
-        i += 2
-        continue
-      }
-      i += 1
-      continue
+    const word = parseOptionWord(tok, args[i + 1] ?? null)
+    if (word === null) {
+      session.positionalArgs = args.slice(i)
+      break
     }
-    if ((tok.startsWith('-') || tok.startsWith('+')) && tok.length > 1) {
-      const enable = tok.startsWith('-')
-      for (const ch of tok.slice(1)) {
-        const opt = SET_FLAG_TO_OPTION[ch]
-        if (opt !== undefined) session.shellOptions[opt] = enable
-      }
-      i += 1
-      continue
-    }
-    session.positionalArgs = args.slice(i)
-    break
+    for (const [option, enable] of word.settings) session.shellOptions[option] = enable
+    // A letter naming no option is ignored rather than refused: bash has
+    // options mirage does not implement (`-a`, `-B`, `-H`), and `set` is
+    // where a script turns those on without wanting to fail. A nested shell
+    // answers the same leftovers differently, which is why the grammar hands
+    // them back instead of deciding here.
+    i += word.consumed
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
 }

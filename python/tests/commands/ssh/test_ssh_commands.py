@@ -33,6 +33,9 @@ class MockSFTPAttrs:
         self.size = size
         self.mtime = mtime or int(
             datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp())
+        # Real asyncssh SFTPAttrs always carry these (default None).
+        self.permissions = None
+        self.atime = None
 
 
 class MockSFTPName:
@@ -90,6 +93,11 @@ class MockSFTPClient:
         if path in self.files:
             return MockSFTPAttrs(size=len(self.files[path]))
         raise asyncssh.SFTPNoSuchFile("not found")
+
+    async def lstat(self, path):
+        # No symlinks in the mock tree, so lstat and stat agree (rm uses
+        # lstat to avoid following links).
+        return await self.stat(path)
 
     async def readdir(self, path):
         if path not in self.dirs:

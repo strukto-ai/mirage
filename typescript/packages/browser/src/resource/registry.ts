@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, type Resource } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  type ChromaConfig,
+  type DifyConfig,
+  type QdrantConfig,
+  type Resource,
+} from '@struktoai/mirage-core'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 
 /**
@@ -278,6 +284,26 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeMongoDBConfig } = await import('@struktoai/mirage-core')
     return new MongoDBResource(normalizeMongoDBConfig(config))
   },
+  chroma: async (config) => {
+    const { ChromaResource } = await import('@struktoai/mirage-core')
+    return new ChromaResource(normalizeFields(config) as unknown as ChromaConfig)
+  },
+  dify: async (config) => {
+    const { DifyResource } = await import('@struktoai/mirage-core')
+    return new DifyResource(normalizeFields(config) as unknown as DifyConfig)
+  },
+  qdrant: async (config) => {
+    const { QdrantResource } = await import('@struktoai/mirage-core')
+    return new QdrantResource(normalizeFields(config) as unknown as QdrantConfig)
+  },
+  lancedb: (_config) => {
+    return Promise.reject(
+      new Error(
+        'LanceDBResource is not supported in the browser: @lancedb/lancedb is a native ' +
+          'Node addon. Use @struktoai/mirage-node from a server.',
+      ),
+    )
+  },
   notion: async (config) => {
     const { NotionResource } = await import('./notion/notion.ts')
     const norm = normalizeFields(config, {
@@ -310,6 +336,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeGitHubCIConfig } = await import('./github_ci/config.ts')
     return new GitHubCIResource(normalizeGitHubCIConfig(config))
   },
+  gcal: async (config) => {
+    const { GCalResource } = await import('./gcal/gcal.ts')
+    const { normalizeGCalConfig } = await import('./gcal/config.ts')
+    return new GCalResource(normalizeGCalConfig(config))
+  },
   gdocs: async (config) => {
     const { GDocsResource } = await import('./gdocs/gdocs.ts')
     const { normalizeGDocsConfig } = await import('./gdocs/config.ts')
@@ -329,6 +360,18 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { GDriveResource } = await import('./gdrive/gdrive.ts')
     const { normalizeGDriveConfig } = await import('./gdrive/config.ts')
     return new GDriveResource(normalizeGDriveConfig(config))
+  },
+  onedrive: async (config) => {
+    const { OneDriveResource, normalizeOneDriveConfig } = await import('@struktoai/mirage-core')
+    return new OneDriveResource(normalizeOneDriveConfig(config))
+  },
+  sharepoint: async (config) => {
+    const { SharePointResource, normalizeSharePointConfig } = await import('@struktoai/mirage-core')
+    return new SharePointResource(normalizeSharePointConfig(config))
+  },
+  mem0: async (config) => {
+    const { Mem0Resource, normalizeMem0Config } = await import('@struktoai/mirage-core')
+    return new Mem0Resource(normalizeMem0Config(config))
   },
   dropbox: async (config) => {
     const { DropboxResource } = await import('./dropbox/dropbox.ts')
@@ -355,19 +398,27 @@ const REGISTRY: Record<string, ResourceFactory> = {
   },
 }
 
+const CUSTOM: Record<string, ResourceFactory> = {}
+
 export function knownResources(): string[] {
-  return Object.keys(REGISTRY).sort()
+  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort()
 }
 
+/**
+ * Register a custom resource factory under `name`. Builtin names cannot
+ * be shadowed; re-registering a custom name replaces it. Mirrors
+ * Python's `register_resource` and the Node counterpart.
+ */
 export function register(name: string, factory: ResourceFactory): void {
-  REGISTRY[name] = factory
+  if (name in REGISTRY) throw new Error(`cannot register '${name}': shadows a builtin`)
+  CUSTOM[name] = factory
 }
 
 export async function buildResource(
   name: string,
   config: Record<string, unknown> = {},
 ): Promise<Resource> {
-  const factory = REGISTRY[name]
+  const factory = REGISTRY[name] ?? CUSTOM[name]
   if (factory === undefined) {
     throw new Error(
       `unknown resource ${JSON.stringify(name)}; known: ${knownResources().join(', ')}`,

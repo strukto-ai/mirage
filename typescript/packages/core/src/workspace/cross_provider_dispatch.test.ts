@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RegisteredCommand } from '../commands/config.ts'
-import { CommandSpec, Operand, OperandKind } from '../commands/spec/types.ts'
+import { CommandSpec, Operand } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { ProvisionResult } from '../provision/types.ts'
@@ -25,7 +25,7 @@ import type { ExecuteResult } from './workspace.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
-const SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) })
+const SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([ENC.encode('ok'), new IOResult()])

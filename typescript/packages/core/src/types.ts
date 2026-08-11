@@ -16,6 +16,11 @@ import type { IndexCacheStore } from './cache/index/store.ts'
 import type { FindOptions } from './resource/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 
+// Any value that survives a JSON round trip: what a decoded payload holds,
+// what jq evaluates over, what an API field hands back. The mirror of
+// python's mirage.types.JsonValue.
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue }
+
 export const MountMode = Object.freeze({
   READ: 'read',
   WRITE: 'write',
@@ -23,6 +28,36 @@ export const MountMode = Object.freeze({
 } as const)
 
 export type MountMode = (typeof MountMode)[keyof typeof MountMode]
+
+/**
+ * How a mount is exposed to the outside world.
+ *
+ * `vfs` is the default: the mount lives only inside mirage's own filesystem
+ * and is reached through the command surface, with nothing registered with
+ * the kernel. `fuse` and `fskit` additionally expose it as a real mountpoint.
+ *
+ * `fskit` is macOS 15.4+ only and needs no kernel extension. It has no
+ * `direct_io` equivalent, so it serves correct reads only for resources that
+ * set `sizesAlwaysKnown`; the mount-time guard warns about resources whose
+ * size-unknown files will read as empty. Writes are also limited: appends and
+ * metadata ops persist, but the macFUSE FSKit shim flushes pages a file did
+ * not already have (a new file, or truncate-then-write) as NUL bytes (pinned
+ * in `integ/fuse/truth_fskit.json`). There is deliberately no `auto`:
+ * auto-selecting fskit would silently degrade every API-backed mount.
+ */
+export const MountBackend = Object.freeze({
+  VFS: 'vfs',
+  FUSE: 'fuse',
+  FSKIT: 'fskit',
+} as const)
+
+export type MountBackend = (typeof MountBackend)[keyof typeof MountBackend]
+
+/** Backends that register a real mountpoint with the kernel. */
+export const KERNEL_BACKENDS: readonly MountBackend[] = Object.freeze([
+  MountBackend.FUSE,
+  MountBackend.FSKIT,
+])
 
 const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({
   [MountMode.READ]: 1,
@@ -76,7 +111,7 @@ export const DriftPolicy = Object.freeze({
 export type DriftPolicy = (typeof DriftPolicy)[keyof typeof DriftPolicy]
 
 /**
- * Behaviour when a command's output exceeds its safeguard cap.
+ * Behaviour when a command's output exceeds its limit cap.
  * TRUNCATE returns the truncated bytes + a notice on stderr.
  * ERROR returns no stdout and exits 1 with the same notice.
  */
@@ -87,7 +122,7 @@ export const OnExceed = Object.freeze({
 
 export type OnExceed = (typeof OnExceed)[keyof typeof OnExceed]
 
-export interface CommandSafeguardInit {
+export interface LimitInit {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
@@ -99,13 +134,21 @@ function minPositive(values: (number | null)[]): number | null {
   return positives.length > 0 ? Math.min(...positives) : null
 }
 
-export class CommandSafeguard {
+/**
+ * A bound on a result: the policy layer's limit arm and the shape
+ * every cap config parses into. Carries its fields inline (the Deny
+ * precedent: an action is its payload). `kind` is the wire
+ * discriminant; `aggr` is the composition law (AND to the tightest
+ * per bound, ANY on error mode).
+ */
+export class Limit {
+  readonly kind = 'limit' as const
   readonly maxBytes: number | null
   readonly maxLines: number | null
   readonly timeoutSeconds: number | null
   readonly onExceed: OnExceed
 
-  constructor(init: CommandSafeguardInit = {}) {
+  constructor(init: LimitInit = {}) {
     const maxBytes = init.maxBytes ?? null
     const maxLines = init.maxLines ?? null
     const timeoutSeconds = init.timeoutSeconds ?? null
@@ -126,18 +169,59 @@ export class CommandSafeguard {
     this.onExceed = init.onExceed ?? OnExceed.TRUNCATE
   }
 
-  static aggr(safeguards: Iterable<CommandSafeguard | null>): CommandSafeguard | null {
-    const present = [...safeguards].filter((s): s is CommandSafeguard => s !== null)
+  /**
+   * Aggregate several limits using each field's declared rule.
+   *
+   * Reads the rules off LIMIT_AGGR rather than naming the fields here, so a
+   * new bound composes as soon as it is declared — the same property Python
+   * gets from walking `model_fields` for each field's `Aggr(rule)`. Returns
+   * null when nothing is configured. Used wherever bounds stack (policy
+   * composition, cross-mount fan-out, layered configs).
+   */
+  static aggr(limits: Iterable<Limit | null>): Limit | null {
+    const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
-    return new CommandSafeguard({
-      maxBytes: minPositive(present.map((s) => s.maxBytes)),
-      maxLines: minPositive(present.map((s) => s.maxLines)),
-      timeoutSeconds: minPositive(present.map((s) => s.timeoutSeconds)),
-      onExceed: present.some((s) => s.onExceed === OnExceed.ERROR)
-        ? OnExceed.ERROR
-        : OnExceed.TRUNCATE,
-    })
+    const init: LimitInit = {}
+    for (const key of Object.keys(LIMIT_AGGR) as LimitAggrField[]) {
+      Object.assign(init, { [key]: LIMIT_AGGR[key](present) })
+    }
+    return new Limit(init)
   }
+}
+
+/** Every Limit field that composes; `kind` is the wire discriminant, not a bound. */
+type LimitAggrField = Exclude<keyof Limit, 'kind'>
+
+/**
+ * Each bound's composition law, keyed by field.
+ *
+ * The mapped type is what makes this a table rather than a second copy of the
+ * field list: declaring a new bound on Limit without adding its rule here is a
+ * compile error, where the old inline literal would have silently dropped it.
+ */
+const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[K] } = {
+  maxBytes: (present) => minPositive(present.map((s) => s.maxBytes)),
+  maxLines: (present) => minPositive(present.map((s) => s.maxLines)),
+  timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),
+  onExceed: (present) =>
+    present.some((s) => s.onExceed === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE,
+}
+
+/**
+ * Provenance of a result: who produced it, and where.
+ *
+ * Rides the IO envelope from the dispatch site to the workspace
+ * boundary; merge keeps the rightmost producer, so this names the
+ * command whose stream the caller actually sees. Post-layer policies
+ * (output caps today; budgets and attribution later) read it as
+ * context. Facts only: policy decisions never travel on the envelope.
+ * `declared` is the bound the command's own registration declared,
+ * when the dispatch site knows it (e.g. a CLI leaf).
+ */
+export interface Producer {
+  readonly command: string
+  readonly prefixes: readonly string[]
+  readonly declared: Limit | null
 }
 
 export const ResourceName = Object.freeze({
@@ -146,10 +230,13 @@ export const ResourceName = Object.freeze({
   RAM: 'ram',
   GITHUB: 'github',
   LINEAR: 'linear',
+  GCAL: 'gcal',
   GDOCS: 'gdocs',
   GSHEETS: 'gsheets',
   GSLIDES: 'gslides',
   GDRIVE: 'gdrive',
+  ONEDRIVE: 'onedrive',
+  SHAREPOINT: 'sharepoint',
   DROPBOX: 'dropbox',
   BOX: 'box',
   SLACK: 'slack',
@@ -160,6 +247,7 @@ export const ResourceName = Object.freeze({
   GRIDFS: 'gridfs',
   NOTION: 'notion',
   LANGFUSE: 'langfuse',
+  JAEGER: 'jaeger',
   SSH: 'ssh',
   REDIS: 'redis',
   GITHUB_CI: 'github_ci',
@@ -173,6 +261,7 @@ export const ResourceName = Object.freeze({
   LANCEDB: 'lancedb',
   CHROMA: 'chroma',
   DIFY: 'dify',
+  MEM0: 'mem0',
   QDRANT: 'qdrant',
   HF_BUCKETS: 'hf_buckets',
   HF_DATASETS: 'hf_datasets',
@@ -197,6 +286,7 @@ export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
 
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
+  SYMLINK: 'symlink',
   TEXT: 'text',
   BINARY: 'binary',
   JSON: 'json',
@@ -207,13 +297,14 @@ export const FileType = Object.freeze({
   ZIP: 'application/zip',
   GZIP: 'application/gzip',
   PDF: 'application/pdf',
-  PARQUET: 'parquet',
-  ORC: 'orc',
-  FEATHER: 'feather',
-  HDF5: 'hdf5',
 } as const)
 
 export type FileType = (typeof FileType)[keyof typeof FileType]
+
+// FileStat.extra key holding a symlink's target, verbatim as it was
+// typed. A link has no backend inode, so this is the only place the
+// target travels with the stat row.
+export const LINK_TARGET_KEY = 'link_target'
 
 export interface FileStatInit {
   name: string
@@ -256,7 +347,119 @@ export class FileStat {
     this.extra = init.extra ?? {}
     Object.freeze(this)
   }
+
+  // Copy with some fields replaced, the mirror of Python's
+  // `model_copy(update=...)`. Callers that rename a row (ls printing an
+  // operand as typed, a link row taking the link's name) must use this
+  // rather than re-listing fields at the call site: a hand-written list
+  // silently drops whatever it forgot, which is how link ownership went
+  // missing. This is the one place the field list is repeated, and it
+  // sits next to the declarations so an added field is hard to miss.
+  with(update: Partial<FileStatInit>): FileStat {
+    return new FileStat({
+      name: this.name,
+      size: this.size,
+      modified: this.modified,
+      fingerprint: this.fingerprint,
+      revision: this.revision,
+      type: this.type,
+      mode: this.mode,
+      uid: this.uid,
+      gid: this.gid,
+      atime: this.atime,
+      extra: this.extra,
+      ...update,
+    })
+  }
 }
+
+export const FileChangeKind = Object.freeze({
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  MOVE: 'move',
+  UNKNOWN: 'unknown',
+} as const)
+
+export type FileChangeKind = (typeof FileChangeKind)[keyof typeof FileChangeKind]
+
+export interface FileMetadataInit {
+  fingerprint?: string | null
+  size?: number | null
+  modified?: string | null
+}
+
+export class FileMetadata {
+  readonly fingerprint: string | null
+  readonly size: number | null
+  readonly modified: string | null
+
+  constructor(init: FileMetadataInit = {}) {
+    this.fingerprint = init.fingerprint ?? null
+    this.size = init.size ?? null
+    this.modified = init.modified ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface FileEventInit {
+  kind: FileChangeKind
+  path: PathSpec
+  timestamp: Date
+  previousPath?: PathSpec | null
+  metadata?: FileMetadata | null
+}
+
+export class FileEvent {
+  readonly kind: FileChangeKind
+  readonly path: PathSpec
+  readonly timestamp: Date
+  readonly previousPath: PathSpec | null
+  readonly metadata: FileMetadata | null
+
+  constructor(init: FileEventInit) {
+    this.kind = init.kind
+    this.path = init.path
+    this.timestamp = init.timestamp
+    this.previousPath = init.previousPath ?? null
+    this.metadata = init.metadata ?? null
+    Object.freeze(this)
+  }
+}
+
+export interface DeltaInit {
+  changes: readonly FileEvent[]
+  checkpoint: string | null
+}
+
+export class Delta {
+  readonly changes: readonly FileEvent[]
+  readonly checkpoint: string | null
+
+  constructor(init: DeltaInit) {
+    this.changes = Object.freeze([...init.changes])
+    this.checkpoint = init.checkpoint
+    Object.freeze(this)
+  }
+}
+
+export interface WalkEntry {
+  virtual: string
+  isDir: boolean
+  fingerprint: string | null
+  size?: number | null
+  modified?: string | null
+}
+
+export type WalkFn = (root: PathSpec) => AsyncIterable<WalkEntry>
+
+export const OverflowPolicy = Object.freeze({
+  COLLAPSE: 'collapse',
+  DROP_OLDEST: 'drop_oldest',
+  ERROR: 'error',
+} as const)
+
+export type OverflowPolicy = (typeof OverflowPolicy)[keyof typeof OverflowPolicy]
 
 // How a mount's capacity relates to a df-style report. QUOTA: real
 // total/used/available are known (a real filesystem, or a provider that
@@ -326,6 +529,11 @@ export interface NativeCopy {
   copy: CopyFn
   find: FindFn
   dirCopy?: CopyFn
+  /**
+   * Lets the per-entry policy path (--update/--backup, which cannot use a
+   * whole-tree dirCopy) still materialize directories that hold no files.
+   */
+  mkdir?: CopyFn<[path: PathSpec]>
 }
 
 export interface PrimitiveCopy {

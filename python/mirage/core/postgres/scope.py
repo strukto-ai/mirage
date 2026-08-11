@@ -70,6 +70,17 @@ class PostgresEntitySchemaScope:
 
 
 @dataclass(frozen=True)
+class PostgresEntitySemanticScope:
+    schema: str
+    kind: PostgresKind
+    entity: str
+    resource_path: str
+    file: Literal["semantic.json"] = field(default="semantic.json", init=False)
+    level: Literal["entity_semantic"] = field(default="entity_semantic",
+                                              init=False)
+
+
+@dataclass(frozen=True)
 class PostgresEntityRowsScope:
     schema: str
     kind: PostgresKind
@@ -88,7 +99,10 @@ class PostgresInvalidScope:
 PostgresScope: TypeAlias = (PostgresRootScope | PostgresDatabaseJSONScope
                             | PostgresSchemaScope | PostgresKindScope
                             | PostgresEntityScope | PostgresEntitySchemaScope
+                            | PostgresEntitySemanticScope
                             | PostgresEntityRowsScope | PostgresInvalidScope)
+
+ENTITY_FILES = ("schema.json", "semantic.json", "rows.jsonl")
 
 
 def detect_scope(path: PathSpec) -> PostgresScope:
@@ -117,14 +131,19 @@ def detect_scope(path: PathSpec) -> PostgresScope:
                                    entity=parts[2],
                                    resource_path=raw)
 
-    if len(parts) == 4 and parts[1] in ("tables", "views") and parts[3] in (
-            "schema.json", "rows.jsonl"):
+    if len(parts) == 4 and parts[1] in ("tables",
+                                        "views") and parts[3] in ENTITY_FILES:
         kind = "tables" if parts[1] == "tables" else "views"
         if parts[3] == "schema.json":
             return PostgresEntitySchemaScope(schema=parts[0],
                                              kind=kind,
                                              entity=parts[2],
                                              resource_path=raw)
+        if parts[3] == "semantic.json":
+            return PostgresEntitySemanticScope(schema=parts[0],
+                                               kind=kind,
+                                               entity=parts[2],
+                                               resource_path=raw)
         return PostgresEntityRowsScope(schema=parts[0],
                                        kind=kind,
                                        entity=parts[2],

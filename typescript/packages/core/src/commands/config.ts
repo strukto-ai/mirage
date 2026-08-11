@@ -16,13 +16,20 @@ import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
-import type { CommandSafeguard, PathSpec } from '../types.ts'
-import type { Runtime } from '../workspace/executor/runtime.ts'
-import type { StatOverlay } from '../ops/config.ts'
+import type { Limit, PathSpec } from '../types.ts'
+import type { Runtime } from '../runtime/base.ts'
+import type {
+  ChildMounts,
+  LinkView,
+  MountView,
+  ReaddirPath,
+  StatOverlay,
+  StatPath,
+} from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
-import { CommandSpec, OperandKind, Option } from './spec/types.ts'
+import { CommandSpec, Option, type FlagValue } from './spec/types.ts'
 
 /**
  * Options bag passed to command functions. Mirrors Python's keyword arguments
@@ -43,12 +50,18 @@ export type CommandDispatch = (
 
 export interface CommandOpts {
   stdin: ByteSource | null
-  flags: Record<string, string | boolean | string[]>
+  flags: Record<string, FlagValue>
   filetypeFns: Record<string, CommandFn> | null
   mountPrefix?: string
   cwd: string
   resource: Resource
   command?: string
+  // The invoked command's spec, set on the provision path. A provision
+  // function is shared across commands, so it cannot name a dest the way a
+  // handler does -- `-c` is `bytes` on head and `c` on tail -- and needs
+  // the spec to resolve a spelling. Mirrors Python's `spec=` provision
+  // keyword (`workspace/provision/command.py`).
+  spec?: CommandSpec
   index?: IndexCacheStore | null
   dispatch?: CommandDispatch
   sessionId?: string
@@ -56,6 +69,28 @@ export interface CommandOpts {
   execAllowed?: boolean
   runtime?: Runtime
   statOverlay?: StatOverlay
+  // The namespace's symlink facts. Symlinks are namespace state no
+  // backend readdir or stat can see; a command that does not read this
+  // simply ignores it, so there is no allowlist of symlink-aware
+  // commands anywhere.
+  links?: LinkView
+  // Dispatcher-backed stat of one path, for a traversal command's start
+  // point: only a directory has a subtree to walk, and a start point the
+  // router resolved into another mount answers there, not on this mount.
+  statPath?: StatPath
+  // Dispatcher-backed readdir of one path, for a walker that has to read
+  // past a mount boundary (tree).
+  readdirPath?: ReaddirPath
+  // Child names the namespace owes a directory (mounts and links): the
+  // other half of namespace structure beside link rows, merged into
+  // listings the same way they are.
+  childMounts?: ChildMounts
+  // Where the mount boundaries are, for a walker whose output cannot be
+  // fanned out and concatenated (tar, zip). A nested mount's keys live
+  // in another resource, so this backend's readdir cannot see it.
+  mounts?: MountView
+  signal?: AbortSignal
+  timeoutSeconds?: number
 }
 
 export type CommandFnResult = [ByteSource | null, IOResult] | null
@@ -94,7 +129,7 @@ export interface RegisteredCommandInit {
   src?: string | null
   dst?: string | null
   write?: boolean
-  safeguard?: CommandSafeguard | null
+  limit?: Limit | null
 }
 
 export class RegisteredCommand {
@@ -108,7 +143,7 @@ export class RegisteredCommand {
   readonly src: string | null
   readonly dst: string | null
   readonly write: boolean
-  readonly safeguard: CommandSafeguard | null
+  readonly limit: Limit | null
 
   constructor(init: RegisteredCommandInit) {
     this.name = init.name
@@ -121,7 +156,7 @@ export class RegisteredCommand {
     this.src = init.src ?? null
     this.dst = init.dst ?? null
     this.write = init.write ?? false
-    this.safeguard = init.safeguard ?? null
+    this.limit = init.limit ?? null
   }
 }
 
@@ -134,18 +169,18 @@ export interface CommandOptions<A extends Accessor = Accessor> {
   provision?: ProvisionFn<A> | null
   aggregate?: AggregateFn | null
   write?: boolean
-  safeguard?: CommandSafeguard | null
+  limit?: Limit | null
 }
 
-const HELP_OPTION = new Option({
+export const HELP_OPTION = new Option({
   long: '--help',
-  valueKind: OperandKind.NONE,
+  type: 'bool',
   description: 'Show this help and exit',
 })
 
 const VERSION_OPTION = new Option({
   long: '--version',
-  valueKind: OperandKind.NONE,
+  type: 'bool',
   description: 'Show version information and exit',
 })
 
@@ -189,14 +224,15 @@ function withHelpSupport(
   const extras: Option[] = []
   if (!hasHelp) extras.push(HELP_OPTION)
   if (!hasVersion) extras.push(VERSION_OPTION)
-  const init: ConstructorParameters<typeof CommandSpec>[0] = {
-    options: extras.length === 0 ? spec.options : [...spec.options, ...extras],
-    positional: spec.positional,
-    rest: spec.rest,
-    ignoreTokens: [...spec.ignoreTokens],
-  }
-  if (spec.description !== null) init.description = spec.description
-  const newSpec = extras.length === 0 ? spec : new CommandSpec(init)
+  // Instance spread mirrors Python's dataclasses.replace: every CommandSpec
+  // field rides along, including ones added after this code was written.
+  // The prototype loss the lint warns about is the point: init wants a
+  // plain field bag, and the constructor rebuilds the class.
+  const newSpec =
+    extras.length === 0
+      ? spec
+      : // eslint-disable-next-line @typescript-eslint/no-misused-spread
+        new CommandSpec({ ...spec, options: [...spec.options, ...extras] })
   const helpText = renderHelp(name, newSpec)
   const versionText = versionLine(name)
   const wrappedFn: CommandFn = async (accessor, paths, texts, opts) => {
@@ -227,7 +263,7 @@ export function command<A extends Accessor = Accessor>(
         provisionFn: (options.provision ?? null) as ProvisionFn | null,
         aggregate: options.aggregate ?? null,
         write: options.write ?? false,
-        safeguard: options.safeguard ?? null,
+        limit: options.limit ?? null,
       }),
   )
 }

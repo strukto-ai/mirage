@@ -19,12 +19,12 @@ import { RAMResource } from '../../resource/ram/ram.ts'
 import { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Session } from '../session/session.ts'
-import { CommandSpec, Operand, OperandKind, Option } from '../../commands/spec/types.ts'
+import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
 import { specWordKinds } from '../expand/spec_hints.ts'
 
@@ -430,22 +430,19 @@ describe('executeNode dispatcher', () => {
 
 describe('specWordKinds — numericShorthand', () => {
   const headSpec = new CommandSpec({
-    options: [new Option({ short: '-n', valueKind: OperandKind.TEXT, numericShorthand: true })],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    options: [new Option({ short: '-n', type: 'str', numericShorthand: true })],
+    rest: new Operand({ type: 'path' }),
   })
 
   it('treats -3 as a flag value, not a path (head/tail GNU shorthand)', () => {
-    expect(specWordKinds(headSpec, ['-3', '/ram/file'])).toEqual([null, OperandKind.PATH])
+    expect(specWordKinds(headSpec, ['-3', '/ram/file'])).toEqual([null, 'path'])
   })
 
   it('falls back to treating -3 as a positional when spec lacks numericShorthand', () => {
     const noShortcut = new CommandSpec({
-      options: [new Option({ short: '-n', valueKind: OperandKind.TEXT })],
-      rest: new Operand({ kind: OperandKind.PATH }),
+      options: [new Option({ short: '-n', type: 'str' })],
+      rest: new Operand({ type: 'path' }),
     })
-    expect(specWordKinds(noShortcut, ['-3', '/ram/file'])).toEqual([
-      OperandKind.PATH,
-      OperandKind.PATH,
-    ])
+    expect(specWordKinds(noShortcut, ['-3', '/ram/file'])).toEqual(['path', 'path'])
   })
 })

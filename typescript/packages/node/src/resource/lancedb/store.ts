@@ -97,6 +97,12 @@ export class LanceDBStore implements LanceDriver {
     return [...values].sort()
   }
 
+  async tableColumns(table: string): Promise<string[]> {
+    const tbl = await this.table(table)
+    const schema = await tbl.schema()
+    return schema.fields.map((field) => field.name)
+  }
+
   async rowsMatching(
     table: string,
     filters: Record<string, string>,

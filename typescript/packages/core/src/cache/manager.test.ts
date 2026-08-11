@@ -80,4 +80,32 @@ describe('CacheManager', () => {
     await manager.invalidateAfterWrite('/a.txt')
     expect(await cache.exists('/data/a.txt')).toBe(false)
   })
+
+  it("drops this mount's bodies without touching a neighbour", async () => {
+    const [cache, index] = await seeded()
+    await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
+    const manager = new CacheManager(cache, index, '/data/', true)
+    await manager.dropPrefix()
+    expect(await cache.exists('/data/arch/h.txt')).toBe(false)
+    expect(await cache.exists('/other/keep.txt')).toBe(true)
+  })
+
+  it('leaves a non-caching mount alone', async () => {
+    const [cache, index] = await seeded()
+    const manager = new CacheManager(cache, index, '/data/', false)
+    await manager.dropPrefix()
+    expect(await cache.exists('/data/arch/h.txt')).toBe(true)
+  })
+
+  it('reaches every key on a root mount', async () => {
+    // A root mount strips to the empty prefix, so the eviction argument is '/'
+    // and matches every key rather than nothing.
+    const cache = new RAMFileCacheStore()
+    await cache.set('/a.txt', new TextEncoder().encode('x'))
+    await cache.set('/sub/b.txt', new TextEncoder().encode('y'))
+    const manager = new CacheManager(cache, null, '/', true)
+    await manager.dropPrefix()
+    expect(await cache.exists('/a.txt')).toBe(false)
+    expect(await cache.exists('/sub/b.txt')).toBe(false)
+  })
 })

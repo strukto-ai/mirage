@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { TSNodeLike } from '../workspace/expand/variable.ts'
+import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, Redirect, RedirectKind } from './types.ts'
 
 export function getText(node: TSNodeLike): string {
@@ -29,7 +29,26 @@ export function getCommandName(node: TSNodeLike): string {
 const SKIP_PARTS: ReadonlySet<string> = new Set([NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT])
 
 export function getParts(node: TSNodeLike): TSNodeLike[] {
-  return node.namedChildren.filter((c) => !SKIP_PARTS.has(c.type))
+  // A bare `$` word is an anonymous token rather than a named child, but
+  // bash passes it through as a literal argument (`echo $` prints `$`), so
+  // it is the one anonymous child that stays - unless a string starts at
+  // its very next byte, where it is the translation marker of `$"..."` and
+  // the string node carries the whole word.
+  const children = node.children
+  const parts: TSNodeLike[] = []
+  for (let position = 0; position < children.length; position += 1) {
+    const c = children[position]
+    if (c === undefined) continue
+    if (c.isNamed === true && !SKIP_PARTS.has(c.type)) {
+      parts.push(c)
+    } else if (c.type === '$') {
+      const nxt = children[position + 1]
+      if (nxt?.type !== NT.STRING || nxt.startIndex !== c.endIndex) {
+        parts.push(c)
+      }
+    }
+  }
+  return parts
 }
 
 /**
@@ -96,6 +115,37 @@ export function getForParts(node: TSNodeLike): [string, TSNodeLike[], TSNodeLike
   return [variable, values, body]
 }
 
+/**
+ * Get ([init, cond, update], bodyCommands) from a C-style for.
+ *
+ * The expression slots are positional between the (( )) delimiters,
+ * separated by `;` tokens, and any of them may be empty (null):
+ * `for ((;;))`.
+ */
+export function getCforParts(node: TSNodeLike): [(TSNodeLike | null)[], TSNodeLike[]] {
+  const exprs: (TSNodeLike | null)[] = [null, null, null]
+  let slot = 0
+  let inside = false
+  let body: TSNodeLike[] = []
+  for (const child of node.children) {
+    if (child.type === NT.ARITH_OPEN) {
+      inside = true
+      continue
+    }
+    if (child.type === NT.ARITH_CLOSE) {
+      inside = false
+      continue
+    }
+    if (inside) {
+      if (child.type === NT.SEMI) slot += 1
+      else if (child.isNamed === true && slot < 3) exprs[slot] = child
+      continue
+    }
+    if (child.type === NT.DO_GROUP) body = [...child.namedChildren]
+  }
+  return [exprs, body]
+}
+
 export function getSubshellBody(node: TSNodeLike): TSNodeLike[] {
   return [...node.namedChildren]
 }
@@ -106,6 +156,11 @@ const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.HERESTRING_REDIRECT,
 ])
 
+// RAW_STRING (single quotes) belongs here alongside STRING (double
+// quotes): quoting a redirect target is purely syntactic in bash, so
+// `> 'f'`, `> "f"` and `> f` name the same file. Omitting it left
+// targetNode null and target '', which silently redirected every
+// single-quoted target to one phantom empty path instead of the file.
 const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.WORD,
   NT.CONCATENATION,
@@ -113,6 +168,9 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.EXPANSION,
   NT.COMMAND_SUBSTITUTION,
   NT.STRING,
+  NT.RAW_STRING,
+  NT.ANSI_C_STRING,
+  NT.TRANSLATED_STRING,
   NT.PROCESS_SUBSTITUTION,
 ])
 
@@ -332,34 +390,36 @@ export function getCaseWord(node: TSNodeLike): TSNodeLike {
 }
 
 /**
- * Get (patterns, bodyStatements) pairs from case. An arm's body is
- * every statement up to its ;; terminator, so multi-statement arms
+ * Get (patternNodes, bodyStatements, terminator) triples from case.
+ *
+ * Patterns are every named child before the arm's `)`, kept as nodes so
+ * quoting survives to the matcher: 'a'), "$x") and $'a\n') all mean literal
+ * text where a bare word keeps its globs live. An arm's body is every
+ * statement up to its terminator, so multi-statement arms
  * (x) cmd1; cmd2;;) keep all commands.
  */
-export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[]][] {
-  const items: [string[], TSNodeLike[]][] = []
+export function getCaseItems(node: TSNodeLike): [TSNodeLike[], TSNodeLike[], string][] {
+  const items: [TSNodeLike[], TSNodeLike[], string][] = []
   for (const c of node.namedChildren) {
     if (c.type !== NT.CASE_ITEM) continue
-    const patterns: string[] = []
+    const patterns: TSNodeLike[] = []
     const body: TSNodeLike[] = []
+    let terminator = ';;'
+    let inBody = false
     for (const child of c.children) {
-      if (
-        body.length === 0 &&
-        (child.type === NT.EXTGLOB_PATTERN ||
-          child.type === NT.WORD ||
-          child.type === NT.CONCATENATION ||
-          child.type === NT.STRING)
-      ) {
-        patterns.push(getText(child))
-      } else if (child.isNamed === true && child.type !== '|') {
+      if (child.type === ';;' || child.type === ';&' || child.type === ';;&') {
+        terminator = child.type
+      } else if (child.type === ')') {
+        inBody = true
+      } else if (child.isNamed !== true) {
+        continue
+      } else if (inBody) {
         body.push(child)
+      } else {
+        patterns.push(child)
       }
     }
-    if (patterns.length === 0) {
-      const first = c.namedChildren[0]
-      if (first !== undefined) patterns.push(getText(first))
-    }
-    items.push([patterns, body])
+    items.push([patterns, body, terminator])
   }
   return items
 }
@@ -374,6 +434,73 @@ export function getDeclarationKeyword(node: TSNodeLike): string {
 
 export function getUnsetNames(node: TSNodeLike): string[] {
   return node.namedChildren.filter((c) => c.type === NT.VARIABLE_NAME).map((c) => getText(c))
+}
+
+/**
+ * Split a whitespace-separated operand string, honoring single and
+ * double quotes the way the shell does. Returns null on an unbalanced
+ * quote so the caller can fall back. Mirrors Python's `shlex.split` for
+ * the un-expanded operand cases `unset` needs.
+ */
+function shellSplit(text: string): string[] | null {
+  const tokens: string[] = []
+  let cur = ''
+  let has = false
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charAt(i)
+    if (inSingle) {
+      if (ch === "'") inSingle = false
+      else cur += ch
+      continue
+    }
+    if (inDouble) {
+      if (ch === '"') inDouble = false
+      else if (ch === '\\' && (text.charAt(i + 1) === '"' || text.charAt(i + 1) === '\\'))
+        cur += text.charAt(++i)
+      else cur += ch
+      continue
+    }
+    if (ch === "'") {
+      inSingle = true
+      has = true
+    } else if (ch === '"') {
+      inDouble = true
+      has = true
+    } else if (ch === '\\' && i + 1 < text.length) {
+      cur += text.charAt(++i)
+      has = true
+    } else if (ch === ' ' || ch === '\t' || ch === '\n') {
+      if (has) {
+        tokens.push(cur)
+        cur = ''
+        has = false
+      }
+    } else {
+      cur += ch
+      has = true
+    }
+  }
+  if (inSingle || inDouble) return null
+  if (has) tokens.push(cur)
+  return tokens
+}
+
+/**
+ * Get every operand word of an unset_command, keeping `-f`/`-v`/`-n` and
+ * keeping a subscript target (`unset arr[1]`, quoted or not) as one word.
+ * Mirrors Python's `get_unset_args`.
+ */
+export function getUnsetArgs(node: TSNodeLike): string[] {
+  const operands = node.children.slice(1)
+  const first = operands[0]
+  if (first === undefined) return []
+  if (first.startIndex !== undefined && node.startIndex !== undefined) {
+    const split = shellSplit(node.text.slice(first.startIndex - node.startIndex))
+    if (split !== null) return split
+  }
+  return node.namedChildren.map((c) => getText(c))
 }
 
 export function getTestArgv(node: TSNodeLike): string[] {

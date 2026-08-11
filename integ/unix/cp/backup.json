@@ -1,0 +1,288 @@
+{
+  "cases": [
+    {
+      "id": "cp_b_simple_backup",
+      "seq": 613010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpb1 && printf 'SRC\\n' > /data/cpb1/s.txt && printf 'DST\\n' > /data/cpb1/d.txt && cp -b /data/cpb1/s.txt /data/cpb1/d.txt && cat /data/cpb1/d.txt /data/cpb1/d.txt~",
+      "expect": {
+        "exit": 0,
+        "stdout": "SRC\nDST\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "cp_backup_numbered_versions",
+      "seq": 613011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpb2 && printf 'SRC\\n' > /data/cpb2/s.txt && printf 'DST\\n' > /data/cpb2/d.txt && cp --backup=numbered /data/cpb2/s.txt /data/cpb2/d.txt && cp --backup=numbered /data/cpb2/s.txt /data/cpb2/d.txt && cat '/data/cpb2/d.txt.~1~' '/data/cpb2/d.txt.~2~'",
+      "expect": {
+        "exit": 0,
+        "stdout": "DST\nSRC\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup"
+      ]
+    },
+    {
+      "id": "cp_b_custom_suffix",
+      "seq": 613012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpb3 && printf 'SRC\\n' > /data/cpb3/s.txt && printf 'DST\\n' > /data/cpb3/d.txt && cp -b -S .bak /data/cpb3/s.txt /data/cpb3/d.txt && cat /data/cpb3/d.txt.bak",
+      "expect": {
+        "exit": 0,
+        "stdout": "DST\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "S"
+      ]
+    },
+    {
+      "id": "cp_b_n_mutually_exclusive",
+      "seq": 613013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp -b -n /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: --backup is mutually exclusive with -n or --update=none-fail\nTry 'cp --help' for more information.\n"
+      },
+      "flags": [
+        "b",
+        "n"
+      ]
+    },
+    {
+      "id": "cp_bv_backup_annotation",
+      "seq": 613014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpb4 && printf 'SRC\\n' > /data/cpb4/s.txt && printf 'DST\\n' > /data/cpb4/d.txt && cp -bv /data/cpb4/s.txt /data/cpb4/d.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/cpb4/s.txt' -> '/data/cpb4/d.txt' (backup: '/data/cpb4/d.txt~')\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "v"
+      ]
+    },
+    {
+      "id": "cp_backup_none_makes_no_backup",
+      "seq": 613074,
+      "command": "mkdir -p /data/cpb5 && printf 'S\\n' > /data/cpb5/s.txt && printf 'D\\n' > /data/cpb5/d.txt && cp --backup=none /data/cpb5/s.txt /data/cpb5/d.txt && ls /data/cpb5",
+      "expect": {
+        "exit": 0,
+        "stdout": "d.txt\ns.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "cp_suffix_long_spelling",
+      "seq": 613075,
+      "command": "mkdir -p /data/cpb6 && printf 'S\\n' > /data/cpb6/s.txt && printf 'D\\n' > /data/cpb6/d.txt && cp --suffix=.bak /data/cpb6/s.txt /data/cpb6/d.txt && cat /data/cpb6/d.txt.bak && ls /data/cpb6",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nd.txt\nd.txt.bak\ns.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "suffix"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    },
+    {
+      "id": "cp_suffix_empty_falls_back_to_tilde",
+      "seq": 613094,
+      "command": "mkdir -p /data/cpb7 && printf 'S\\n' > /data/cpb7/s.txt && printf 'D\\n' > /data/cpb7/d.txt && cp --backup --suffix= /data/cpb7/s.txt /data/cpb7/d.txt && cat '/data/cpb7/d.txt~' && ls /data/cpb7",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nd.txt\nd.txt~\ns.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup",
+        "suffix"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    }
+  ]
+}

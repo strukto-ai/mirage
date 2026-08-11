@@ -1,8 +1,19 @@
-// Fake-Slack workspace schema for the integ battery. One shared Node server
-// (integ/server/slack.ts) serves the Slack Web API from this SQLite store,
-// seeded from integ/fixtures/slack/v1.json; the Python and TypeScript battery
-// hosts both call it over HTTP. Flat scalar FKs (no @relation) — the fake
-// queries each table explicitly.
+// Shared store for the fake-service integ servers. Prisma allows exactly one
+// datasource per schema, so every fake that wants a database lives here and
+// each server pushes this schema into its own SQLite file (INTEG_DB_URL) and
+// touches only its own tables. One Node server per service serves that
+// vendor's HTTP API out of this store, seeded from
+// integ/fixtures/<service>/v1.json; the Python and TypeScript battery hosts
+// both call it over HTTP, so responses are byte-identical across hosts by
+// construction. Flat scalar FKs (no @relation) — the fakes query each table
+// explicitly.
+//
+// Slack (integ/server/slack.ts, fixtures/slack/v1.json): Channel, User,
+// Message, SlackFile, Pin.
+// Trello (integ/server/trello.ts).
+// Notion (integ/server/notion_server.ts, fixtures/notion/v1.json): the
+// Notion* models, every one scoped by workspaceId so parallel scenarios can
+// share one server without clobbering each other.
 
 generator client {
   provider = "prisma-client-js"
@@ -10,7 +21,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("SLACK_DB_URL")
+  url      = env("INTEG_DB_URL")
 }
 
 model Channel {
@@ -33,13 +44,13 @@ model User {
 }
 
 model Message {
-  pk           Int     @id @default(autoincrement())
-  channelId    String
-  ts           String
-  userId       String
-  text         String
-  type         String  @default("message")
-  threadTs     String?
+  pk            Int     @id @default(autoincrement())
+  channelId     String
+  ts            String
+  userId        String
+  text          String
+  type          String  @default("message")
+  threadTs      String?
   reactionsJson String?
 }
 
@@ -55,4 +66,190 @@ model SlackFile {
   timestamp   Int
   content     String
   contentPath String?
+}
+
+model Pin {
+  channelId String
+  ts        String
+  createdBy String @default("UBOT")
+  created   Int    @default(0)
+
+  @@id([channelId, ts])
+}
+
+// A Notion child page is one object seen two ways: it is a NotionPage row and
+// a NotionBlock row of type child_page carrying the *same* id. Creating a page
+// under a page_id parent must write both, or readdir and block-children
+// disagree about the tree.
+//
+// Trash is ONE bit, stored as `inTrash`. Upstream's `archived` is a deprecated
+// alias for it ("This is an alias for in_trash and always returns the same
+// value"), so it is a spelling on the wire, not a column: two columns let the
+// fake answer archived=true with in_trash=false, which real Notion cannot do,
+// and made every filter have to remember to name both.
+model NotionPage {
+  id             String
+  workspaceId    String
+  parentType     String
+  parentId       String?
+  titleText      String
+  propertiesJson String
+  iconJson       String?
+  coverJson      String?
+  inTrash        Boolean @default(false)
+  createdTime    String
+  lastEditedTime String
+  createdBy      String
+  lastEditedBy   String
+  url            String
+  position       Int     @default(0)
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId])
+}
+
+model NotionDatabase {
+  id              String
+  workspaceId     String
+  parentType      String
+  parentId        String?
+  titleText       String
+  titleJson       String
+  descriptionJson String?
+  propertiesJson  String
+  isInline        Boolean @default(false)
+  inTrash         Boolean @default(false)
+  createdTime     String
+  lastEditedTime  String
+  createdBy       String
+  lastEditedBy    String
+  url             String
+  position        Int     @default(0)
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId])
+}
+
+model NotionBlock {
+  id             String
+  workspaceId    String
+  parentId       String
+  position       Int
+  type           String
+  payloadJson    String
+  hasChildren    Boolean @default(false)
+  inTrash        Boolean @default(false)
+  createdTime    String
+  lastEditedTime String
+  createdBy      String
+  lastEditedBy   String
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId, position])
+}
+
+model NotionComment {
+  id             String
+  workspaceId    String
+  parentType     String
+  parentId       String
+  discussionId   String
+  richTextJson   String
+  createdTime    String
+  lastEditedTime String
+  createdBy      String
+  position       Int    @default(0)
+
+  @@id([workspaceId, id])
+  @@index([workspaceId, parentId])
+}
+
+// Trello. The vendor API returns collections in a caller-visible order that
+// the fixture fixes and writes append to, so every table that can be listed
+// carries an explicit `seq` and is read back with orderBy seq. Membership
+// tables (card members, card labels) are rows rather than JSON arrays so an
+// idempotent add is a findFirst, matching what the real endpoints do.
+
+model TrelloWorkspace {
+  id          String @id
+  displayName String
+  name        String
+  seq         Int
+}
+
+model TrelloBoard {
+  id               String  @id
+  workspaceId      String
+  name             String
+  closed           Boolean @default(false)
+  url              String?
+  dateLastActivity String?
+  seq              Int
+}
+
+model TrelloMember {
+  id       String @id
+  username String
+  fullName String
+}
+
+model TrelloBoardMember {
+  pk       Int    @id @default(autoincrement())
+  boardId  String
+  memberId String
+  seq      Int
+}
+
+model TrelloLabel {
+  id      String  @id
+  boardId String
+  name    String
+  color   String?
+  seq     Int
+}
+
+model TrelloList {
+  id      String  @id
+  boardId String
+  name    String
+  closed  Boolean @default(false)
+  pos     Int?
+  seq     Int
+}
+
+model TrelloCard {
+  id               String  @id
+  boardId          String
+  listId           String
+  name             String
+  desc             String  @default("")
+  due              String?
+  dueComplete      Boolean @default(false)
+  closed           Boolean @default(false)
+  dateLastActivity String?
+  seq              Int
+}
+
+model TrelloCardMember {
+  pk       Int    @id @default(autoincrement())
+  cardId   String
+  memberId String
+  seq      Int
+}
+
+model TrelloCardLabel {
+  pk      Int    @id @default(autoincrement())
+  cardId  String
+  labelId String
+  seq     Int
+}
+
+model TrelloComment {
+  id       String  @id
+  cardId   String
+  memberId String?
+  text     String
+  date     String?
+  seq      Int
+
 }

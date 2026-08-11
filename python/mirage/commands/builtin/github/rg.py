@@ -12,20 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.github.narrow import (files_only_shortcircuit,
-                                                   narrow_scope)
+from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.grep_helper import pattern_arg
-from mirage.commands.builtin.rg_helper import rg_matches_filter
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
@@ -41,7 +37,7 @@ async def rg(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
@@ -49,7 +45,7 @@ async def rg(
         raise UsageError("rg: usage: rg [flags] pattern [path]")
 
     if paths:
-        scope = paths[0]
+        paths[0]
         paths, file_count, used_search = await narrow_scope(
             accessor,
             index,
@@ -57,22 +53,15 @@ async def rg(
             pattern_str,
             fixed_string=fl.as_bool("F"),
             recursive=True,
+            whole_word=fl.as_bool("w"),
         )
         if file_count > SCOPE_ERROR:
-            msg = f"rg: {file_count} files in scope, narrow the path\n"
+            # Push-down needs -w (see narrow_scope); without it a scope
+            # this large has no complete narrowing strategy, so say so
+            # rather than scanning thousands of blobs.
+            msg = (f"rg: {file_count} files in scope, "
+                   "narrow the path, or use -w to enable code search\n")
             return b"", IOResult(exit_code=1, stderr=msg.encode())
-        if used_search:
-            predicate = partial(rg_matches_filter,
-                                file_type=fl.as_str("type"),
-                                glob_pattern=fl.as_str("glob"),
-                                hidden=fl.as_bool("hidden"))
-            short = files_only_shortcircuit(fl,
-                                            pattern_str,
-                                            paths,
-                                            scope,
-                                            path_predicate=predicate)
-            if short is not None:
-                return short
 
     return await generic_rg(
         paths,

@@ -109,6 +109,23 @@ export interface FingerprintEntrySnapshot {
   revision?: string | null
 }
 
+export interface CLISnapshot {
+  name: string
+  spec: string
+  config: Record<string, unknown> | null
+  /**
+   * The embedded program, present only for a script install: its spec
+   * is synthesized from a yaml `script:` and so resolves under no
+   * registry name, leaving nothing for `load` to look up.
+   */
+  script?: {
+    source: string
+    language: string
+    module: boolean
+  }
+  runtime?: string | null
+}
+
 export interface WorkspaceStateDict {
   version: number
   mirage_version: string
@@ -139,4 +156,9 @@ export interface WorkspaceStateDict {
    * backwards compatibility with snapshots that predate the table.
    */
   nodes?: Record<string, NodeMetaSnapshot>
+  /**
+   * Installed CLIs (name, spec registry key, config with schema-declared
+   * secrets redacted). Optional for snapshots that predate the registry.
+   */
+  clis?: CLISnapshot[]
 }

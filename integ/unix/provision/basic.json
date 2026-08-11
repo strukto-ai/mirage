@@ -2615,6 +2615,41 @@
         "stdout": "net=24 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "prov_touch_r",
+      "seq": 300075,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "touch -r /data/a.txt /data/b.txt",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
     }
   ]
 }

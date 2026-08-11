@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
+import { parseFlags as parseWcFlags } from '../../wc.ts'
 import { combinedExit } from './exit.ts'
 import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
 import { Cmd, type CrossResult, type OperandRun, type RunSingle } from '../types.ts'
 import { mergeOperandIos, runOperands } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -62,7 +64,7 @@ export async function runFanout(
   cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   runSingle: RunSingle,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
@@ -77,8 +79,29 @@ export async function runFanout(
   if (cmdName === Cmd.RG && flags.args_I !== true) {
     flags.H = true
   }
-  if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags.q !== true) {
-    flags.v = true
+  // head pairs -q/--quiet and -v/--verbose (canonical dests), tail declares
+  // them short-only.
+  const quietKey = cmdName === Cmd.HEAD ? 'quiet' : 'q'
+  const verboseKey = cmdName === Cmd.HEAD ? 'verbose' : 'v'
+  if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[quietKey] !== true) {
+    flags[verboseKey] = true
+  }
+  // Both re-totalling combines below need raw per-file rows from every run:
+  // wc must not see a per-run total row it would have to guess at, and du
+  // must not sum sizes that were already rounded for -h.
+  if (cmdName === Cmd.WC) {
+    // The override would mask an invalid --total from every native run, so
+    // the user's value is diagnosed here first, as one mount would.
+    const checked = parseWcFlags(flagKwargs)
+    if (typeof checked === 'string') {
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(checked) })]
+    }
+    flags.total = 'never'
+  }
+  const duC = cmdName === Cmd.DU && flagKwargs.c === true
+  const duHuman = duC && flagKwargs.h === true
+  if (duHuman) {
+    flags.h = false
   }
 
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
@@ -91,15 +114,15 @@ export async function runFanout(
     quiet,
   )
 
-  let body: Uint8Array
+  let body: ByteSource | null
   if (cmdName === Cmd.WC) {
     body = combineWc(results, flagKwargs)
-  } else if (cmdName === Cmd.DU && flagKwargs.c === true) {
-    body = duTotal(results, flagKwargs.h === true)
+  } else if (duC) {
+    body = duTotal(results, duHuman)
   } else if (cmdName === Cmd.TEE) {
     body = stdinBytes ?? new Uint8Array()
   } else if (
-    ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags.v === true) ||
+    ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[verboseKey] === true) ||
     (cmdName === Cmd.LS && flagKwargs.R === true)
   ) {
     // Blank line between per-operand blocks, like one native run separates

@@ -19,6 +19,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { pureProvision } from '../generic_bind/provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -211,7 +212,10 @@ async function bcCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const useMath = opts.flags.args_l === true || opts.flags.l === true
+  const fl = new FlagView(opts.flags, specOf('bc'))
+  // -l is short-only, so it lands on the disambiguated `args_l` dest
+  // (`AMBIGUOUS_NAMES`); a plain `l` key is one the parser never emits.
+  const useMath = fl.asBool('args_l')
   const raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
   const lines = new TextDecoder().decode(raw).trim().split('\n')
   const results: string[] = []

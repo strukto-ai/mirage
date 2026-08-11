@@ -17,19 +17,17 @@ from functools import partial
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import LsSortBy, PathSpec
 
 
-@command("ls",
-         resource="history",
-         spec=SPECS["ls"],
-         provision=metadata_provision)
+@command("ls", resource="history", spec=SPECS["ls"])
 async def ls(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
@@ -47,7 +45,9 @@ async def ls(
     d: bool = False,
     F: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    L: bool = False,
+    links: LinkView | None = None,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
     return await generic_ls(
@@ -64,4 +64,6 @@ async def ls(
         list_dir=d,
         classify=F,
         index=index,
+        links=links,
+        deref=L,
     )

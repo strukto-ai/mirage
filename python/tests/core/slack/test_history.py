@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.history import get_history_jsonl
-from mirage.resource.slack.config import SlackConfig
 
 
 @pytest.fixture

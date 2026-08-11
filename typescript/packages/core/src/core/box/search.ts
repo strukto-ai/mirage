@@ -15,7 +15,7 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { PathSpec } from '../../types.ts'
-import { rebaseRaw } from '../../utils/path.ts'
+import { respellRaw } from '../../utils/path.ts'
 import { searchContent, type BoxSearchItem } from './api.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 
@@ -106,7 +106,7 @@ export async function narrowPaths(
           directory: '',
           resourcePath: mountKey(virtual, mountPrefix),
           resolved: true,
-          rawPath: rebaseRaw([virtual], p.virtual, p.rawPath)[0] ?? virtual,
+          rawPath: respellRaw([virtual], p.virtual, p.rawPath)[0] ?? virtual,
         }),
       )
     }

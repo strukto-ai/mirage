@@ -18,10 +18,15 @@ PROMPT = """\
   <schema>/                      Postgres schema (namespace)
     tables/<table>/
       schema.json                column types, PK/FK, indexes
+      semantic.json              descriptions, roles, sample values
       rows.jsonl                 data (size-guarded)
     views/<view>/
       schema.json
+      semantic.json
       rows.jsonl
+  Read semantic.json to learn what a table means: it splits columns into
+  dimensions (group by), time_dimensions and facts (aggregate), and
+  carries COMMENTs, enum domains and example values.
   Read database.json first to plan joins. Reading rows.jsonl is refused
   for tables above the configured row/byte threshold; use head, tail, wc,
   or grep, all of which push predicates down to SQL."""

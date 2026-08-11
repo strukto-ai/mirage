@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "id": "curl_o_writes_vfs",
+      "seq": 330015,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /data/fetched.txt {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_content_landed",
+      "seq": 330016,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "cat /data/fetched.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_size_visible",
+      "seq": 330017,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wc -c < /data/fetched.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "16\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_binary_landed",
+      "seq": 330018,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /data/fetched.bin {http}/bytes.bin && wc -c < /data/fetched.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "32\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_404_body_landed",
+      "seq": 330019,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /data/err.txt {http}/missing && cat /data/err.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "not found\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_fail_writes_nothing",
+      "seq": 330020,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -f -o /data/nothing.txt {http}/missing; echo exit=$?; ls /data/nothing.txt 2>&1",
+      "expect": {
+        "exit": 2,
+        "stdout": "exit=22\nls: cannot access '/data/nothing.txt': No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_o_nested_parent_missing",
+      "seq": 330021,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sS -o /data/nope/fetched.txt {http}/hello",
+      "expect": {
+        "exit": 23,
+        "stdout": "",
+        "stderr": "curl: (23) /data/nope/fetched.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "curl_o_readonly_exit_23",
+      "seq": 330022,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -o /ro/fetched.txt {http}/hello; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=23\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

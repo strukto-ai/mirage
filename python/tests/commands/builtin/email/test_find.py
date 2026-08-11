@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.email.find import find
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 from mirage.types import PathSpec
 
 
@@ -67,6 +67,67 @@ async def test_path_pattern_is_honored():
 async def test_size_is_honored_dirs_count_as_zero():
     lines = await _run([_spec("/")], maxdepth="1", size="+0c")
     assert lines == []
+
+
+ATTACHMENT_HEADERS = [{
+    "uid":
+    "7",
+    "subject":
+    "Report",
+    "date":
+    "Mon, 04 Aug 2026 10:00:00 +0000",
+    "attachments": [{
+        "filename": "invoice.pdf",
+        "size": 123
+    }],
+}]
+
+
+@pytest.mark.asyncio
+async def test_type_f_lists_attachments():
+    with patch("mirage.core.email.readdir.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.stat.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.readdir.list_message_uids",
+               new_callable=AsyncMock,
+               return_value=["7"]), \
+         patch("mirage.core.email.readdir.fetch_headers",
+               new_callable=AsyncMock,
+               return_value=ATTACHMENT_HEADERS):
+        stdout, _io = await find(_accessor(), [_spec("/")],
+                                 type="f",
+                                 index=RAMIndexCacheStore())
+    lines = (stdout
+             if isinstance(stdout, bytes) else b"").decode().splitlines()
+    assert "/INBOX/2026-08-04/Report__7.email.json" in lines
+    assert "/INBOX/2026-08-04/Report__7/invoice.pdf" in lines
+    assert "/INBOX/2026-08-04/Report__7" not in lines
+
+
+@pytest.mark.asyncio
+async def test_type_d_lists_attachment_dir_not_attachment():
+    with patch("mirage.core.email.readdir.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.stat.list_folders",
+               new_callable=AsyncMock,
+               return_value=["INBOX"]), \
+         patch("mirage.core.email.readdir.list_message_uids",
+               new_callable=AsyncMock,
+               return_value=["7"]), \
+         patch("mirage.core.email.readdir.fetch_headers",
+               new_callable=AsyncMock,
+               return_value=ATTACHMENT_HEADERS):
+        stdout, _io = await find(_accessor(), [_spec("/")],
+                                 type="d",
+                                 index=RAMIndexCacheStore())
+    lines = (stdout
+             if isinstance(stdout, bytes) else b"").decode().splitlines()
+    assert "/INBOX/2026-08-04/Report__7" in lines
+    assert "/INBOX/2026-08-04/Report__7/invoice.pdf" not in lines
 
 
 @pytest.mark.asyncio

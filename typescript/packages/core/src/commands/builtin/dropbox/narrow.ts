@@ -19,7 +19,7 @@ import { stat as dropboxStat } from '../../../core/dropbox/stat.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
 import { getExtension } from '../../resolve.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
-import { BINARY_EXTENSIONS, searchQuery } from '../grep_helper.ts'
+import { BINARY_EXTENSIONS, isLiteralPattern, searchQuery } from '../grep_helper.ts'
 import { DROPBOX_IO } from './io.ts'
 
 const resolveGlob = resolveGlobOf(DROPBOX_IO)
@@ -61,6 +61,13 @@ async function allDirectories(
 // Binary-extension candidates are dropped from the narrowed set because the
 // recursive walk it replaces skips them; a narrowed set may therefore be
 // empty, which callers must not treat as a stdin run.
+// Push-down also requires -w. Dropbox search matches whole words while
+// grep matches substrings, so for a bare literal the search result is a
+// strict subset of the grep matches and a file containing the literal
+// only inside a longer word would be silently dropped. Under -w both
+// sides agree and disagreement can only over-fetch, which the local
+// scan filters. A regex narrowed on an extracted literal stays excluded
+// even under -w, since the searched term is then only part of the match.
 export async function narrowScope(
   accessor: DropboxAccessor,
   paths: PathSpec[],
@@ -68,6 +75,7 @@ export async function narrowScope(
   opts: {
     fixedString: boolean
     recursive: boolean
+    wholeWord: boolean
     exactFileSet: boolean
     index?: IndexCacheStore
   },
@@ -76,6 +84,9 @@ export async function narrowScope(
     pattern !== null && !pattern.includes('\n') ? searchQuery(pattern, opts.fixedString) : null
   const useSearch =
     query !== null &&
+    opts.wholeWord &&
+    pattern !== null &&
+    isLiteralPattern(pattern, opts.fixedString) &&
     opts.recursive &&
     !opts.exactFileSet &&
     accessor.contentSearch &&

@@ -1,22 +1,18 @@
 {
   "_meta": {
+    "by_resource": {},
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
     "has_write": false,
     "resources": []
   },
-  "description": null,
-  "ignore_tokens": [],
-  "options": [],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "type": "str"
     }
   ],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "type": "str"
   }
 }

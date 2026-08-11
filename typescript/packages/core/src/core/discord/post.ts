@@ -26,3 +26,45 @@ export async function sendMessage(
   }
   return accessor.transport.call('POST', `/channels/${channelId}/messages`, undefined, body)
 }
+
+export async function editMessage(
+  accessor: DiscordAccessor,
+  channelId: string,
+  messageId: string,
+  text: string,
+): Promise<unknown> {
+  return accessor.transport.call(
+    'PATCH',
+    `/channels/${channelId}/messages/${messageId}`,
+    undefined,
+    {
+      content: text,
+    },
+  )
+}
+
+export async function deleteMessage(
+  accessor: DiscordAccessor,
+  channelId: string,
+  messageId: string,
+): Promise<void> {
+  await accessor.transport.call('DELETE', `/channels/${channelId}/messages/${messageId}`)
+}
+
+export async function sendPoll(
+  accessor: DiscordAccessor,
+  channelId: string,
+  question: string,
+  answers: readonly string[],
+  durationHours = 24,
+  multiselect = false,
+): Promise<unknown> {
+  return accessor.transport.call('POST', `/channels/${channelId}/messages`, undefined, {
+    poll: {
+      question: { text: question },
+      answers: answers.map((answer) => ({ poll_media: { text: answer } })),
+      duration: durationHours,
+      allow_multiselect: multiselect,
+    },
+  })
+}

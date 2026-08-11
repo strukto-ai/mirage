@@ -15,13 +15,13 @@
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { command, type CommandFn, RegisteredCommand } from '../../commands/config.ts'
-import { CommandSpec, Operand, OperandKind } from '../../commands/spec/types.ts'
+import { CommandSpec, Operand } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 
 class StubResource implements Resource {
@@ -34,10 +34,11 @@ class StubResource implements Resource {
   }
 }
 
-const BASIC_SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) })
+const BASIC_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 
 const OK_CMD: CommandFn = () => [null, new IOResult({ exitCode: 0 })]
 const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IOResult()]
+const HANG_CMD: CommandFn = () => new Promise(() => undefined)
 
 function makeMount(mode: MountMode = MountMode.WRITE): MountEntry {
   return new MountEntry({ prefix: '/ram/', resource: new StubResource(), mode })
@@ -206,6 +207,22 @@ describe('Mount.executeCmd', () => {
     m.register(cmd)
     await m.executeCmd('cat', [PathSpec.fromStrPath('/ram/hello.txt')], [], {})
     expect(seenPrefix).toBe('/ram')
+  })
+
+  it('a null limitOverride does not shadow the mount own table', async () => {
+    // The override carries the origin mount's cap across a warm-cache
+    // redirect; a path-less command from an unmounted cwd resolves no
+    // origin and passes null, which must fall through to the serving
+    // mount's command_limits (python always reads the serving
+    // mount's own table).
+    const m = makeMount()
+    m.commandLimits.set('cat', new Limit({ timeoutSeconds: 0.05 }))
+    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })
+    if (cmd === undefined) throw new Error('missing')
+    m.register(cmd)
+    await expect(
+      m.executeCmd('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, { limitOverride: null }),
+    ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
 })
 

@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "id": "gws_scope_sheet_lands_in_the_mount",
+      "seq": 563100,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Q3 Report\"}}' > /dev/null && ls /data",
+      "expect": { "exit": 0, "stdout": "Q3 Report.gsheet.json\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_sheet_is_readable_through_the_mount",
+      "seq": 563101,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Budget\"}}' > /dev/null && cat '/data/Budget.gsheet.json' | jq -r .properties.title",
+      "expect": { "exit": 0, "stdout": "Budget\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_doc_lands_in_the_mount",
+      "seq": 563102,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws docs documents create --json '{\"title\": \"Notes\"}' > /dev/null && ls /data | grep -c gdoc",
+      "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_deck_lands_in_the_mount",
+      "seq": 563103,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws slides presentations create --json '{\"title\": \"Deck\"}' > /dev/null && ls /data | grep -c gslide",
+      "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_drive_create_defaults_its_parent",
+      "seq": 563104,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws drive files create --json '{\"name\": \"draft.txt\", \"mimeType\": \"text/plain\"}' > /dev/null && ls /data | grep -c draft.txt",
+      "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_explicit_parent_still_wins",
+      "seq": 563105,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws drive files create --json '{\"name\": \"elsewhere.txt\", \"parents\": [\"root\"]}' | jq -r '.parents[]'",
+      "expect": { "exit": 0, "stdout": "root\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_edit_warms_the_body_cache",
+      "seq": 563106,
+      "targets": ["cli-gws-scoped"],
+      "command": "gws docs documents create --json '{\"title\": \"Stale\"}' > /dev/null && cat /data/Stale.gdoc.json | grep -c NEWTEXT",
+      "expect": { "exit": 1, "stdout": "0\n", "stderr": "" }
+    },
+    {
+      "id": "gws_scope_edit_is_visible_through_the_mount",
+      "seq": 563107,
+      "targets": ["cli-gws-scoped"],
+      "command": "ID=$(gws drive files list | jq -r '.files[] | select(.name==\"Stale\") | .id') && gws docs documents batchUpdate --params \"{\\\"documentId\\\": \\\"$ID\\\"}\" --json '{\"requests\": [{\"insertText\": {\"location\": {\"index\": 1}, \"text\": \"NEWTEXT\"}}]}' > /dev/null && cat /data/Stale.gdoc.json | grep -c NEWTEXT",
+      "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
+    }
+  ]
+}

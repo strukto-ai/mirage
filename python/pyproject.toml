@@ -36,7 +36,7 @@ classifiers = [
 
 dependencies = [
     "aiofiles>=24.1.0",
-    "aiohttp>=3.14.0",
+    "aiohttp>=3.14.2",
     "fastapi>=0.135.1",
     "httpx>=0.28.1",
     "python-multipart>=0.0.27",
@@ -49,7 +49,6 @@ dependencies = [
     "jq>=1.11.0",
     "pyjwt[crypto]>=2.13.0",
     "dulwich>=1.2.5",
-    "uuid6>=2025.0.1",
     "tenacity>=9.1.4",
 ]
 
@@ -74,7 +73,9 @@ mirage = ["**/*.lua"]
 
 [project.optional-dependencies]
 # --- python runtime (sandboxed python3 default) ---
-monty    = ["pydantic-monty>=0.0.18"]
+# Pinned exactly: monty's API is still moving fast (0.0.19 replaced the whole
+# execution model), and upstream pins its own worker binary the same way.
+monty    = ["pydantic-monty==0.0.19"]
 wasi     = ["wasmtime>=46"]
 quickjs  = ["wasmtime>=46"]
 
@@ -111,9 +112,6 @@ redis    = ["redis[hiredis]>=5.0"]
 email    = ["aioimaplib>=2.0.1", "aiosmtplib>=5.1.0"]
 
 # --- data ---
-parquet  = ["pandas>=3.0.1", "pyarrow>=15.0"]
-hdf5     = ["h5py>=3.16.0", "tables>=3.11.1", "pandas>=3.0.1"]
-pdf      = ["pypdfium2>=5.7.0", "pillow>=12.2.0"]
 
 # --- observability ---
 langfuse = ["langfuse>=4.2.0"]
@@ -140,7 +138,6 @@ pydantic-ai = [
 # --- deepagents ---
 deepagents  = [
     "deepagents>=0.6.12",
-    "mirage-ai[pdf]",
 ]
 
 # --- openhands ---
@@ -166,7 +163,9 @@ camel       = [
 ]
 
 # --- sandboxes ---
-daytona     = ["daytona>=0.176.0"]
+daytona     = [
+    "daytona>=0.176.0",
+]
 
 # --- meta: install everything ---
 all = [
@@ -184,9 +183,6 @@ all = [
     "mirage-ai[postgres]",
     "mirage-ai[redis]",
     "mirage-ai[email]",
-    "mirage-ai[parquet]",
-    "mirage-ai[hdf5]",
-    "mirage-ai[pdf]",
     "mirage-ai[langfuse]",
     "mirage-ai[mem0]",
     "mirage-ai[chroma]",
@@ -199,12 +195,35 @@ all = [
     "mirage-ai[agno]",
     "mirage-ai[claude-agent-sdk]",
     "mirage-ai[daytona]",
+    "mirage-ai[e2b]",
+]
+sandbox = [
+    "mirage-ai[s3]",
+    "mirage-ai[r2]",
+    "mirage-ai[gcs]",
+    "mirage-ai[oci]",
+    "mirage-ai[databricks]",
+    "mirage-ai[ssh]",
+    "mirage-ai[nextcloud]",
+    "mirage-ai[hf]",
+    "mirage-ai[fuse]",
+    "mirage-ai[mongodb]",
+    "mirage-ai[gridfs]",
+    "mirage-ai[postgres]",
+    "mirage-ai[redis]",
+    "mirage-ai[email]",
+    "mirage-ai[langfuse]",
+    "mirage-ai[chroma]",
+    "mirage-ai[qdrant]",
 ]
 lancedb = [
     "lancedb>=0.33.0",
 ]
 mem0 = [
     "mem0ai>=2.0.6",
+]
+e2b = [
+    "e2b>=2.0.0",
 ]
 
 [tool.uv]

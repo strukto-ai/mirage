@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   EmailResource,
+  HIMALAYA,
   MountMode,
   Workspace,
   buildEmailConfig,
@@ -70,8 +71,12 @@ function printSection(label: string, out: string, err: string, max = 500): void 
 }
 
 async function main(): Promise<void> {
-  const resource = new EmailResource(buildConfig())
+  const config = buildConfig()
+  const resource = new EmailResource(config)
   const ws = new Workspace({ '/email': resource }, { mode: MountMode.READ })
+  // The mail verbs are a CLI install, separate from the mount: the
+  // mount serves files, himalaya acts on the account.
+  ws.registerCli('himalaya', HIMALAYA, { ...config })
 
   try {
     const lsRoot = await run(ws, 'ls /email/')

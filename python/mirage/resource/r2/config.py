@@ -12,25 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
-
-from mirage.resource.s3 import S3Config
+from mirage.resource.s3_alias import RegionEndpointConfig
 
 
-class R2Config(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class R2Config(RegionEndpointConfig):
+    """Cloudflare R2, addressed by account rather than region."""
 
-    bucket: str
     account_id: str | None = None
-    endpoint_url: str | None = None
-    access_key_id: SecretStr | None = None
-    secret_access_key: SecretStr | None = None
-    aws_profile: str | None = None
     region: str = "auto"
-    path_style: bool = False
-    key_prefix: str | None = None
-    timeout: int = 30
-    proxy: SecretStr | None = None
 
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:
@@ -38,17 +27,3 @@ class R2Config(BaseModel):
         if self.account_id:
             return f"https://{self.account_id}.r2.cloudflarestorage.com"
         raise ValueError("R2Config requires account_id or endpoint_url")
-
-    def to_s3_config(self) -> S3Config:
-        return S3Config(
-            bucket=self.bucket,
-            region=self.region,
-            endpoint_url=self.resolved_endpoint_url(),
-            aws_access_key_id=self.access_key_id,
-            aws_secret_access_key=self.secret_access_key,
-            aws_profile=self.aws_profile,
-            path_style=self.path_style,
-            key_prefix=self.key_prefix,
-            timeout=self.timeout,
-            proxy=self.proxy,
-        )

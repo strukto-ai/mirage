@@ -16,4 +16,4 @@ from mirage.accessor._hf import HF_RESOURCES
 from mirage.commands.builtin.hf_buckets.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops(HF_RESOURCES, IO, filetype_read=True)
+OPS = make_generic_ops(HF_RESOURCES, IO)

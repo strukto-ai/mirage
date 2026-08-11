@@ -17,9 +17,9 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.resource.ram import RAMResource
-from mirage.types import CommandSafeguard
+from mirage.types import Limit
 
 
 async def _slow_op(accessor, scope, *args, **kwargs):
@@ -42,7 +42,7 @@ async def _ws_mount():
 @pytest.mark.asyncio
 async def test_vfs_op_honors_per_mount_timeout(monkeypatch):
     mount = await _ws_mount()
-    mount.command_safeguards["stat"] = CommandSafeguard(timeout_seconds=0.05)
+    mount.command_limits["stat"] = Limit(timeout_seconds=0.05)
     monkeypatch.setattr(mount._ops[("stat", None)], "fn", _slow_op)
     with pytest.raises(CommandTimeoutError):
         await mount.execute_op("stat", "/data/f.txt")

@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../io/types.ts'
-import { IOResult, materialize } from '../../io/types.ts'
-import { CommandTimeoutError } from '../../commands/builtin/utils/safeguard.ts'
+import { IOResult } from '../../io/types.ts'
+import { concat } from '../../io/cachable_iterator.ts'
+import { CommandTimeoutError } from '../../commands/builtin/utils/limit.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { Job, JobTable } from '../../shell/job_table.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 
 /** Per-call overrides a caller can layer onto the walker's deps. */
@@ -37,7 +39,7 @@ export type ExecuteNodeFn = (
   opts?: ExecuteNodeOpts,
 ) => Promise<[ByteSource | null, IOResult, ExecutionNode]>
 
-type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
+export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
 
 /**
  * Send a command's output to a console as chunks arrive.
@@ -75,6 +77,10 @@ export async function handleBackground(
   const bgSession = session.fork()
 
   const abort = new AbortController()
+  // `kill %n` aborts this controller; the signal rides the forked
+  // session so the job's whole subtree (builtins, mounts, runtimes)
+  // observes the kill, merged with any enclosing job's channel.
+  bgSession.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
     const console_ = job.console
@@ -119,6 +125,8 @@ export async function handleBackground(
   }
 
   const cmdStr = left.text
+  // Non-interactive bash announces nothing on launch ("[1] <pid>" is
+  // interactive-only); the job stays discoverable via $! and `jobs`.
   const job = jobTable.submit({
     command: cmdStr,
     run: runBg,
@@ -128,21 +136,17 @@ export async function handleBackground(
     sessionId: session.sessionId,
   })
   session.lastBgJobId = job.id
-  const jobLine = new TextEncoder().encode(`[${job.id.toString()}]\n`)
 
   if (right === null) {
-    const io = new IOResult({ stderr: jobLine })
     const tree = new ExecutionNode({
       op: '&',
       exitCode: 0,
       children: [new ExecutionNode({ command: cmdStr, exitCode: 0 })],
     })
-    return [null, io, tree]
+    return [null, new IOResult(), tree]
   }
 
   const [rightStdout, rightIo, rightExec] = await executeNode(right, session, stdin, callStack)
-  const rightStderr = await materialize(rightIo.stderr)
-  rightIo.stderr = rightStderr.byteLength > 0 ? concat([jobLine, rightStderr]) : jobLine
   const children = [new ExecutionNode({ command: cmdStr, exitCode: 0 }), rightExec]
   const tree = new ExecutionNode({
     op: '&',
@@ -314,16 +318,4 @@ export function handlePs(jobTable: JobTable, parts: string[]): JobHandlerResult 
   const out =
     lines.length > 0 ? new TextEncoder().encode(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const c of chunks) total += c.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    out.set(c, offset)
-    offset += c.byteLength
-  }
-  return out
 }

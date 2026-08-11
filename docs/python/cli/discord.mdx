@@ -1,0 +1,81 @@
+---
+title: discord
+description: Discord REST API client speaking the OpenClaw Discord action vocabulary.
+icon: terminal
+---
+
+Discord REST API client speaking the OpenClaw Discord action vocabulary. Install it on the workspace and the whole tree is
+discoverable with `discord --help`.
+
+## Install
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.discord import DISCORD
+from mirage.core.discord.config import DiscordConfig
+from mirage.resource.discord import DiscordResource
+
+config = DiscordConfig(token="bot-token")
+ws = Workspace({"/discord": DiscordResource(config)})
+ws.register_cli("discord", DISCORD, config.model_dump())
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+
+## Verbs
+
+The verbs follow the OpenClaw Discord action vocabulary (bare verbs:
+`send`, `read`, `edit`, `delete`, `react`, `search`, `thread-create`,
+`poll`); `members` and `server-info` are mirage extensions. IDs are
+Discord snowflakes, discoverable from the mounted tree
+(`<name>__<id>` path segments).
+
+### Messages
+
+```bash
+discord send --channel 1256522563555819574 --text "Hello from MIRAGE"
+discord send --channel 1256522563555819574 --text "A reply" --reply-to 1489887688978075769
+discord read --channel 1256522563555819574 --limit 20
+discord edit --channel 1256522563555819574 --message 1489887688978075769 --text "Edited"
+discord delete --channel 1256522563555819574 --message 1489887688978075769
+```
+
+| Verb     | Flags                                   | Writes |
+| -------- | --------------------------------------- | ------ |
+| `send`   | `--channel --text [--reply-to]`         | yes    |
+| `read`   | `--channel [--limit]`                   | no     |
+| `edit`   | `--channel --message --text`            | yes    |
+| `delete` | `--channel --message`                   | yes    |
+
+`edit` only works on messages the bot authored.
+
+### Reactions, threads, polls
+
+```bash
+discord react --channel 1256522563555819574 --message 1489887688978075769 --emoji "👍"
+discord thread-create --channel 1256522563555819574 --message 1489887688978075769 --name "Budget talk"
+discord poll --channel 1256522563555819574 --question "Lunch?" --answer Pizza --answer Sushi --duration 24
+```
+
+| Verb            | Flags                                                        | Writes |
+| --------------- | ------------------------------------------------------------ | ------ |
+| `react`         | `--channel --message --emoji`                                | yes    |
+| `thread-create` | `--channel --name [--message]`                               | yes    |
+| `poll`          | `--channel --question --answer... [--duration] [--multiselect]` | yes |
+
+`--answer` repeats, one per poll option.
+
+### Guild metadata and search
+
+```bash
+discord server-info --guild 1256522563555819574
+discord members --guild 1256522563555819574 --query "alice"
+discord search --guild 1256522563555819574 --query "deploy" --channel 1256522563555819574
+```
+
+| Verb          | Flags                              | Writes |
+| ------------- | ---------------------------------- | ------ |
+| `server-info` | `--guild`                          | no     |
+| `members`     | `--guild [--query]`                | no     |
+| `search`      | `--guild --query [--channel]`      | no     |

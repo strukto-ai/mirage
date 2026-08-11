@@ -51,6 +51,32 @@
         "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_find_type_f_uploads",
+      "seq": 520013,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -type f -name '*.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "slack_find_type_f_pdf",
+      "seq": 520014,
+      "targets": [
+        "slack"
+      ],
+      "command": "find /slack/channels/ -type f -name '*.pdf'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
+        "stderr": ""
+      }
     }
   ]
 }

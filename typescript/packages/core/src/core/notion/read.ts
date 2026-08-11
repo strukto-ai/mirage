@@ -15,8 +15,8 @@
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
-import { normalizeDatabase, normalizePage, toJsonBytes } from './normalize.ts'
-import { getBlockTree, getDatabase, getPage } from './pages.ts'
+import { normalizeDataSource, normalizeDatabase, normalizePage, toJsonBytes } from './normalize.ts'
+import { getBlockTree, getDataSource, getDatabase, getPage } from './pages.ts'
 import { parseSegment } from './pathing.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -34,7 +34,9 @@ export async function read(
   if (key === '') throw enoent(path.virtual)
   const parts = key.split('/')
   const last = parts[parts.length - 1] ?? ''
-  if (last !== 'page.json' && last !== 'database.json') throw enoent(path.virtual)
+  if (last !== 'page.json' && last !== 'database.json' && last !== 'data_source.json') {
+    throw enoent(path.virtual)
+  }
   if (last === 'database.json') {
     if (parts[0] !== 'databases' || parts.length !== 3) throw enoent(path.virtual)
     const databaseSegment = parts[parts.length - 2] ?? ''
@@ -47,8 +49,20 @@ export async function read(
     const database = await getDatabase(accessor.transport, parsedDatabase.id)
     return toJsonBytes(normalizeDatabase(database))
   }
+  if (last === 'data_source.json') {
+    if (parts[0] !== 'databases' || parts.length !== 4) throw enoent(path.virtual)
+    const sourceSegment = parts[parts.length - 2] ?? ''
+    let parsedSource: { id: string; title: string }
+    try {
+      parsedSource = parseSegment(sourceSegment)
+    } catch {
+      throw enoent(path.virtual)
+    }
+    const dataSource = await getDataSource(accessor.transport, parsedSource.id)
+    return toJsonBytes(normalizeDataSource(dataSource))
+  }
   const isPageJson =
-    (parts[0] === 'pages' && parts.length >= 3) || (parts[0] === 'databases' && parts.length >= 4)
+    (parts[0] === 'pages' && parts.length >= 3) || (parts[0] === 'databases' && parts.length >= 5)
   if (!isPageJson) throw enoent(path.virtual)
   const parentSegment = parts[parts.length - 2] ?? ''
   let parsed: { id: string; title: string }

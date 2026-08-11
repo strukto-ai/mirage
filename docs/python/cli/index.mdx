@@ -1,0 +1,178 @@
+---
+title: CLIs
+description: Install typed command-line programs beside your mounts and let agents act on services by name.
+icon: terminal
+---
+
+Mounts make a service readable as files; CLIs make it actionable as a
+program. A CLI is a typed program tree (`CLISpec`) installed on the
+workspace by name and separate from the mounts: an account CLI
+initializes from its own config, consults no mount, and takes no operand
+path. `git` is the credential-free tier, so it takes no config at all and
+reads the repository `-C` names through the mount ops. The shell
+dispatches a line to a CLI when its first word matches an installed
+name.
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.himalaya import HIMALAYA
+
+ws = Workspace({"/mail": EmailResource(config)})
+ws.register_cli("himalaya", HIMALAYA, config.model_dump())
+
+await ws.execute("himalaya envelope list --unseen --max 5")
+```
+
+In YAML the same install rides the `clis:` section:
+
+```yaml
+mounts:
+  /mail:
+    resource: email
+    config: { ... }
+clis:
+  himalaya:
+    cli: himalaya
+    config: { ... }
+```
+
+Every level of the tree answers `--help`, unknown verbs fail with git's
+wording (exit 1), and missing required flags fail with argparse's
+wording (exit 2). Two installs under different head words are two
+accounts.
+
+## Authoring your own CLI
+
+A CLI is code you point at, the same way a mount points at a resource.
+In application code you build a `CLISpec`, and each leaf takes the
+line's one `CLIInvocation`:
+
+```python
+from mirage import CLIInvocation, CLISpec
+from mirage.io import IOResult
+
+
+async def send(inv: CLIInvocation[MyConfig]):
+    return f"sent to {inv.flags['to']}\n".encode(), IOResult()
+
+
+TREE = CLISpec(name="mine",
+               config_model=MyConfig,
+               subcommands=(CLISpec(name="send", fn=send), ))
+```
+
+The record carries both views of the line: the process view (`argv`,
+`stdin`, `env`) and the parsed view (`config`, `paths`, `texts`,
+`flags`).
+
+In YAML, `cli:` references that spec by builtin or registered name, by
+`module:ATTR` import, or by `./file.py:ATTR` path. A package can also
+publish one through the `mirage.clis` entry-point group.
+
+### A CLI as a script
+
+`script:` points at an ordinary program instead of a spec tree, so a CLI
+can be authored with no mirage import at all:
+
+```yaml
+clis:
+  pager:
+    script: ./cli/pager.py
+    config: { width: 80 }
+```
+
+The file's content is embedded at load (relative paths resolve next to
+the config file) and the program runs on the workspace's runtime world:
+`.py` on the first Python runtime, `.js`/`.mjs` on the first JavaScript
+one. What it gets is what a native binary would get. The words after the
+head arrive verbatim, piped input arrives on standard input, the
+install's config arrives as `MIRAGE_CLI_CONFIG` in the environment as JSON,
+and the workspace mounts are visible as ordinary files through the
+runtime's bridge. Its exit code becomes the line's `$?` and its stderr
+reaches the shell.
+
+A Python program reads that variable either way the language spells it,
+`os.getenv('MIRAGE_CLI_CONFIG')` or `os.environ['MIRAGE_CLI_CONFIG']`, on
+every Python runtime and on both host languages.
+
+How arguments and input are spelled is the runtime's own contract, the
+same one the `python3` and `node` commands follow:
+
+| Runtime           | Arguments             | Standard input      |
+| ----------------- | --------------------- | ------------------- |
+| monty (default)   | `argv` global         | `stdin` global      |
+| wasi, local       | `sys.argv`            | `sys.stdin`         |
+| quickjs           | `scriptArgs`          | `std.in`            |
+
+Slot 0 is the installed name, so `pager --width 80` reads as
+`['pager', '--width', '80']` and a program's own messages can say
+`pager:` like any other tool. Two installs of one program are told apart
+the same way. Arguments therefore start at index 1 on monty and quickjs.
+The exception is `wasi` and `local`, where a real CPython runs the code
+as `-c` and defines `sys.argv[0]` itself; mirage cannot fill that slot,
+so it stays `-c` and arguments start at index 1 there too.
+
+A script CLI is one program rather than a verb tree, so it parses its
+own arguments, and mirage stays out of the way: it recognizes no flags
+of its own, so `pager --width 80` reaches the program instead of being
+refused, and `pager --help` is the program's to answer. A spec that
+declares `options` or `positional` opts back in, and then mirage parses
+the line, renders `--help` and `man` from the declaration, and refuses
+an undeclared flag; that is only reachable in code, since a YAML entry
+declares no grammar.
+
+`runtime:` pins which entry runs it, and `runtime: local`
+escalates a Python script to the host interpreter, where third-party
+packages are available. The sandboxed runtimes are files plus compute:
+no sockets, no third-party imports on monty, no Node builtins on
+quickjs.
+
+Snapshots carry a script CLI by value: the embedded program travels in
+the snapshot and `Workspace.load` rebuilds the install from it, because
+there is no name for the loading process to resolve. Its config travels
+verbatim, since a script CLI declares no config model and so declares
+no secrets; keep credentials in the environment rather than the install
+config, or supply them through `clis=` on load.
+
+## Discovering an installed CLI
+
+An install is discoverable from inside the shell, so an agent that was
+never told about it can still find it. This works for your own
+registered CLI exactly as for a builtin one: every page is rendered from
+the spec, so there is nothing extra to write.
+
+```bash
+man                      # lists installs under "# clis", beside the mounts
+man linear               # the tree: description, verbs, flags
+man linear issue create  # one leaf, same text as `linear issue create --help`
+type linear              # linear is a mirage CLI
+type -t linear           # cli
+which linear             # linear
+```
+
+`type -t` prints one of `keyword`, `function`, `cli` or `builtin`.
+`which` prints the bare name rather than a path, since mirage has no
+PATH, and reports a miss through exit `1` with no output, like GNU
+`which`.
+
+A shell function may shadow a head word, exactly as in bash. It is
+reversible with `unset -f`, bypassable with `command linear ...`, and
+`type -a linear` lists both layers. Installing and uninstalling a CLI is
+a host-side API only (`ws.register_cli` / `ws.unregister_cli`): there is no shell
+verb for it, so an agent cannot uninstall the tools it was given.
+
+## Builtin CLIs
+
+| Program                              | Acts on          | Vocabulary                                  |
+| ------------------------------------ | ---------------- | ------------------------------------------- |
+| [himalaya](/python/cli/himalaya)     | IMAP/SMTP mail   | pimalaya/himalaya (`envelope`, `message`)   |
+| [gws](/python/cli/gws)               | Google Workspace | official Google Workspace CLI               |
+| [slack](/python/cli/slack)           | Slack            | OpenClaw Slack actions (`send-message`, …)  |
+| [discord](/python/cli/discord)       | Discord          | OpenClaw Discord actions (`send`, `poll`, …)|
+| [ntn](/python/cli/ntn)               | Notion           | official Notion CLI (`pages`, `datasources`)|
+| [linear](/python/cli/linear)         | Linear           | noun/verb (`issue create`, `team list`)     |
+| [git](/python/cli/git)               | git repositories | git (`status`, `log`, `add`, `commit`)      |
+
+Reading stays on the mount (`cat`, `grep`, `jq` over the virtual
+files); acting goes through the CLI. The mounted tree's
+`<name>__<id>` path segments supply the IDs the CLI flags take.

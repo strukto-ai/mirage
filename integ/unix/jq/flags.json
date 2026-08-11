@@ -1,0 +1,839 @@
+{
+  "cases": [
+    {
+      "id": "jq_raw_input_lines",
+      "seq": 700900,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf 'alpha\\nbeta\\n' > /data/qjqf/lines.txt && jq -R . /data/qjqf/lines.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alpha\"\n\"beta\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R"
+      ]
+    },
+    {
+      "id": "jq_raw_input_slurp_is_one_string",
+      "seq": 700901,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf 'alpha\\nbeta\\n' > /data/qjqf/lines.txt && jq -Rs . /data/qjqf/lines.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alpha\\nbeta\\n\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R",
+        "s"
+      ]
+    },
+    {
+      "id": "jq_null_input_collects_lines_as_json_array",
+      "seq": 700902,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf 'alpha\\nbeta\\n' > /data/qjqf/lines.txt && jq -Rn -c '[inputs]' /data/qjqf/lines.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"alpha\",\"beta\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "R",
+        "n"
+      ]
+    },
+    {
+      "id": "jq_arg_injects_a_shell_value_without_quoting_it",
+      "seq": 700903,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n -c --arg v 'a\"b' '{msg: $v}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"msg\":\"a\\\"b\"}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "arg"
+      ]
+    },
+    {
+      "id": "jq_argjson_binds_a_json_value",
+      "seq": 700904,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n -c --argjson v '[1,2]' '{msg: $v}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"msg\":[1,2]}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "argjson"
+      ]
+    },
+    {
+      "id": "jq_slurp_spans_every_operand",
+      "seq": 700905,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n' > /data/qjqf/a.json && printf '{\"b\":2}\\n' > /data/qjqf/b.json && jq -s -c . /data/qjqf/a.json /data/qjqf/b.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"a\":1},{\"b\":2}]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "jq_exit_status_reports_a_null_last_output",
+      "seq": 700906,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n' > /data/qjqf/a.json && jq -e .missing /data/qjqf/a.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "null\n",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "jq_exit_status_reports_no_output_at_all",
+      "seq": 700907,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n' > /data/qjqf/a.json && jq -e empty /data/qjqf/a.json",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "e"
+      ]
+    },
+    {
+      "id": "jq_join_output_writes_no_newline",
+      "seq": 700908,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\"}\\n' > /data/qjqf/a.json && jq -j .a /data/qjqf/a.json && echo END",
+      "expect": {
+        "exit": 0,
+        "stdout": "xEND\n",
+        "stderr": ""
+      },
+      "flags": [
+        "j"
+      ]
+    },
+    {
+      "id": "jq_sort_keys_and_tab_indent",
+      "seq": 700909,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"b\":1,\"a\":2}\\n' > /data/qjqf/o.json && jq -S --tab . /data/qjqf/o.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n\t\"a\": 2,\n\t\"b\": 1\n}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "S",
+        "tab"
+      ]
+    },
+    {
+      "id": "jq_from_file_reads_the_program",
+      "seq": 700910,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n' > /data/qjqf/a.json && printf '.a\\n' > /data/qjqf/p.jq && jq -f /data/qjqf/p.jq /data/qjqf/a.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "jq_empty_file_prints_nothing",
+      "seq": 700911,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && : > /data/qjqf/e.json && jq . /data/qjqf/e.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_rawfile_binds_a_file_as_a_string",
+      "seq": 700913,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf 'a\\nb\\n' > /data/qjqf/body.txt && jq -n -c --rawfile body /data/qjqf/body.txt '{text: $body}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"text\":\"a\\nb\\n\"}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "rawfile"
+      ]
+    },
+    {
+      "id": "jq_slurpfile_binds_a_files_documents",
+      "seq": 700914,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n{\"a\":2}\\n' > /data/qjqf/m.json && jq -n -c --slurpfile docs /data/qjqf/m.json '$docs | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "slurpfile"
+      ]
+    },
+    {
+      "id": "jq_args_are_positional_not_files",
+      "seq": 700915,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n -c --args '$ARGS.positional' alpha beta",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"alpha\",\"beta\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "args"
+      ]
+    },
+    {
+      "id": "jq_jsonargs_parses_each_operand",
+      "seq": 700916,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n -c --jsonargs '$ARGS.positional' 1 '{\"k\":2}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,{\"k\":2}]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "jsonargs"
+      ]
+    },
+    {
+      "id": "jq_dollar_args_carries_named_bindings",
+      "seq": 700917,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n -c --arg v hi '$ARGS.named'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"v\":\"hi\"}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "arg"
+      ]
+    },
+    {
+      "id": "jq_stream_reads_documents_as_events",
+      "seq": 700918,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n' > /data/qjqf/s.json && jq -c --stream . /data/qjqf/s.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"a\"],1]\n[[\"a\"]]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "stream"
+      ]
+    },
+    {
+      "id": "jq_seq_writes_a_separator_before_each_value",
+      "seq": 700919,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n --seq -c '1,2'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\u001e1\n\u001e2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "seq"
+      ]
+    },
+    {
+      "id": "jq_a_field_named_inputs_still_runs_per_document",
+      "seq": 700920,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"inputs\":1}\\n{\"inputs\":2}\\n' > /data/qjqf/f.json && jq -c .inputs /data/qjqf/f.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_the_word_inputs_in_a_string_still_runs_per_document",
+      "seq": 700921,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n{\"a\":2}\\n' > /data/qjqf/m2.json && jq -c '\"no inputs\"' /data/qjqf/m2.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"no inputs\"\n\"no inputs\"\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_inputs_drains_the_rest_of_the_stream",
+      "seq": 700922,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n{\"a\":2}\\n{\"a\":3}\\n' > /data/qjqf/m3.json && jq -c '[., inputs]' /data/qjqf/m3.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"a\":1},{\"a\":2},{\"a\":3}]\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_raw_output0_terminates_with_a_nul",
+      "seq": 700923,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --raw-output0 .a /data/qjqf/o.json && echo END",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\u0000END\n",
+        "stderr": ""
+      },
+      "flags": [
+        "raw-output0"
+      ]
+    },
+    {
+      "id": "jq_ascii_output_escapes_non_ascii",
+      "seq": 700924,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"k\":\"café\"}\\n' > /data/qjqf/u.json && jq -a -c . /data/qjqf/u.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"k\":\"caf\\u00e9\"}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
+    },
+    {
+      "id": "jq_ascii_output_long_form",
+      "seq": 700925,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"k\":\"café\"}\\n' > /data/qjqf/u.json && jq --ascii-output -c . /data/qjqf/u.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"k\":\"caf\\u00e9\"}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "ascii-output"
+      ]
+    },
+    {
+      "id": "jq_monochrome_and_unbuffered_change_nothing",
+      "seq": 700926,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -M --unbuffered -c . /data/qjqf/o.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"a\":\"x\",\"b\":1}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "M",
+        "unbuffered"
+      ]
+    },
+    {
+      "id": "jq_indent_sets_the_width",
+      "seq": 700927,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --indent 4 . /data/qjqf/o.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n    \"a\": \"x\",\n    \"b\": 1\n}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "indent"
+      ]
+    },
+    {
+      "id": "jq_null_input_compact_and_sort_keys_long_forms",
+      "seq": 700928,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq --null-input --compact-output --sort-keys '{b:1,a:2}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"a\":2,\"b\":1}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "null-input",
+        "compact-output",
+        "sort-keys"
+      ]
+    },
+    {
+      "id": "jq_raw_output_long_form",
+      "seq": 700929,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --raw-output .a /data/qjqf/o.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "raw-output"
+      ]
+    },
+    {
+      "id": "jq_join_output_long_form",
+      "seq": 700930,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --join-output .a /data/qjqf/o.json && echo END",
+      "expect": {
+        "exit": 0,
+        "stdout": "xEND\n",
+        "stderr": ""
+      },
+      "flags": [
+        "join-output"
+      ]
+    },
+    {
+      "id": "jq_raw_input_and_slurp_long_forms",
+      "seq": 700931,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf 'alpha\\nbeta\\n' > /data/qjqf/lines.txt && jq --raw-input --slurp . /data/qjqf/lines.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alpha\\nbeta\\n\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "raw-input",
+        "slurp"
+      ]
+    },
+    {
+      "id": "jq_exit_status_long_form",
+      "seq": 700932,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --exit-status .missing /data/qjqf/o.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "null\n",
+        "stderr": ""
+      },
+      "flags": [
+        "exit-status"
+      ]
+    },
+    {
+      "id": "jq_from_file_long_form",
+      "seq": 700933,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '.a\\n' > /data/qjqf/p.jq && printf '{\"a\":\"x\"}\\n' > /data/qjqf/o2.json && jq --from-file /data/qjqf/p.jq /data/qjqf/o2.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"x\"\n",
+        "stderr": ""
+      },
+      "flags": [
+        "from-file"
+      ]
+    },
+    {
+      "id": "jq_slurp_long_form_spans_the_stream",
+      "seq": 700934,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":1}\\n{\"a\":2}\\n' > /data/qjqf/m.json && jq --slurp --compact-output . /data/qjqf/m.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"a\":1},{\"a\":2}]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "slurp"
+      ]
+    },
+    {
+      "id": "jq_help_lists_the_flags",
+      "seq": 700935,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq --help | grep -c -e --slurpfile -e --jsonargs -e --seq",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "help"
+      ]
+    },
+    {
+      "id": "jq_help_short_form",
+      "seq": 700936,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -h | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "jq\n",
+        "stderr": ""
+      },
+      "flags": [
+        "h"
+      ]
+    },
+    {
+      "id": "jq_colour_output_is_refused",
+      "seq": 700937,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -C . /data/qjqf/o.json",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: invalid option -- 'C'\nTry 'jq --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_module_path_is_refused",
+      "seq": 700938,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq -L . /data/qjqf/o.json",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: invalid option -- 'L'\nTry 'jq --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_stream_errors_is_refused",
+      "seq": 700939,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --stream-errors . /data/qjqf/o.json",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: unrecognized option '--stream-errors'\nTry 'jq --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_build_configuration_is_refused",
+      "seq": 700940,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq --build-configuration",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: unrecognized option '--build-configuration'\nTry 'jq --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "jq_indent_out_of_range_is_a_usage_error",
+      "seq": 700941,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/qjqf && printf '{\"a\":\"x\",\"b\":1}\\n' > /data/qjqf/o.json && jq --indent 9 . /data/qjqf/o.json",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: --indent takes a number between -1 and 7\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs  at https://jqlang.github.io/jq\n"
+      },
+      "flags": [
+        "indent"
+      ]
+    },
+    {
+      "id": "jq_argjson_refuses_invalid_json",
+      "seq": 700942,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n --argjson v nope '$v'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: invalid JSON text passed to --argjson\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs  at https://jqlang.github.io/jq\n"
+      },
+      "flags": [
+        "argjson"
+      ]
+    },
+    {
+      "id": "jq_jsonargs_refuses_invalid_json",
+      "seq": 700943,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n --jsonargs '$ARGS.positional' nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: invalid JSON text passed to --jsonargs\nUse jq --help for help with command-line options,\nor see the jq manpage, or online docs  at https://jqlang.github.io/jq\n"
+      },
+      "flags": [
+        "jsonargs"
+      ]
+    },
+    {
+      "id": "jq_a_pair_option_needs_both_tokens",
+      "seq": 700944,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -n --arg v",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: option '--arg' requires an argument\nTry 'jq --help' for more information.\n"
+      },
+      "flags": [
+        "arg"
+      ]
+    }
+  ]
+}

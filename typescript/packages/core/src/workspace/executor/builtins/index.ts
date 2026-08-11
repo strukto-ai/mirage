@@ -40,6 +40,7 @@ export {
   handleTrap,
   handleUnset,
   handleWhoami,
+  noteLocalArray,
 } from './vars.ts'
 export { handleMan } from './man.ts'
 export { handleHistory } from './history.ts'
@@ -47,5 +48,6 @@ export { handleBash, handleEval, handleSleep, handleSource } from './script.ts'
 export { handleTest } from './condition/index.ts'
 export { handleTimeout } from './timeout.ts'
 export { handleXargs } from './xargs.ts'
-export { handleCommandBuiltin, handleType } from './command.ts'
+export { handleCommandBuiltin } from './command.ts'
+export { handleType, handleWhich } from './lookup/index.ts'
 export { handleEcho, handlePrintf } from './text.ts'

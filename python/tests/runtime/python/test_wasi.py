@@ -20,9 +20,9 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
-from mirage.runtime.base import RunArgs
 from mirage.runtime.python import WasiRuntime
 from mirage.runtime.python.wasi import WASI_HOME_ENV
+from mirage.runtime.types import RunArgs
 
 
 def _build_dir() -> str | None:
@@ -45,13 +45,13 @@ def test_missing_build_dir_raises_hint(monkeypatch):
 
 def test_dir_without_wasm_raises_hint(tmp_path):
     with pytest.raises(FileNotFoundError, match="no python.wasm"):
-        WasiRuntime(home=str(tmp_path))
+        WasiRuntime(config={"home": str(tmp_path)})
 
 
 def test_dir_without_stdlib_raises_hint(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     with pytest.raises(FileNotFoundError, match="no lib/python3"):
-        WasiRuntime(home=str(tmp_path))
+        WasiRuntime(config={"home": str(tmp_path)})
 
 
 @live

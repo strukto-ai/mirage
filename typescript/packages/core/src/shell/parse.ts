@@ -103,6 +103,66 @@ function failedArithOpeners(root: Node): number[] {
   return offsets
 }
 
+// Drop a trailing backslash that continues the line, as bash does. The
+// reader removes `\<newline>` before the parser ever sees it, and a
+// backslash ending the input is the same thing with nothing left to
+// continue onto: `echo a\` runs `echo a`. Only an odd-length run of
+// trailing backslashes ends in a live one, since each earlier pair is an
+// escaped backslash (`echo a\\` keeps its literal backslash).
+export function stripLineContinuation(command: string): string {
+  let trailing = 0
+  for (let i = command.length - 1; i >= 0 && command[i] === '\\'; i -= 1) trailing += 1
+  return trailing % 2 === 1 ? command.slice(0, -1) : command
+}
+
+// Locate a backtick substitution that is never closed. tree-sitter
+// happily parses "echo `echo a" as a complete command, so the region has
+// to be scanned directly. Quoting follows the shell reader: single quotes
+// protect a backtick, double quotes do not, and once inside a
+// substitution only a backslash escapes, which is why `"`echo '`'`"` is
+// an error in bash rather than a quoted backtick.
+export function findUnterminatedBacktick(command: string): string | null {
+  let quote: string | null = null
+  let dollarQuote = false
+  let opened: number | null = null
+  let lastDollar = -2
+  let i = 0
+  while (i < command.length) {
+    const ch = command[i]
+    if (quote === "'") {
+      // $'...' takes backslash escapes, so \' does not close it; a
+      // plain '...' treats every backslash literally.
+      if (dollarQuote && ch === '\\') {
+        i += 2
+        continue
+      }
+      if (ch === "'") {
+        quote = null
+        dollarQuote = false
+      }
+      i += 1
+      continue
+    }
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (opened !== null) {
+      if (ch === '`') opened = null
+      i += 1
+      continue
+    }
+    if (ch === '`') opened = i
+    else if (ch === "'" && quote === null) {
+      quote = "'"
+      dollarQuote = lastDollar === i - 1
+    } else if (ch === '"') quote = quote === '"' ? null : '"'
+    else if (ch === '$') lastDollar = i
+    i += 1
+  }
+  return opened !== null ? command.slice(opened) : null
+}
+
 export async function createShellParser(config: ShellParserConfig): Promise<ShellParser> {
   await Parser.init({ wasmBinary: toArrayBuffer(config.engineWasm) })
   const language = await Language.load(toUint8(config.grammarWasm))
@@ -122,7 +182,8 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
      * untouched, so no working command's offsets move.
      */
     parse(command: string): Node {
-      const tree = parser.parse(command)
+      const source = stripLineContinuation(command)
+      const tree = parser.parse(source)
       if (tree === null) {
         throw new Error('shell parse returned null')
       }
@@ -135,10 +196,10 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
       // running `i++`, which is a wrong parse rather than a rejected
       // one. Each opener is judged on its own span instead.
       const offsets = [...new Set(failedArithOpeners(root))].filter(
-        (o) => !isArithmetic(parser, command, o),
+        (o) => !isArithmetic(parser, source, o),
       )
       if (offsets.length === 0) return root
-      let text = command
+      let text = source
       for (const offset of offsets.sort((a, b) => b - a)) {
         text = `${text.slice(0, offset + 1)} ${text.slice(offset + 1)}`
       }

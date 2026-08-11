@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.dropbox.copy import copy as _copy
 from mirage.core.dropbox.create import create as _create
+from mirage.core.dropbox.du import entries as _du_entries
+from mirage.core.dropbox.du import size as _du_size
 from mirage.core.dropbox.exists import exists as _exists
 from mirage.core.dropbox.mkdir import mkdir as _mkdir
 from mirage.core.dropbox.read import read as _read
 from mirage.core.dropbox.read import stream as _stream
-from mirage.core.dropbox.readdir import is_dir_name as _is_dir_name
 from mirage.core.dropbox.readdir import readdir as _readdir
 from mirage.core.dropbox.rename import rename as _rename
 from mirage.core.dropbox.rm import rm_r as _rm_r
@@ -29,15 +30,19 @@ from mirage.core.dropbox.unlink import unlink as _unlink
 from mirage.core.dropbox.write import write_bytes as _write
 
 # copy_v2 copies folder subtrees server-side, so dir_copy is the same
-# call as copy. du falls back to the generic readdir+stat walk.
+# call as copy.
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_stream,
     stat=_stat,
     is_mounted=lambda a: True,
-    is_dir_name=lambda a, child: _is_dir_name(child),
     local=False,
+    # Own the du walk instead of taking the builder's, which is capped at
+    # max_du_entries and reports a partial total past it. See the Box
+    # table; list_folder's recursive mode would make this a real pushdown.
+    du=DuOps(size=_du_size, entries=_du_entries),
     write=_write,
     exists=_exists,
     mkdir=_mkdir,

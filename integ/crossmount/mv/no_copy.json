@@ -1,0 +1,150 @@
+{
+  "cases": [
+    {
+      "id": "xm_mv_no_copy_refuses",
+      "seq": 613090,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xmnc /data2/xmnc && printf 'NC\\n' > /data/xmnc/f.txt && mv --no-copy /data/xmnc/f.txt /data2/xmnc/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/xmnc/f.txt' to '/data2/xmnc/f.txt': Invalid cross-device link\n"
+      },
+      "flags": [
+        "no-copy"
+      ]
+    },
+    {
+      "id": "xm_mv_no_copy_source_kept",
+      "seq": 613091,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/xmnc/f.txt && ls /data2/xmnc",
+      "expect": {
+        "exit": 0,
+        "stdout": "NC\n",
+        "stderr": ""
+      },
+      "flags": [
+        "no-copy"
+      ]
+    },
+    {
+      "id": "xm_mv_no_copy_same_mount_ok",
+      "seq": 613092,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv --no-copy /data/xmnc/f.txt /data/xmnc/g.txt && cat /data/xmnc/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "NC\n",
+        "stderr": ""
+      },
+      "flags": [
+        "no-copy"
+      ]
+    },
+    {
+      "id": "xm_mv_exchange_cross_mount_refused",
+      "seq": 613093,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xmx /data2/xmx && printf 'X\\n' > /data/xmx/a.txt && printf 'Y\\n' > /data2/xmx/b.txt && mv --exchange /data/xmx/a.txt /data2/xmx/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot exchange '/data/xmx/a.txt' and '/data2/xmx/b.txt': Invalid cross-device link\n"
+      },
+      "flags": [
+        "exchange"
+      ]
+    }
+  ]
+}

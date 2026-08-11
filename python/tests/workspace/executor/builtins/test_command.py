@@ -2,10 +2,8 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
-from mirage.workspace.executor.builtins.command import (_classify, _describe,
-                                                        _parse_flags,
-                                                        handle_command_builtin,
-                                                        handle_type)
+from mirage.workspace.cli.registry import CLIRegistry
+from mirage.workspace.executor.builtins.command import handle_command_builtin
 from mirage.workspace.session.session import Session
 
 
@@ -13,6 +11,7 @@ class FakeRegistry:
 
     def __init__(self, commands: set[str]):
         self._commands = commands
+        self.clis = CLIRegistry()
 
     def mount_for_command(self, name: str) -> object | None:
         return object() if name in self._commands else None
@@ -43,66 +42,25 @@ def make_registry() -> FakeRegistry:
     return FakeRegistry({"cat", "grep", "ls", "jq"})
 
 
-def test_parse_flags_last_v_or_V_wins():
-    assert _parse_flags(["-v", "ls"]) == ("v", ["ls"], None)
-    assert _parse_flags(["-V", "ls"]) == ("V", ["ls"], None)
-    assert _parse_flags(["-vV", "ls"]) == ("V", ["ls"], None)
-    assert _parse_flags(["-Vv", "ls"]) == ("v", ["ls"], None)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args,expected", [
+    (["-vV", "cd"], b"cd is a shell builtin\n"),
+    (["-Vv", "cd"], b"cd\n"),
+    (["-pv", "cd"], b"cd\n"),
+])
+async def test_last_of_v_or_V_wins_and_p_is_inert(args: list[str],
+                                                  expected: bytes):
+    out, _io, _ = await handle_command_builtin(FakeShell(), args,
+                                               make_session(), make_registry())
+    assert await materialize(out) == expected
 
 
-def test_parse_flags_p_is_accepted_but_inert():
-    assert _parse_flags(["-p", "ls"]) == (None, ["ls"], None)
-    assert _parse_flags(["-pv", "ls"]) == ("v", ["ls"], None)
-
-
-def test_parse_flags_stops_at_first_operand():
-    # A flag after the target name belongs to the target.
-    assert _parse_flags(["ls", "-l"]) == (None, ["ls", "-l"], None)
-    assert _parse_flags(["-v", "ls", "-l"]) == ("v", ["ls", "-l"], None)
-
-
-def test_parse_flags_double_dash_ends_options():
-    assert _parse_flags(["--", "ls"]) == (None, ["ls"], None)
-    assert _parse_flags(["-v", "--", "ls"]) == ("v", ["ls"], None)
-
-
-def test_parse_flags_invalid_option():
-    assert _parse_flags(["-x", "ls"]) == (None, [], "-x")
-    assert _parse_flags(["-vx", "ls"]) == (None, [], "-x")
-
-
-def test_parse_flags_bare_dash_is_operand():
-    assert _parse_flags(["-"]) == (None, ["-"], None)
-
-
-def test_classify_keyword_before_route():
-    session = make_session()
-    registry = make_registry()
-    for kw in ("if", "for", "while", "case", "[[", "]]", "!", "{", "}"):
-        assert _classify(kw, session, registry) == "keyword"
-
-
-def test_classify_shell_builtin_and_mount_are_builtin():
-    session = make_session()
-    registry = make_registry()
-    assert _classify("cd", session, registry) == "builtin"
-    assert _classify("echo", session, registry) == "builtin"
-    assert _classify("cat", session, registry) == "builtin"
-    assert _classify("jq", session, registry) == "builtin"
-
-
-def test_classify_function_and_not_found():
-    session = make_session()
-    session.functions["myfn"] = []
-    registry = make_registry()
-    assert _classify("myfn", session, registry) == "function"
-    assert _classify("nope_xyz", session, registry) == "not_found"
-
-
-def test_describe_lines():
-    assert _describe("if", "keyword") == "if is a shell keyword"
-    assert _describe("myfn", "function") == "myfn is a function"
-    assert _describe("cat", "builtin") == "cat is a shell builtin"
+@pytest.mark.asyncio
+async def test_a_flag_after_the_target_belongs_to_the_target():
+    shell = FakeShell()
+    await handle_command_builtin(shell, ["ls", "-l"], make_session(),
+                                 make_registry())
+    assert shell.lines == ["ls -l"]
 
 
 @pytest.mark.asyncio
@@ -128,6 +86,18 @@ async def test_v_multi_name_any_found_rc0():
                                               ["-v", "ls", "nope_xyz", "cat"],
                                               make_session(), make_registry())
     assert await materialize(out) == b"ls\ncat\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_V_warns_for_a_missing_name_while_exiting_0():
+    # bash prints the diagnostic and still exits 0 when another name
+    # resolved: the status and the stderr are independent.
+    out, io, _ = await handle_command_builtin(FakeShell(),
+                                              ["-V", "cd", "nope_xyz"],
+                                              make_session(), make_registry())
+    assert await materialize(out) == b"cd is a shell builtin\n"
+    assert await materialize(io.stderr) == b"command: nope_xyz: not found\n"
     assert io.exit_code == 0
 
 
@@ -225,64 +195,3 @@ async def test_run_mode_masks_function_then_restores():
     await handle_command_builtin(shell, ["cat"], session, make_registry())
     assert seen["masked"] is True
     assert session.functions["cat"] is body
-
-
-def _type_out(result) -> str:
-    out, _io, _node = result
-    return out.decode() if out is not None else ""
-
-
-def test_type_reports_builtin():
-    out, io, _ = handle_type(["cd"], make_session(), make_registry())
-    assert out.decode() == "cd is a shell builtin\n"
-    assert io.exit_code == 0
-
-
-def test_type_reports_keyword():
-    assert _type_out(handle_type(["if"], make_session(),
-                                 make_registry())) == "if is a shell keyword\n"
-
-
-def test_type_t_prints_word():
-    assert _type_out(handle_type(["-t", "cd"], make_session(),
-                                 make_registry())) == "builtin\n"
-    assert _type_out(handle_type(["-t", "if"], make_session(),
-                                 make_registry())) == "keyword\n"
-
-
-def test_type_mount_command_is_builtin():
-    assert _type_out(
-        handle_type(["cat"], make_session(),
-                    make_registry())) == "cat is a shell builtin\n"
-
-
-def test_type_not_found_warns_and_exits_1():
-    out, io, _ = handle_type(["nope"], make_session(), make_registry())
-    assert out is None
-    assert io.exit_code == 1
-    assert io.stderr == b"type: nope: not found\n"
-
-
-def test_type_t_not_found_is_silent():
-    out, io, _ = handle_type(["-t", "nope"], make_session(), make_registry())
-    assert out is None
-    assert io.exit_code == 1
-    assert io.stderr == b""
-
-
-def test_type_all_found_exit_rule():
-    out, io, _ = handle_type(["cd", "nope"], make_session(), make_registry())
-    assert out.decode() == "cd is a shell builtin\n"
-    assert io.exit_code == 1
-
-
-def test_type_path_mode_empty_for_builtin():
-    out, io, _ = handle_type(["-p", "cd"], make_session(), make_registry())
-    assert out is None
-    assert io.exit_code == 0
-
-
-def test_type_invalid_option():
-    out, io, _ = handle_type(["-x", "cd"], make_session(), make_registry())
-    assert io.exit_code == 2
-    assert io.stderr.startswith(b"type: -x: invalid option\n")

@@ -1,0 +1,152 @@
+---
+title: Policy Engine
+description: Script which runtime serves each command line; policy scripts run on the workspace's evaluator runtime.
+icon: route
+---
+
+A workspace can hold several runtimes for the same command, with different
+trade-offs. `monty` runs `python3` in-process, sandboxed, stdlib-only:
+perfect for quick one-liners and pipe transforms, useless for a script that
+imports `pandas`. A `docker` entry is the opposite: your container, your
+installed packages, but every line pays the exec round-trip. The **policy**
+decides per line which one serves it:
+
+```yaml
+mode: exec
+runtimes:
+  - monty # captures python3 by default: sandboxed, stdlib-only
+  - name: docker
+    captures: ["python3"] # your container, has pandas installed
+    config:
+      container: my-box
+  - vfs
+policy: ./policy.py
+```
+
+```python policy.py
+# Jobs under /jobs need the container's packages; anything else
+# stays on the fast in-process sandbox. The LAST EXPRESSION is
+# the verdict.
+stage = ctx["commands"][0]
+in_jobs = any(p.startswith("/jobs/") for p in stage["paths"])
+"docker" if in_jobs else "monty"
+```
+
+So `python3 /jobs/train.py --epochs 3` runs in the container, while
+`cat data.csv | python3 -c "import sys; print(len(sys.stdin.read()))"`
+stays on monty.
+
+## Input: the line's context
+
+The script sees one global, `ctx`, the parsed line before any routing.
+This payload is captured from a live run of the config above, routing
+`python3 /jobs/train.py --epochs 3`:
+
+```json
+{
+  "line": "python3 /jobs/train.py --epochs 3",
+  "commands": [
+    {
+      "command": "python3",
+      "words": ["python3", "/jobs/train.py", "--epochs", "3"],
+      "builtin": true,
+      "paths": ["/jobs/train.py"]
+    }
+  ],
+  "command": "python3",
+  "builtin": true,
+  "cwd": "/",
+  "env": {},
+  "session_id": "019fb2fc-19a3-77cf-bbbe-c76069eed523",
+  "agent_id": "",
+  "mounts": ["/.bash_history/", "/data/", "/dev/", "/"]
+}
+```
+
+- `commands`: one entry per pipeline stage (`cat x | python3 -` has two),
+  each with its full words and its absolute-path operands.
+- `command`, `builtin`: mirror the first stage. `builtin` means mirage has
+  a builtin spec for the command (`python3` is a builtin that hands its
+  code to a runtime), as opposed to an unknown name.
+- `env`: the session environment (empty here, no `export` yet).
+- `session_id`: the executing session's id. `agent_id` is empty until an
+  agent identity is attached.
+- `mounts`: the workspace's mount prefixes, including built-ins like
+  `/dev/`.
+
+The payload round-trips through JSON (`PolicyContext.from_dict`), so you
+can store one and replay a decision in tests.
+
+## Output: the verdict
+
+- **A runtime name** (`"docker"`): that entry serves every command it
+  captures on this line.
+- **`None`**: no opinion; the first capturer in the `runtimes` list order
+  serves each command (here, `monty`).
+- **`{"deny": reason}`**: the line is refused before anything runs. It
+  exits 126 with `<command>: policy denied: <reason>` on stderr.
+- Anything else is a routing error; the line fails rather than guessing.
+
+`{"runtime": "docker"}` is the dict spelling of a name, and the dict is
+where the verdict grows: new powers arrive as new keys, never as new
+return types.
+
+In code, the same two arms have a typed spelling, `RouteResult` and
+`DenyResult`; the dict is their wire form, the only shape a script can
+return from inside the evaluator sandbox:
+
+```python
+from mirage.runtime.policy import (DenyResult, PolicyContext, PolicyResult,
+                                   RouteResult)
+
+def policy(ctx: PolicyContext) -> PolicyResult | None:
+    if any(p.startswith("/prod/") for p in ctx.commands[0].paths):
+        return DenyResult("writes under /prod are blocked")
+    return RouteResult("docker") if "/jobs/" in ctx.line else None
+```
+
+Besides the global `policy`, each runtime entry can carry its own `script:`
+with the same `ctx` input but a boolean verdict: am I willing to serve this
+line? Unwilling entries step aside and the first willing capturer wins.
+
+## What runs the scripts
+
+`policy.py` is never imported: the workspace evaluates its source on the
+**policy engine**, an entry in the `runtimes` list with the evaluator
+capability. The script's file extension picks the engine: `policy:
+./policy.py` runs on the first python evaluator (monty, or pyodide in
+TypeScript) and `policy: ./policy.js` on the first JS evaluator
+(quickjs), even when an evaluator of the other language sits earlier in
+the list; with no language match the first evaluator serves. A config
+with policy scripts but no evaluator entry fails at the first decision.
+
+Evaluation is bounded: a policy script that hangs fails the line with a
+policy error after 10 seconds instead of freezing the workspace.
+
+When you build the workspace in code rather than from a config file,
+`policy=` also accepts a plain function with the same decision contract,
+sync or async. It is called directly, so no evaluator is involved:
+
+```python
+from mirage.runtime.policy import PolicyContext
+
+def policy(ctx: PolicyContext) -> str | None:
+    stage = ctx.commands[0]
+    in_jobs = any(p.startswith("/jobs/") for p in stage.paths)
+    return "docker" if in_jobs else "monty"
+
+ws = Workspace(mounts, runtimes=runtimes, policy=policy)
+```
+
+A per-entry `script=` likewise accepts `(ctx) -> bool` in code.
+
+## Bring your own
+
+The capability is open: inherit `EvaluatorMixin` (Python) or implement
+`Evaluator` with the `EVALUATOR` brand (TypeScript) on your own runtime,
+and it becomes eligible as the policy engine. `eval(code, inputs=...)`
+returns the last expression's value; how the value travels is your
+runtime's choice. The docker examples give a stock container the
+capability by piping a harness to `python3 -`:
+[python](https://github.com/strukto-ai/mirage/blob/main/examples/python/runtimes/docker/docker_eval.py),
+[typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/runtimes/docker/docker_eval.ts).

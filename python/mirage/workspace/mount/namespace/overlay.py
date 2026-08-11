@@ -44,6 +44,12 @@ def merge_overlay_stat(meta: NodeMeta | None, stat: FileStat) -> FileStat:
         update["atime"] = meta.atime
     if meta.mtime is not None and meta.target is None:
         update["modified"] = epoch_to_iso(meta.mtime)
+    elif (meta.observed_mtime is not None and meta.target is None
+          and stat.modified is None):
+        # Fallback only: a backend-reported mtime always wins; the
+        # observed write time fills the gap on mtime-less backends so
+        # `find -mtime` and `ls -l` see when mirage last wrote the file.
+        update["modified"] = epoch_to_iso(meta.observed_mtime)
     if not update:
         return stat
     return stat.model_copy(update=update)

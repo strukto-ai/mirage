@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "id": "nest_seed",
+      "seq": 950001,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "echo top > /data/top.txt && echo deep > /data/inner/leaf.txt && echo ghost > /ghost/deep/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_parent_lists_child_mount",
+      "seq": 950002,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ls /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "inner\ntop.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_read_routes_longest_prefix",
+      "seq": 950003,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat /data/inner/leaf.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_child_mount_root_is_dir",
+      "seq": 950004,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "test -d /data/inner && echo yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_descends_child_mount",
+      "seq": 950005,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/inner\n/data/inner/leaf.txt\n/data/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_ls_recursive_renders_both_groups",
+      "seq": 950006,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ls -R /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data:\ntop.txt\n\n/data/inner:\nleaf.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_grep_r_crosses_the_boundary",
+      "seq": 950007,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "grep -r deep /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner/leaf.txt:deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_tree_crosses_the_boundary",
+      "seq": 950008,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "tree /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n|-- inner\n|   `-- leaf.txt\n`-- top.txt\n\n2 directories, 2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_namespace_ancestor_lists",
+      "seq": 950009,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ls /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_namespace_ancestor_row",
+      "seq": 950010,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ls -d /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ghost\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_namespace_ancestor_is_dir",
+      "seq": 950011,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "test -d /ghost && echo yes",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_namespace_ancestor_recursive",
+      "seq": 950012,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ls -R /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ghost:\ndeep\n\n/ghost/deep:\ng.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_write_through_parent_path",
+      "seq": 950013,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "echo w > /data/inner/w.txt && cat /data/inner/w.txt && rm /data/inner/w.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "w\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_namespace_ancestor_start",
+      "seq": 950014,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ghost\n/ghost/deep\n/ghost/deep/g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_type_d_lists_boundaries",
+      "seq": 950015,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /data -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_names_namespace_ancestor",
+      "seq": 950016,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find / -name ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ghost\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

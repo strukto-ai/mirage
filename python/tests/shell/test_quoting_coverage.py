@@ -253,3 +253,364 @@ def test_echo_quoting_matrix(input_text, expected):
     ws = _ws_with_paths()
     io = _exec(ws, f'echo "{input_text}"')
     assert _stdout(io) == expected
+
+
+# ── whitespace between expansions inside double quotes ─────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # tree-sitter folds the separating whitespace into the *second*
+        # node's extent, so each expansion branch has to re-emit it.
+        ('echo "$(echo a) $(echo b)"', b"a b\n"),
+        ('echo "$(echo a) $(echo b) $(echo c)"', b"a b c\n"),
+        ('x=a; echo "$x $(echo b)"', b"a b\n"),
+        ('x=a; echo "${x} $(echo b)"', b"a b\n"),
+        ('y=b; echo "$(echo a) ${y}"', b"a b\n"),
+        ('echo "$((1+1)) $(echo b)"', b"2 b\n"),
+        ('echo "$(echo a) $((1+1))"', b"a 2\n"),
+        ('echo "$((1+1)) $((2+2))"', b"2 4\n"),
+        ('x=a; echo "$x $((1+1))"', b"a 2\n"),
+        ('x=a; true; echo "$x $?"', b"a 0\n"),
+        ('x=a; set -- p q; echo "$x $#"', b"a 2\n"),
+        # a run of whitespace is preserved verbatim, not collapsed
+        ('echo "$(echo a)  $(echo b)"', b"a  b\n"),
+        ('printf "%s\\n" "$(echo a)\t$(echo b)"', b"a\tb\n"),
+        # unquoted words never fold, so word splitting is unchanged
+        ("echo $(echo a) $(echo b)", b"a b\n"),
+        ("echo $((1+1)) $((2+2))", b"2 4\n"),
+        # "${a[@]}" word-splits, and the folded gap joins its first word
+        ('x=a; arr=(1 2); echo "$x ${arr[@]}"', b"a 1 2\n"),
+        ('arr=(1 2); echo "$(echo p) ${arr[@]}"', b"p 1 2\n"),
+        ('arr=(1 2); echo "${arr[@]} ${arr[@]}"', b"1 2 1 2\n"),
+        ('x=a; arr=(); echo "[$x ${arr[@]}]"', b"[a ]\n"),
+    ])
+def test_whitespace_between_expansions_survives(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── adjacent backtick substitutions ────────────────────────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # tree-sitter merges pairs separated by nothing or whitespace
+        # into one node, so the region is re-lexed during expansion.
+        ("echo `echo a` `echo b`", b"a b\n"),
+        ('echo "`echo a` `echo b`"', b"a b\n"),
+        ("echo `echo a``echo b`", b"ab\n"),
+        ('echo "`echo a``echo b`"', b"ab\n"),
+        ("echo `echo a` `echo b` `echo c`", b"a b c\n"),
+        ('echo "`echo \'q q\'` `echo b`"', b"q q b\n"),
+        # backslash parity: `\\` is one escaped backslash, so the
+        # backtick after it still closes the region
+        (r"echo `echo 'a\\'`", b"a\\\n"),
+        (r"echo `echo 'a\\'` `echo b`", b"a\\ b\n"),
+        (r"echo `echo 'a\\b'`", b"a\\b\n"),
+        (r"echo `echo 'a\`b'`", b"a`b\n"),
+        (r"echo `echo \`echo n\``", b"n\n"),
+        # shapes the grammar already handled, kept so the re-lex is
+        # proven not to regress them
+        ("echo `echo a`", b"a\n"),
+        ('echo "`echo a`"', b"a\n"),
+        ('echo "x`echo a`y`echo b`z"', b"xaybz\n"),
+        ('echo "`echo a` lit `echo b`"', b"a lit b\n"),
+        ("echo `echo a` mid `echo b`", b"a mid b\n"),
+        ("x=`echo a`; y=`echo b`; echo \"$x $y\"", b"a b\n"),
+    ])
+def test_adjacent_backtick_substitutions(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── ANSI-C quoting $'...' and locale quoting $"..." ────────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # expectations pinned against bash 5.2 (docker, C.UTF-8)
+        (r"echo $'a\nb'", b"a\nb\n"),
+        (r"echo x$'\ty'z", b"x\tyz\n"),
+        (r"echo $'\x41\101\u42\U00000043'", b"AABC\n"),
+        (r"echo $'a\qb'", b"a\\qb\n"),
+        (r"echo $'\x'", b"\\x\n"),
+        (r"echo $'it\'s'", b"it's\n"),
+        (r"echo $'' y", b" y\n"),
+        # NUL truncates the segment alone, not the rest of the word
+        (r"printf '[%s]' x$'a\0b'y", b"[xay]"),
+        # high bytes survive to output as raw bytes
+        (r"echo $'\xe4\xb8\xad'", "中\n".encode()),
+        # braces inside the quotes are literal, outside still expand
+        (r"echo $'{a,b}'", b"{a,b}\n"),
+        (r"echo $'a'{1,2}", b"a1 a2\n"),
+        # no expansion of any kind happens inside
+        (r"V=w; echo $'$V $(echo x)'", b"$V $(echo x)\n"),
+        # assignments and quoted re-reads round-trip
+        ("V=$'x\\ty'; echo \"$V\"", b"x\ty\n"),
+        # inside double quotes the form is inert text
+        ("echo \"$'a\\nb'\"", b"$'a\\nb'\n"),
+        # $"..." is plain double-quote semantics (identity translation)
+        ('echo $"hello world"', b"hello world\n"),
+        ('echo a$"b c"d', b"ab cd\n"),
+        ('echo "a"$"c"', b"ac\n"),
+        ('V=$"tv"; echo "$V"', b"tv\n"),
+        # a bare trailing dollar is still literal text
+        ("echo a$", b"a$\n"),
+    ])
+def test_ansi_c_and_translated_quoting(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+def test_ansi_c_word_splits_never_happen():
+    # The quoted form is one word even with embedded spaces/newlines.
+    ws = _ws_with_paths()
+    io = _exec(ws, "for i in $'x y'; do echo \"<$i>\"; done")
+    assert _stdout(io) == b"<x y>\n"
+
+
+def test_ansi_c_redirect_target_names_the_file():
+    ws = _ws_with_paths()
+    _exec(ws, "echo hi > $'f 1.txt'")
+    io = _exec(ws, "cat '/data/f 1.txt'")
+    assert _stdout(io) == b"hi\n"
+
+
+def test_ansi_c_herestring_carries_the_decoded_text():
+    ws = _ws_with_paths()
+    io = _exec(ws, r"grep -c $'\t' <<< $'a\tb'")
+    assert _stdout(io) == b"1\n"
+
+
+def test_ansi_c_in_test_command_is_literal():
+    ws = _ws_with_paths()
+    io = _exec(ws, "x=a; [[ $x == $'a' ]] && echo eq")
+    assert _stdout(io) == b"eq\n"
+
+
+# ── quoted case patterns (pinned against bash 5.2 in docker) ──
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("case a in 'a') echo hit;; *) echo miss;; esac", b"hit\n"),
+        ('case a in "a") echo hit;; *) echo miss;; esac', b"hit\n"),
+        ("case a in $'a') echo hit;; *) echo miss;; esac", b"hit\n"),
+        ('case a in $"a") echo hit;; *) echo miss;; esac', b"hit\n"),
+        # A quoted glob is literal; an unquoted one stays live.
+        ("case '*' in '*') echo hit;; *) echo other;; esac", b"hit\n"),
+        ("case x in '*') echo lit;; *) echo glob;; esac", b"glob\n"),
+        # Expansion results are live patterns unless double-quoted.
+        ("x='*'; case y in \"$x\") echo lit;; *) echo miss;; esac", b"miss\n"),
+        ("x='*'; case '*' in \"$x\") echo hit;; *) echo miss;; esac",
+         b"hit\n"),
+        ("x='*'; case y in $x) echo glob;; *) echo miss;; esac", b"glob\n"),
+        # Patterns are never word-split.
+        ("p='a b'; case 'a b' in $p) echo hit;; *) echo miss;; esac", b"hit\n"
+         ),
+        # Concatenations mix literal and live segments.
+        ("case ab in 'a'*) echo hit;; *) echo miss;; esac", b"hit\n"),
+        ("case Xb in 'a'*) echo hit;; *) echo miss;; esac", b"miss\n"),
+        ('case ab in a"b") echo hit;; *) echo miss;; esac', b"hit\n"),
+        # Backslash escapes the next character in an unquoted pattern.
+        ("case 'a*b' in a\\*b) echo hit;; *) echo miss;; esac", b"hit\n"),
+        ("case aXb in a\\*b) echo hit;; *) echo miss;; esac", b"miss\n"),
+        ("case x in \\?) echo hit;; *) echo miss;; esac", b"miss\n"),
+        # Escaped-quote coverage: literal class text and quoted alternation.
+        ("case '[^a]' in '[^a]') echo hit;; *) echo miss;; esac", b"hit\n"),
+        ("case b in [^a]) echo hit;; *) echo miss;; esac", b"hit\n"),
+        ("case b in a|'b') echo hit;; *) echo miss;; esac", b"hit\n"),
+        ("case '' in '') echo hit;; *) echo miss;; esac", b"hit\n"),
+    ])
+def test_quoted_case_patterns(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+def test_ansi_c_case_pattern_matches_decoded_bytes():
+    ws = _ws_with_paths()
+    io = _exec(ws, "case \"$(printf 'a\\tb')\" in $'a\\tb') echo hit;; esac")
+    assert _stdout(io) == b"hit\n"
+
+
+# ── quoted declaration operands (pinned against bash 5.2) ──
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("export 'FOO=bar'; echo [$FOO]", b"[bar]\n"),
+        ('x=v; export "FOO=$x"; echo [$FOO]', b"[v]\n"),
+        ("export 'A=1' B=2; echo [$A][$B]", b"[1][2]\n"),
+        ("export $'T=a\\tb'; printf '[%s]\\n' \"$T\"", b"[a\tb]\n"),
+        ("export 'NOEQ'; echo ok$?", b"ok0\n"),
+        ("declare 'x=y z'; echo [$x]", b"[y z]\n"),
+        # Quoting keeps a compound-looking value scalar, exactly like bash.
+        ("declare 'x=(1 2)'; echo [$x] [${x[1]-unset}]", b"[(1 2)] [unset]\n"),
+        ("f() { local 'l=v'; echo in:[$l]; }; f; echo out:[$l]",
+         b"in:[v]\nout:[]\n"),
+        ("readonly 'R=v'; echo [$R]", b"[v]\n"),
+    ])
+def test_quoted_declaration_operands(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── quoted parameter-expansion and [[ ]] patterns (pinned against
+# bash 5.2 in docker) ──
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # Quoted parameter-expansion patterns match literally.
+        ('v="a*b"; echo "${v#"a*"}"', b"b\n"),
+        ('v=aXb; echo "${v#"a*"}"', b"aXb\n"),
+        ("v=aXb; echo \"${v#'a*'}\"", b"aXb\n"),
+        ('v="a*b"; echo "${v/"*"/y}"', b"ayb\n"),
+        ('v="a*b"; echo "${v%"*b"}"', b"a\n"),
+        ('v=aXbXc; echo "${v//"X"/-}"', b"a-b-c\n"),
+        # Unquoted globs stay live; a backslash binds the next char.
+        ("v=aXb; echo ${v#a*}", b"Xb\n"),
+        ('v="a*b"; echo ${v#a\\*}', b"b\n"),
+        ("v=aXb; echo ${v#a\\*}", b"aXb\n"),
+        # Expansion values are live unquoted, literal double-quoted.
+        ("p='a*'; v='a*b'; echo \"${v#\"$p\"}\"", b"b\n"),
+        ("p='a*'; v='a*b'; echo ${v#$p}", b"*b\n"),
+        ("v=$'a\\tb'; echo \"${v#$'a\\t'}\"", b"b\n"),
+        # Mixed operands stay one opaque token; quoting inside them
+        # still binds (single, double, ANSI-C, quoted refs).
+        ("v=ab; echo \"[${v#a'b'}]\"", b"[]\n"),
+        ('v="xa*b"; echo "[${v#x"a*"}]"', b"[b]\n"),
+        ('v=xaXb; echo "[${v#x"a*"}]"', b"[xaXb]\n"),
+        ("v=xy; echo \"[${v#$'x'y}]\"", b"[]\n"),
+        ("p='a*'; v='xa*b'; echo \"[${v#x\"$p\"}]\"", b"[b]\n"),
+        ("p='a*'; v=xaXb; echo \"[${v#x$p}]\"", b"[Xb]\n"),
+        # [[ == ]] renders its right side through the same expander.
+        ('x=abc; [[ $x == "a*"* ]] && echo hit || echo miss', b"miss\n"),
+        ("x='a*c'; [[ $x == \"a*\"* ]] && echo hit || echo miss", b"hit\n"),
+        ('x=aXb; [[ $x == "a"*"b" ]] && echo hit || echo miss', b"hit\n"),
+        ('x=ab; [[ $x == "a*" ]] && echo hit || echo miss', b"miss\n"),
+        ('x=ab; [[ $x == a* ]] && echo hit || echo miss', b"hit\n"),
+        ('x=ab; [[ $x != "a*" ]] && echo hit || echo miss', b"hit\n"),
+        ("x=$'a\\tb'; [[ $x == $'a\\tb' ]] && echo hit || echo miss",
+         b"hit\n"),
+        ('[[ abc < abd ]] && echo hit || echo miss', b"hit\n"),
+    ])
+def test_quoted_parameter_and_test_patterns(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── multi-line double-quoted strings (pinned against bash 5.2 in
+# docker): the newline bytes belong to no token and must re-emit ──
+
+
+@pytest.mark.parametrize("line,expected", [
+    ('echo "a\nb"', b"a\nb\n"),
+    ('echo "a\n\nb"', b"a\n\nb\n"),
+    ('echo "\na"', b"\na\n"),
+    ('echo "a\n"', b"a\n\n"),
+    ('x=1; echo "p$x\n\nq"', b"p1\n\nq\n"),
+    ('case "a\nb" in "a\nb") echo hit;; *) echo miss;; esac', b"hit\n"),
+])
+def test_multiline_double_quoted_strings(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── a bare $ is a literal word ─────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("echo $", b"$\n"),
+        ("echo a$ b", b"a$ b\n"),
+        ("echo $ x", b"$ x\n"),
+        # Adjacency decides: $"..." is a translated string, $ "..." is
+        # two words.
+        ('echo $"x"', b"x\n"),
+        ('echo $ "x"', b"$ x\n"),
+    ])
+def test_bare_dollar_is_a_literal_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+# ── a quoted "$@" splices into the word around it ──────────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # The prefix joins the first parameter and the suffix joins the
+        # last; the ones between stand alone. Pinned on bash 5.2.37 in
+        # debian:stable-slim, NOT on macOS bash 3.2, which diverges on
+        # the slice below.
+        ('set -- a b; printf "[%s]\\n" "pre $@ post"', b"[pre a]\n[b post]\n"),
+        ('set -- a b; printf "[%s]\\n" "pre $@"', b"[pre a]\n[b]\n"),
+        ('set -- a b; printf "[%s]\\n" "$@ post"', b"[a]\n[b post]\n"),
+        # One parameter merges both literals into a single word.
+        ('set -- a; printf "[%s]\\n" "pre $@ post"', b"[pre a post]\n"),
+        # No parameters leaves the literals as one word...
+        ('set --; printf "[%s]\\n" "pre $@ post"', b"[pre  post]\n"),
+        # ...but an empty splat alone is no word at all.
+        ('set --; printf "[%s]\\n" x "$@" y', b"[x]\n[y]\n"),
+        ('arr=(); printf "[%s]\\n" x "${arr[@]}" y', b"[x]\n[y]\n"),
+        # A parameter's own spaces survive; only the splat splits.
+        ('set -- "x y" b; printf "[%s]\\n" "pre $@ post"',
+         b"[pre x y]\n[b post]\n"),
+        # The braced spelling splits identically; "$*" joins instead.
+        ('set -- a b; printf "[%s]\\n" "pre ${@} post"', b"[pre a]\n[b post]\n"
+         ),
+        ('set -- a b; printf "[%s]\\n" "pre ${*} post"', b"[pre a b post]\n"),
+        # A slice numbers the parameters from 1, so index 0 is $0.
+        ('set -- a b c d; printf "[%s]\\n" "${@:2}"', b"[b]\n[c]\n[d]\n"),
+        ('set -- a b c d; printf "[%s]\\n" "${@:0}"',
+         b"[mirage]\n[a]\n[b]\n[c]\n[d]\n"),
+        # Every other op applies per element.
+        ('set -- ax bx; printf "[%s]\\n" "${@/x/y}"', b"[ay]\n[by]\n"),
+    ])
+def test_at_splat_splices_into_its_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # One EMPTY element is still an element, so the word survives and
+        # is empty. Zero elements is what drops the word, and the two
+        # render the same text, so only the count can tell them apart.
+        ('set -- ""; printf "[%s]\\n" A "$@" B', b"[A]\n[]\n[B]\n"),
+        ('set -- ""; printf "[%s]\\n" A "${@}" B', b"[A]\n[]\n[B]\n"),
+        ('arr=(""); printf "[%s]\\n" A "${arr[@]}" B', b"[A]\n[]\n[B]\n"),
+        ('set -- "" ""; printf "[%s]\\n" A "$@" B', b"[A]\n[]\n[]\n[B]\n"),
+        ('set -- ""; printf "[%s]\\n" A "$@$@" B', b"[A]\n[]\n[B]\n"),
+        # An expansion that renders empty does NOT rescue the word: with
+        # no parameters, "$u$@" is nothing at all, either way round.
+        ('set --; printf "[%s]\\n" A "$u$@" B', b"[A]\n[B]\n"),
+        ('set --; printf "[%s]\\n" A "$@$u" B', b"[A]\n[B]\n"),
+        ('arr=(); printf "[%s]\\n" A "$u${arr[@]}" B', b"[A]\n[B]\n"),
+        # A literal does rescue it, even one space.
+        ('set --; printf "[%s]\\n" A "$@ $@" B', b"[A]\n[ ]\n[B]\n"),
+    ])
+def test_empty_element_splat_is_still_a_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected

@@ -21,6 +21,7 @@ from mirage.resource.ram import RAMResource
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand.globs import resolve_globs
 
 
@@ -37,6 +38,7 @@ def _mock_registry(resolve_result=None):
     mount.resource.resolve_glob = _resolve_glob
 
     reg = MagicMock()
+    reg.clis = CLIRegistry()
     reg.mount_for = MagicMock(return_value=mount)
     return reg
 

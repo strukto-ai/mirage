@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import get_user_profile, list_users, search_users
-from mirage.resource.slack.config import SlackConfig
 
 
 @pytest.fixture

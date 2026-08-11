@@ -21,7 +21,7 @@ const DEC = new TextDecoder()
 
 async function runDate(
   texts: string[] = [],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const resource = new RAMResource()
   const cmd = GENERAL_DATE[0]
@@ -43,7 +43,7 @@ async function runDate(
 describe('date', () => {
   it('-I returns ISO date', async () => {
     const fixed = '2026-04-21T12:00:00Z'
-    const out = await runDate([], { d: fixed, I: true })
+    const out = await runDate([], { d: fixed, args_I: true })
     expect(out).toBe('2026-04-21\n')
   })
 

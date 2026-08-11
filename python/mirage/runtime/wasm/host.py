@@ -17,6 +17,7 @@ import posixpath
 from typing import Any, Callable
 
 # yapf: disable
+from mirage.runtime.errors import CrossMountError
 from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
                                      ENOTDIR, ENOTSUP, FDFLAG_APPEND, FT_CHR,
                                      FT_DIR, FT_REG, OFLAG_CREAT,
@@ -27,7 +28,7 @@ from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
                                      pack_prestat, pack_u32, pack_u64,
                                      unpack_iovs)
 # yapf: enable
-from mirage.runtime.wasm.fs import GuestFs
+from mirage.runtime.wasm.vfs import WasmVFS
 
 wasmtime: Any
 Func: Any
@@ -63,12 +64,12 @@ def _call_guarded(fn: Callable[..., Any], caller: "wasmtime.Caller", *args:
     """
     try:
         return fn(caller, *args)
-    except (OSError, ValueError, NotImplementedError) as exc:
+    except (OSError, ValueError, NotImplementedError, CrossMountError) as exc:
         return errno_for(exc)
 
 
 class WasiFs:
-    """Preview1 filesystem host functions over a GuestFs router.
+    """Preview1 filesystem host functions over a WasmVFS router.
 
     One instance per run: owns the guest fd table (stdin/stdout/stderr
     plus one preopen at "/"), buffers whole files between open and
@@ -78,7 +79,7 @@ class WasiFs:
     stay native.
     """
 
-    def __init__(self, fs: GuestFs, stdin: bytes) -> None:
+    def __init__(self, fs: WasmVFS, stdin: bytes) -> None:
         self._fs = fs
         self.stdout = bytearray()
         self.stderr = bytearray()
@@ -208,6 +209,12 @@ class WasiFs:
             "dirty": False,
             "writable": writable,
             "stat": st,
+            # What close needs to plan the flush: the length this handle
+            # opened over, and the lowest offset it wrote at. Seeded to
+            # the base so a handle that only extends the file keeps
+            # low_write == base_len.
+            "base_len": len(buf),
+            "low_write": len(buf),
         })
         self._store(caller, out, pack_u32(fd))
         return OK
@@ -218,7 +225,8 @@ class WasiFs:
             return EBADF
         del self._fds[fd]
         if entry["kind"] == "file" and entry["dirty"]:
-            self._fs.write(entry["path"], bytes(entry["buf"]))
+            self._fs.flush(entry["path"], entry["base_len"],
+                           entry["low_write"], entry["buf"])
         return OK
 
     def fd_renumber(self, caller: "wasmtime.Caller", fd: int, to: int) -> int:
@@ -283,6 +291,7 @@ class WasiFs:
                 buf, pos = entry["buf"], entry["pos"]
                 if pos > len(buf):
                     buf += b"\0" * (pos - len(buf))
+                entry["low_write"] = min(entry["low_write"], pos)
                 buf[pos:pos + blen] = data
                 entry["pos"] += blen
                 entry["dirty"] = True
@@ -305,6 +314,7 @@ class WasiFs:
             buf = entry["buf"]
             if pos > len(buf):
                 buf += b"\0" * (pos - len(buf))
+            entry["low_write"] = min(entry["low_write"], pos)
             buf[pos:pos + blen] = data
             pos += blen
             total += blen
@@ -389,6 +399,9 @@ class WasiFs:
         else:
             buf += b"\0" * (size - len(buf))
         entry["dirty"] = True
+        # Truncation rewrites what the file already held, which no tail
+        # can express, so the close ships the whole buffer.
+        entry["low_write"] = 0
         return OK
 
     # -- readdir ----------------------------------------------------------

@@ -48,17 +48,17 @@ seed() {
   $cli execute -w "$id" -c "echo cross-history-marker" >/dev/null
 }
 
-# The /guard mount in cross.yaml caps `cat` at 2 lines. Safeguards apply at
+# The /guard mount in cross.yaml caps `cat` at 2 lines. Limits apply at
 # create time (not load) in both languages, so assert on the writer: this
-# proves both CLIs parse + apply the same snake_case command_safeguards block.
-check_safeguard() {
+# proves both CLIs parse + apply the same snake_case command_limits block.
+check_limit() {
   local cli="$1" name="$2"
   local lines
   lines="$($cli execute -w cross_w -c "cat /guard/big.txt" | stdout_of | grep -c .)"
   if [ "$lines" == "2" ]; then
-    echo "  OK   safeguard caps cat to 2 lines ($name)"
+    echo "  OK   limit caps cat to 2 lines ($name)"
   else
-    echo "  FAIL safeguard not applied by $name: got $lines lines (expected 2)"
+    echo "  FAIL limit not applied by $name: got $lines lines (expected 2)"
     fail=1
   fi
 }
@@ -90,7 +90,7 @@ run_direction() {
   create_json="$($writer_cli workspace create "$YAML" --id cross_w)"
   check_default_session "$create_json" "$writer_name"
   seed "$writer_cli" cross_w
-  check_safeguard "$writer_cli" "$writer_name"
+  check_limit "$writer_cli" "$writer_name"
 
   local expected=()
   local i

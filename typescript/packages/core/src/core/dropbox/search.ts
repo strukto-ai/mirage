@@ -15,7 +15,7 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { PathSpec } from '../../types.ts'
-import { rebaseRaw } from '../../utils/path.ts'
+import { respellRaw } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchFiles } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
@@ -84,7 +84,7 @@ export async function narrowPaths(
           directory: '',
           resourcePath: mountKey(virtual, mountPrefix),
           resolved: true,
-          rawPath: rebaseRaw([virtual], p.virtual, p.rawPath)[0] ?? virtual,
+          rawPath: respellRaw([virtual], p.virtual, p.rawPath)[0] ?? virtual,
         }),
       )
     }

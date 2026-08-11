@@ -163,3 +163,83 @@ async def test_procsub_output_redirect_errors_loudly():
     io = await ws.execute("echo hi > >(cat)")
     assert io.exit_code == 2
     assert b"unsupported: process substitution" in (io.stderr or b"")
+
+
+# ── quoted redirect targets ────────────────────
+
+
+@pytest.mark.parametrize("target", ["'/data/Q'", '"/data/Q"', "/data/Q"])
+@pytest.mark.asyncio
+async def test_redirect_target_quoting_is_syntactic(target: str):
+    # Quoting a redirect target names the same file in bash. A
+    # single-quoted target used to leave the parsed target empty, so the
+    # write silently went nowhere and exited 0 (silent data loss).
+    ws = await _workspace_at("/data")
+    io = await ws.execute(f"printf 'V\\n' > {target}")
+    assert io.exit_code == 0
+    assert (io.stderr or b"") == b""
+    assert await _stdout(ws, "cat /data/Q") == "V\n"
+
+
+@pytest.mark.asyncio
+async def test_redirect_single_quoted_target_appends():
+    ws = await _workspace_at("/data")
+    await ws.execute("printf 'one\\n' > '/data/APP'")
+    await ws.execute("printf 'two\\n' >> '/data/APP'")
+    assert await _stdout(ws, "cat /data/APP") == "one\ntwo\n"
+
+
+@pytest.mark.asyncio
+async def test_redirect_single_quoted_stderr_target_captures():
+    # The empty-target fallback swallowed stderr entirely: the command
+    # failed with no message anywhere.
+    ws = await _workspace_at("/data")
+    io = await ws.execute("cat /data/missing 2> '/data/ERR'")
+    assert io.exit_code != 0
+    assert b"No such file or directory" in (await
+                                            _stdout(ws,
+                                                    "cat /data/ERR")).encode()
+
+
+@pytest.mark.asyncio
+async def test_redirect_single_quoted_stdin_source_reads_file():
+    ws = await _workspace_at("/data")
+    await ws.execute("printf 'a\\nb\\n' > /data/IN")
+    assert await _stdout(ws, "wc -l < '/data/IN'") == "2\n"
+
+
+@pytest.mark.asyncio
+async def test_redirect_single_quoted_both_streams_target():
+    ws = await _workspace_at("/data")
+    await ws.execute("{ echo out; echo err >&2; } &> '/data/BOTH'")
+    assert await _stdout(ws, "cat /data/BOTH") == "out\nerr\n"
+
+
+@pytest.mark.asyncio
+async def test_single_quoted_targets_do_not_alias_each_other():
+    # Every single-quoted target collapsed to the same empty path, so
+    # distinct files aliased onto one phantom entry and a read of an
+    # unrelated name returned another file's bytes. Asserted on the
+    # bytes rather than the message: the missing-source wording for `<`
+    # still differs between the hosts and from GNU.
+    ws = await _workspace_at("/data")
+    await ws.execute("printf 'first\\n' > '/data/A1'")
+    io = await ws.execute("cat < '/data/A2'")
+    assert io.exit_code != 0
+    assert b"first" not in (io.stdout or b"")
+
+
+@pytest.mark.asyncio
+async def test_redirect_single_quoted_target_with_space():
+    ws = await _workspace_at("/data")
+    await ws.execute("printf 'S\\n' > '/data/sp ace.txt'")
+    assert await _stdout(ws, "cat '/data/sp ace.txt'") == "S\n"
+
+
+@pytest.mark.asyncio
+async def test_herestring_single_quoted_body_into_redirect():
+    # `<<< 'text'` shares the target-type gate; it delivered an empty
+    # body (a bare newline) instead of the text.
+    ws = await _workspace_at("/data")
+    await ws.execute("cat <<< 'hi' > /data/HS")
+    assert await _stdout(ws, "cat /data/HS") == "hi\n"

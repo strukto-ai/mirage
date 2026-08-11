@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../io/types.ts'
+import { PolicyDenied } from '../../../policy/index.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
-import { isMissingOp } from '../../../utils/errors.ts'
+import { fsStrerror, isEnoent, isFsError, isMissingOp } from '../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -230,11 +231,11 @@ function readOnlyError(cmd: string, namespace: Namespace, path: PathSpec): strin
 }
 
 function isReadOnlyError(err: unknown): boolean {
+  // A policy deny is EACCES too but must render GNU's "Permission
+  // denied", not the mount read-only wording, even when its reason
+  // text happens to contain "read-only".
+  if (err instanceof PolicyDenied) return false
   return err instanceof Error && err.message.includes('read-only')
-}
-
-function isEnoent(err: unknown): boolean {
-  return err instanceof Error && (err as { code?: string }).code === 'ENOENT'
 }
 
 interface SetAttrFields {
@@ -288,9 +289,60 @@ function joinedError(cmd: string, errors: string[], exitCode: number): Result {
   ]
 }
 
+// A subtree as [path, stat] pairs, parents before children. Each entry's
+// stat is captured during the walk because chmod's symbolic clauses (u+x)
+// build on the entry's own current mode. Symlinks are skipped by name:
+// the door's readdir reports them (they are namespace structure), GNU
+// chmod -R changes neither a traversed link nor its referent, and the
+// skip must come before the stat because stat follows a link and would
+// descend through a directory link.
+async function walkStats(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  root: PathSpec,
+  rootStat: FileStat,
+): Promise<[PathSpec, FileStat][]> {
+  const entries: [PathSpec, FileStat][] = [[root, rootStat]]
+  const queue: PathSpec[] = rootStat.type === FileType.DIRECTORY ? [root] : []
+  while (queue.length > 0) {
+    const directory = queue.shift()
+    if (directory === undefined) break
+    const [children] = await dispatch('readdir', directory)
+    for (const childVirtual of children as string[]) {
+      if (namespace.isLink(childVirtual)) continue
+      const child = PathSpec.fromStrPath(childVirtual)
+      const [childStat] = await dispatch('stat', child)
+      const stat = childStat as FileStat
+      entries.push([child, stat])
+      if (stat.type === FileType.DIRECTORY) queue.push(child)
+    }
+  }
+  return entries
+}
+
+// A subtree split into backend paths and namespace link nodes. chown and
+// chgrp change a traversed symlink itself rather than its referent (POSIX
+// gives -R an implicit -P), and a link is namespace state that no readdir
+// can report, so the link nodes are folded back in from the node table.
+async function walkOwned(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  root: PathSpec,
+  rootStat: FileStat,
+): Promise<{ paths: PathSpec[]; links: string[] }> {
+  const walked = await walkStats(namespace, dispatch, root, rootStat)
+  return {
+    paths: walked.map(([path]) => path),
+    links: namespace.linkStatsBelow(root.virtual).map(([path]) => path),
+  }
+}
+
 // chmod MODE FILE...: set permission bits via setattr. Follows symlinks
 // (GNU chmod always dereferences). Stored, not enforced: mount mode does
-// real access control.
+// real access control. -R walks the operand's subtree and applies the mode
+// to every entry, skipping symlinks the way GNU does (a traversed link
+// changes neither itself nor its referent); a command-line link to a
+// directory is still followed and its target walked.
 export async function handleChmod(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -302,11 +354,11 @@ export async function handleChmod(
   const first = operands[0]
   if (first === undefined) return errorResult('chmod', 'chmod: missing operand\n', 2)
   const modeText = first instanceof PathSpec ? first.virtual : first
-  if (flags.has('R')) return errorResult('chmod', 'chmod: -R is not supported\n', 2)
   if (parseMode(modeText, 0) === null) {
     return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
   }
 
+  const recursive = flags.has('R')
   let exitCode = 0
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
@@ -334,20 +386,26 @@ export async function handleChmod(
       }
       throw err
     }
-    // Backends without a mode default to what ls renders: 755 for
-    // directories, 644 for files (symbolic clauses build on this).
-    const current =
-      stat.mode ?? (stat.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
-    const newMode = parseMode(modeText, current)
-    if (newMode === null) {
-      return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
-    }
-    try {
-      await setattrVia(namespace, dispatch, resolved, { mode: newMode })
-    } catch (err) {
-      if (!isReadOnlyError(err)) throw err
-      errors.push(readOnlyError('chmod', namespace, resolved))
-      exitCode = 1
+    const entries: [PathSpec, FileStat][] = recursive
+      ? await walkStats(namespace, dispatch, resolved, stat)
+      : [[resolved, stat]]
+    for (const [path, pathStat] of entries) {
+      // Backends without a mode default to what ls renders: 755 for
+      // directories, 644 for files (symbolic clauses build on this).
+      const current =
+        pathStat.mode ??
+        (pathStat.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
+      const newMode = parseMode(modeText, current)
+      if (newMode === null) {
+        return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
+      }
+      try {
+        await setattrVia(namespace, dispatch, path, { mode: newMode })
+      } catch (err) {
+        if (!isReadOnlyError(err)) throw err
+        errors.push(readOnlyError('chmod', namespace, path))
+        exitCode = 1
+      }
     }
   }
   if (errors.length > 0) return joinedError('chmod', errors, exitCode)
@@ -365,7 +423,6 @@ export async function handleChown(
   const { flags, operands, bad } = splitValueFlags(args, 'Rvfh', '')
   if (bad !== null) return errorResult('chown', `chown: invalid option -- '${bad}'\n`, 2)
   if (operands.length < 2) return errorResult('chown', 'chown: missing operand\n', 2)
-  if (flags.has('R')) return errorResult('chown', 'chown: -R is not supported\n', 2)
   const first = operands[0]
   if (first === undefined) return errorResult('chown', 'chown: missing operand\n', 2)
   const ownerText = first instanceof PathSpec ? first.virtual : first
@@ -374,7 +431,8 @@ export async function handleChown(
     return errorResult('chown', `chown: invalid spec: '${ownerText}'\n`, 1)
   }
 
-  const noDeref = flags.has('h')
+  const recursive = flags.has('R')
+  const noDeref = recursive || flags.has('h')
   let exitCode = 0
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
@@ -397,8 +455,10 @@ export async function handleChown(
       throw err
     }
     const resolved = PathSpec.fromStrPath(virtual)
+    let stat: FileStat
     try {
-      await dispatch('stat', resolved)
+      const [result] = await dispatch('stat', resolved)
+      stat = result as FileStat
     } catch (err) {
       if (isEnoent(err)) {
         errors.push(`chown: cannot access '${target.rawPath}': No such file or directory\n`)
@@ -407,15 +467,26 @@ export async function handleChown(
       }
       throw err
     }
-    try {
-      await setattrVia(namespace, dispatch, resolved, {
+    const { paths, links } = recursive
+      ? await walkOwned(namespace, dispatch, resolved, stat)
+      : { paths: [resolved], links: [] as string[] }
+    for (const path of paths) {
+      try {
+        await setattrVia(namespace, dispatch, path, {
+          ...(uid !== null ? { uid } : {}),
+          ...(gid !== null ? { gid } : {}),
+        })
+      } catch (err) {
+        if (!isReadOnlyError(err)) throw err
+        errors.push(readOnlyError('chown', namespace, path))
+        exitCode = 1
+      }
+    }
+    for (const link of links) {
+      await namespace.setAttrs(link, {
         ...(uid !== null ? { uid } : {}),
         ...(gid !== null ? { gid } : {}),
       })
-    } catch (err) {
-      if (!isReadOnlyError(err)) throw err
-      errors.push(readOnlyError('chown', namespace, resolved))
-      exitCode = 1
     }
   }
   if (errors.length > 0) return joinedError('chown', errors, exitCode)
@@ -434,7 +505,6 @@ export async function handleChgrp(
   const { flags, operands, bad } = splitValueFlags(args, 'Rvfh', '')
   if (bad !== null) return errorResult('chgrp', `chgrp: invalid option -- '${bad}'\n`, 2)
   if (operands.length < 2) return errorResult('chgrp', 'chgrp: missing operand\n', 2)
-  if (flags.has('R')) return errorResult('chgrp', 'chgrp: -R is not supported\n', 2)
   const first = operands[0]
   if (first === undefined) return errorResult('chgrp', 'chgrp: missing operand\n', 2)
   const groupText = first instanceof PathSpec ? first.virtual : first
@@ -443,7 +513,8 @@ export async function handleChgrp(
     return errorResult('chgrp', `chgrp: invalid group: '${groupText}'\n`, 1)
   }
 
-  const noDeref = flags.has('h')
+  const recursive = flags.has('R')
+  const noDeref = recursive || flags.has('h')
   let exitCode = 0
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
@@ -463,8 +534,10 @@ export async function handleChgrp(
       throw err
     }
     const resolved = PathSpec.fromStrPath(virtual)
+    let stat: FileStat
     try {
-      await dispatch('stat', resolved)
+      const [result] = await dispatch('stat', resolved)
+      stat = result as FileStat
     } catch (err) {
       if (isEnoent(err)) {
         errors.push(`chgrp: cannot access '${target.rawPath}': No such file or directory\n`)
@@ -473,12 +546,20 @@ export async function handleChgrp(
       }
       throw err
     }
-    try {
-      await setattrVia(namespace, dispatch, resolved, { gid })
-    } catch (err) {
-      if (!isReadOnlyError(err)) throw err
-      errors.push(readOnlyError('chgrp', namespace, resolved))
-      exitCode = 1
+    const { paths, links } = recursive
+      ? await walkOwned(namespace, dispatch, resolved, stat)
+      : { paths: [resolved], links: [] as string[] }
+    for (const path of paths) {
+      try {
+        await setattrVia(namespace, dispatch, path, { gid })
+      } catch (err) {
+        if (!isReadOnlyError(err)) throw err
+        errors.push(readOnlyError('chgrp', namespace, path))
+        exitCode = 1
+      }
+    }
+    for (const link of links) {
+      await namespace.setAttrs(link, { gid })
     }
   }
   if (errors.length > 0) return joinedError('chgrp', errors, exitCode)
@@ -575,8 +656,19 @@ export async function handleTouch(
       if (setMtime) fields.mtime = stamp
       await setattrVia(namespace, dispatch, resolved, fields)
     } catch (err) {
-      if (!isReadOnlyError(err)) throw err
-      errors.push(readOnlyError('touch', namespace, resolved))
+      if (isReadOnlyError(err)) {
+        errors.push(readOnlyError('touch', namespace, resolved))
+        exitCode = 1
+        continue
+      }
+      // A destination whose parent chain is not all directories is one
+      // failed operand, not an aborted command: GNU reports it and touches
+      // the rest. Caught here rather than around the write because backends
+      // disagree about which call refuses first (ram answers stat with
+      // ENOENT and fails the write; a real filesystem answers stat itself
+      // with ENOTDIR).
+      if (!isFsError(err)) throw err
+      errors.push(`touch: cannot touch '${target.rawPath}': ${String(fsStrerror(err))}\n`)
       exitCode = 1
     }
   }

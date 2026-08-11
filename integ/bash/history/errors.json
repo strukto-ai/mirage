@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "id": "append_rejected",
+      "seq": 310031,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo hacked >> /.bash_history",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/.bash_history: Operation not supported\n"
+      }
+    },
+    {
+      "id": "sessions_path_gone",
+      "seq": 310032,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "ls /.sessions",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/.sessions': No such file or directory\n"
+      }
+    },
+    {
+      "id": "history_non_numeric",
+      "seq": 310033,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "history: abc: numeric argument required\n"
+      }
+    },
+    {
+      "id": "history_invalid_option",
+      "seq": 310034,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history -z",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "history: -z: invalid option\nhistory: usage: history [-c] [-d offset] [n] or history -awrn [filename] or history -ps arg [arg...]\n"
+      }
+    },
+    {
+      "id": "history_d_out_of_range",
+      "seq": 310035,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history -d 999",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "history: 999: history position out of range\n"
+      }
+    },
+    {
+      "id": "history_too_many_args",
+      "seq": 310036,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history 1 2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "history: too many arguments\n"
+      }
+    }
+  ]
+}

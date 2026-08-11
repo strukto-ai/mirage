@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -111,8 +113,9 @@ export async function iconvGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const fromName = typeof opts.flags.f === 'string' ? opts.flags.f : 'utf-8'
-  const toName = typeof opts.flags.t === 'string' ? opts.flags.t : 'utf-8'
+  const fl = new FlagView(opts.flags, specOf('iconv'))
+  const fromName = fl.asStr('f') ?? 'utf-8'
+  const toName = fl.asStr('t') ?? 'utf-8'
   const fromEnc = normalizeEncoding(fromName)
   const toEnc = normalizeEncoding(toName)
   if (fromEnc === null) {
@@ -141,7 +144,7 @@ export async function iconvGeneric(
   }
   const decoded = decodeBytes(raw, fromEnc)
   const encoded = encodeText(decoded, toEnc)
-  const outPath = typeof opts.flags.o === 'string' ? opts.flags.o : null
+  const outPath = fl.asStr('o') ?? null
   if (outPath !== null) {
     const spec = PathSpec.fromStrPath(outPath, mountKey(outPath, opts.mountPrefix ?? ''))
     await write(spec, encoded)

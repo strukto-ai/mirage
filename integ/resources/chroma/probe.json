@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "chroma_cat_missing",
+      "seq": 630047,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /knowledge/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "chroma_write_rejected",
+      "seq": 630048,
+      "targets": [
+        "chroma"
+      ],
+      "command": "echo hi > /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/knowledge/guides/auth.md: Operation not supported\n"
+      }
+    },
+    {
+      "id": "chroma_sed_stream_1p",
+      "seq": 630049,
+      "targets": [
+        "chroma"
+      ],
+      "command": "sed -n 1p /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authentication uses bearer tokens via the Authorization header.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_sed_i_readonly",
+      "seq": 630050,
+      "targets": [
+        "chroma"
+      ],
+      "command": "sed -i s/x/y/ /knowledge/guides/auth.md",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    },
+    {
+      "id": "chroma_prov_cat",
+      "seq": 630051,
+      "targets": [
+        "chroma"
+      ],
+      "command": "cat /knowledge/guides/auth.md",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=188 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_prov_grep",
+      "seq": 630052,
+      "targets": [
+        "chroma"
+      ],
+      "command": "grep x /knowledge/guides/auth.md",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=188 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_prov_ls",
+      "seq": 630053,
+      "targets": [
+        "chroma"
+      ],
+      "command": "ls /knowledge/guides",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

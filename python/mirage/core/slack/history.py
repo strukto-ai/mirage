@@ -17,8 +17,9 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
+from mirage.core.slack._client import slack_get
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
-from mirage.resource.slack.config import SlackConfig
 
 
 def _day_bounds_ts(date_str: str) -> tuple[str, str]:
@@ -83,6 +84,25 @@ async def fetch_messages_for_day(
     return messages
 
 
+def messages_to_jsonl(messages: list[dict[str, Any]]) -> bytes:
+    """Render messages as the chat.jsonl byte content.
+
+    The single renderer behind both read and the readdir-time size, so
+    stat().size == len(read()) by construction.
+
+    Args:
+        messages (list[dict]): messages sorted by ts ascending.
+
+    Returns:
+        bytes: JSONL-encoded messages.
+    """
+    lines = [
+        json.dumps(m, ensure_ascii=False, separators=(",", ":"))
+        for m in messages
+    ]
+    return ("\n".join(lines) + "\n").encode() if lines else b""
+
+
 async def get_history_jsonl(
     config: SlackConfig,
     channel_id: str,
@@ -99,8 +119,30 @@ async def get_history_jsonl(
         bytes: JSONL-encoded messages.
     """
     messages = await fetch_messages_for_day(config, channel_id, date_str)
-    lines = [
-        json.dumps(m, ensure_ascii=False, separators=(",", ":"))
-        for m in messages
-    ]
-    return ("\n".join(lines) + "\n").encode() if lines else b""
+    return messages_to_jsonl(messages)
+
+
+async def fetch_recent_messages(
+    config: SlackConfig,
+    channel_id: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Fetch the most recent messages of a channel (one API page).
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        channel_id (str): channel ID.
+        limit (int): maximum number of messages.
+
+    Returns:
+        list[dict]: messages sorted by ts ascending.
+    """
+    data = await slack_get(config, "conversations.history", {
+        "channel": channel_id,
+        "limit": limit,
+    })
+    messages = data.get("messages")
+    items = [m for m in messages
+             if isinstance(m, dict)] if isinstance(messages, list) else []
+    items.sort(key=lambda m: float(m.get("ts", "0")))
+    return items

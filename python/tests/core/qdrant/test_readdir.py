@@ -1,7 +1,8 @@
 import pytest
 
-from mirage.core.qdrant.readdir import is_dir_name, readdir
-from mirage.resource.qdrant.config import QdrantConfig
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.qdrant.readdir import _blob_size, readdir
+from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.types import PathSpec
 
 
@@ -39,13 +40,31 @@ async def test_leaf_lists_row_files(accessor):
     assert _names(out) == {"1.json", "1.txt", "1.png"}
 
 
-def test_is_dir_name_classifies_row_files():
-    cfg = QdrantConfig(text_field="name", blob_field="img", blob_ext="png")
-    assert is_dir_name("/animals/cat", config=cfg) is True
-    assert is_dir_name("/animals/cat/big/1.json", config=cfg) is False
-    assert is_dir_name("/animals/cat/big/1.txt", config=cfg) is False
-    assert is_dir_name("/animals/cat/big/1.png", config=cfg) is False
-    no_extra = QdrantConfig()
-    assert is_dir_name("/animals/cat/big/1.png", config=no_extra) is True
-    assert is_dir_name("/animals/cat/big/1.txt", config=no_extra) is True
-    assert is_dir_name("/animals/cat/big/1.json", config=no_extra) is False
+@pytest.mark.asyncio
+async def test_leaf_seeds_exact_rendered_sizes(accessor):
+    index = RAMIndexCacheStore()
+    await readdir(accessor, _ps("/animals/cat/big"), index)
+    config = accessor.config
+    row = {
+        "label": "cat",
+        "kind": "big",
+        "name": "a big orange cat",
+        "image_bytes": "UE5HLTE=",
+        "id": 1,
+    }
+    json_lookup = await index.get("/animals/cat/big/1.json")
+    assert json_lookup.entry is not None
+    assert json_lookup.entry.size == len(render_json(row, config))
+    txt_lookup = await index.get("/animals/cat/big/1.txt")
+    assert txt_lookup.entry is not None
+    assert txt_lookup.entry.size == len(render_text(row, config))
+    blob_lookup = await index.get("/animals/cat/big/1.png")
+    assert blob_lookup.entry is not None
+    assert blob_lookup.entry.size == len(blob_bytes("UE5HLTE="))
+
+
+def test_blob_size_leaves_undecodable_values_unknown():
+    # An undecodable blob must leave that one size unknown rather than take
+    # the whole directory listing down with it.
+    assert _blob_size("UE5HLTE=") == 5
+    assert _blob_size(42) is None

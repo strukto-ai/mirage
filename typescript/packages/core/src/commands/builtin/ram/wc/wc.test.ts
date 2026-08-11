@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runWc(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_WC[0]
   if (cmd === undefined) throw new Error('wc not registered')
@@ -61,7 +61,7 @@ describe('wc', () => {
   it('-l counts lines with trailing newline', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc\n'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { args_l: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: true })).toBe(
       '3 /tmp/f.txt\n',
     )
   })
@@ -69,7 +69,7 @@ describe('wc', () => {
   it('-l counts lines without trailing newline', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { args_l: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: true })).toBe(
       '2 /tmp/f.txt\n',
     )
   })
@@ -77,7 +77,7 @@ describe('wc', () => {
   it('-w single line', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('one two three'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { w: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { words: true })).toBe(
       '3 /tmp/f.txt\n',
     )
   })
@@ -85,7 +85,7 @@ describe('wc', () => {
   it('-w multiline', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('one two\nthree four five\nsix\n'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { w: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { words: true })).toBe(
       '6 /tmp/f.txt\n',
     )
   })
@@ -93,7 +93,7 @@ describe('wc', () => {
   it('-c counts bytes (ascii)', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('hello'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: true })).toBe(
       '5 /tmp/f.txt\n',
     )
   })
@@ -101,7 +101,7 @@ describe('wc', () => {
   it('-c counts bytes (multibyte)', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('caf\u00e9'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: true })).toBe(
       '5 /tmp/f.txt\n',
     )
   })
@@ -109,7 +109,7 @@ describe('wc', () => {
   it('-m counts chars (ascii)', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('hello'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { m: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { chars: true })).toBe(
       '5 /tmp/f.txt\n',
     )
   })
@@ -117,7 +117,7 @@ describe('wc', () => {
   it('-m counts chars (multibyte utf8)', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('caf\u00e9'))
-    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { m: true })).toBe(
+    expect(await runWc(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { chars: true })).toBe(
       '4 /tmp/f.txt\n',
     )
   })

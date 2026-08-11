@@ -14,12 +14,12 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.provision import \
-    make_search_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
 from mirage.core.history.readdir import readdir as _readdir
 from mirage.core.history.stat import stat as _stat
@@ -30,7 +30,7 @@ from mirage.types import PathSpec
 @command("grep",
          resource="history",
          spec=SPECS["grep"],
-         provision=make_search_provision(_stat))
+         aggregate=prefix_aggregate)
 async def grep(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
@@ -38,7 +38,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_grep(
         list(paths),

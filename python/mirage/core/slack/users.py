@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.core.slack._client import slack_get
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
-from mirage.resource.slack.config import SlackConfig
 
 
 def _is_real_user(m: dict[str, Any]) -> bool:
@@ -65,6 +66,28 @@ async def list_users(
     async for page in list_users_stream(config, limit=limit):
         out.extend(page)
     return out
+
+
+def user_json_bytes(user: dict[str, Any]) -> bytes:
+    """Render one user object as its .json byte content.
+
+    The single renderer behind both read and the readdir-time size.
+    readdir sizes a user from the users.list member; read renders the
+    users.info response. Sizing is exact only while those two payloads
+    encode identically, which was verified live on 2026-08-01: every real
+    user in a live workspace matched byte for byte, key order included.
+
+    The integ battery cannot catch a regression here. The fake server
+    builds users.list and users.info from one row through one helper, so
+    they agree by construction; only a live call tests the assumption.
+
+    Args:
+        user (dict): user object from users.list or users.info.
+
+    Returns:
+        bytes: compact JSON encoding.
+    """
+    return json.dumps(user, ensure_ascii=False, separators=(",", ":")).encode()
 
 
 async def get_user_profile(

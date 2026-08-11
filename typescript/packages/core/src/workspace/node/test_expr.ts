@@ -15,9 +15,10 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { CondNode } from '../executor/builtins/condition/index.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import { expandNode } from '../expand/node.ts'
+import { expandPattern } from '../expand/pattern.ts'
 import type { Session } from '../session/session.ts'
 
 const CONTAINER_TYPES = new Set<string>([
@@ -28,7 +29,6 @@ const CONTAINER_TYPES = new Set<string>([
 ])
 const FLAT_OP_TOKENS = new Set(['=', '==', '!=', '<', '>', '!', '(', ')'])
 const COND_OP_TOKENS = new Set(['=', '==', '!=', '=~', '<', '>', '&&', '||'])
-const LITERAL_RIGHT_TYPES = new Set<string>([NT.STRING, NT.RAW_STRING])
 const SPLIT_TYPES = new Set<string>([NT.SIMPLE_EXPANSION, NT.EXPANSION])
 
 /**
@@ -234,7 +234,16 @@ async function buildBinary(
     }
     return { kind: 'binary', left: leftText, op, right: raw, rightLiteral: false }
   }
-  const rightLiteral = LITERAL_RIGHT_TYPES.has(right.type)
+  if (op === '=' || op === '==' || op === '!=') {
+    // The right side of a glob comparison is a pattern word; the shared
+    // expander renders its quoting into the matcher's dialect per
+    // segment (quoted literal, unquoted globs live), so the evaluator
+    // fnmatches unconditionally. A wholly-literal pattern matches
+    // exactly itself, which is what the equality the old whole-node
+    // boolean spelled out reduced to.
+    const pattern = await expandPattern(right, session, executeFn, cs)
+    return { kind: 'binary', left: leftText, op, right: pattern, rightLiteral: false }
+  }
   const rightText = await expandNode(right, session, executeFn, cs)
-  return { kind: 'binary', left: leftText, op, right: rightText, rightLiteral }
+  return { kind: 'binary', left: leftText, op, right: rightText, rightLiteral: false }
 }

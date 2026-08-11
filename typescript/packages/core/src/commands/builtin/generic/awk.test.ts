@@ -32,7 +32,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): CommandOpts {
   return { stdin, flags, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts
@@ -43,7 +43,12 @@ function makeStream(files: Record<string, string>) {
     const content = files[p.virtual]
     async function* gen(): AsyncIterable<Uint8Array> {
       await Promise.resolve()
-      if (content === undefined) throw new Error(`${p.virtual}: no such file`)
+      if (content === undefined) {
+        // Stamped like a real backend's ENOENT; awk rethrows anything else.
+        const err = new Error(p.virtual) as Error & { code: string }
+        err.code = 'ENOENT'
+        throw err
+      }
       yield ENC.encode(content)
     }
     return gen()
@@ -193,6 +198,27 @@ describe('awkGeneric', () => {
     const [stdout, io] = result ?? [null, new IOResult()]
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
+    expect(DEC.decode(await materialize(io.stderr))).toBe(
+      'awk: /missing.awk: No such file or directory\n',
+    )
+  })
+
+  it('propagates a -f read failure that is not absence', async () => {
+    const raw = new Error('S3 GET prog.awk failed: 403 Forbidden')
+    function stream(): AsyncIterable<Uint8Array> {
+      throw raw
+    }
+    await expect(
+      awkGeneric([spec('/data.txt')], [], opts({ f: '/prog.awk' }), stream),
+    ).rejects.toThrow('403 Forbidden')
+  })
+
+  it('resolves a relative -f program file against the cwd', async () => {
+    const files = { '/data/prog.awk': '{print $1}\n', '/data/in.txt': 'hey there\n' }
+    const o = { ...opts({ f: 'prog.awk' }), cwd: '/data' } as CommandOpts
+    const result = await awkGeneric([spec('/data/in.txt')], [], o, makeStream(files))
+    const [stdout] = result ?? [null, new IOResult()]
+    expect(DEC.decode(await materialize(stdout))).toBe('hey\n')
   })
 
   it('runs the -f program over multiple data files with continuous NR', async () => {

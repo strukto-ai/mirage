@@ -6,7 +6,7 @@ from mirage.commands.builtin.sort_helper import (SortKeyError, build_config,
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,38 +34,33 @@ class SortFlags:
     zero_terminated: bool = False
 
 
-def _bool_alias(fl: FlagView, short: str, long: str) -> bool:
-    return fl.as_bool(short) or fl.as_bool(long)
-
-
-def parse_flags(flags: Mapping[str, object]) -> SortFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     fl = FlagView(flags, spec=SPECS["sort"])
     raw_check = fl.raw("check")
     if raw_check not in (None, True, "diagnose-first", "quiet", "silent"):
         raise ValueError(f"invalid argument '{raw_check}' for '--check'")
-    raw_output = fl.raw("o") or fl.raw("output")
+    raw_output = fl.raw("output")
     output = raw_output if isinstance(raw_output, PathSpec) else None
-    key_defs = tuple(fl.as_list("k") + fl.as_list("key"))
     return SortFlags(
-        reverse=_bool_alias(fl, "r", "reverse"),
-        numeric=_bool_alias(fl, "n", "numeric_sort"),
-        unique=_bool_alias(fl, "u", "unique"),
-        fold_case=_bool_alias(fl, "f", "ignore_case"),
-        key_defs=key_defs,
-        field_separator=(fl.as_str("t") or fl.as_str("field_separator")),
-        human_numeric=_bool_alias(fl, "h", "human_numeric_sort"),
-        version_sort=_bool_alias(fl, "V", "version_sort"),
-        month_sort=_bool_alias(fl, "M", "month_sort"),
-        ignore_blanks=_bool_alias(fl, "b", "ignore_leading_blanks"),
-        stable=_bool_alias(fl, "s", "stable"),
+        reverse=fl.as_bool("reverse"),
+        numeric=fl.as_bool("numeric_sort"),
+        unique=fl.as_bool("unique"),
+        fold_case=fl.as_bool("ignore_case"),
+        key_defs=tuple(fl.as_list("key")),
+        field_separator=fl.as_str("field_separator"),
+        human_numeric=fl.as_bool("human_numeric_sort"),
+        version_sort=fl.as_bool("version_sort"),
+        month_sort=fl.as_bool("month_sort"),
+        ignore_blanks=fl.as_bool("ignore_leading_blanks"),
+        stable=fl.as_bool("stable"),
         check=fl.as_bool("c") or raw_check is not None,
         check_quiet=raw_check in ("quiet", "silent"),
-        dictionary=_bool_alias(fl, "d", "dictionary_order"),
-        general_numeric=_bool_alias(fl, "g", "general_numeric_sort"),
-        ignore_nonprinting=_bool_alias(fl, "i", "ignore_nonprinting"),
-        merge=_bool_alias(fl, "m", "merge"),
+        dictionary=fl.as_bool("dictionary_order"),
+        general_numeric=fl.as_bool("general_numeric_sort"),
+        ignore_nonprinting=fl.as_bool("ignore_nonprinting"),
+        merge=fl.as_bool("merge"),
         output=output,
-        zero_terminated=_bool_alias(fl, "z", "zero_terminated"),
+        zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 
@@ -84,7 +79,7 @@ async def sort(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     reverse: bool = False,
     numeric: bool = False,
     unique: bool = False,

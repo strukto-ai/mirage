@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
+import { PathSpec } from '../types.ts'
 
 /** Normalize a key prefix: empty/undefined → '', strip leading /, ensure trailing /. */
 export function normalize(raw: string | undefined): string {
@@ -104,4 +105,14 @@ export function rekey(parentVirtual: string, parentResourcePath: string, child: 
 export function mountPrefixOf(virtual: string, resourcePath: string): string {
   const prefixLen = rstripSlash(virtual).length - resourcePath.length
   return rstripSlash(virtual.slice(0, prefixLen))
+}
+
+// A PathSpec for a mount-local key, addressed like `root`. Rebuilds the
+// virtual path from the mount prefix `root` sits behind, so a backend holding
+// only a key (an ancestor it walked to, say) can name it the way the user
+// would see it. Mirrors Python's mounted_path.
+export function mountedPath(root: PathSpec, mountPath: string): PathSpec {
+  const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+  const virtual = prefix !== '' ? prefix + mountPath : mountPath
+  return PathSpec.fromStrPath(virtual, stripSlash(mountPath))
 }

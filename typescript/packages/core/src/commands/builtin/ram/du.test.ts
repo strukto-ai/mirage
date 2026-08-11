@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runDu(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ lines: string[]; exitCode: number }> {
   const cmd = RAM_DU[0]
   if (cmd === undefined) throw new Error('du not registered')
@@ -66,13 +66,14 @@ describe('du', () => {
     resource.store.files.set('/tmp/sub/b.txt', ENC.encode('bb'))
     const r = await runDu(resource, [PathSpec.fromStrPath('/tmp')])
     expect(r.exitCode).toBe(0)
-    expect(r.lines).toEqual(['5\t/tmp'])
+    expect(r.lines).toEqual(['2\t/tmp/sub', '5\t/tmp'])
   })
 
-  it('missing path returns 0', async () => {
+  it('reports a missing path and exits 1, like GNU', async () => {
     const resource = new RAMResource()
     const r = await runDu(resource, [PathSpec.fromStrPath('/nonexistent')])
-    expect(r.lines).toEqual(['0\t/nonexistent'])
+    expect(r.lines).toEqual([])
+    expect(r.exitCode).toBe(1)
   })
 
   it('empty directory returns 0', async () => {

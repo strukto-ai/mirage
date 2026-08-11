@@ -45,6 +45,11 @@ export interface SlackResourceState {
 export class SlackResource implements Resource {
   readonly kind: string = ResourceName.SLACK
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: chat.jsonl and users/*.json
+  // are rendered at readdir from payloads the listing already fetched
+  // (users.list is payload-identical to users.info, verified live), and
+  // file blobs carry Slack's upload byte count.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 600
   readonly prompt: string = SLACK_PROMPT
   readonly writePrompt: string = SLACK_WRITE_PROMPT

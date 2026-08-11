@@ -16,8 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import list_users_stream
-from mirage.resource.slack.config import SlackConfig
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from mirage.commands.builtin.generic.tree import tree
@@ -208,7 +210,9 @@ async def test_tree_missing_path_marks_error_and_exits_2():
         "/nowhere  [error opening dir]", "", "0 directories, 0 files"
     ]
     assert io.exit_code == 2
-    assert b"nowhere" in (io.stderr or b"")
+    # GNU signals this with the inline marker and exit 2 and writes nothing to
+    # stderr; TypeScript already behaved this way.
+    assert io.stderr is None
 
 
 @pytest.mark.asyncio
@@ -217,4 +221,201 @@ async def test_tree_empty_dir_reports_zero_counts():
     readdir, stat = _make_backend(tree_map)
     output, io = await tree(_spec("/r"), readdir=readdir, stat=stat)
     assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_tree_not_a_directory_matches_the_missing_path_shape():
+    """GNU `tree /a.txt/x` prints the same `[error opening dir]` body and
+    exits 2 as `tree /nope`; ENOTDIR must not escape the walk.
+    """
+
+    async def readdir(p: PathSpec, _index=None) -> list[str]:
+        raise NotADirectoryError(p.virtual)
+
+    async def stat(p: PathSpec, index=None) -> FileStat:
+        raise NotADirectoryError(p.virtual)
+
+    output, io = await tree(_spec("/a.txt/x"), readdir=readdir, stat=stat)
+    lines = output.decode().splitlines()
+    assert lines == [
+        "/a.txt/x  [error opening dir]", "", "0 directories, 0 files"
+    ]
+    assert io.exit_code == 2
+
+
+def _stat_path(stat: FileStat | None):
+
+    async def fn(_virtual: str) -> FileStat | None:
+        return stat
+
+    return fn
+
+
+async def _unreached_readdir(*_a, **_kw) -> list[str]:
+    raise AssertionError("a non-directory operand must not be listed")
+
+
+async def _unreached_stat(*_a, **_kw) -> FileStat:
+    raise AssertionError("a non-directory operand must not be listed")
+
+
+# GNU tree 2.2.1, pinned on debian:stable-slim. A file operand gets the
+# same inline marker an unopenable one does, but it exists, so it is
+# counted and the exit status stays 0:
+#   tree <file>     -> "<file>  [error opening dir]", 0 directories, 1 file, 0
+#   tree -d <file>  -> same marker, "0 directories", exit 0
+#   tree <missing>  -> same marker, 0 directories, 0 files, exit 2
+
+
+@pytest.mark.asyncio
+async def test_tree_file_operand_is_counted_and_exits_zero():
+    output, io = await tree(
+        _spec("/r/a.txt"),
+        readdir=_unreached_readdir,
+        stat=_unreached_stat,
+        stat_path=_stat_path(_file("a.txt", 6)),
+    )
+    assert io.exit_code == 0
+    assert output == (b"/r/a.txt  [error opening dir]\n\n"
+                      b"0 directories, 1 file\n")
+
+
+@pytest.mark.asyncio
+async def test_tree_file_operand_dirs_only_omits_the_file_count():
+    output, io = await tree(
+        _spec("/r/a.txt"),
+        readdir=_unreached_readdir,
+        stat=_unreached_stat,
+        dirs_only=True,
+        stat_path=_stat_path(_file("a.txt", 6)),
+    )
+    assert io.exit_code == 0
+    assert output == b"/r/a.txt  [error opening dir]\n\n0 directories\n"
+
+
+@pytest.mark.asyncio
+async def test_tree_unstattable_operand_still_walks():
+    """A stat that sees nothing is not proof of absence.
+
+    A backend with implicit directories has no inode for a key prefix, so
+    the walk decides: it already renders an unopenable root as the inline
+    marker with exit 2.
+    """
+
+    async def readdir(_p: PathSpec, _index=None) -> list[str]:
+        raise FileNotFoundError("/r/nope")
+
+    output, io = await tree(
+        _spec("/r/nope"),
+        readdir=readdir,
+        stat=_unreached_stat,
+        stat_path=_stat_path(None),
+    )
+    assert io.exit_code == 2
+    assert output == (b"/r/nope  [error opening dir]\n\n"
+                      b"0 directories, 0 files\n")
+
+
+def _dispatch_pair(parent: dict, child: dict, root: str):
+    """The dispatcher's view: each path answered by its OWNING mount.
+
+    A key the parent holds under the mount root is shadowed and cannot be
+    reached through it, which is the whole point of crossing.
+    """
+    parent_readdir, _ = _make_backend(parent)
+    child_readdir, _ = _make_backend(child)
+
+    def owner(virtual: str) -> tuple[dict, object]:
+        under = virtual == root or virtual.startswith(root + "/")
+        return (child, child_readdir) if under else (parent, parent_readdir)
+
+    async def readdir_path(virtual: str) -> list[str]:
+        _, readdir = owner(virtual)
+        return await readdir(_spec(virtual))
+
+    async def stat_path(virtual: str):
+        rows, _ = owner(virtual)
+        return rows.get(virtual)
+
+    return readdir_path, stat_path
+
+
+def _mounts_view(roots: list[str]):
+    return SimpleNamespace(descendants=lambda path: [
+        r for r in roots
+        if r.startswith(path.rstrip("/") + "/") and r != path.rstrip("/")
+    ],
+                           is_root=lambda path: path.rstrip("/") in roots,
+                           root_of=lambda path: "/")
+
+
+@pytest.mark.asyncio
+async def test_tree_crosses_into_a_nested_mount():
+    """Real ``tree`` draws the mounted filesystem's entries under the mount
+    point, never the ones it covers, and counts the whole thing once
+    (pinned on tree 2.2.1 over a tmpfs at the same spot). Concatenating a
+    per-mount run cannot do that: it would print two roots and two
+    summaries.
+    """
+    parent = {
+        "/base": _dir("base"),
+        "/base/top.txt": _file("top.txt"),
+        "/base/inner": _dir("inner"),
+        "/base/inner/leftover.txt": _file("leftover.txt"),
+    }
+    child = {
+        "/base/inner": _dir("inner"),
+        "/base/inner/real.txt": _file("real.txt"),
+        "/base/inner/deep": _dir("deep"),
+        "/base/inner/deep/d.txt": _file("d.txt"),
+    }
+    readdir, stat = _make_backend(parent)
+    readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
+    output, io = await tree(
+        _spec("/base"),
+        readdir=readdir,
+        stat=stat,
+        mounts=_mounts_view(["/base/inner"]),
+        readdir_path=readdir_path,
+        stat_path=stat_path,
+    )
+    assert output.decode().splitlines() == [
+        "/base",
+        "|-- inner",
+        "|   |-- deep",
+        "|   |   `-- d.txt",
+        "|   `-- real.txt",
+        "`-- top.txt",
+        "",
+        "3 directories, 3 files",
+    ]
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_tree_draws_a_mount_point_the_parent_never_listed():
+    """A mount point need not exist in the parent backend at all, and the
+    mount table says it is a directory, so neither the name nor the type
+    is asked of a backend that cannot answer.
+    """
+    parent = {"/base": _dir("base"), "/base/top.txt": _file("top.txt")}
+    child = {"/base/inner": _dir("inner")}
+    readdir, stat = _make_backend(parent)
+    readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
+    output, io = await tree(
+        _spec("/base"),
+        readdir=readdir,
+        stat=stat,
+        mounts=_mounts_view(["/base/inner"]),
+        readdir_path=readdir_path,
+        stat_path=stat_path,
+    )
+    assert output.decode().splitlines() == [
+        "/base",
+        "|-- inner",
+        "`-- top.txt",
+        "",
+        "2 directories, 1 file",
+    ]
     assert io.exit_code == 0

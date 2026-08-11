@@ -100,17 +100,18 @@ export function buildDirEntries(
   for (const path of [...files.keys()].sort()) {
     const metadata = files.get(path) ?? {}
     const slug = stripSlash(path)
-    const size = metadataIntOrNull(metadata, 'size')
     const updatedAt = metadataOrNull(metadata, 'updated_at')
+    // The path tree's `size` describes the producer's source document, not
+    // the chunk join mirage serves, so it rides in extra and never becomes
+    // the reported byte length: ensureDirSizes measures the rendered bytes.
     const entry = new IndexEntry({
       id: slug,
       name: gnuBasename(path),
       resourceType: 'file',
-      size,
       remoteTime: updatedAt ?? '',
       extra: {
         slug,
-        size,
+        source_size: metadataIntOrNull(metadata, 'size'),
         created_at: metadataOrNull(metadata, 'created_at'),
         updated_at: updatedAt,
       },

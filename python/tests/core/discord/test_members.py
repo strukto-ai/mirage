@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.members import list_members, search_members
-from mirage.resource.discord.config import DiscordConfig
 
 
 @pytest.fixture

@@ -17,11 +17,13 @@ import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { ArithError, ReadonlyError } from '../../shell/errors.ts'
+import { finishStatement } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
@@ -82,8 +84,9 @@ async function executeBody(
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
   for (const cmd of body) {
     try {
-      const [stdout, io, execNode] = await executeNode(cmd, session, stdin, callStack)
+      const [rawStdout, io, execNode] = await executeNode(cmd, session, stdin, callStack)
       lastExec = execNode
+      const stdout = await finishStatement(rawStdout, io, session)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       if (
@@ -285,6 +288,96 @@ async function conditionLoop(
   }
 }
 
+export type CforEval = (expr: TSNodeLike | null, dflt: number) => Promise<number>
+
+/**
+ * Run bash's C-style for: ((init; cond; update)) around a body.
+ *
+ * `evalExpr` evaluates one expression slot to its integer value (the
+ * default when the slot is empty) and throws ArithError with the
+ * offending expression text on an invalid expression, or ReadonlyError
+ * when it assigns to a readonly variable; bash aborts the loop with
+ * status 1, keeping the output of iterations that ran. The update
+ * expression still runs after `continue`, per bash.
+ */
+export async function handleCfor(
+  executeNode: ExecuteNodeFn,
+  exprs: readonly (TSNodeLike | null)[],
+  body: readonly TSNodeLike[],
+  evalExpr: CforEval,
+  session: Session,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Result> {
+  let mergedIo = new IOResult()
+  const allStdout: (ByteSource | null)[] = []
+  let hitLimit = true
+  const [prevBuffer, bodyStdin] = installStdinBuffer(session, stdin)
+  stdin = bodyStdin
+
+  try {
+    try {
+      await evalExpr(exprs[0] ?? null, 0)
+      for (let i = 0; i < MAX_WHILE; i++) {
+        if ((await evalExpr(exprs[1] ?? null, 1)) === 0) {
+          hitLimit = false
+          break
+        }
+        try {
+          const [stdout, io] = await executeBody(executeNode, body, session, stdin, callStack)
+          allStdout.push(stdout)
+          mergedIo = await mergedIo.merge(io)
+        } catch (sig) {
+          if (sig instanceof BreakSignal) {
+            hitLimit = false
+            if (sig.stdout !== null) allStdout.push(sig.stdout)
+            mergedIo = await mergedIo.merge(sig.io)
+            if (sig.levels > 1) {
+              throw new BreakSignal(chainNonNull(allStdout), mergedIo, sig.levels - 1)
+            }
+            break
+          }
+          if (sig instanceof ContinueSignal) {
+            if (sig.stdout !== null) allStdout.push(sig.stdout)
+            mergedIo = await mergedIo.merge(sig.io)
+            if (sig.levels > 1) {
+              throw new ContinueSignal(chainNonNull(allStdout), mergedIo, sig.levels - 1)
+            }
+            await evalExpr(exprs[2] ?? null, 0)
+            continue
+          }
+          throw sig
+        }
+        await evalExpr(exprs[2] ?? null, 0)
+      }
+    } catch (err) {
+      if (!(err instanceof ArithError) && !(err instanceof ReadonlyError)) throw err
+      const prefix = err instanceof ReadonlyError ? 'bash: ' : 'bash: ((: '
+      const errBytes = new TextEncoder().encode(`${prefix}${err.message}\n`)
+      mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
+      mergedIo.exitCode = 1
+      return collectLoopResult(allStdout, mergedIo, 'for')
+    }
+    if (hitLimit) {
+      const warn = new TextEncoder().encode(
+        `warning: for loop terminated after ${MAX_WHILE.toString()} iterations\n`,
+      )
+      const existing = mergedIo.stderr
+      if (existing instanceof Uint8Array && existing.byteLength > 0) {
+        const combined = new Uint8Array(existing.byteLength + warn.byteLength)
+        combined.set(existing, 0)
+        combined.set(warn, existing.byteLength)
+        mergedIo.stderr = combined
+      } else {
+        mergedIo.stderr = warn
+      }
+    }
+    return collectLoopResult(allStdout, mergedIo, 'for')
+  } finally {
+    session.stdinBuffer = prevBuffer
+  }
+}
+
 export function handleWhile(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
@@ -310,31 +403,42 @@ export function handleUntil(
 export async function handleCase(
   executeNode: ExecuteNodeFn,
   word: string,
-  items: readonly [readonly string[], readonly TSNodeLike[]][],
+  items: readonly [readonly string[], readonly TSNodeLike[], string][],
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
-  for (const [patterns, body] of items) {
-    if (patterns.some((p) => fnmatch(word, p.trim()))) {
-      const allStdout: ByteSource[] = []
-      let mergedIo = new IOResult()
-      let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
-      let stageStdin = stdin
-      for (const stmt of body) {
-        const [stdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
-        stageStdin = null
-        lastExec = execNode
-        if (stdout !== null) allStdout.push(stdout)
-        mergedIo = await mergedIo.merge(io)
-      }
-      const first = allStdout[0]
-      if (allStdout.length === 1 && first !== undefined) return [first, mergedIo, lastExec]
-      const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
-      return [combined, mergedIo, lastExec]
+  const allStdout: ByteSource[] = []
+  let mergedIo = new IOResult()
+  let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
+  let stageStdin = stdin
+  let ran = false
+  let fallthrough = false
+  for (const [patterns, body, terminator] of items) {
+    if (!(fallthrough || patterns.some((p) => fnmatch(word, p)))) continue
+    ran = true
+    for (const stmt of body) {
+      const [rawStdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
+      stageStdin = null
+      lastExec = execNode
+      const stdout = await finishStatement(rawStdout, io, session)
+      if (stdout !== null) allStdout.push(stdout)
+      mergedIo = await mergedIo.merge(io)
     }
+    if (terminator === ';&') {
+      // Fall through: run the next arm's body without testing it.
+      fallthrough = true
+      continue
+    }
+    // ;;& keeps testing remaining patterns; ;; stops here.
+    fallthrough = false
+    if (terminator !== ';;&') break
   }
-  return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
+  if (!ran) return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
+  const first = allStdout[0]
+  if (allStdout.length === 1 && first !== undefined) return [first, mergedIo, lastExec]
+  const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
+  return [combined, mergedIo, lastExec]
 }
 
 /**
@@ -424,4 +528,15 @@ export async function handleSelect(
     session.stdinBuffer = prevBuffer
   }
   return collectLoopResult(allStdout, mergedIo, 'select')
+}
+
+export class ReturnSignal extends Error {
+  readonly exitCode: number
+  readonly stderr: Uint8Array
+  constructor(exitCode: number, stderr: Uint8Array = new Uint8Array()) {
+    super('return')
+    this.name = 'ReturnSignal'
+    this.exitCode = exitCode
+    this.stderr = stderr
+  }
 }

@@ -14,7 +14,7 @@
 
 import { Accessor, loadOptionalPeer } from '@struktoai/mirage-core'
 import type { ImapFlow } from 'imapflow'
-import type { EmailConfig } from '../resource/email/config.ts'
+import type { EmailConfig } from '../core/email/config.ts'
 
 export class EmailAccessor extends Accessor {
   readonly config: EmailConfig

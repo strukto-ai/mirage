@@ -29,14 +29,18 @@ class Consumer(Enum):
     SESSION = auto()
     NAMESPACE = auto()
     FUNCTION = auto()
+    CLI = auto()
     MOUNT = auto()
     UNKNOWN = auto()
 
 
+# CLI rides with the shell consumers for word policy: an installed CLI
+# is a program, and bash hands programs glob matches, never patterns.
 SHELL_CONSUMERS = frozenset({
     Consumer.SESSION,
     Consumer.NAMESPACE,
     Consumer.FUNCTION,
+    Consumer.CLI,
 })
 
 

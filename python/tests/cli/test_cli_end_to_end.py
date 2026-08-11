@@ -341,23 +341,23 @@ def test_missing_env_var_fails_fast_before_daemon_call(daemon, tmp_path):
     _run_cli(env, "workspace", "create", str(cfg), expect_exit=2)
 
 
-SAFEGUARD_TRUNCATE_YAML = """\
+LIMIT_TRUNCATE_YAML = """\
 mounts:
   /:
     resource: ram
     mode: WRITE
-    command_safeguards:
+    command_limits:
       cat:
         max_lines: 2
         on_exceed: truncate
 """
 
-SAFEGUARD_ERROR_YAML = """\
+LIMIT_ERROR_YAML = """\
 mounts:
   /:
     resource: ram
     mode: WRITE
-    command_safeguards:
+    command_limits:
       cat:
         max_lines: 2
         on_exceed: error
@@ -372,8 +372,8 @@ def _write_named(tmp_path: Path, name: str, text: str) -> Path:
     return p
 
 
-def test_execute_safeguard_truncates_output(daemon, tmp_path):
-    cfg = _write_named(tmp_path, "sg_trunc.yaml", SAFEGUARD_TRUNCATE_YAML)
+def test_execute_limit_truncates_output(daemon, tmp_path):
+    cfg = _write_named(tmp_path, "sg_trunc.yaml", LIMIT_TRUNCATE_YAML)
     _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id",
              "sg-trunc")
     _run_cli(daemon["env"], "execute", "--workspace_id", "sg-trunc",
@@ -385,8 +385,8 @@ def test_execute_safeguard_truncates_output(daemon, tmp_path):
     _run_cli(daemon["env"], "workspace", "delete", "sg-trunc")
 
 
-def test_execute_safeguard_error_exits_1(daemon, tmp_path):
-    cfg = _write_named(tmp_path, "sg_err.yaml", SAFEGUARD_ERROR_YAML)
+def test_execute_limit_error_exits_1(daemon, tmp_path):
+    cfg = _write_named(tmp_path, "sg_err.yaml", LIMIT_ERROR_YAML)
     _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id", "sg-err")
     _run_cli(daemon["env"], "execute", "--workspace_id", "sg-err", "--command",
              _SEED_5_LINES)

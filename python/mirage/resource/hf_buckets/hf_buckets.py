@@ -19,7 +19,8 @@ from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.commands.builtin.hf_buckets import COMMANDS as HF_COMMANDS
 from mirage.core.hf_buckets.constants import SCOPE_ERROR
 from mirage.core.hf_buckets.create import create
-from mirage.core.hf_buckets.du import du, du_all
+from mirage.core.hf_buckets.du import entries as du_entries
+from mirage.core.hf_buckets.du import size as du_size
 from mirage.core.hf_buckets.exists import exists
 from mirage.core.hf_buckets.find import find
 from mirage.core.hf_buckets.mkdir import mkdir
@@ -44,8 +45,8 @@ _OPS = {
     "stat": hf_stat,
     "read_stream": read_stream,
     "range_read": range_read,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "exists": exists,
     "find_flat": find,
     "write": write_bytes,
@@ -60,6 +61,10 @@ class HfBucketsResource(BaseResource):
     accessor: HfBucketsAccessor
     name: str = ResourceName.HF_BUCKETS
     caches_reads: bool = True
+    # The Hub tree API reports each file's exact byte size (the LFS
+    # object size for LFS files); readdir backfills any lister-omitted
+    # size with one stat.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
@@ -70,8 +75,8 @@ class HfBucketsResource(BaseResource):
         self.accessor = HfBucketsAccessor(self.config)
         for fn in HF_COMMANDS:
             self.register(fn)
-        for fn in HF_OPS:
-            self.register_op(fn)
+        for op in HF_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

@@ -88,7 +88,11 @@ describe('buildDirEntries', () => {
     expect(guides).toHaveLength(1)
     const auth = guides[0]?.[1]
     expect(auth?.resourceType).toBe('file')
-    expect(auth?.size).toBe(190)
+    // The path tree's own size never becomes the byte length: it describes
+    // the producer's source document, so it rides in extra and the size is
+    // measured later, from the rendered chunks.
+    expect(auth?.size).toBeNull()
+    expect(auth?.extra.source_size).toBe(190)
     expect(auth?.extra.slug).toBe('guides/auth.md')
     expect(auth?.extra.updated_at).toBe('2026-02-15T00:00:00Z')
   })

@@ -26,7 +26,7 @@ const DEC = new TextDecoder()
 
 async function runWc(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
 ): Promise<string> {
   const cmd = SLACK_WC[0]
@@ -112,7 +112,7 @@ describe('slack wc', () => {
           ),
         }),
       ],
-      { args_l: true },
+      { lines: true },
       { index: idx, transport },
     )
     expect(out).toBe('2 /mnt/slack/channels/general__C1/2024-01-01/chat.jsonl\n')

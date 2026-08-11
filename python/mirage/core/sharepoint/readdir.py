@@ -60,6 +60,7 @@ async def readdir(accessor: SharePointAccessor,
     if resolved.drive_id is None:
         return []
 
-    return await readdir_items(accessor.config, drive_loc(resolved, stripped),
+    return await readdir_items(accessor.config,
+                               drive_loc(accessor.config, resolved, stripped),
                                index, prefix, stripped, virtual_key,
                                partial(stat, accessor, original, index))

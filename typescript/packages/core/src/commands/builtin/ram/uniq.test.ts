@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runUniq(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ lines: string[]; exitCode: number; stderr: string }> {
   const cmd = RAM_UNIQ[0]
@@ -71,28 +71,28 @@ describe('uniq', () => {
   it('-c prefixes each line with count', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: true })
+    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { count: true })
     expect(r.lines).toEqual(['      2 aaa', '      1 bbb', '      3 ccc'])
   })
 
   it('-d shows only duplicated lines', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { d: true })
+    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { repeated: true })
     expect(r.lines).toEqual(['aaa', 'ccc'])
   })
 
   it('-d with no duplicates produces empty output', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\nbbb\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { d: true })
+    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { repeated: true })
     expect(r.lines).toEqual([])
   })
 
   it('-u shows only unique lines', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { u: true })
+    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { unique: true })
     expect(r.lines).toEqual(['bbb'])
   })
 
@@ -100,8 +100,8 @@ describe('uniq', () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
     const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
-      c: true,
-      d: true,
+      count: true,
+      repeated: true,
     })
     expect(r.lines).toEqual(['      2 aaa', '      3 ccc'])
   })
@@ -135,7 +135,7 @@ describe('uniq', () => {
 
   it('rejects trailing text in numeric options', async () => {
     const resource = new RAMResource()
-    const r = await runUniq(resource, [], { f: '2junk' })
+    const r = await runUniq(resource, [], { skip_fields: '2junk' })
     expect(r.exitCode).toBe(1)
     expect(r.stderr).toBe("uniq: invalid count: '2junk'\n")
   })

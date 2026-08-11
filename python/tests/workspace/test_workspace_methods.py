@@ -28,7 +28,7 @@ from mirage.shell.console import (Channel, ConsoleChunk, JobConsole,
 from mirage.shell.job_table import Job, JobStatus
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 

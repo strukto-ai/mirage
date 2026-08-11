@@ -18,9 +18,11 @@ import { searchRowsOutput } from '../../../core/qdrant/search.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { ResourceName } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type CommandOpts, type ProvisionFn } from '../../config.ts'
+import { exactZeroProvision } from '../generic_bind/provision.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { defaultPaths } from '../utils/operands.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -34,7 +36,8 @@ async function searchCommand(
   if (query === undefined || query === '') {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('search: query is required\n') })]
   }
-  const method = typeof opts.flags.method === 'string' ? opts.flags.method : 'semantic'
+  const fl = new FlagView(opts.flags, specOf('search'))
+  const method = fl.asStr('method') ?? 'semantic'
   if (method !== 'semantic') {
     return [
       null,
@@ -51,11 +54,8 @@ async function searchCommand(
       : mountPrefixOf(target[0].virtual, target[0].resourcePath)) ??
     opts.mountPrefix ??
     ''
-  const topK =
-    typeof opts.flags.top_k === 'string'
-      ? parseInt(opts.flags.top_k, 10)
-      : accessor.config.searchLimit
-  const threshold = typeof opts.flags.threshold === 'string' ? Number(opts.flags.threshold) : 0
+  const topK = fl.asInt('top_k') ?? accessor.config.searchLimit
+  const threshold = fl.asFloat('threshold') ?? 0
   try {
     const out = await searchRowsOutput(accessor, query, target, topK, threshold, mountPrefix)
     return [out, new IOResult()]
@@ -70,4 +70,5 @@ export const QDRANT_SEARCH = command({
   resource: ResourceName.QDRANT,
   spec: specOf('search'),
   fn: searchCommand,
+  provision: exactZeroProvision as ProvisionFn,
 })

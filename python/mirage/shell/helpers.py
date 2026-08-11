@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import shlex
 from enum import StrEnum
 
 import tree_sitter
@@ -42,10 +43,26 @@ def get_command_name(node: tree_sitter.Node) -> str:
 def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     """Get command parts as child nodes.
 
-    Preserves expansion nodes for later processing.
+    Preserves expansion nodes for later processing. A bare ``$`` word
+    is an anonymous token rather than a named child, but bash passes it
+    through as a literal argument (``echo $`` prints ``$``), so it is
+    the one anonymous child that stays - unless a string starts at its
+    very next byte, where it is the translation marker of ``$"..."``
+    and the string node carries the whole word.
     """
     _SKIP = frozenset({NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT})
-    return [c for c in node.named_children if c.type not in _SKIP]
+    children = node.children
+    parts: list[tree_sitter.Node] = []
+    for position, c in enumerate(children):
+        if c.is_named and c.type not in _SKIP:
+            parts.append(c)
+        elif c.type == "$":
+            nxt = children[position +
+                           1] if position + 1 < len(children) else None
+            if (nxt is None or nxt.type != NT.STRING
+                    or nxt.start_byte != c.end_byte):
+                parts.append(c)
+    return parts
 
 
 def has_command_substitution(node: tree_sitter.Node) -> bool:
@@ -129,6 +146,40 @@ def get_for_parts(
     return variable, values, body
 
 
+def get_cfor_parts(
+    node: tree_sitter.Node,
+) -> tuple[list[tree_sitter.Node | None], list[tree_sitter.Node]]:
+    """Get ([init, cond, update], body_commands) from a C-style for.
+
+    The expression slots are positional between the (( )) delimiters,
+    separated by `;` tokens, and any of them may be empty (None):
+    `for ((;;))`.
+
+    Args:
+        node (tree_sitter.Node): the c_style_for_statement node.
+    """
+    exprs: list[tree_sitter.Node | None] = [None, None, None]
+    slot = 0
+    inside = False
+    body: list[tree_sitter.Node] = []
+    for child in node.children:
+        if child.type == NT.ARITH_OPEN:
+            inside = True
+            continue
+        if child.type == NT.ARITH_CLOSE:
+            inside = False
+            continue
+        if inside:
+            if child.type == NT.SEMI:
+                slot += 1
+            elif child.is_named and slot < 3:
+                exprs[slot] = child
+            continue
+        if child.type == NT.DO_GROUP:
+            body = list(child.named_children)
+    return exprs, body
+
+
 def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     """Get body commands from subshell."""
     return list(node.named_children)
@@ -140,6 +191,11 @@ _REDIRECT_NODE_TYPES = frozenset({
     NT.HERESTRING_REDIRECT,
 })
 
+# RAW_STRING (single quotes) belongs here alongside STRING (double
+# quotes): quoting a redirect target is purely syntactic in bash, so
+# `> 'f'`, `> "f"` and `> f` name the same file. Omitting it left
+# target_node None and target "", which silently redirected every
+# single-quoted target to one phantom empty path instead of the file.
 _TARGET_TYPES = frozenset({
     NT.WORD,
     NT.CONCATENATION,
@@ -147,6 +203,9 @@ _TARGET_TYPES = frozenset({
     NT.EXPANSION,
     NT.COMMAND_SUBSTITUTION,
     NT.STRING,
+    NT.RAW_STRING,
+    NT.ANSI_C_STRING,
+    NT.TRANSLATED_STRING,
     NT.PROCESS_SUBSTITUTION,
 })
 
@@ -352,26 +411,39 @@ def get_case_word(node: tree_sitter.Node) -> tree_sitter.Node:
 
 def get_case_items(
     node: tree_sitter.Node,
-) -> list[tuple[list[str], list[tree_sitter.Node]]]:  # noqa: E125,E501
-    """Get (patterns, body_statements) pairs from case.
+) -> list[tuple[list[tree_sitter.Node], list[tree_sitter.Node],
+                str]]:  # noqa: E125,E501
+    """Get (pattern_nodes, body_statements, terminator) triples from case.
 
-    An arm's body is every statement up to its ;; terminator, so
-    multi-statement arms (x) cmd1; cmd2;;) keep all commands.
+    Patterns are every named child before the arm's ``)``, kept as
+    nodes so quoting survives to the matcher: 'a'), "$x") and $'a\\n')
+    all mean literal text where a bare word keeps its globs live. An
+    arm's body is every statement up to its terminator, so
+    multi-statement arms (x) cmd1; cmd2;;) keep all commands. The
+    terminator is one of ``;;`` (default/last arm), ``;&`` (fall through
+    into the next arm's body unconditionally), or ``;;&`` (keep testing
+    the remaining patterns).
     """
-    items: list[tuple[list[str], list[tree_sitter.Node]]] = []
+    items: list[tuple[list[tree_sitter.Node], list[tree_sitter.Node],
+                      str]] = []
     for c in node.named_children:
         if c.type == NT.CASE_ITEM:
-            patterns = []
+            patterns: list[tree_sitter.Node] = []
             body: list[tree_sitter.Node] = []
+            terminator = ";;"
+            in_body = False
             for child in c.children:
-                if not body and child.type in (NT.EXTGLOB_PATTERN, NT.WORD,
-                                               NT.CONCATENATION, NT.STRING):
-                    patterns.append(get_text(child))
-                elif child.is_named and child.type != "|":
+                if child.type in (";;", ";&", ";;&"):
+                    terminator = child.type
+                elif child.type == ")":
+                    in_body = True
+                elif not child.is_named:
+                    continue
+                elif in_body:
                     body.append(child)
-            if not patterns:
-                patterns = [get_text(c.named_children[0])]
-            items.append((patterns, body))
+                else:
+                    patterns.append(child)
+            items.append((patterns, body, terminator))
     return items
 
 
@@ -385,6 +457,25 @@ def get_unset_names(node: tree_sitter.Node) -> list[str]:
     return [
         get_text(c) for c in node.named_children if c.type == NT.VARIABLE_NAME
     ]
+
+
+def get_unset_args(node: tree_sitter.Node) -> list[str]:
+    """Get every operand word of unset_command, keeping ``-f``/``-v``/``-n``.
+
+    Unlike ``get_unset_names`` this preserves the leading option words so
+    the handler can tell a function unset (``unset -f``) from a variable
+    unset, and splits the operand span the way the shell does so a
+    subscript target (``unset arr[1]``, quoted or not) stays one word.
+    """
+    operands = node.children[1:]
+    if not operands:
+        return []
+    start = operands[0].start_byte - node.start_byte
+    text = (node.text or b"")[start:].decode()
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return [get_text(c) for c in node.named_children]
 
 
 def get_negated_command(node: tree_sitter.Node) -> tree_sitter.Node:

@@ -128,11 +128,25 @@ runs:
         cat /tmp/boxsrv.log
         echo "BOX_ENDPOINT=http://127.0.0.1:5096" >> "$GITHUB_ENV"
 
+    - name: Start fake GitHub API
+      shell: bash
+      run: |
+        nohup ./python/.venv/bin/python integ/server/github_server.py \
+          --port 5098 --repo integ/repo-v1=github/repo-v1 \
+          --repo integ/repo-trunc=github/repo-v1:truncated \
+          > /tmp/ghsrv.log 2>&1 &
+        for i in $(seq 1 30); do
+          grep -q "GITHUB_ENDPOINT=" /tmp/ghsrv.log && break
+          sleep 1
+        done
+        cat /tmp/ghsrv.log
+        echo "GITHUB_URL=http://127.0.0.1:5098" >> "$GITHUB_ENV"
+
     - name: Start fake Slack Web API (Prisma)
       working-directory: integ
       shell: bash
       env:
-        SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
+        INTEG_DB_URL: file:/tmp/mirage-slack-ci.db
       run: |
         ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
         nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slacksrv.log 2>&1 &
@@ -143,10 +157,14 @@ runs:
         cat /tmp/slacksrv.log
         echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
 
-    - name: Start fake Trello API
+    - name: Start fake Trello API (Prisma)
+      working-directory: integ
       shell: bash
+      env:
+        INTEG_DB_URL: file:/tmp/mirage-trello-ci.db
       run: |
-        nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trellosrv.log 2>&1 &
+        ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+        nohup ./node_modules/.bin/tsx server/trello.ts --port 5095 > /tmp/trellosrv.log 2>&1 &
         for i in $(seq 1 30); do
           grep -q "TRELLO_ENDPOINT=" /tmp/trellosrv.log && break
           sleep 1
@@ -175,6 +193,20 @@ runs:
         done
         cat /tmp/difysrv.log
         echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
+
+    - name: Start jaeger all-in-one and seed traces over OTLP
+      shell: bash
+      run: |
+        for i in $(seq 1 5); do
+          docker pull jaegertracing/jaeger:latest && break
+          echo "docker pull failed (attempt $i), retrying"; sleep 10
+        done
+        docker run -d --name mirage-jaeger \
+          -p 16686:16686 -p 4317:4317 -p 4318:4318 \
+          jaegertracing/jaeger:latest
+        ./python/.venv/bin/python integ/server/jaeger_seed.py \
+          --host http://localhost:16686 --otlp http://localhost:4318
+        echo "JAEGER_URL=http://localhost:16686" >> "$GITHUB_ENV"
 
     - name: Start fake Databricks API
       shell: bash

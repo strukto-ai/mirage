@@ -203,6 +203,22 @@ describe('workspace: subshell', () => {
     expect(ws.getSession(ws.defaultSessionId).env.X).toBe('outer')
     await ws.close()
   })
+
+  it('$? updates between commands inside a subshell', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('(false; echo subshell=$?)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('subshell=1\n')
+    await ws.close()
+  })
+
+  it('$? sees lazily finalized exit codes inside a subshell', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('(grep missing /ram/notes.txt; echo s=$?)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('s=1\n')
+    await ws.close()
+  })
 })
 
 describe('workspace: function', () => {
@@ -246,6 +262,116 @@ describe('workspace: brace group', () => {
     const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
+    await ws.close()
+  })
+
+  it('$? updates between commands inside a brace group', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('{ false; echo group=$?; }')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('group=1\n')
+    await ws.close()
+  })
+
+  it('$? sees lazily finalized exit codes inside a brace group', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('{ grep missing /ram/notes.txt; echo s=$?; }')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('s=1\n')
+    await ws.close()
+  })
+})
+
+describe('workspace: $? in construct bodies', () => {
+  const cases = [
+    'if true; then false; echo s=$?; fi',
+    'for i in 1; do false; echo s=$?; done',
+    'while true; do false; echo s=$?; break; done',
+    'case x in x) false; echo s=$?;; esac',
+    'f() { false; echo s=$?; }; f',
+    'if true; then grep missing /ram/notes.txt; echo s=$?; fi',
+    'for i in 1; do grep missing /ram/notes.txt; echo s=$?; done',
+    'case x in x) grep missing /ram/notes.txt; echo s=$?;; esac',
+    'g() { grep missing /ram/notes.txt; echo s=$?; }; g',
+  ]
+  for (const cmd of cases) {
+    it(`tracks the previous statement: ${cmd}`, async () => {
+      const { ws } = await makeWorkspace()
+      const io = await ws.execute(cmd)
+      expect(io.exitCode).toBe(0)
+      expect(stdoutStr(io)).toBe('s=1\n')
+      await ws.close()
+    })
+  }
+})
+
+describe('workspace: $? for negation, background, assignments', () => {
+  const cases: [string, string][] = [
+    ['! grep missing /ram/notes.txt; echo s=$?', 's=0\n'],
+    ['false; true & echo s=$?; wait', 's=0\n'],
+    ['x=$(false); echo s=$?', 's=1\n'],
+    ['x=$(exit 42); echo s=$?', 's=42\n'],
+    ['x=$(true) y=$(false); echo s=$?', 's=1\n'],
+    ['x=$(false) y=$(true); echo s=$?', 's=0\n'],
+    ['x=1 y=2; echo s=$? x=$x y=$y', 's=0 x=1 y=2\n'],
+    ['export e=$(false); echo s=$?', 's=0\n'],
+    ['arr=($(false)); echo s=$?', 's=1\n'],
+    ['x=$(false) && echo yes; echo s=$?', 's=1\n'],
+    ['g() { local lx=$(false); echo s=$?; }; g', 's=0\n'],
+  ]
+  for (const [cmd, want] of cases) {
+    it(`matches bash: ${cmd}`, async () => {
+      const { ws } = await makeWorkspace()
+      const io = await ws.execute(cmd)
+      expect(stdoutStr(io)).toBe(want)
+      await ws.close()
+    })
+  }
+})
+
+describe('workspace: C-style for', () => {
+  const cases: [string, string][] = [
+    ['for ((i=0;i<3;i++)); do echo $i; done', '0\n1\n2\n'],
+    ['for ((i=0;i<3;i++)); do false; done; echo code=$?', 'code=1\n'],
+    ['for ((i=5;i<3;i++)); do echo x; done; echo code=$?', 'code=0\n'],
+    ['x=0; for ((i=0;i<4;i++)); do x=$((x+i)); done; echo $x', '6\n'],
+    ['for ((i=0;i<5;i++)); do if ((i==2)); then continue; fi; echo $i; done', '0\n1\n3\n4\n'],
+    ['for ((i=0;i<5;i++)); do if ((i==2)); then break; fi; echo $i; done', '0\n1\n'],
+    ['for ((;;)); do break; done; echo code=$?', 'code=0\n'],
+    ['n=2; for ((i=n;i<4;i++)); do echo $i; done', '2\n3\n'],
+    ['for ((i=0;i<2;i++)); do echo a; done; echo i=$i', 'a\na\ni=2\n'],
+    ['for ((i=0;i<1;i++)); do false; echo s=$?; done', 's=1\n'],
+  ]
+  for (const [cmd, want] of cases) {
+    it(`matches bash: ${cmd}`, async () => {
+      const { ws } = await makeWorkspace()
+      const io = await ws.execute(cmd)
+      expect(stdoutStr(io)).toBe(want)
+      await ws.close()
+    })
+  }
+
+  it('aborts with status 1 on an arithmetic error', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('for ((i=@;i<1;i++)); do echo x; done; echo c=$?')
+    expect(stdoutStr(io)).toBe('c=1\n')
+    await ws.close()
+  })
+
+  it('aborts with status 1 when a slot assigns to a readonly variable', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('readonly i=5; for ((i=0;i<2;i++)); do echo x; done; echo c=$?')
+    expect(stdoutStr(io)).toBe('c=1\n')
+    expect(new TextDecoder().decode(io.stderr)).toBe('bash: i: readonly variable\n')
+    await ws.close()
+  })
+
+  it('keeps the output of iterations that ran before a readonly update', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      'readonly i=5; for ((;i<10;i++)); do echo hi; done; echo c=$?; echo i=$i',
+    )
+    expect(stdoutStr(io)).toBe('hi\nc=1\ni=5\n')
     await ws.close()
   })
 })

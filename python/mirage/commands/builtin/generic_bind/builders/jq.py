@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,11 +30,8 @@ async def jq(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    r: bool = False,
-    c: bool = False,
-    s: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_jq(paths,
@@ -43,9 +41,7 @@ async def jq(
                             read_stream=bound_op(ops.read_stream, accessor,
                                                  index),
                             stdin=stdin,
-                            r=r,
-                            c=c,
-                            s=s)
+                            **flags)
 
 
 BUILDER = Builder('jq', jq, None, False, None, read=True)

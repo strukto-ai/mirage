@@ -82,7 +82,6 @@ const HISTORY_RG = command({
       (p) => histReaddir(a, p),
       (p) => histStream(a, p),
     ),
-  aggregate: prefixAggregate,
 })
 
 const HISTORY_HEAD = command({

@@ -14,21 +14,24 @@
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import {
+  enoent,
   IndexEntry,
   PathSpec as PathSpecCtor,
   mountKey,
   mountPrefixOf,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchHeaders, listMessageUids } from './_client.ts'
+import { fetchHeaders, listMessageUids, type FetchedMessage } from './_client.ts'
 import { listFolders } from './folders.ts'
+import { messageJsonBytes } from './render.ts'
 import type { ParsedAttachment } from './_parse.ts'
 
 const TITLE_MAX = 80
 const UNSAFE = /[^\w\s\-.]/g
 const MULTI_UNDERSCORE = /_+/g
+const EPOCH_DATE = '1970-01-01'
 
-function sanitize(text: string): string {
+export function sanitize(text: string): string {
   if (text.trim() === '') return 'No_Subject'
   let cleaned = text.replace(UNSAFE, '_').replace(/ /g, '_')
   cleaned = cleaned.replace(MULTI_UNDERSCORE, '_').replace(/^_+|_+$/g, '')
@@ -40,20 +43,67 @@ function msgFilename(subject: string, uid: string): string {
   return `${sanitize(subject)}__${uid}.email.json`
 }
 
-function dateFromHeader(dateStr: string): string {
-  if (dateStr === '') return '1970-01-01'
-  const d = new Date(dateStr)
-  if (Number.isNaN(d.getTime())) return '1970-01-01'
-  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = d.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+// RFC 5322's obsolete zone names, the set `parsedate_to_datetime` knows.
+const NAMED_ZONES: Record<string, number> = {
+  UT: 0,
+  UTC: 0,
+  GMT: 0,
+  Z: 0,
+  EST: -300,
+  EDT: -240,
+  CST: -360,
+  CDT: -300,
+  MST: -420,
+  MDT: -360,
+  PST: -480,
+  PDT: -420,
 }
 
-function enoent(p: string): Error {
-  const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
+/** Minutes east of UTC the timestamp states, null when it states none. */
+function statedOffset(value: string): number | null {
+  const numeric = /([+-])(\d{2}):?(\d{2})\s*$/.exec(value)
+  if (numeric !== null) {
+    const sign = numeric[1] === '-' ? -1 : 1
+    return sign * (Number(numeric[2]) * 60 + Number(numeric[3]))
+  }
+  const named = /([A-Z]{1,3})\s*$/.exec(value.toUpperCase())
+  return NAMED_ZONES[named?.[1] ?? ''] ?? null
+}
+
+function ymd(year: number, month: number, day: number): string {
+  return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+}
+
+function parseDate(value: string): string | null {
+  if (value.trim() === '') return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  // The calendar date as written, with no zone conversion. RFC 3501
+  // defines SENTON/SENTBEFORE/SENTSINCE (and ON/BEFORE/SINCE) as
+  // comparing the date "disregarding time and timezone", so a message
+  // written 05 Jan 23:30 -0500 answers a search for the 5th and has to
+  // sit in the 5th's directory. `Date` only keeps the instant, so the
+  // stated offset is added back before reading the fields.
+  const offset = statedOffset(value)
+  // No zone stated: `new Date` read the wall clock as host-local, so the
+  // local fields hand it back exactly as written.
+  if (offset === null) return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())
+  const shifted = new Date(d.getTime() + offset * 60_000)
+  return ymd(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate())
+}
+
+/**
+ * Picks the YYYY-MM-DD directory a message files under.
+ *
+ * The `Date:` header wins, because it is the timestamp the sender wrote
+ * and the one himalaya's date conditions search on (SENTON / SENTSINCE /
+ * SENTBEFORE). It is also optional, and a message without it used to
+ * fall straight to the epoch, collapsing the mount's only organizing
+ * axis into a single 1970 directory. IMAP's own INTERNALDATE (RFC 3501,
+ * server-assigned and always present) fills that hole.
+ */
+export function dateBucket(message: FetchedMessage): string {
+  return parseDate(message.date) ?? parseDate(message.internalDate) ?? EPOCH_DATE
 }
 
 export async function readdir(
@@ -94,12 +144,15 @@ export async function readdir(
       if (cached.entries !== undefined && cached.entries !== null) return cached.entries
     }
     if (index === undefined) throw enoent(path.virtual)
+    // An unknown folder must be ENOENT: selecting it over IMAP fails with
+    // "command SEARCH illegal in state AUTH", which leaked to the caller.
+    if (!(await listFolders(accessor)).includes(folderName)) throw enoent(path.virtual)
     const maxMessages = accessor.config.maxMessages
     const uids = await listMessageUids(accessor, folderName, 'ALL', maxMessages)
     const headersList = await fetchHeaders(accessor, folderName, uids)
     const dateGroups = new Map<string, typeof headersList>()
     for (const hdr of headersList) {
-      const dateStr = dateFromHeader(hdr.date)
+      const dateStr = dateBucket(hdr)
       let bucket = dateGroups.get(dateStr)
       if (bucket === undefined) {
         bucket = []
@@ -127,6 +180,7 @@ export async function readdir(
           name: subject,
           resourceType: 'email/message',
           vfsName: filename,
+          size: messageJsonBytes(hdr).byteLength,
         })
         msgEntries.push([filename, msgEntry])
         const attachments: ParsedAttachment[] = hdr.attachments

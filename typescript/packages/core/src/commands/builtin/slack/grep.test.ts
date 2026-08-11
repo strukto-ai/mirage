@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runGrep(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = SLACK_GREP[0]
@@ -81,7 +81,7 @@ describe('slack grep', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('search.messages')

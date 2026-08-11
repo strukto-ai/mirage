@@ -1,5 +1,91 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "disk": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "hf_buckets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "nextcloud": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
@@ -21,90 +107,52 @@
       "ssh"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
       "long": "--prefix",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-f",
-      "value_kind": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "description": null,
       "long": "--digits",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-n",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "description": null,
       "long": "--suffix-format",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-b",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "description": null,
       "long": "--keep-files",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-k",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--quiet",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-s",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--silent",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--suppress-matched",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--elide-empty-files",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-z",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     }
   ],
   "positional": [
     {
-      "kind": "path",
-      "provided_by": []
+      "type": "path"
     }
   ],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "type": "str"
   }
 }

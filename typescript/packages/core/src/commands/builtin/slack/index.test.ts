@@ -34,12 +34,6 @@ describe('SLACK_COMMANDS', () => {
       'basename',
       'dirname',
       'realpath',
-      'slack-post-message',
-      'slack-reply-to-thread',
-      'slack-add-reaction',
-      'slack-get-users',
-      'slack-get-user-profile',
-      'slack-search',
     ]) {
       expect(names.has(name)).toBe(true)
     }

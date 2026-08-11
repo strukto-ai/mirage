@@ -41,7 +41,7 @@ import {
   type CommandOpts,
   type RegisteredCommand,
 } from '../../config.ts'
-import { CommandSpec, OperandKind, Operand } from '../../spec/types.ts'
+import { CommandSpec, Operand } from '../../spec/types.ts'
 
 type Runner = (accessor: TrelloAccessor, texts: string[]) => Promise<Uint8Array>
 
@@ -52,7 +52,7 @@ interface TrelloRead {
 }
 
 const SPEC_NONE = new CommandSpec({})
-const SPEC_ARG = new CommandSpec({ rest: new Operand({ kind: OperandKind.TEXT }) })
+const SPEC_ARG = new CommandSpec({ rest: new Operand({ type: 'str' }) })
 
 function first(texts: string[], label: string): string {
   const value = texts[0]

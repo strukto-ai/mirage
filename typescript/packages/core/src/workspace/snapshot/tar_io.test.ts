@@ -38,7 +38,7 @@ describe('writeSnapshotTar / readSnapshotTar', () => {
   it('writes valid JSON as manifest.json inside the tar', async () => {
     const manifest = { version: 2, mounts: [], cache: { limit: 0, entries: [] } }
     const tarBytes = await writeSnapshotTar(manifest as Record<string, unknown>, {})
-    const entries = readTar(tarBytes)
+    const entries = await readTar(tarBytes)
     const mf = entries.find((e) => e.name === 'manifest.json')
     if (mf === undefined) throw new Error('manifest.json not found in tar')
     const parsed = JSON.parse(DEC.decode(mf.data)) as Record<string, unknown>
@@ -74,7 +74,7 @@ describe('readSnapshotTar path-traversal defense', () => {
     const entries: TarEntry[] = [
       { name: 'manifest.json', data: ENC.encode(JSON.stringify(manifest)), isFile: true },
     ]
-    const tarBytes = writeTar(entries)
+    const tarBytes = await writeTar(entries)
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/Unsafe blob path/)
   })
 
@@ -96,13 +96,13 @@ describe('readSnapshotTar path-traversal defense', () => {
     const entries: TarEntry[] = [
       { name: 'manifest.json', data: ENC.encode(JSON.stringify(manifest)), isFile: true },
     ]
-    const tarBytes = writeTar(entries)
+    const tarBytes = await writeTar(entries)
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/Unsafe blob path/)
   })
 
   it('throws when manifest.json is missing from the tar', async () => {
     const entries: TarEntry[] = [{ name: 'other.txt', data: ENC.encode('x'), isFile: true }]
-    const tarBytes = writeTar(entries)
+    const tarBytes = await writeTar(entries)
     await expect(readSnapshotTar(tarBytes)).rejects.toThrow(/manifest\.json/)
   })
 })

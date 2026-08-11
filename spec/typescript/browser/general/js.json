@@ -1,36 +1,34 @@
 {
   "_meta": {
+    "by_resource": {
+      "": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
     "has_write": false,
     "resources": []
   },
-  "description": null,
-  "ignore_tokens": [],
+  "description": "Run JavaScript on a sandboxed quickjs engine.",
   "options": [
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Evaluate the next argument as a script.",
       "short": "-e",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     },
     {
-      "description": null,
+      "description": "Run as an ES module (top-level import/export/await); .mjs files select this automatically.",
       "long": "--module",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-m",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "type": "str"
   }
 }

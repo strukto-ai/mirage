@@ -13,15 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 # yapf: disable
-from mirage.core.google._client import (DOCS_API_BASE, DRIVE_API_BASE,
-                                        DRIVE_UPLOAD_BASE, GMAIL_API_BASE,
+from mirage.core.google._client import (CALENDAR_API_BASE, DOCS_API_BASE,
+                                        DRIVE_API_BASE, DRIVE_UPLOAD_BASE,
+                                        FORMS_API_BASE, GMAIL_API_BASE,
                                         SHEETS_API_BASE, SLIDES_API_BASE,
-                                        TOKEN_URL, TokenManager, docs_base,
-                                        drive_base, drive_upload_base,
-                                        gmail_base, sheets_base, slides_base,
-                                        token_url)
+                                        TOKEN_URL, TokenManager, calendar_base,
+                                        docs_base, drive_base,
+                                        drive_upload_base, forms_base,
+                                        gmail_base, google_error_message,
+                                        sheets_base, slides_base, token_url)
 # yapf: enable
 from mirage.core.google.config import GoogleConfig
+
+API_ERROR = ('{"error": {"code": 400, "message": "Unsupported request: '
+             'insertDimension", "status": "INVALID_ARGUMENT"}}')
+TOKEN_ERROR = ('{"error": "invalid_grant", "error_description": '
+               '"Token has been expired or revoked."}')
 
 
 def _manager(api_base: str | None = None) -> TokenManager:
@@ -37,6 +44,8 @@ def test_bases_default_to_real_google_hosts():
     assert slides_base(tm) == SLIDES_API_BASE
     assert sheets_base(tm) == SHEETS_API_BASE
     assert gmail_base(tm) == GMAIL_API_BASE
+    assert calendar_base(tm) == CALENDAR_API_BASE
+    assert forms_base(tm) == FORMS_API_BASE
     assert token_url(tm.config) == TOKEN_URL
 
 
@@ -48,4 +57,28 @@ def test_api_base_override_rewrites_every_service():
     assert slides_base(tm) == "http://127.0.0.1:19999/v1"
     assert sheets_base(tm) == "http://127.0.0.1:19999/v4"
     assert gmail_base(tm) == "http://127.0.0.1:19999/gmail/v1"
+    assert calendar_base(tm) == "http://127.0.0.1:19999/calendar/v3"
+    assert forms_base(tm) == "http://127.0.0.1:19999/v1"
     assert token_url(tm.config) == "http://127.0.0.1:19999/token"
+
+
+def test_api_error_message_comes_from_the_body():
+    assert google_error_message(
+        API_ERROR, 400,
+        "Bad Request") == "Unsupported request: insertDimension"
+
+
+def test_token_endpoint_error_shape_is_flat():
+    assert google_error_message(
+        TOKEN_ERROR, 400,
+        "Bad Request") == "invalid_grant: Token has been expired or revoked."
+
+
+def test_non_json_body_is_reported_verbatim():
+    assert google_error_message("<html>gateway</html>", 502,
+                                "Bad Gateway") == "<html>gateway</html>"
+
+
+def test_empty_body_falls_back_to_the_reason_then_the_status():
+    assert google_error_message("", 404, "Not Found") == "Not Found"
+    assert google_error_message("   ", 404, None) == "HTTP 404"

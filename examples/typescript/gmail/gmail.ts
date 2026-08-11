@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GmailResource, MountMode, Workspace, type FileStat, type GmailConfig } from '@struktoai/mirage-node'
+import { GWS, GmailResource, MountMode, Workspace, type FileStat, type GmailConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -49,8 +49,11 @@ function printSection(label: string, out: string, err: string, max = 500): void 
 }
 
 async function main(): Promise<void> {
-  const resource = new GmailResource(buildConfig())
+  const config = buildConfig()
+  const resource = new GmailResource(config)
   const ws = new Workspace({ '/gmail': resource }, { mode: MountMode.WRITE })
+  // The gws verbs are a CLI install, separate from the mount.
+  ws.registerCli('gws', GWS, { ...config })
 
   try {
     const lsRoot = await run(ws, 'ls /gmail/')
@@ -166,8 +169,8 @@ async function main(): Promise<void> {
     printSection('realpath', (await run(ws, `realpath ${msgPath}`)).out, '')
 
     printSection(
-      'gws gmail +triage',
-      (await run(ws, 'gws gmail +triage --query "is:unread" --max 3')).out,
+      'gws gmail triage',
+      (await run(ws, 'gws gmail triage --query "is:unread" --max 3')).out,
       '',
     )
 
@@ -184,16 +187,16 @@ async function main(): Promise<void> {
 
     const msgId = (firstMsg.split('__').pop() ?? '').replace('.gmail.json', '')
     printSection(
-      `gws gmail +read --id ${msgId}`,
-      (await run(ws, `gws gmail +read --id ${msgId}`)).out,
+      `gws gmail read --id ${msgId}`,
+      (await run(ws, `gws gmail read --id ${msgId}`)).out,
       '',
     )
 
     const sendOut = await run(
       ws,
-      'gws gmail +send --to "zechengzhang97@gmail.com" --subject "Test from MIRAGE TS" --body "Sent by gmail.ts example"',
+      'gws gmail send --to "zechengzhang97@gmail.com" --subject "Test from MIRAGE TS" --body "Sent by gmail.ts example"',
     )
-    printSection('gws gmail +send', sendOut.out, sendOut.err, 200)
+    printSection('gws gmail send', sendOut.out, sendOut.err, 200)
 
     let sentId = ''
     if (sendOut.out.trim() !== '') {
@@ -207,33 +210,33 @@ async function main(): Promise<void> {
 
     if (sentId !== '') {
       printSection(
-        'gws gmail +reply',
+        'gws gmail reply',
         (
           await run(
             ws,
-            `gws gmail +reply --message-id ${sentId} --body "Reply from MIRAGE TS"`,
+            `gws gmail reply --message-id ${sentId} --body "Reply from MIRAGE TS"`,
           )
         ).out,
         '',
         200,
       )
       printSection(
-        'gws gmail +reply-all',
+        'gws gmail reply-all',
         (
           await run(
             ws,
-            `gws gmail +reply-all --message-id ${sentId} --body "Reply-all from MIRAGE TS"`,
+            `gws gmail reply-all --message-id ${sentId} --body "Reply-all from MIRAGE TS"`,
           )
         ).out,
         '',
         200,
       )
       printSection(
-        'gws gmail +forward',
+        'gws gmail forward',
         (
           await run(
             ws,
-            `gws gmail +forward --message-id ${sentId} --to "zechengzhang97@gmail.com"`,
+            `gws gmail forward --message-id ${sentId} --to "zechengzhang97@gmail.com"`,
           )
         ).out,
         '',

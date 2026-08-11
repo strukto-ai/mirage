@@ -16,9 +16,8 @@ import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { QdrantRow } from './_client.ts'
 import { PathSpec } from '../../types.ts'
-import { decodeBase64 } from '../../utils/base64.ts'
 import { enoent } from '../../utils/errors.ts'
-import { renderJson, renderText } from './render.ts'
+import { blobBytes, renderJson, renderText } from './render.ts'
 import { type QdrantScope, ScopeLevel, detectScope } from './scope.ts'
 
 async function resolveRow(
@@ -31,12 +30,6 @@ async function resolveRow(
   const row = await accessor.rowRecord(scope.table, config.idField, scope.rowId)
   if (row === null) throw enoent(notFoundPath)
   return row
-}
-
-function blobBytes(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) return value
-  if (typeof value === 'string') return decodeBase64(value)
-  throw new Error('blob column is not bytes or base64 string')
 }
 
 export async function read(

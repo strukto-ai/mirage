@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
@@ -49,3 +51,28 @@ async def test_readdir_populates_index_cache(make_acc):
     assert lookup.entry is not None
     assert lookup.entry.size == 5
     assert lookup.entry.resource_type == "file"
+
+
+async def _null_meta_iter(entries, null_key: str):
+    async for entry in entries:
+        if entry.path == null_key:
+            entry.metadata = None
+        yield entry
+
+
+async def _stripped_list(inner, null_key: str, path, **kw):
+    return _null_meta_iter(await inner(path, **kw), null_key)
+
+
+@pytest.mark.asyncio
+async def test_readdir_backfills_lister_omitted_size(make_acc):
+    # When the lister omits metadata, readdir does one stat per affected
+    # file instead of caching an unknown size.
+    acc = make_acc({"a.txt": b"hello", "b.txt": b"abc"})
+    fake = acc._fake
+    fake.list = partial(_stripped_list, fake.list, "a.txt")
+    cache = RAMIndexCacheStore(ttl=60)
+    await readdir(acc, PathSpec.from_str_path("/"), cache)
+    entry = (await cache.get("/a.txt")).entry
+    assert entry is not None
+    assert entry.size == 5

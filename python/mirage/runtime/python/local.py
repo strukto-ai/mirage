@@ -16,52 +16,63 @@ import asyncio
 import os
 import shutil
 import sys
+from collections.abc import Sequence
+from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.python.bootstrap import bootstrap
+from mirage.runtime.python.flags import init_argv
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
-class LocalRuntime(Runtime):
+class LocalRuntime(PythonRuntime):
     """Run Python code on a host interpreter as a subprocess.
 
     Each run spawns `<interpreter> -c <code>`; the code sees the host
     filesystem and environment, not the workspace mounts. Cancelling the
-    run kills the subprocess, so a safeguard timeout reclaims it.
+    run kills the subprocess, so a limit timeout reclaims it.
 
     The interpreter defaults to the one running mirage; point the
-    `home` argument (the yaml `runtimes:` entry `home` option ends up
-    here) or the MIRAGE_LOCAL_HOME environment variable at another
-    binary, e.g. a project venv whose packages the code needs.
-
-    Args:
-        home (str | None): interpreter path or command name. None
-            reads MIRAGE_LOCAL_HOME, then falls back to
-            `sys.executable`.
+    config `home` (the yaml entry's ``config`` block ends up here) or
+    the MIRAGE_LOCAL_HOME environment variable at another binary, e.g.
+    a project venv whose packages the code needs.
     """
 
     name = "local"
-    captures = ("python3", "python")
 
-    def __init__(self, home: str | None = None) -> None:
-        chosen = home or os.environ.get(LOCAL_HOME_ENV)
+    config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
+    config: HomeConfig
+
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: HomeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
+        super().__init__(captures, config, script)
+        chosen = self.config.home or os.environ.get(LOCAL_HOME_ENV)
         if chosen:
             resolved = shutil.which(chosen)
             if resolved is None:
                 raise FileNotFoundError(
                     f"local python interpreter not found: {chosen!r} "
-                    "(from the yaml `runtimes:` entry `home` option, the "
-                    "runtime entry's `home` option, or "
+                    "(from the runtime entry's config `home` or "
                     f"{LOCAL_HOME_ENV})")
             self._python = resolved
         else:
             self._python = sys.executable
 
     async def run(self, args: RunArgs) -> RunResult:
+        # Honoring the init switches is just handing them back to the
+        # real interpreter, which is why this tier gets them exactly
+        # right (sys.flags included) where an in-process engine cannot.
         proc = await asyncio.create_subprocess_exec(
             self._python,
+            *init_argv(args.flags),
             "-c",
-            args.code,
+            bootstrap(args.code, args.prog),
             *args.args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

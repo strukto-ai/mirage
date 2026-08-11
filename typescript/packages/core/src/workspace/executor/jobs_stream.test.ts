@@ -129,6 +129,21 @@ describe('bare wait adopts job output', () => {
     expect(res.stdoutText).toBe('')
     expect(res.exitCode).toBe(0)
   })
+
+  // A job started inside a backgrounded subshell has to reach its own
+  // console, not the enclosing job's. The subshell's executor closure is
+  // the only one built by hand, so it is the only one that can drop the
+  // per-call opts carrying that console; when it does, both nested jobs
+  // write straight to the outer console and bare `wait` adopts nothing,
+  // which turns the documented job-id order into completion order.
+  it('gives a job nested in a backgrounded subshell its own console', async () => {
+    const ws = buildWs()
+    await ws.execute('( (sleep 0.15; echo a) & echo b & wait ) &')
+    await ws.jobTable.wait(1)
+    const job = ws.jobTable.get(1)
+    if (job === null) throw new Error('job 1 missing')
+    expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('a\nb\n')
+  })
 })
 
 describe('kill reaches a real running command', () => {

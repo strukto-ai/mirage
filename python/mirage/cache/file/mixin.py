@@ -67,6 +67,21 @@ class FileCacheMixin:
     async def clear(self) -> None:
         raise NotImplementedError
 
+    async def evict_prefix(self, prefix: str) -> None:
+        """Drop every cached entry whose key starts with ``prefix``.
+
+        The path-unknown counterpart to :meth:`remove`: a mutation that
+        names no path (an account CLI writing to its service by id)
+        cannot say which entries went stale, only which mount's keyspace
+        did. Stores that own their keyspace remotely push the filter
+        down rather than enumerating.
+
+        Args:
+            prefix (str): Cache-key prefix to drop, normally a mount
+                prefix ending in "/".
+        """
+        raise NotImplementedError
+
     async def close(self) -> None:
         """Release connections held by the cache backend."""
 

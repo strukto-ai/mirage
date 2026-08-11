@@ -9,7 +9,7 @@ from mirage.commands.builtin.grep_helper import (build_pattern_str,
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -92,6 +92,7 @@ class ZgrepFlags:
     files_only: bool
     line_numbers: bool
     fixed: bool
+    basic_regexp: bool
     force_filename: bool
     suppress_filename: bool
     only_matching: bool
@@ -115,6 +116,9 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
         files_only=fl.as_bool("args_l"),
         line_numbers=fl.as_bool("n"),
         fixed=fl.as_bool("F") and not never_match,
+        # zgrep is grep over decompressed bytes, so it reads a basic
+        # expression unless -E says otherwise; -G asks for the default.
+        basic_regexp=not fl.as_bool("E"),
         force_filename=fl.as_bool("H"),
         suppress_filename=fl.as_bool("h"),
         only_matching=fl.as_bool("o"),
@@ -127,7 +131,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
 async def zgrep(
     paths: list[PathSpec],
     texts: Sequence[str] = (),
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     stdin: ByteSource | None = None,
@@ -137,7 +141,8 @@ async def zgrep(
         texts, fl, partial(_read_plain, read_bytes),
         "zgrep: usage: zgrep [flags] pattern [path]")
     f = parse_flags(fl, never_match)
-    compiled = build_pattern_str(pattern, f.fixed, f.whole_word)
+    compiled = build_pattern_str(pattern, f.fixed, f.whole_word,
+                                 f.basic_regexp)
     multi = len(paths) > 1
     show_filename = f.force_filename or (multi and not f.suppress_filename)
     any_match = False

@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "seed_echo_one",
+      "seq": 310000,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo marker-one",
+      "expect": {
+        "exit": 0,
+        "stdout": "marker-one\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "seed_echo_two",
+      "seq": 310001,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo marker-two",
+      "expect": {
+        "exit": 0,
+        "stdout": "marker-two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "seed_write",
+      "seq": 310002,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo persisted > /data/h.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "seed_cat",
+      "seq": 310003,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "cat /data/h.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "persisted\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "seed_s2_echo",
+      "seq": 310004,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "echo marker-s2",
+      "expect": {
+        "exit": 0,
+        "stdout": "marker-s2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

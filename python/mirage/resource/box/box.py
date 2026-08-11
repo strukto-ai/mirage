@@ -36,6 +36,9 @@ class BoxResource(BaseResource):
     name: str = ResourceName.BOX
     caches_reads: bool = True
     index_ttl: float = 86_400
+    # Box item listings carry an exact byte `size` for every file (0
+    # included); sizeless weblinks are filtered out of listings.
+    SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
 
     def __init__(self, config: BoxConfig) -> None:
@@ -45,8 +48,8 @@ class BoxResource(BaseResource):
         self.accessor = BoxAccessor(self.config, self._token_manager)
         for fn in BOX_COMMANDS:
             self.register(fn)
-        for fn in BOX_OPS:
-            self.register_op(fn)
+        for op in BOX_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

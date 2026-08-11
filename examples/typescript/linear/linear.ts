@@ -15,6 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
+import { LINEAR } from '@struktoai/mirage-core'
 import {
   LinearResource,
   MountMode,
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
     { '/linear': new LinearResource(buildConfig()) },
     { mode: MountMode.READ },
   )
+  ws.registerCli('linear', LINEAR, buildConfig() as unknown as Record<string, unknown>)
   try {
     console.log('=== ls /linear/ ===')
     await run(ws, 'ls /linear/')

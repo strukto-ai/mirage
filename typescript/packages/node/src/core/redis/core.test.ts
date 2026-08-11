@@ -26,7 +26,7 @@ import { appendBytes } from './append.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { copy } from './copy.ts'
 import { create } from './create.ts'
-import { du, duAll } from './du.ts'
+import { size, entries } from './du/index.ts'
 import { exists } from './exists.ts'
 import { find } from './find.ts'
 import { mkdir } from './mkdir.ts'
@@ -78,9 +78,12 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('writeBytes fails when parent is missing', async () => {
-    await expect(writeBytes(acc, spec('/missing/x.txt'), ENC.encode('.'))).rejects.toThrow(
-      /parent directory does not exist/,
-    )
+    // The operand is what a GNU stderr line names, so the error carries the
+    // virtual path and an errno, not the internal parent phrasing.
+    await expect(writeBytes(acc, spec('/missing/x.txt'), ENC.encode('.'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/missing/x.txt',
+    })
   })
 
   it('appendBytes creates then extends', async () => {
@@ -103,10 +106,32 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('mkdir requires existing parent', async () => {
-    await expect(mkdir(acc, spec('/foo/bar'))).rejects.toThrow(/parent directory does not exist/)
+    await expect(mkdir(acc, spec('/foo/bar'))).rejects.toMatchObject({ code: 'ENOENT' })
     await mkdir(acc, spec('/foo'))
     await mkdir(acc, spec('/foo/bar'))
     expect(await exists(acc, spec('/foo/bar'))).toBe(true)
+  })
+
+  it('mkdir refuses an existing target, and -p is the idempotent form (GNU)', async () => {
+    await mkdir(acc, spec('/d'))
+    await expect(mkdir(acc, spec('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
+    await mkdir(acc, spec('/d'), true)
+    expect(await exists(acc, spec('/d'))).toBe(true)
+  })
+
+  it('mkdir -p across a plain file names the component and keeps the file', async () => {
+    await writeBytes(acc, spec('/f.txt'), ENC.encode('hi'))
+    await expect(mkdir(acc, spec('/f.txt/sub'), true)).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      virtualPath: '/f.txt',
+    })
+    expect(await store.hasDir('/f.txt')).toBe(false)
+    expect(DEC.decode(await read(acc, spec('/f.txt')))).toBe('hi')
+  })
+
+  it('mkdir -p onto a plain file target is EEXIST', async () => {
+    await writeBytes(acc, spec('/f.txt'), ENC.encode('hi'))
+    await expect(mkdir(acc, spec('/f.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
   })
 
   it('mkdir with parents=true creates chain', async () => {
@@ -179,9 +204,9 @@ describe.skipIf(skip)('core/redis ops', () => {
     await mkdir(acc, spec('/d'))
     await writeBytes(acc, spec('/d/a'), ENC.encode('abc'))
     await writeBytes(acc, spec('/d/b'), ENC.encode('defg'))
-    expect(await du(acc, spec('/d'))).toBe(7)
-    const { entries, total } = await duAll(acc, spec('/d'))
-    expect(entries).toHaveLength(2)
+    expect(await size(acc, spec('/d'))).toBe(7)
+    const [found, total] = await entries(acc, spec('/d'))
+    expect(found).toHaveLength(2)
     expect(total).toBe(7)
   })
 

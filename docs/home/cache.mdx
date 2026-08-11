@@ -34,12 +34,12 @@ ws = Workspace(
 ```
 
 ```typescript TypeScript
-import { RedisFileCacheStore, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { S3Resource, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/s3': new S3Resource({ bucket: 'my-bucket' }) },
   {
-    cache: new RedisFileCacheStore({ url: 'redis://localhost:6379/0', cacheLimit: '8GB' }),
+    cache: { type: 'redis', url: 'redis://localhost:6379/0', limit: '8GB' },
     index: { type: 'redis', url: 'redis://localhost:6379/0', ttl: 600 },
   },
 )

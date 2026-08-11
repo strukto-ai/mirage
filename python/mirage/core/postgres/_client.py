@@ -17,6 +17,18 @@ from typing import Any
 
 import asyncpg
 
+from mirage.utils.json_canonical import canonicalize_row, canonicalize_value
+
+__all__ = ["canonicalize_row", "canonicalize_value"]
+
+
+def quote_ident(ident: str) -> str:
+    return '"' + ident.replace('"', '""') + '"'
+
+
+def qualified(schema: str, name: str) -> str:
+    return f"{quote_ident(schema)}.{quote_ident(name)}"
+
 
 async def list_schemas(conn: asyncpg.Connection,
                        allowlist: list[str] | None) -> list[str]:
@@ -56,13 +68,14 @@ async def list_matviews(conn: asyncpg.Connection, schema: str) -> list[str]:
 
 
 async def count_rows(conn: asyncpg.Connection, schema: str, name: str) -> int:
-    return await conn.fetchval(f'SELECT COUNT(*) FROM "{schema}"."{name}"')
+    return await conn.fetchval(
+        f"SELECT COUNT(*) FROM {qualified(schema, name)}")
 
 
 async def estimate_size(conn: asyncpg.Connection, schema: str,
                         name: str) -> tuple[int, int]:
     plan = await conn.fetchval(
-        f'EXPLAIN (FORMAT JSON) SELECT * FROM "{schema}"."{name}"')
+        f"EXPLAIN (FORMAT JSON) SELECT * FROM {qualified(schema, name)}")
     if isinstance(plan, str):
         plan = json.loads(plan)
     top = plan[0]["Plan"]
@@ -90,8 +103,9 @@ async def table_size_bytes(conn: asyncpg.Connection, schema: str,
 async def fetch_rows(conn: asyncpg.Connection, schema: str, name: str, *,
                      limit: int, offset: int) -> list[dict[str, Any]]:
     rows = await conn.fetch(
-        f'SELECT * FROM "{schema}"."{name}" LIMIT $1 OFFSET $2', limit, offset)
-    return [dict(r) for r in rows]
+        f"SELECT * FROM {qualified(schema, name)} LIMIT $1 OFFSET $2", limit,
+        offset)
+    return [canonicalize_row(dict(r)) for r in rows]
 
 
 async def fetch_columns(conn: asyncpg.Connection, schema: str,
@@ -106,6 +120,68 @@ async def fetch_columns(conn: asyncpg.Connection, schema: str,
         "type": r["data_type"],
         "nullable": r["is_nullable"] == "YES",
     } for r in rows]
+
+
+async def fetch_table_comment(conn: asyncpg.Connection, schema: str,
+                              name: str) -> str | None:
+    return await conn.fetchval(
+        "SELECT obj_description(c.oid, 'pg_class') "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = $1 AND c.relname = $2", schema, name)
+
+
+async def fetch_column_comments(conn: asyncpg.Connection, schema: str,
+                                name: str) -> dict[str, str]:
+    rows = await conn.fetch(
+        "SELECT a.attname, col_description(c.oid, a.attnum) AS comment "
+        "FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "JOIN pg_attribute a "
+        "  ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped "
+        "WHERE n.nspname = $1 AND c.relname = $2 "
+        "ORDER BY a.attnum", schema, name)
+    return {r["attname"]: r["comment"] for r in rows if r["comment"]}
+
+
+async def fetch_enum_columns(conn: asyncpg.Connection, schema: str,
+                             name: str) -> dict[str, dict[str, Any]]:
+    rows = await conn.fetch(
+        "SELECT a.attname, t.typname, "
+        "       array_agg(e.enumlabel ORDER BY e.enumsortorder)::text[] "
+        "AS labels "
+        "FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "JOIN pg_attribute a "
+        "  ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped "
+        "JOIN pg_type t ON t.oid = a.atttypid "
+        "JOIN pg_enum e ON e.enumtypid = t.oid "
+        "WHERE n.nspname = $1 AND c.relname = $2 "
+        "GROUP BY a.attname, t.typname", schema, name)
+    return {
+        r["attname"]: {
+            "type": r["typname"],
+            "labels": list(r["labels"]),
+        }
+        for r in rows
+    }
+
+
+async def fetch_column_stats(conn: asyncpg.Connection, schema: str,
+                             name: str) -> dict[str, dict[str, Any]]:
+    # pg_stats is populated by ANALYZE, so it is empty for a freshly written
+    # relation until autovacuum gets to it. Callers treat it as best-effort;
+    # mirage never runs ANALYZE itself (a write and a cost on the user's DB).
+    rows = await conn.fetch(
+        "SELECT attname, n_distinct, "
+        "       most_common_vals::text::text[] AS mcv "
+        "FROM pg_stats WHERE schemaname = $1 AND tablename = $2", schema, name)
+    return {
+        r["attname"]: {
+            "n_distinct": float(r["n_distinct"]),
+            "most_common_vals": list(r["mcv"]) if r["mcv"] else [],
+        }
+        for r in rows
+    }
 
 
 async def fetch_primary_key(conn: asyncpg.Connection, schema: str,

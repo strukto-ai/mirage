@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 async function runCat(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_CAT[0]
   if (cmd === undefined) throw new Error('cat not registered')

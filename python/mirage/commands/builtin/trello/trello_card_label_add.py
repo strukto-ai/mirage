@@ -16,7 +16,7 @@ import json
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import CommandSpec, FlagValue, FlagView, Option
 from mirage.core.trello._client import card_add_label
 from mirage.core.trello.normalize import normalize_card
 from mirage.io.stream import yield_bytes
@@ -24,8 +24,8 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--card_id", value_kind=OperandKind.TEXT),
-    Option(long="--label_id", value_kind=OperandKind.TEXT),
+    Option(long="--card_id", type="str"),
+    Option(long="--label_id", type="str"),
 ), )
 
 
@@ -34,14 +34,15 @@ async def trello_card_label_add(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
-    card_id = _extra.get("card_id")
-    if not card_id or not isinstance(card_id, str):
+    card_id = fl.as_str("card_id")
+    if not card_id:
         raise ValueError("--card_id is required")
-    label_id = _extra.get("label_id")
-    if not label_id or not isinstance(label_id, str):
+    label_id = fl.as_str("label_id")
+    if not label_id:
         raise ValueError("--label_id is required")
     card = await card_add_label(config, card_id=card_id, label_id=label_id)
     return yield_bytes(

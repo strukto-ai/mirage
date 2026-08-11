@@ -20,13 +20,23 @@ export interface AfterIdPagesOpts {
   lastIdFn: (item: Record<string, unknown>) => string
   pageSize?: number
   startAfter?: string
+  // The endpoint answers newest-first. Messages do (GET /channels/{id}/
+  // messages documents "newest to oldest"); members and guilds do not.
+  newestFirst?: boolean
 }
 
 export async function* afterIdPages<T extends Record<string, unknown>>(
   accessor: DiscordAccessor,
   opts: AfterIdPagesOpts,
 ): AsyncIterableIterator<T[]> {
-  const { endpoint, baseParams = {}, lastIdFn, pageSize = 100, startAfter = '0' } = opts
+  const {
+    endpoint,
+    baseParams = {},
+    lastIdFn,
+    pageSize = 100,
+    startAfter = '0',
+    newestFirst = false,
+  } = opts
   let last = startAfter
   for (;;) {
     const params: Record<string, string | number> = { ...baseParams, after: last, limit: pageSize }
@@ -34,9 +44,11 @@ export async function* afterIdPages<T extends Record<string, unknown>>(
     if (!Array.isArray(data) || data.length === 0) return
     yield data
     if (data.length < pageSize) return
-    const tail = data[data.length - 1]
-    if (tail === undefined) return
-    last = lastIdFn(tail)
+    // The cursor is the newest id in the page, which is the first item on a
+    // newest-first endpoint (messages) and the last one elsewhere.
+    const cursor = newestFirst ? data[0] : data[data.length - 1]
+    if (cursor === undefined) return
+    last = lastIdFn(cursor)
   }
 }
 

@@ -18,6 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { listAnnotations } from './annotations.ts'
 import { downloadArtifact } from './artifacts.ts'
+import { ciJsonBytes } from './render.ts'
 import { downloadJobLog, getJob, getRun, listJobsForRun } from './runs.ts'
 import { getWorkflow } from './workflows.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -32,10 +33,6 @@ function stripPrefix(path: PathSpec): string {
     p = p.slice(prefix.length) || '/'
   }
   return p
-}
-
-function jsonBytes(value: unknown): Uint8Array {
-  return ENC.encode(JSON.stringify(value, null, 2))
 }
 
 export async function read(
@@ -54,7 +51,7 @@ export async function read(
     const lookup = await index.get(virtualKey)
     if (lookup.entry === undefined || lookup.entry === null) throw enoent(path)
     const wf = await getWorkflow(accessor.transport, accessor.owner, accessor.repo, lookup.entry.id)
-    return jsonBytes(wf)
+    return ciJsonBytes(wf)
   }
 
   if (parts.length === 3 && parts[0] === 'runs' && parts[2] === 'run.json') {
@@ -65,7 +62,7 @@ export async function read(
     const lookup = await index.get(runVirtual)
     if (lookup.entry === undefined || lookup.entry === null) throw enoent(path)
     const run = await getRun(accessor.transport, accessor.owner, accessor.repo, lookup.entry.id)
-    return jsonBytes(run)
+    return ciJsonBytes(run)
   }
 
   if (parts.length === 3 && parts[0] === 'runs' && parts[2] === 'annotations.jsonl') {
@@ -104,7 +101,7 @@ export async function read(
     const lookup = await index.get(virtualKey)
     if (lookup.entry === undefined || lookup.entry === null) throw enoent(path)
     const job = await getJob(accessor.transport, accessor.owner, accessor.repo, lookup.entry.id)
-    return jsonBytes(job)
+    return ciJsonBytes(job)
   }
 
   if (

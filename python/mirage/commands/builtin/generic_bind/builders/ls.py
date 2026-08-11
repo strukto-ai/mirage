@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.config import StatOverlay
+from mirage.ops.types import ChildMounts, LinkView, StatOverlay
 from mirage.types import LsSortBy, PathSpec
 
 
@@ -41,9 +41,12 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
+    L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
     stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
+    child_mounts: ChildMounts | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -77,6 +80,9 @@ async def ls(
         list_dir=d,
         classify=F,
         index=index,
+        links=links,
+        deref=L,
+        child_mounts=child_mounts,
     )
 
 

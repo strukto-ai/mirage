@@ -80,8 +80,12 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
-        // dst does not exist yet; src is an existing file.
-        if (p.virtual === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        // dst does not exist yet; src is an existing file. The mount root
+        // stats as a directory, like every real mount: cp probes the
+        // destination's parent before creating anything under it.
+        if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
+        if (p.virtual === '/disk')
+          return Promise.resolve<[unknown, IOResult]>([dirStat('disk'), new IOResult()])
         return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
       }
       if (op === 'read')
@@ -120,7 +124,7 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
-        if (p.virtual === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
         return Promise.resolve<[unknown, IOResult]>([dirStat('a'), new IOResult()])
       }
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
@@ -150,8 +154,12 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
+        // The mount root stats as a directory, like every real mount: cp
+        // probes the destination's parent before creating anything under it.
+        if (p.virtual === '/disk')
+          return Promise.resolve<[unknown, IOResult]>([dirStat('disk'), new IOResult()])
         if (p.virtual === '/disk/b' || p.virtual.startsWith('/disk/'))
-          return Promise.reject(new Error('ENOENT'))
+          return Promise.reject(enoent(p))
         if (p.virtual === '/ram/dir')
           return Promise.resolve<[unknown, IOResult]>([dirStat('dir'), new IOResult()])
         return Promise.resolve<[unknown, IOResult]>([fileStat('f'), new IOResult()])
@@ -189,7 +197,7 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
-        if (p.virtual === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
         return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
       }
       if (op === 'read')

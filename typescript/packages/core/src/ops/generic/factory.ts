@@ -13,11 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { cat as featherCat } from '../../core/filetype/feather.ts'
-import { cat as hdf5Cat } from '../../core/filetype/hdf5.ts'
-import { cat as parquetCat } from '../../core/filetype/parquet.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { extractWriteData } from '../write_args.ts'
+import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { PathSpec } from '../../types.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,6 +31,13 @@ type OpCoreFn = (...args: any[]) => unknown
 export interface OpsTable<A extends Accessor = Accessor> {
   readdir: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
   readBytes: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => Promise<Uint8Array>
+  readRange?: (
+    accessor: A,
+    path: PathSpec,
+    index: OpKwargs['index'],
+    offset: number,
+    size: number | null,
+  ) => Promise<Uint8Array>
   stat: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
   write?: OpCoreFn
   mkdir?: OpCoreFn
@@ -45,20 +50,7 @@ export interface OpsTable<A extends Accessor = Accessor> {
   setAttrs?: OpCoreFn
 }
 
-const FILETYPE_CATS: Record<string, (raw: Uint8Array) => unknown> = {
-  '.parquet': parquetCat,
-  '.feather': featherCat,
-  '.hdf5': hdf5Cat,
-  '.h5': hdf5Cat,
-}
-
 export interface MakeGenericOpsOptions {
-  /**
-   * Extensions to emit rendered `read` ops for (keys of FILETYPE_CATS).
-   * Explicit list rather than Python's `filetype_read` bool: TS has no
-   * ORC support and backends opt in per extension.
-   */
-  filetypeRead?: readonly string[]
   /** Synthesize truncate from readBytes + write (no native partial write). */
   emulateTruncate?: boolean
   /** Forward `parents=true` to the core mkdir (disk). */
@@ -66,12 +58,19 @@ export interface MakeGenericOpsOptions {
   /** Op names to skip because the backend registers an irregular wrapper. */
   overrides?: ReadonlySet<string>
   /**
-   * Forward `kwargs.index` into read/readdir/stat (default true). Mutable
-   * local backends (ram/disk/redis/ssh) historically call their cores
-   * index-less: their readdir caches listings into the index store while
-   * mutations never invalidate them, so forwarding would serve stale
-   * listings after mkdir/rmdir/write. Python has no such knob — its
-   * cores invalidate the index through the cache context on mutation.
+   * Forward `kwargs.index` into read/readdir/stat (default true). Off for
+   * the mutable local backends (ram/disk/redis/ssh), whose non-zero index
+   * TTL would otherwise let a cached listing outlive the mutation.
+   *
+   * `ws.dispatch` is safe on its own: the dispatcher calls
+   * `invalidateAfterWriteByPath` after every write op. `WorkspaceFS` is
+   * not. It reaches `OpsRegistry.call` directly, so a forwarded index is
+   * never evicted and readdir replays the pre-mutation listing for the
+   * whole TTL. Python has no such knob because its `Ops` facade takes an
+   * `on_write` hook (`Ops(..., on_write=self._invalidate_after_write_by_path)`)
+   * and fires it on the same path; giving `WorkspaceFS` that hook is what
+   * would retire this option. `packages/node/src/ops/index_invalidation.test.ts`
+   * pins both halves.
    */
   forwardIndex?: boolean
 }
@@ -125,9 +124,38 @@ export function makeGenericOps<A extends Accessor>(
   const pickIndex = (kwargs: OpKwargs): OpKwargs['index'] =>
     options.forwardIndex === false ? undefined : kwargs.index
 
+  // A backend that can fetch a range natively does so, which is the whole
+  // point on an object store: one ranged GET instead of the whole file. Every
+  // other backend falls back to reading and slicing, which is the same answer
+  // at the same cost as before, and is the only meaningful behavior for a
+  // backend that renders its content rather than storing it, since there is no
+  // remote range to ask for. A zero-length read is answered here rather than
+  // sent anywhere: no store can express an empty range, and the answer is known.
+  //
+  // A window starting at or past EOF is the one case where the two paths do not
+  // agree on their own: slicing yields empty, the POSIX answer, while an HTTP
+  // store refuses with 416. Normalizing here rather than in each reader keeps
+  // the op's contract one thing, and keeps a backend from becoming the odd one
+  // out the day it grows a native range.
   emit(
     'read',
-    (accessor, path, _args, kwargs) => table.readBytes(asA(accessor), path, pickIndex(kwargs)),
+    async (accessor, path, _args, kwargs) => {
+      const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
+      const size = typeof kwargs.size === 'number' ? kwargs.size : null
+      if (size === 0) return new Uint8Array(0)
+      const whole = offset === 0 && size === null
+      const native = table.readRange
+      if (native !== undefined && !whole) {
+        try {
+          return await native(asA(accessor), path, pickIndex(kwargs), offset, size)
+        } catch (err) {
+          if (!isUnsatisfiableRange(err)) throw err
+          return new Uint8Array(0)
+        }
+      }
+      const data = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
+      return whole ? data : sliceWindow(data, offset, size)
+    },
     false,
   )
   emit(
@@ -140,20 +168,6 @@ export function makeGenericOps<A extends Accessor>(
     (accessor, path, _args, kwargs) => table.stat(asA(accessor), path, pickIndex(kwargs)),
     false,
   )
-
-  for (const ext of options.filetypeRead ?? []) {
-    const cat = FILETYPE_CATS[ext]
-    if (!cat) throw new Error(`no filetype cat registered for ${ext}`)
-    emit(
-      'read',
-      async (accessor, path, _args, kwargs) => {
-        const raw = await table.readBytes(asA(accessor), path, pickIndex(kwargs))
-        return cat(raw)
-      },
-      false,
-      ext,
-    )
-  }
 
   const { write, mkdir, unlink, rmdir, rename, create, truncate, append, setAttrs } = table
   if (write) {
@@ -213,7 +227,7 @@ export function makeGenericOps<A extends Accessor>(
         try {
           data = await table.readBytes(asA(accessor), path)
         } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+          if ((err as { code?: string }).code !== 'ENOENT') throw err
           data = new Uint8Array(0)
         }
         const out = new Uint8Array(length)

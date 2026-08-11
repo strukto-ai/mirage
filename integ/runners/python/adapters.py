@@ -12,14 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import base64
 import functools
+import gzip
 import imaplib
 import importlib.util
+import inspect
 import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import uuid
 from collections.abc import Awaitable, Callable
@@ -30,34 +34,47 @@ from pathlib import Path
 from types import ModuleType
 
 import aiohttp
+import asyncpg
 import boto3
+import chromadb
+import lancedb
 from moto.server import ThreadedMotoServer
 from pymongo import AsyncMongoClient
+from qdrant_client import AsyncQdrantClient, models
 
 from mirage import MountMode, Workspace
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
+from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
-from mirage.core.google import _client as google_client
+from mirage.core.discord.config import DiscordConfig
+from mirage.core.email.config import EmailConfig
 from mirage.core.sharepoint import _resolver as sharepoint_resolver
 from mirage.resource.aliyun import AliyunConfig, AliyunResource
 from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
 from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.ceph import CephConfig, CephResource
+from mirage.resource.chroma import ChromaConfig, ChromaResource
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
                                                DatabricksVolumeResource)
 from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.digitalocean import (DigitalOceanConfig,
                                           DigitalOceanResource)
+from mirage.resource.discord.discord import DiscordResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
-from mirage.resource.email.config import EmailConfig
 from mirage.resource.email.email import EmailResource
+from mirage.resource.gcal.config import GCalConfig
+from mirage.resource.gcal.gcal import GCalResource
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
 from mirage.resource.gdrive.config import GoogleDriveConfig
 from mirage.resource.gdrive.gdrive import GoogleDriveResource
+from mirage.resource.github import GitHubConfig, GitHubResource
+from mirage.resource.github_ci.config import GitHubCIConfig
+from mirage.resource.github_ci.github_ci import GitHubCIResource
 from mirage.resource.gmail.config import GmailConfig
 from mirage.resource.gmail.gmail import GmailResource
 from mirage.resource.gridfs import GridFSConfig, GridFSResource
@@ -66,11 +83,19 @@ from mirage.resource.gsheets.gsheets import GSheetsResource
 from mirage.resource.gslides.config import GSlidesConfig
 from mirage.resource.gslides.gslides import GSlidesResource
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+from mirage.resource.jaeger import JaegerConfig, JaegerResource
+from mirage.resource.lancedb import LanceDBConfig, LanceDBResource
+from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
 from mirage.resource.linear import LinearConfig, LinearResource
+from mirage.resource.mem0 import Mem0Config, Mem0Resource
 from mirage.resource.minio import MinIOConfig, MinIOResource
+from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+from mirage.resource.notion import NotionConfig, NotionResource
 from mirage.resource.oci import OCIConfig, OCIResource
 from mirage.resource.onedrive.onedrive import OneDriveResource
+from mirage.resource.postgres import PostgresConfig, PostgresResource
+from mirage.resource.qdrant import QdrantConfig, QdrantResource
 from mirage.resource.qingstor import QingStorConfig, QingStorResource
 from mirage.resource.r2 import R2Config, R2Resource
 from mirage.resource.ram import RAMResource
@@ -93,6 +118,8 @@ EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
 EMAIL_USERNAME = "integ@example.com"
 EMAIL_PASSWORD = "secret"
+# Doubles as the workspace id on the fake notion server.
+NOTION_TOKEN = "integ-test"
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
@@ -328,9 +355,9 @@ def _load_databricks_server() -> ModuleType:
         "databricks_server.py")
 
 
-def _load_trello_server() -> ModuleType:
+def _load_discord_server() -> ModuleType:
     return _load_module(
-        Path(__file__).resolve().parents[2] / "server" / "trello_server.py")
+        Path(__file__).resolve().parents[2] / "server" / "discord_server.py")
 
 
 def _load_linear_server() -> ModuleType:
@@ -377,6 +404,15 @@ class SSHService:
         paths = " ".join(f"/admin/{base}/{m['root']}"
                          for m in target["mounts"])
         await _admin_exec(admin_ws, f"mkdir -p {paths}")
+        # A server-side symlink in the /links mount: mirage's shell ln -s
+        # only makes namespace links, so the battery needs one created over
+        # SFTP to pin that ssh stat follows links (target size, not
+        # link-text length). Dangling until the fixture seeds poem.txt.
+        sftp = await admin.accessor.sftp()
+        for m in target["mounts"]:
+            if m["root"] == "links":
+                await sftp.symlink("../data/poem.txt",
+                                   f"/{base}/{m['root']}/poem_link.txt")
         return cls(host, port, server, root_dir, admin, admin_ws, base)
 
     def resource(self, mount: dict) -> SSHResource:
@@ -442,16 +478,6 @@ class NextcloudService:
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
-def _use_fake_google_endpoints(url: str) -> None:
-    google_client.TOKEN_URL = f"{url}/token"
-    google_client.DRIVE_API_BASE = f"{url}/drive/v3"
-    google_client.DRIVE_UPLOAD_BASE = f"{url}/upload/drive/v3"
-    google_client.DOCS_API_BASE = f"{url}/v1"
-    google_client.SLIDES_API_BASE = f"{url}/v1"
-    google_client.SHEETS_API_BASE = f"{url}/v4"
-    google_client.GMAIL_API_BASE = f"{url}/gmail/v1"
-
-
 class GwsService:
     """Points gdrive mounts at the fake Google Workspace server.
 
@@ -461,20 +487,32 @@ class GwsService:
     analog, so the three mounts never see each other.
     """
 
-    def __init__(self, url: str, folder_ids: dict[str, str]) -> None:
+    def __init__(self, url: str, folder_ids: dict[str, str],
+                 cli_scope: str | None) -> None:
         self.url = url
         self.folder_ids = folder_ids
+        # A target may scope the gws install to one mount's folder, the
+        # configuration where the CLI and the mount are the same folder.
+        self.cli_scope = cli_scope
 
     @classmethod
     async def create(cls, run_id: str, target: dict) -> "GwsService":
         url = os.environ["GWS_URL"].rstrip("/")
-        _use_fake_google_endpoints(url)
         folder_ids: dict[str, str] = {}
         drive_ids: dict[str, str] = {}
         # Native mounts (gdocs/gsheets/gslides) render the modified date
         # into filenames, so those targets pin the server clock.
         epoch = target.get("epoch")
-        reset_body = {"epoch": epoch} if epoch else {}
+        reset_body: dict = {"epoch": epoch} if epoch else {}
+        # Secondary calendars and seeded form responses are declared to
+        # /reset rather than inserted: a calendar's accessRole and a form
+        # response are both states no API call can produce.
+        calendar = cls._manifest(target.get("calendar"))
+        if calendar and calendar.get("calendars"):
+            reset_body["calendars"] = calendar["calendars"]
+        forms = cls._manifest(target.get("forms"))
+        if forms:
+            reset_body["forms"] = forms
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{url}/reset", json=reset_body) as resp:
                 resp.raise_for_status()
@@ -493,19 +531,31 @@ class GwsService:
                 for segment in str(mount["root"]).split("/"):
                     parent = await cls._folder(session, url, segment, parent)
                 folder_ids[mount["path"]] = parent
-            apps = target.get("apps")
+            apps = cls._manifest(target.get("apps"))
             if apps:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{apps}.json"
-                await cls._seed_apps(session, url,
-                                     json.loads(manifest.read_text()))
-            mail = target.get("mail")
+                await cls._seed_apps(session, url, apps)
+            mail = cls._manifest(target.get("mail"))
             if mail:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{mail}.json"
-                await cls._seed_mail(session, url,
-                                     json.loads(manifest.read_text()))
-        return cls(url, folder_ids)
+                await cls._seed_mail(session, url, mail)
+            if calendar:
+                await cls._seed_calendar(session, url, calendar["events"])
+        return cls(url, folder_ids, target.get("cli_scope"))
+
+    @staticmethod
+    def _manifest(name: str | None) -> list | dict | None:
+        """Read a fixture manifest by its targets.json name.
+
+        Args:
+            name (str | None): the fixture path, e.g. ``calendar/v1``.
+
+        Returns:
+            list | dict | None: the parsed manifest, or None when unnamed.
+        """
+        if not name:
+            return None
+        path = Path(
+            __file__).resolve().parents[2] / "fixtures" / f"{name}.json"
+        return json.loads(path.read_text())
 
     @staticmethod
     async def _seed_apps(session: aiohttp.ClientSession, url: str,
@@ -552,6 +602,18 @@ class GwsService:
                 raise ValueError(f"unknown google-apps kind: {kind}")
 
     @staticmethod
+    async def _seed_calendar(session: aiohttp.ClientSession, url: str,
+                             entries: list[dict]) -> None:
+        # Events are API objects, so they seed through events.insert and
+        # take the ids the server mints; the manifest pins the times, which
+        # is what the day directories are derived from.
+        for entry in entries:
+            async with session.post(
+                    f"{url}/calendar/v3/calendars/primary/events",
+                    json=entry) as resp:
+                resp.raise_for_status()
+
+    @staticmethod
     async def _seed_mail(session: aiohttp.ClientSession, url: str,
                          entries: list[dict]) -> None:
         # Messages are API objects: each manifest entry becomes an RFC822
@@ -594,23 +656,51 @@ class GwsService:
         return GoogleDriveResource(
             GoogleDriveConfig(client_id="integ",
                               refresh_token="integ",
+                              api_base=self.url,
                               folder_id=self.folder_ids[mount["path"]]))
 
     def gdocs_resource(self) -> GDocsResource:
         return GDocsResource(
-            GDocsConfig(client_id="integ", refresh_token="integ"))
+            GDocsConfig(client_id="integ",
+                        refresh_token="integ",
+                        api_base=self.url))
 
     def gsheets_resource(self) -> GSheetsResource:
         return GSheetsResource(
-            GSheetsConfig(client_id="integ", refresh_token="integ"))
+            GSheetsConfig(client_id="integ",
+                          refresh_token="integ",
+                          api_base=self.url))
 
     def gslides_resource(self) -> GSlidesResource:
         return GSlidesResource(
-            GSlidesConfig(client_id="integ", refresh_token="integ"))
+            GSlidesConfig(client_id="integ",
+                          refresh_token="integ",
+                          api_base=self.url))
+
+    def gcal_resource(self) -> GCalResource:
+        # today is pinned so the rolling window is the same on both hosts
+        # and lands on the seeded events.
+        return GCalResource(
+            GCalConfig(client_id="integ",
+                       refresh_token="integ",
+                       api_base=self.url,
+                       today="2026-02-11"))
 
     def gmail_resource(self) -> GmailResource:
         return GmailResource(
-            GmailConfig(client_id="integ", refresh_token="integ"))
+            GmailConfig(client_id="integ",
+                        refresh_token="integ",
+                        api_base=self.url))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        config: dict[str, object] = {
+            "client_id": "integ",
+            "refresh_token": "integ",
+            "api_base": self.url,
+        }
+        if self.cli_scope is not None:
+            config["folder_id"] = self.folder_ids[self.cli_scope]
+        return {"gws": (cli_spec_for("gws"), config)}
 
     async def teardown(self) -> None:
         return None
@@ -670,28 +760,121 @@ class EmailService:
                         password=EMAIL_PASSWORD,
                         use_ssl=False))
 
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "himalaya": (cli_spec_for("himalaya"), {
+                "imap_host": self.host,
+                "imap_port": EMAIL_IMAP_PORT,
+                "smtp_host": self.host,
+                "smtp_port": EMAIL_SMTP_PORT,
+                "username": EMAIL_USERNAME,
+                "password": EMAIL_PASSWORD,
+                "use_ssl": False,
+            }),
+        }
+
     async def teardown(self) -> None:
         return None
 
 
 class OneDriveService:
 
-    def __init__(self, runner) -> None:
+    def __init__(self, base: str, runner) -> None:
+        self.base = base
         self.runner = runner
 
     @classmethod
     async def create(cls) -> "OneDriveService":
         module = _load_onedrive_server()
-        _state, _server, runner = await module.start_fake_graph()
-        return cls(runner)
+        state, _server, runner = await module.start_fake_graph()
+        return cls(state.base, runner)
 
     def resource(self, mount: dict) -> OneDriveResource:
         return OneDriveResource(
             OneDriveConfig(access_token="integ-token",
+                           graph_base_url=self.base,
                            key_prefix=mount.get("prefix")))
 
     async def teardown(self) -> None:
         await self.runner.cleanup()
+
+
+class Mem0Service:
+
+    def __init__(self, endpoint: str,
+                 process: asyncio.subprocess.Process) -> None:
+        self.endpoint = endpoint
+        self.process = process
+
+    @classmethod
+    async def create(cls) -> "Mem0Service":
+        script = (Path(__file__).resolve().parents[2] / "server" /
+                  "mem0_server.py")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        endpoint = (await process.stdout.readline()).decode().strip()
+        if not endpoint:
+            assert process.stderr is not None
+            detail = (await process.stderr.read()).decode().strip()
+            raise RuntimeError(f"mem0 fake failed to start: {detail}")
+        return cls(endpoint, process)
+
+    def resource(self, mount: dict) -> Mem0Resource:
+        return Mem0Resource(
+            Mem0Config(api_key="integ-key",
+                       host=self.endpoint,
+                       user_id="integ-user",
+                       default_page_size=2))
+
+    async def teardown(self) -> None:
+        if self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
+
+
+class HttpService:
+    """The fixture web server curl and wget fetch from.
+
+    Exported through ``HTTP_ENDPOINT`` rather than a mount, because the cases
+    name it as a URL in the command text (the ``{http}`` token) instead of a
+    path. Owning the process here means ``--facet http`` needs no CI setup.
+    """
+
+    def __init__(self, endpoint: str,
+                 process: asyncio.subprocess.Process) -> None:
+        self.endpoint = endpoint
+        self.process = process
+
+    @classmethod
+    async def create(cls) -> "HttpService":
+        script = (Path(__file__).resolve().parents[2] / "server" /
+                  "http_server.py")
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        line = (await process.stdout.readline()).decode().strip()
+        if not line.startswith("HTTP_ENDPOINT="):
+            assert process.stderr is not None
+            detail = (await process.stderr.read()).decode().strip()
+            raise RuntimeError(f"http fixture failed to start: {detail}")
+        endpoint = line.split("=", 1)[1]
+        os.environ["HTTP_ENDPOINT"] = endpoint
+        return cls(endpoint, process)
+
+    async def teardown(self) -> None:
+        os.environ.pop("HTTP_ENDPOINT", None)
+        if self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
 
 
 class DropboxService:
@@ -793,6 +976,11 @@ class BoxService:
                 rel = src.relative_to(base).as_posix()
                 self.state.seed_path(f"{mount['folder']}/{rel}",
                                      src.read_bytes())
+        if seed == "files/v1":
+            # A weblink beside the fixture: sizeless and content-free, so
+            # listings must hide it and a direct stat must ENOENT.
+            self.state.add_web_link(folder["id"], "homepage",
+                                    "https://example.com/")
         return BoxResource(
             BoxConfig(
                 access_token="integ-box-token",
@@ -836,6 +1024,79 @@ class SlackService:
                         search_token="xoxp-integ-search",
                         base_url=f"{self.url}/api"))
 
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "slack": (cli_spec_for("slack"), {
+                "token": "xoxb-integ",
+                "search_token": "xoxp-integ-search",
+                "base_url": f"{self.url}/api",
+            }),
+        }
+
+    async def teardown(self) -> None:
+        return None
+
+
+class GitHubService:
+    """Points github mounts at the fake api.github.com server.
+
+    The server (integ/server/github_server.py) runs out of process on
+    GITHUB_URL, mirroring the fake Slack and Google Workspace servers and
+    shared with the typescript host. It used to be out of process by
+    necessity — GitHubResource fetched the repo tree with a blocking
+    urlopen from its constructor, which would starve an aiohttp fake on
+    the runner's loop. That constraint is gone now that the fetch is
+    awaited in `GitHubResource.build`; sharing one fake across both hosts
+    is why it stays external.
+
+    Args:
+        url (str): GITHUB_URL origin the fake is listening on.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @classmethod
+    async def create(cls) -> "GitHubService":
+        return cls(os.environ["GITHUB_URL"].rstrip("/"))
+
+    async def resource(self, mount: dict) -> GitHubResource:
+        owner, _, repo = mount["repo"].partition("/")
+        return await GitHubResource.build(
+            GitHubConfig(token="ghp-integ",
+                         owner=owner,
+                         repo=repo,
+                         base_url=self.url))
+
+    async def teardown(self) -> None:
+        return None
+
+
+class GitHubCIService:
+    """Points github_ci mounts at the fake api.github.com server.
+
+    Reuses the external github_server.py process on GITHUB_URL, which also
+    serves the fixed Actions dataset (workflows/runs/jobs/artifacts).
+
+    Args:
+        url (str): GITHUB_URL origin the fake is listening on.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @classmethod
+    async def create(cls) -> "GitHubCIService":
+        return cls(os.environ["GITHUB_URL"].rstrip("/"))
+
+    def resource(self, mount: dict) -> GitHubCIResource:
+        owner, _, repo = mount["repo"].partition("/")
+        return GitHubCIResource(
+            GitHubCIConfig(token="ghp-integ",
+                           owner=owner,
+                           repo=repo,
+                           base_url=self.url))
+
     async def teardown(self) -> None:
         return None
 
@@ -864,6 +1125,44 @@ class DifyService:
 
 
 class TrelloService:
+    """Points trello mounts at the shared fake Trello REST API server.
+
+    The server (integ/server/trello.ts) is external, Prisma-backed, and
+    shared across both hosts; /reset re-seeds it to the fixture, so the
+    write cases see the same state on every run and on either host.
+
+    Args:
+        base (str): TRELLO_ENDPOINT origin.
+    """
+
+    def __init__(self, base: str) -> None:
+        self.base = base
+
+    @classmethod
+    async def create(cls) -> "TrelloService":
+        base = os.environ["TRELLO_ENDPOINT"].rstrip("/")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{base}/reset") as resp:
+                resp.raise_for_status()
+        return cls(base)
+
+    def resource(self, mount: dict) -> TrelloResource:
+        return TrelloResource(
+            TrelloConfig(api_key="integ-key",
+                         api_token="integ-token",
+                         base_url=self.base))
+
+    async def teardown(self) -> None:
+        return None
+
+
+class DiscordService:
+    """Points discord mounts at the fake discord.com/api server.
+
+    The server (integ/server/discord_server.py) mirrors the documented
+    shapes: newest-first message pages, after/limit pagination, and a CDN
+    route that serves attachment bytes without the bot token.
+    """
 
     def __init__(self, state, runner, base: str) -> None:
         self.state = state
@@ -871,16 +1170,23 @@ class TrelloService:
         self.base = base
 
     @classmethod
-    async def create(cls) -> "TrelloService":
-        module = _load_trello_server()
-        state, _server, runner = await module.start_fake_trello()
+    async def create(cls) -> "DiscordService":
+        module = _load_discord_server()
+        state, _server, runner = await module.start_fake_discord()
         return cls(state, runner, state.base)
 
-    def resource(self, mount: dict) -> TrelloResource:
-        return TrelloResource(
-            TrelloConfig(api_key="integ-key",
-                         api_token="integ-token",
-                         base_url=self.base))
+    def resource(self, mount: dict) -> DiscordResource:
+        return DiscordResource(
+            DiscordConfig(token="integ-bot-token",
+                          base_url=f"{self.base}/api/v10"))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "discord": (cli_spec_for("discord"), {
+                "token": "integ-bot-token",
+                "base_url": f"{self.base}/api/v10",
+            }),
+        }
 
     async def teardown(self) -> None:
         await self.runner.cleanup()
@@ -903,6 +1209,14 @@ class LinearService:
         return LinearResource(
             LinearConfig(api_key="integ-key", base_url=self.base))
 
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "linear": (cli_spec_for("linear"), {
+                "api_key": "integ-key",
+                "base_url": self.base,
+            }),
+        }
+
     async def teardown(self) -> None:
         await self.runner.cleanup()
 
@@ -914,18 +1228,71 @@ def _clear_sharepoint_caches() -> None:
     sharepoint_resolver._drive_cache.clear()
 
 
+class JaegerService:
+    """Points jaeger mounts at a real jaeger all-in-one container.
+
+    The container is external and seeded over OTLP by
+    integ/server/jaeger_seed.py, so trace ids and timestamps are fixed.
+    """
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+
+    @classmethod
+    async def create(cls) -> "JaegerService":
+        return cls(os.environ["JAEGER_URL"])
+
+    def resource(self, mount: dict) -> JaegerResource:
+        return JaegerResource(JaegerConfig(host=self.host))
+
+    async def teardown(self) -> None:
+        return None
+
+
+class LangfuseService:
+    """Points langfuse mounts at a real self-hosted Langfuse instance.
+
+    The stack (web + worker + postgres + clickhouse + redis + blob store) is
+    external, brought up from integ/server/langfuse_compose.yml and seeded by
+    integ/server/langfuse_seed.py, so the project keys are fixed constants.
+    """
+
+    def __init__(self, host: str, public_key: str, secret_key: str) -> None:
+        self.host = host
+        self.public_key = public_key
+        self.secret_key = secret_key
+
+    @classmethod
+    async def create(cls) -> "LangfuseService":
+        return cls(
+            os.environ["LANGFUSE_URL"],
+            os.environ.get("LANGFUSE_PUBLIC_KEY", "pk-lf-mirage-integ"),
+            os.environ.get("LANGFUSE_SECRET_KEY", "sk-lf-mirage-integ"),
+        )
+
+    def resource(self, mount: dict) -> LangfuseResource:
+        return LangfuseResource(
+            LangfuseConfig(public_key=self.public_key,
+                           secret_key=self.secret_key,
+                           host=self.host))
+
+    async def teardown(self) -> None:
+        return None
+
+
 class SharePointService:
 
-    def __init__(self, server, runner) -> None:
+    def __init__(self, base: str, server, runner) -> None:
+        self.base = base
         self.server = server
         self.runner = runner
 
     @classmethod
     async def create(cls) -> "SharePointService":
         module = _load_onedrive_server()
-        _state, server, runner = await module.start_fake_graph()
+        state, server, runner = await module.start_fake_graph()
         _clear_sharepoint_caches()
-        return cls(server, runner)
+        return cls(state.base, server, runner)
 
     def resource(self, mount: dict) -> SharePointResource:
         graph = self.server.drives.get(mount["drive"])
@@ -936,6 +1303,7 @@ class SharePointService:
             graph._ensure_parents(f"{key_prefix}/placeholder")
         return SharePointResource(
             SharePointConfig(access_token="integ-token",
+                             graph_base_url=self.base,
                              site="Main",
                              drive=mount["drive"],
                              key_prefix=key_prefix))
@@ -945,10 +1313,393 @@ class SharePointService:
         await self.runner.cleanup()
 
 
-Service = (S3Service | OneDriveService | SharePointService | SSHService
+class NotionService:
+    """Points notion mounts at the shared fake Notion REST API.
+
+    The server (integ/server/notion_server.ts) is external, Prisma-backed and
+    shared across both hosts; /reset re-seeds it to the fixture. The api key
+    doubles as the workspace id on that server, the way a real Notion
+    integration token scopes you to one workspace, so scenarios that use
+    different keys do not see each other's writes.
+
+    Args:
+        url (str): NOTION_URL origin (the REST surface lives under /v1).
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @classmethod
+    async def create(cls) -> "NotionService":
+        url = os.environ["NOTION_URL"].rstrip("/")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{url}/reset",
+                                    json={"workspace": NOTION_TOKEN}) as resp:
+                resp.raise_for_status()
+        return cls(url)
+
+    def resource(self, mount: dict) -> NotionResource:
+        return NotionResource(config=NotionConfig(api_key=NOTION_TOKEN,
+                                                  base_url=f"{self.url}/v1"))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "ntn": (cli_spec_for("ntn"), {
+                "api_key": NOTION_TOKEN,
+                "base_url": f"{self.url}/v1",
+            }),
+        }
+
+    async def teardown(self) -> None:
+        return None
+
+
+LANCEDB_ROWS = [
+    {
+        "id": 1,
+        "label": "cat",
+        "kind": "big",
+        "name": "a big orange cat"
+    },
+    {
+        "id": 2,
+        "label": "cat",
+        "kind": "small",
+        "name": "a small grey cat"
+    },
+    {
+        "id": 3,
+        "label": "dog",
+        "kind": "big",
+        "name": "a big brown dog"
+    },
+    {
+        "id": 4,
+        "label": "dog",
+        "kind": "small",
+        "name": "a small white dog"
+    },
+]
+
+
+class LanceDBService:
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+
+    @classmethod
+    async def create(cls) -> "LanceDBService":
+        uri = tempfile.mkdtemp(prefix="mirage-integ-lancedb-")
+        db = lancedb.connect(uri)
+        db.create_table("animals", data=LANCEDB_ROWS)
+        return cls(uri)
+
+    def resource(self, mount: dict) -> LanceDBResource:
+        return LanceDBResource(
+            LanceDBConfig(uri=self.uri,
+                          group_by=["label", "kind"],
+                          id_column="id",
+                          title_column="name",
+                          text_column="name"))
+
+    async def teardown(self) -> None:
+        shutil.rmtree(self.uri, ignore_errors=True)
+
+
+QDRANT_EMBED_DIM = 8
+
+QDRANT_ROWS = [
+    (1, "cat", "big", "a big orange cat"),
+    (2, "cat", "small", "a small grey cat"),
+    (3, "dog", "big", "a big brown dog"),
+    (4, "dog", "small", "a small white dog"),
+]
+
+
+class QdrantService:
+
+    def __init__(self, host: str, port: int, collection: str) -> None:
+        self.host = host
+        self.port = port
+        self.collection = collection
+
+    @classmethod
+    async def create(cls) -> "QdrantService":
+        host = os.environ.get("QDRANT_HOST", "localhost")
+        port = int(os.environ.get("QDRANT_PORT", "6333"))
+        collection = f"mirage-integ-{uuid.uuid4().hex[:8]}"
+        client = AsyncQdrantClient(host=host, port=port)
+        try:
+            await client.create_collection(
+                collection,
+                vectors_config=models.VectorParams(
+                    size=QDRANT_EMBED_DIM, distance=models.Distance.COSINE))
+            await client.upsert(
+                collection,
+                points=[
+                    models.PointStruct(
+                        id=i,
+                        vector=[0.1] * QDRANT_EMBED_DIM,
+                        payload={
+                            "label":
+                            label,
+                            "kind":
+                            kind,
+                            "name":
+                            name,
+                            "image_bytes":
+                            base64.b64encode(f"PNG-{i}".encode()).decode(),
+                        }) for i, label, kind, name in QDRANT_ROWS
+                ])
+            for field in ("label", "kind"):
+                await client.create_payload_index(
+                    collection,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD)
+            await asyncio.sleep(2)
+        finally:
+            await client.close()
+        return cls(host, port, collection)
+
+    def resource(self, mount: dict) -> QdrantResource:
+        return QdrantResource(
+            QdrantConfig(host=self.host,
+                         port=self.port,
+                         collection=self.collection,
+                         group_by=["label", "kind"],
+                         id_field="id",
+                         text_field="name",
+                         blob_field="image_bytes",
+                         blob_ext="png"))
+
+    async def teardown(self) -> None:
+        client = AsyncQdrantClient(host=self.host, port=self.port)
+        try:
+            await client.delete_collection(self.collection)
+        finally:
+            await client.close()
+
+
+CHROMA_EMBED_DIM = 8
+
+
+def _chroma_embedding(position: int) -> list[float]:
+    vector = [0.0] * CHROMA_EMBED_DIM
+    vector[position % CHROMA_EMBED_DIM] = 1.0
+    return vector
+
+
+class ChromaService:
+
+    def __init__(self, host: str, port: int, collection_name: str) -> None:
+        self.host = host
+        self.port = port
+        self.collection_name = collection_name
+
+    @classmethod
+    async def create(cls) -> "ChromaService":
+        host = os.environ.get("CHROMA_HOST", "localhost")
+        port = int(os.environ.get("CHROMA_PORT", "8000"))
+        collection_name = f"mirage-integ-{uuid.uuid4().hex[:8]}"
+        seed_path = (Path(__file__).resolve().parents[2] / "server" /
+                     "chroma_seed.json")
+        seed = json.loads(seed_path.read_text())
+        encoded = base64.b64encode(
+            gzip.compress(json.dumps(seed["path_tree"]).encode())).decode()
+        ids = ["__path_tree__"]
+        documents = [encoded]
+        metadatas: list[dict] = [{"kind": "path_tree"}]
+        embeddings = [_chroma_embedding(0)]
+        position = 1
+        for chunks in seed["chunks"].values():
+            for chunk in chunks:
+                slug = chunk["metadata"]["page_slug"]
+                index = chunk["metadata"]["chunk_index"]
+                ids.append(f"{slug}#{index}")
+                documents.append(chunk["document"])
+                metadatas.append(chunk["metadata"])
+                embeddings.append(_chroma_embedding(position))
+                position += 1
+        client = await chromadb.AsyncHttpClient(host=host, port=port)
+        collection = await client.create_collection(collection_name)
+        await collection.add(ids=ids,
+                             documents=documents,
+                             metadatas=metadatas,
+                             embeddings=embeddings)
+        return cls(host, port, collection_name)
+
+    def resource(self, mount: dict) -> ChromaResource:
+        return ChromaResource(
+            config=ChromaConfig(host=self.host,
+                                port=self.port,
+                                collection_name=self.collection_name))
+
+    async def teardown(self) -> None:
+        client = await chromadb.AsyncHttpClient(host=self.host, port=self.port)
+        await client.delete_collection(self.collection_name)
+
+
+MONGODB_DB = "mirage_integ"
+
+MONGODB_BOOKS = [
+    {
+        "_id": 1,
+        "title": "alpha",
+        "author": "ada",
+        "year": 2020,
+        "tags": ["fiction", "classic"],
+        "rating": 4.5,
+    },
+    {
+        "_id": 2,
+        "title": "beta",
+        "author": "ben",
+        "year": 2021,
+        "tags": ["fiction"],
+        "rating": 3.2,
+    },
+    {
+        "_id": 3,
+        "title": "gamma",
+        "author": "cara",
+        "year": 2022,
+        "rating": 5.0,
+    },
+    {
+        "_id": 4,
+        "title": "delta",
+        "author": "ada",
+        "year": 2023,
+        "tags": ["history"],
+        "rating": 4.0,
+    },
+    {
+        "_id": 5,
+        "title": "epsilon",
+        "author": "ben",
+        "year": 2024,
+        "rating": 2.5,
+    },
+]
+
+MONGODB_AUTHORS = [
+    {
+        "_id": 1,
+        "name": "ada",
+        "books": 2
+    },
+    {
+        "_id": 2,
+        "name": "ben",
+        "books": 2
+    },
+    {
+        "_id": 3,
+        "name": "cara",
+        "books": 1
+    },
+]
+
+
+class MongoDBService:
+
+    def __init__(self, uri: str) -> None:
+        self.uri = uri
+
+    @classmethod
+    async def create(cls) -> "MongoDBService":
+        uri = os.environ["MONGODB_URI"]
+        client: AsyncMongoClient = AsyncMongoClient(uri)
+        try:
+            await client.drop_database(MONGODB_DB)
+            db = client[MONGODB_DB]
+            await db["books"].insert_many([dict(d) for d in MONGODB_BOOKS])
+            await db["authors"].insert_many([dict(d) for d in MONGODB_AUTHORS])
+            await db.create_collection(
+                "recent_books",
+                viewOn="books",
+                pipeline=[{
+                    "$match": {
+                        "year": {
+                            "$gte": 2022
+                        }
+                    }
+                }],
+            )
+        finally:
+            await client.close()
+        return cls(uri)
+
+    def resource(self, mount: dict) -> MongoDBResource:
+        return MongoDBResource(
+            config=MongoDBConfig(uri=self.uri, databases=[MONGODB_DB]))
+
+    async def teardown(self) -> None:
+        return None
+
+
+POSTGRES_BOOKS = [
+    (1, "alpha", "ada", 2020, 4.5),
+    (2, "beta", "ben", 2021, 3.2),
+    (3, "gamma", "cara", 2022, 5.0),
+    (4, "delta", "ada", 2023, 4.0),
+    (5, "epsilon", "ben", 2024, 2.5),
+]
+
+POSTGRES_AUTHORS = [
+    (1, "ada", 2),
+    (2, "ben", 2),
+    (3, "cara", 1),
+]
+
+
+class PostgresService:
+
+    def __init__(self, dsn: str) -> None:
+        self.dsn = dsn
+
+    @classmethod
+    async def create(cls) -> "PostgresService":
+        dsn = os.environ["POSTGRES_DSN"]
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute("DROP VIEW IF EXISTS recent_books")
+            await conn.execute("DROP TABLE IF EXISTS books")
+            await conn.execute("DROP TABLE IF EXISTS authors")
+            await conn.execute(
+                "CREATE TABLE books (id int PRIMARY KEY, title text, "
+                "author text, year int, rating double precision)")
+            await conn.execute("CREATE TABLE authors (id int PRIMARY KEY, "
+                               "name text, books int)")
+            await conn.executemany(
+                "INSERT INTO books (id, title, author, year, rating) "
+                "VALUES ($1, $2, $3, $4, $5)", POSTGRES_BOOKS)
+            await conn.executemany(
+                "INSERT INTO authors (id, name, books) VALUES ($1, $2, $3)",
+                POSTGRES_AUTHORS)
+            await conn.execute("CREATE VIEW recent_books AS SELECT * FROM "
+                               "books WHERE year >= 2022")
+            await conn.execute("ANALYZE books")
+            await conn.execute("ANALYZE authors")
+        finally:
+            await conn.close()
+        return cls(dsn)
+
+    def resource(self, mount: dict) -> PostgresResource:
+        return PostgresResource(PostgresConfig(dsn=self.dsn,
+                                               max_read_rows=200))
+
+    async def teardown(self) -> None:
+        return None
+
+
+Service = (S3Service | OneDriveService | SharePointService | Mem0Service
+           | SSHService | PostgresService | MongoDBService | ChromaService
+           | QdrantService | LanceDBService | NotionService
            | NextcloudService | GwsService | HfService | BoxService
            | DropboxService | GridFSService | SlackService | TrelloService
-           | LinearService | DifyService | DatabricksVolumeService)
+           | LinearService | DifyService | DatabricksVolumeService
+           | LangfuseService | JaegerService)
 
 
 def build_ram(
@@ -1011,6 +1762,59 @@ def build_sharepoint(
     return service.resource(mount), _noop
 
 
+def build_mem0(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, Mem0Service)
+    return service.resource(mount), _noop
+
+
+def build_postgres(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, PostgresService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_mongodb(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, MongoDBService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_chroma(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, ChromaService)
+    return service.resource(mount), _noop
+
+
+def build_qdrant(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, QdrantService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_lancedb(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, LanceDBService)
+    resource = service.resource(mount)
+    return resource, resource.accessor.close
+
+
+def build_notion(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, NotionService)
+    return service.resource(mount), _noop
+
+
 def build_hf(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1046,10 +1850,31 @@ def build_trello(
     return service.resource(mount), _noop
 
 
+def build_discord(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, DiscordService)
+    return service.resource(mount), _noop
+
+
 def build_linear(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, LinearService)
+    return service.resource(mount), _noop
+
+
+def build_jaeger(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, JaegerService)
+    return service.resource(mount), _noop
+
+
+def build_langfuse(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, LangfuseService)
     return service.resource(mount), _noop
 
 
@@ -1095,6 +1920,13 @@ def build_email(
     return service.resource(mount), _noop
 
 
+def build_gcal(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gcal_resource(), _noop
+
+
 def build_gmail(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1109,11 +1941,107 @@ def build_nextcloud(
     return service.resource(mount), _noop
 
 
+async def build_github(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GitHubService)
+    return await service.resource(mount), _noop
+
+
+def build_github_ci(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GitHubCIService)
+    return service.resource(mount), _noop
+
+
 def build_slack(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, SlackService)
     return service.resource(mount), _noop
+
+
+# Backends reachable with dummy credentials and no server, for the arg-error
+# battery: an invalid -maxdepth/-mindepth/-size/-mtime must be rejected while
+# flags are parsed, before any network call, so construction is all these
+# targets ever need. github, notion and hf_buckets are absent on purpose:
+# github needs a live repo at construct, notion an OAuth provider, and
+# hf_buckets validates the bucket id.
+ARG_ERROR_RESOURCES: dict[str, tuple[type, type, dict[str, object]]] = {
+    "databricks": (DatabricksVolumeResource, DatabricksVolumeConfig, {
+        "host": "h",
+        "token": "t",
+        "catalog": "c",
+        "schema": "s",
+        "volume": "v",
+    }),
+    "discord": (DiscordResource, DiscordConfig, {
+        "token": "x"
+    }),
+    "email": (EmailResource, EmailConfig, {
+        "imap_host": "h",
+        "smtp_host": "h",
+        "username": "u",
+        "password": "p",
+    }),
+    "gdocs": (GDocsResource, GDocsConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "gdrive": (GoogleDriveResource, GoogleDriveConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "github_ci": (GitHubCIResource, GitHubCIConfig, {
+        "token": "t",
+        "owner": "o",
+        "repo": "r"
+    }),
+    "gmail": (GmailResource, GmailConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "gsheets": (GSheetsResource, GSheetsConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "gslides": (GSlidesResource, GSlidesConfig, {
+        "client_id": "c",
+        "refresh_token": "r"
+    }),
+    "langfuse": (LangfuseResource, LangfuseConfig, {
+        "public_key": "p",
+        "secret_key": "s"
+    }),
+    "linear": (LinearResource, LinearConfig, {
+        "api_key": "k"
+    }),
+    "mem0": (Mem0Resource, Mem0Config, {
+        "api_key": "k",
+        "user_id": "u"
+    }),
+    "onedrive": (OneDriveResource, OneDriveConfig, {
+        "access_token": "t"
+    }),
+    "sharepoint": (SharePointResource, SharePointConfig, {
+        "access_token": "t"
+    }),
+    "slack": (SlackResource, SlackConfig, {
+        "token": "x"
+    }),
+    "trello": (TrelloResource, TrelloConfig, {
+        "api_key": "k",
+        "api_token": "t"
+    }),
+}
+
+
+def build_arg_error(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    resource_cls, config_cls, kwargs = ARG_ERROR_RESOURCES[mount["backend"]]
+    return resource_cls(config_cls(**kwargs)), _noop
 
 
 BUILDERS = {
@@ -1139,21 +2067,37 @@ BUILDERS = {
     "databricks_volume": build_databricks_volume,
     "onedrive": build_onedrive,
     "sharepoint": build_sharepoint,
+    "mem0": build_mem0,
+    "postgres": build_postgres,
+    "mongodb": build_mongodb,
+    "chroma": build_chroma,
+    "qdrant": build_qdrant,
+    "lancedb": build_lancedb,
+    "notion": build_notion,
     "ssh": build_ssh,
     "nextcloud": build_nextcloud,
     "gdrive": build_gdrive,
     "gdocs": build_gdocs,
     "gsheets": build_gsheets,
     "gslides": build_gslides,
+    "gcal": build_gcal,
     "gmail": build_gmail,
     "email": build_email,
     "hf": build_hf,
     "box": build_box,
     "dropbox": build_dropbox,
+    "github": build_github,
+    "github_ci": build_github_ci,
     "slack": build_slack,
     "trello": build_trello,
+    "discord": build_discord,
     "linear": build_linear,
+    "langfuse": build_langfuse,
+    "jaeger": build_jaeger,
     "dify": build_dify,
+    "arg_error": build_arg_error,
+    # The mounts are plain RAM; HttpService is what makes this target special.
+    "http_fixture": build_ram,
 }
 
 
@@ -1168,6 +2112,20 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await OneDriveService.create()
     if target.get("service") == "sharepoint":
         return await SharePointService.create()
+    if target.get("service") == "mem0":
+        return await Mem0Service.create()
+    if target.get("service") == "postgres":
+        return await PostgresService.create()
+    if target.get("service") == "mongodb":
+        return await MongoDBService.create()
+    if target.get("service") == "chroma":
+        return await ChromaService.create()
+    if target.get("service") == "qdrant":
+        return await QdrantService.create()
+    if target.get("service") == "lancedb":
+        return await LanceDBService.create()
+    if target.get("service") == "notion":
+        return await NotionService.create()
     if target.get("service") == "ssh":
         return await SSHService.create(run_id, target)
     if target.get("service") == "nextcloud":
@@ -1182,31 +2140,84 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await BoxService.create(run_id)
     if target.get("service") == "dropbox":
         return await DropboxService.create(target)
+    if target.get("service") == "github":
+        return await GitHubService.create()
+    if target.get("service") == "github_ci":
+        return await GitHubCIService.create()
     if target.get("service") == "slack":
         return await SlackService.create()
     if target.get("service") == "trello":
         return await TrelloService.create()
+    if target.get("service") == "discord":
+        return await DiscordService.create()
     if target.get("service") == "linear":
         return await LinearService.create()
     if target.get("service") == "dify":
         return await DifyService.create(target)
+    if target.get("service") == "langfuse":
+        return await LangfuseService.create()
+    if target.get("service") == "jaeger":
+        return await JaegerService.create()
+    if target.get("service") == "http":
+        return await HttpService.create()
     return None
 
 
-def build_mounts(
+async def build_mounts(
     target: dict, run_id: str, service: "Service | None"
 ) -> tuple[dict[str, object], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, object] = {}
     cleanups: list[Callable[[], Awaitable[None]]] = []
+    built: dict[str, object] = {}
     for mount in target["mounts"]:
-        builder = BUILDERS[mount["resource"]]
-        resource, cleanup = builder(mount, run_id, service)
+        alias_of = mount.get("alias_of")
+        if alias_of is not None:
+            # Two prefixes over one store: the shape that made cross-mount
+            # mv copy an object onto itself and then unlink the source.
+            # Reusing the built resource is the only way to express it,
+            # since every builder otherwise allocates fresh storage.
+            resource = built[alias_of]
+            cleanup = _noop
+        else:
+            builder = BUILDERS[mount["resource"]]
+            # A builder is async only when its resource needs I/O to come
+            # up — github fetches the repo tree. Awaiting whatever the
+            # table returns keeps the other forty builders plain.
+            pair = builder(mount, run_id, service)
+            if inspect.isawaitable(pair):
+                pair = await pair
+            resource, cleanup = pair
+        built[mount["path"]] = resource
         if mount.get("mode") == "read":
             mounts[mount["path"]] = (resource, MountMode.READ)
         else:
             mounts[mount["path"]] = resource
         cleanups.append(cleanup)
     return mounts, cleanups
+
+
+def cli_install(service: "Service | None",
+                cli_name: str) -> tuple[CLISpec, dict[str, object] | None]:
+    """The spec and config to install one CLI under its head word.
+
+    Every CLI here so far talks to an API, so its mock service hands
+    over both the tree and the credentials pointing at itself. `git` is
+    the first with neither: it reads a repository out of a mount, which
+    is what makes it installable from a bare name, so it resolves
+    through the registry the YAML ``clis:`` section uses and installs
+    with no config at all.
+
+    Args:
+        service (Service | None): the target's mock service, None for a
+            target that needs none.
+        cli_name (str): the head word the target declared.
+    """
+    if service is None:
+        return cli_spec_for(cli_name), None
+    # Widen the assert when another service grows a CLI.
+    assert isinstance(service, (DiscordService, EmailService, GwsService,
+                                LinearService, NotionService, SlackService))
+    return service.cli_installs()[cli_name]
 
 
 async def mutate_write(shadow_ws: Workspace, path: str,
@@ -1233,7 +2244,7 @@ async def open_target(
 ) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
-    mounts, cleanups = build_mounts(target, run_id, service)
+    mounts, cleanups = await build_mounts(target, run_id, service)
     agent_id = target.get("agentId")
     if consistency is not None:
         ws = Workspace(mounts,
@@ -1242,6 +2253,14 @@ async def open_target(
                        agent_id=agent_id)
     else:
         ws = Workspace(mounts, mode=MountMode.WRITE, agent_id=agent_id)
+    for cli_name in target.get("clis", []):
+        spec, config = cli_install(service, cli_name)
+        ws.register_cli(cli_name, spec, config)
+    # A target's declared environment. A CLI whose spec reads a variable
+    # (ntn's --notion-version off NOTION_API_VERSION) behaves differently
+    # with and without it, so the conformance runner passes the same map
+    # to the real binary and the comparison stays like for like.
+    ws.env.update(target.get("env", {}))
     return ws, functools.partial(teardown_target, [ws], cleanups, service)
 
 
@@ -1254,12 +2273,18 @@ async def open_consistency(
 ]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
-    read_mounts, read_cleanups = build_mounts(target, run_id, service)
-    shadow_mounts, shadow_cleanups = build_mounts(target, run_id, service)
+    read_mounts, read_cleanups = await build_mounts(target, run_id, service)
+    shadow_mounts, shadow_cleanups = await build_mounts(
+        target, run_id, service)
     read_ws = Workspace(read_mounts,
                         mode=MountMode.WRITE,
                         consistency=consistency)
     shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
+    # Same rule as open_target: a target's declared environment reaches
+    # every workspace a case can run against, or a consistency scenario
+    # would silently run under a different one.
+    read_ws.env.update(target.get("env", {}))
+    shadow_ws.env.update(target.get("env", {}))
     return (
         read_ws,
         functools.partial(mutate_write, shadow_ws),

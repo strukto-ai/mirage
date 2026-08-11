@@ -145,8 +145,17 @@ def test_get_case_word():
 def test_get_case_items():
     items = get_case_items(_first("case x in a) echo a;; b) echo b;; esac"))
     assert len(items) == 2
-    assert items[0][0] == ["a"]
-    assert items[1][0] == ["b"]
+    assert [get_text(p) for p in items[0][0]] == ["a"]
+    assert [get_text(p) for p in items[1][0]] == ["b"]
+
+
+def test_get_case_items_keeps_quoted_patterns_as_nodes():
+    items = get_case_items(
+        _first("case x in 'a'|\"b\"|$'c') echo q;; $p) echo v;; esac"))
+    assert [p.type for p in items[0][0]
+            ] == [NT.RAW_STRING, NT.STRING, NT.ANSI_C_STRING]
+    assert [p.type for p in items[1][0]] == [NT.SIMPLE_EXPANSION]
+    assert [len(item[1]) for item in items] == [1, 1]
 
 
 def test_get_function_name():
@@ -540,6 +549,93 @@ def test_redirect_target_stderr():
     target_node = redirects[0].target_node
     assert target_node is not None
     assert get_text(target_node) == "/err.txt"
+
+
+def test_redirect_target_raw_string():
+    # Single quotes parse as raw_string; the node must ride along or the
+    # expansion layer sees target_node None and falls back to the empty
+    # target, silently writing nowhere.
+    node = _first("echo x > '/out.txt'")
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.RAW_STRING
+
+
+def test_redirect_target_double_quoted_string():
+    node = _first('echo x > "/out.txt"')
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.STRING
+
+
+def test_redirect_target_unquoted_word():
+    node = _first("echo x > /out.txt")
+    _, redirects = get_redirects(node)
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.WORD
+
+
+@pytest.mark.parametrize(
+    "cmd", ["echo x > '/out.txt'", 'echo x > "/out.txt"', "echo x > /out.txt"])
+def test_redirect_target_carried_for_every_quoting_form(cmd: str):
+    # Quoting a redirect target is purely syntactic in bash: all three
+    # forms must reach the expansion layer with a target node.
+    _, redirects = get_redirects(_first(cmd))
+    assert redirects[0].target_node is not None
+
+
+@pytest.mark.parametrize("cmd", [
+    "echo x >> '/out.txt'",
+    "cmd 2> '/err.txt'",
+    "cmd < '/in.txt'",
+    "cmd &> '/both.txt'",
+])
+def test_redirect_raw_string_target_all_operators(cmd: str):
+    # Every operator shares _parse_file_redirect, so a single-quoted
+    # target has to survive on all of them, not just plain `>`.
+    _, redirects = get_redirects(_first(cmd))
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.RAW_STRING
+
+
+def test_herestring_raw_string_target():
+    # `<<< 'text'` shares the same target-type gate as file redirects.
+    node = _first("cat <<< 'hi' > out.txt")
+    _, redirects = get_redirects(node)
+    herestring = [r for r in redirects if r.kind == RedirectKind.HERESTRING]
+    assert len(herestring) == 1
+    target_node = herestring[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.RAW_STRING
+
+
+@pytest.mark.parametrize("cmd,expected_type", [
+    ("echo x > $'/out 1.txt'", NT.ANSI_C_STRING),
+    ('echo x > $"/out.txt"', NT.TRANSLATED_STRING),
+    ("cmd 2>> $'/e.log'", NT.ANSI_C_STRING),
+])
+def test_redirect_dollar_quoted_targets_ride_along(cmd: str,
+                                                   expected_type: NT):
+    # $'...' and $"..." are quoting forms like '...' and "...": a
+    # redirect target in either must reach the expansion layer.
+    _, redirects = get_redirects(_first(cmd))
+    target_node = redirects[0].target_node
+    assert target_node is not None
+    assert target_node.type == expected_type
+
+
+def test_herestring_ansi_c_target():
+    node = _first("cat <<< $'a\\tb' > out.txt")
+    _, redirects = get_redirects(node)
+    herestring = [r for r in redirects if r.kind == RedirectKind.HERESTRING]
+    assert len(herestring) == 1
+    target_node = herestring[0].target_node
+    assert target_node is not None
+    assert target_node.type == NT.ANSI_C_STRING
 
 
 # ── python command parsing ─────────────────────

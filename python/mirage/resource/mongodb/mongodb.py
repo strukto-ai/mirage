@@ -30,6 +30,9 @@ class MongoDBResource(BaseResource):
     accessor: MongoDBAccessor
     name: str = ResourceName.MONGODB
     caches_reads: bool = False
+    # A live store: every readdir must hit the backend, so the index is
+    # not reused across commands. Mirrors the TypeScript resource.
+    index_ttl: float = 0
     PROMPT: str = PROMPT
 
     def __init__(self, config: MongoDBConfig) -> None:
@@ -41,8 +44,8 @@ class MongoDBResource(BaseResource):
 
         for fn in COMMANDS:
             self.register(fn)
-        for fn in MONGODB_VFS_OPS:
-            self.register_op(fn)
+        for op in MONGODB_VFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)

@@ -81,11 +81,17 @@ async def stat(
         if parts[2] == "team.json":
             team_key = "/" + "/".join(parts[:2])
             result = await index.get(team_key)
-            team_id = result.entry.id if result.entry else None
+            if result.entry is None:
+                await _populate_via_parent(accessor, team_key, prefix, index)
+                result = await index.get(team_key)
+                if result.entry is None:
+                    raise enoent(virtual)
             return FileStat(
                 name="team.json",
                 type=FileType.JSON,
-                extra={"team_id": team_id},
+                size=result.entry.extra.get("team_json_size"),
+                modified=result.entry.remote_time or None,
+                extra={"team_id": result.entry.id},
             )
         return FileStat(name=parts[2], type=FileType.DIRECTORY)
 
@@ -99,6 +105,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            size=result.entry.size,
             modified=result.entry.remote_time or None,
             extra={"user_id": result.entry.id},
         )
@@ -117,25 +124,22 @@ async def stat(
             extra={"issue_id": result.entry.id},
         )
 
-    if len(parts) == 5 and parts[0] == "teams" and parts[2] == "issues":
-        if parts[4] == "issue.json":
-            issue_key = "/" + "/".join(parts[:4])
-            result = await index.get(issue_key)
-            issue_id = result.entry.id if result.entry else None
-            return FileStat(
-                name="issue.json",
-                type=FileType.JSON,
-                extra={"issue_id": issue_id},
-            )
-        if parts[4] == "comments.jsonl":
-            issue_key = "/" + "/".join(parts[:4])
-            result = await index.get(issue_key)
-            issue_id = result.entry.id if result.entry else None
-            return FileStat(
-                name="comments.jsonl",
-                type=FileType.TEXT,
-                extra={"issue_id": issue_id},
-            )
+    if (len(parts) == 5 and parts[0] == "teams" and parts[2] == "issues"
+            and parts[4] in {"issue.json", "comments.jsonl"}):
+        result = await index.get(idx_key)
+        if result.entry is None:
+            await _populate_via_parent(accessor, idx_key, prefix, index)
+            result = await index.get(idx_key)
+            if result.entry is None:
+                raise enoent(virtual)
+        return FileStat(
+            name=parts[4],
+            type=(FileType.JSON
+                  if parts[4] == "issue.json" else FileType.TEXT),
+            size=result.entry.size,
+            modified=result.entry.remote_time or None,
+            extra={"issue_id": result.entry.id},
+        )
 
     if len(parts) == 4 and parts[0] == "teams" and parts[2] in {
             "projects", "cycles", "documents"
@@ -154,6 +158,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            size=result.entry.size,
             modified=result.entry.remote_time or None,
             extra={id_field: result.entry.id},
         )

@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import logging
 import posixpath
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gmail.messages import get_attachment, get_message_processed
+from mirage.core.gmail.messages import (get_attachment, get_message_raw,
+                                        message_json_bytes)
 from mirage.core.gmail.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -62,7 +62,5 @@ async def read(
         attachment_id = result.entry.id
         return await get_attachment(accessor.token_manager, message_id,
                                     attachment_id)
-    processed = await get_message_processed(accessor.token_manager,
-                                            result.entry.id)
-    return json.dumps(processed, ensure_ascii=False,
-                      separators=(",", ":")).encode()
+    raw = await get_message_raw(accessor.token_manager, result.entry.id)
+    return message_json_bytes(raw)

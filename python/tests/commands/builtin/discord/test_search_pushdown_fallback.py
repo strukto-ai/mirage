@@ -64,6 +64,7 @@ async def test_grep_emits_token_hint_on_forbidden():
         _out, io = await grep(accessor,
                               paths,
                               "hi",
+                              w=True,
                               index=_fake_index(),
                               args_l=True)
     stderr = (io.stderr or b"").decode()
@@ -86,7 +87,7 @@ async def test_rg_emits_warning_on_rate_limit():
             "mirage.commands.builtin.discord.rg.generic_rg",
             new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
     ):
-        _out, io = await rg(accessor, paths, "hi", index=_fake_index())
+        _out, io = await rg(accessor, paths, "hi", w=True, index=_fake_index())
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr
     # 429 doesn't trigger the perm hint; should still warn

@@ -136,9 +136,21 @@ async def with_mount_prefix(prefix: str,
 
 
 def _virtual(path: str, prefix: str) -> str:
-    if prefix and not path.startswith(prefix):
-        return prefix + path
-    return path
+    """Name `path` against `prefix`, leaving an already-virtual path alone.
+
+    Backends name the mount-relative path ("/report.json") and a few name
+    the virtual one already ("/s3/report.json"), so the two have to be told
+    apart. The test is for a path boundary, not a bare startswith: a mount
+    at /s3 holding s3-report.txt would otherwise look already-prefixed and
+    record as "/s3-report.txt".
+
+    Args:
+        path (str): Mount-relative or already-virtual path.
+        prefix (str): Mount prefix (e.g. "/s3"), empty for the root mount.
+    """
+    if not prefix or path == prefix or path.startswith(prefix + "/"):
+        return path
+    return prefix + path
 
 
 def record(op: str,
@@ -175,7 +187,6 @@ def record(op: str,
             bytes=nbytes,
             timestamp=int(time.time() * 1000),
             duration_ms=elapsed,
-            mount_prefix=prefix,
             fingerprint=fingerprint,
             revision=revision,
         ))
@@ -220,7 +231,6 @@ def record_stream(op: str,
         bytes=0,
         timestamp=int(time.time() * 1000),
         duration_ms=0,
-        mount_prefix=prefix,
         fingerprint=fingerprint,
         revision=revision,
     )
@@ -269,7 +279,7 @@ def revision_for(path: str) -> str | None:
     """Return the revision pin for ``path`` if one is active.
 
     Args:
-        path (str): Virtual path (mount_prefix + rel_path).
+        path (str): Virtual path, mount prefix included.
 
     Returns:
         str | None: The pinned revision, or None if no revisions

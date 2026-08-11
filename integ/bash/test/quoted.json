@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "dbl_mixed_quoting_rhs_miss",
+      "seq": 930200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=abc; [[ $x == \"a*\"* ]] && echo hit || echo miss",
+      "expect": {
+        "exit": 0,
+        "stdout": "miss\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_mixed_quoting_rhs_hit",
+      "seq": 930201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x='a*c'; [[ $x == \"a*\"* ]] && echo hit || echo miss",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_concatenated_quoted_segments",
+      "seq": 930202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=aXb; [[ $x == \"a\"*\"b\" ]] && echo hit || echo miss",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_wholly_quoted_rhs_literal",
+      "seq": 930203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=ab; [[ $x == \"a*\" ]] && echo hit || echo miss",
+      "expect": {
+        "exit": 0,
+        "stdout": "miss\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_negated_quoted_rhs",
+      "seq": 930204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=ab; [[ $x != \"a*\" ]] && echo hit || echo miss",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_ansi_c_rhs_literal",
+      "seq": 930205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$'a\\tb'; [[ $x == $'a\\tb' ]] && echo hit || echo miss",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

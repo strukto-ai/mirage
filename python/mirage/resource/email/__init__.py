@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.email.config import EmailConfig
+from mirage.core.email.config import EmailConfig
 
 __all__ = ["EmailConfig", "EmailResource"]
 

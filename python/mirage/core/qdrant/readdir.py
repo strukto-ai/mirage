@@ -12,27 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.qdrant.query import (distinct_values, list_tables,
                                       rows_matching)
+from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.core.qdrant.scope import QdrantGroupScope, ScopeLevel, detect_scope
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
-
-def is_dir_name(child: str, config) -> bool:
-    # Row files are recognized by extension, so classification never needs
-    # the stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    if name.endswith(".json"):
-        return False
-    if config.text_field and name.endswith(".txt"):
-        return False
-    if config.blob_field and name.endswith("." + config.blob_ext):
-        return False
-    return True
+logger = logging.getLogger(__name__)
 
 
 def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
@@ -45,6 +36,56 @@ def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
         if config.blob_field and row.get(config.blob_field) is not None:
             names.append(f"{rid}.{config.blob_ext}")
     return names
+
+
+def _blob_size(value: JsonValue) -> int | None:
+    # A payload whose blob column holds something undecodable must not take
+    # the whole listing down with it: leave the size unknown and let read()
+    # raise the same error it always did.
+    try:
+        return len(blob_bytes(value))
+    except ValueError as exc:
+        logger.debug("qdrant: unsizeable blob value (%s); size stays unknown",
+                     exc)
+        return None
+
+
+def _row_entries(rows: list[dict[str, Any]],
+                 config) -> list[tuple[str, IndexEntry]]:
+    # The scroll already carries every payload, so each file's exact
+    # rendered size is free here; stat serves it from the index instead of
+    # refetching one row per file.
+    entries: list[tuple[str, IndexEntry]] = []
+    for row in rows:
+        rid = str(row[config.id_field])
+        entries.append((f"{rid}.json",
+                        IndexEntry(
+                            id=rid,
+                            name=f"{rid}.json",
+                            resource_type="qdrant/row_json",
+                            vfs_name=f"{rid}.json",
+                            size=len(render_json(row, config)),
+                        )))
+        if config.text_field and row.get(config.text_field) is not None:
+            entries.append((f"{rid}.txt",
+                            IndexEntry(
+                                id=rid,
+                                name=f"{rid}.txt",
+                                resource_type="qdrant/row_text",
+                                vfs_name=f"{rid}.txt",
+                                size=len(render_text(row, config)),
+                            )))
+        if config.blob_field and row.get(config.blob_field) is not None:
+            blob_name = f"{rid}.{config.blob_ext}"
+            entries.append((blob_name,
+                            IndexEntry(
+                                id=rid,
+                                name=blob_name,
+                                resource_type="qdrant/row_blob",
+                                vfs_name=blob_name,
+                                size=_blob_size(row[config.blob_field]),
+                            )))
+    return entries
 
 
 async def readdir(
@@ -71,6 +112,9 @@ async def readdir(
             rows = await rows_matching(accessor, scope.table, scope.filters,
                                        config.max_rows)
             names = _row_files(rows, config)
+            # find-style callers pass index=None; there is nothing to seed.
+            if index is not None:
+                await index.set_dir(base, _row_entries(rows, config))
         return [f"{base}/{name}" for name in names]
 
     raise FileNotFoundError(path.virtual)

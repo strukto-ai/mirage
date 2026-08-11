@@ -31,12 +31,21 @@ class RAMWatchQueue:
     - CREATE then UPDATE stays CREATE (the consumer never saw it);
     - CREATE then DELETE cancels out;
     - UPDATE then DELETE becomes DELETE;
-    - DELETE then CREATE becomes UPDATE (the path was replaced).
+    - DELETE then CREATE becomes UPDATE (the path was replaced);
+    - MOVE then UPDATE stays MOVE (the source is still gone).
+
+    A MOVE touches two paths, so it also absorbs whatever was pending at
+    its source: an unobserved CREATE there makes the destination a plain
+    CREATE, a pending MOVE chains into one MOVE from the original
+    source, and deleting a moved destination leaves a DELETE on the
+    source, the only path the consumer ever saw.
 
     On overflow the default policy collapses everything to one UNKNOWN
     change per watch root: precision degrades to "re-inventory these
     subtrees", dirtiness is never lost. Per-root matters for multi-root
-    watches, where the dirty paths may sit under any of the roots.
+    watches, where the dirty paths may sit under any of the roots. An
+    UNKNOWN marker outlives later changes to the same path, so the
+    re-inventory signal cannot be merged away before a pop sees it.
     """
 
     def __init__(
@@ -76,6 +85,8 @@ class RAMWatchQueue:
         """
         if old is None:
             return new
+        if old.kind is FileChangeKind.UNKNOWN:
+            return old
         if old.kind is FileChangeKind.CREATE:
             if new.kind is FileChangeKind.DELETE:
                 return None
@@ -83,6 +94,13 @@ class RAMWatchQueue:
                              path=new.path,
                              timestamp=new.timestamp,
                              previous_path=new.previous_path,
+                             metadata=new.metadata)
+        if old.kind is FileChangeKind.MOVE \
+                and new.kind is not FileChangeKind.DELETE:
+            return FileEvent(kind=FileChangeKind.MOVE,
+                             path=new.path,
+                             timestamp=new.timestamp,
+                             previous_path=old.previous_path,
                              metadata=new.metadata)
         if old.kind is FileChangeKind.DELETE \
                 and new.kind is FileChangeKind.CREATE:
@@ -93,6 +111,38 @@ class RAMWatchQueue:
                              metadata=new.metadata)
         return new
 
+    def _absorb_source(self, change: FileEvent) -> FileEvent:
+        """Fold whatever is pending at a MOVE's source into the move.
+
+        Args:
+            change (FileEvent): Change about to be merged.
+
+        Returns:
+            FileEvent: The change to key under its own path, rewritten
+            when the source's pending state changes what the consumer
+            should be told.
+        """
+        if change.kind is not FileChangeKind.MOVE \
+                or change.previous_path is None:
+            return change
+        source = self._pending.get(change.previous_path.virtual)
+        if source is None or source.kind is FileChangeKind.UNKNOWN:
+            return change
+        del self._pending[change.previous_path.virtual]
+        if source.kind is FileChangeKind.CREATE:
+            return FileEvent(kind=FileChangeKind.CREATE,
+                             path=change.path,
+                             timestamp=change.timestamp,
+                             metadata=change.metadata)
+        if source.kind is FileChangeKind.MOVE \
+                and source.previous_path is not None:
+            return FileEvent(kind=FileChangeKind.MOVE,
+                             path=change.path,
+                             timestamp=change.timestamp,
+                             previous_path=source.previous_path,
+                             metadata=change.metadata)
+        return change
+
     async def push(self, change: FileEvent) -> None:
         """Merge ``change`` into the pending map; apply the overflow
         policy when the cap is exceeded.
@@ -102,10 +152,21 @@ class RAMWatchQueue:
         """
         if self._closed:
             return
-        key = change.path.virtual
-        merged = self._merge(self._pending.pop(key, None), change)
-        if merged is not None:
-            self._pending[key] = merged
+        event = self._absorb_source(change)
+        key = event.path.virtual
+        old = self._pending.pop(key, None)
+        if old is not None and old.kind is FileChangeKind.MOVE \
+                and old.previous_path is not None \
+                and event.kind is FileChangeKind.DELETE:
+            source = old.previous_path.virtual
+            if source not in self._pending:
+                self._pending[source] = FileEvent(kind=FileChangeKind.DELETE,
+                                                  path=old.previous_path,
+                                                  timestamp=event.timestamp)
+        else:
+            merged = self._merge(old, event)
+            if merged is not None:
+                self._pending[key] = merged
         if len(self._pending) > self._max_pending:
             if self._on_overflow is OverflowPolicy.DROP_OLDEST:
                 oldest = next(iter(self._pending))

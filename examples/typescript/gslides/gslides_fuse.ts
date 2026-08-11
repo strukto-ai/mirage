@@ -45,7 +45,7 @@ function buildConfig(): GSlidesConfig {
 async function main(): Promise<void> {
   const resource = new GSlidesResource(buildConfig());
   const ws = new Workspace({
-    "/gslides": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/gslides": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

@@ -16,11 +16,10 @@ from typing import Any
 
 import tree_sitter
 
-from mirage.commands.builtin.utils.safeguard import run_with_timeout
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
 from mirage.io.types import ByteSource, materialize
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
@@ -28,6 +27,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.executor.jobs import handle_background
+from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -151,9 +151,7 @@ async def handle_connection(
     children = [left_exec]
 
     if op == NT.AND:
-        left_bytes = await apply_barrier(left_stdout, left_io,
-                                         BarrierPolicy.VALUE)
-        session.last_exit_code = left_io.exit_code
+        left_bytes = await finish_statement(left_stdout, left_io, session)
         if left_io.exit_code != 0:
             # The failing command is left of the final `&&`, which bash
             # exempts from `set -e`.
@@ -174,9 +172,7 @@ async def handle_connection(
                                                children=children)
 
     if op == NT.OR:
-        left_bytes = await apply_barrier(left_stdout, left_io,
-                                         BarrierPolicy.VALUE)
-        session.last_exit_code = left_io.exit_code
+        left_bytes = await finish_statement(left_stdout, left_io, session)
         if left_io.exit_code == 0:
             return left_bytes, left_io, ExecutionNode(
                 op="||", exit_code=left_io.exit_code, children=children)
@@ -194,8 +190,7 @@ async def handle_connection(
                                                children=children)
 
     # semicolon or other
-    left_bytes = await apply_barrier(left_stdout, left_io, BarrierPolicy.VALUE)
-    session.last_exit_code = left_io.exit_code
+    left_bytes = await finish_statement(left_stdout, left_io, session)
     try:
         right_stdout, right_io, right_exec = await execute_node(
             right, session, stdin, call_stack)
@@ -237,16 +232,7 @@ async def handle_subshell(
             (bash forks: the parent's table never sees these jobs).
         agent_id (str | None): agent identity for job bookkeeping.
     """
-    saved_cwd = session.cwd
-    saved_env = dict(session.env)
-    saved_options = dict(session.shell_options)
-    saved_readonly = set(session.readonly_vars)
-    saved_arrays = {k: list(v) for k, v in session.arrays.items()}
-    saved_functions = dict(session.functions)
-    saved_positional = list(getattr(session, "positional_args", None) or [])
-    saved_last_bg_job = session.last_bg_job_id
-    saved_getopts_pos = session._getopts_pos
-    saved_getopts_optind = session._getopts_optind
+    saved = session.snapshot()
     try:
         all_stdout: list[Any] = []
         merged_io = IOResult()
@@ -263,6 +249,8 @@ async def handle_subshell(
                     execute_node, child, None, session, job_table, agent_id
                     or "", stdin, call_stack)
                 merged_io = await merged_io.merge(io)
+                # Seed $? for later body commands (mirrors program loop).
+                session.last_exit_code = io.exit_code
                 if stdout is not None:
                     all_stdout.append(stdout)
                 i += 2
@@ -280,10 +268,12 @@ async def handle_subshell(
                                   stderr=sig.stderr or None)
                 merged_io = await merged_io.merge(sig_io)
                 merged_io.exit_code = sig.contained_code
+                session.last_exit_code = sig.contained_code
                 last_exec = ExecutionNode(command="()",
                                           exit_code=sig.contained_code,
                                           stderr=sig.stderr)
                 break
+            stdout = await finish_statement(stdout, io, session)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
@@ -297,13 +287,4 @@ async def handle_subshell(
         combined = async_chain(*all_stdout) if all_stdout else None
         return combined, merged_io, last_exec
     finally:
-        session.cwd = saved_cwd
-        session.env = saved_env
-        session.shell_options = saved_options
-        session.readonly_vars = saved_readonly
-        session.arrays = saved_arrays
-        session.functions = saved_functions
-        session.positional_args = saved_positional
-        session.last_bg_job_id = saved_last_bg_job
-        session._getopts_pos = saved_getopts_pos
-        session._getopts_optind = saved_getopts_optind
+        session.restore(saved)

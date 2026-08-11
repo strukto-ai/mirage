@@ -12,6 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# The per-command metadata cases this file used to run now live in
+# integ/unix/meta and integ/unix/meta_overlay, where the JSON battery runs
+# them on 22 backends instead of the four here. What is left are the three
+# scenarios the declarative harness cannot express: it can run commands and
+# stat paths, but it cannot snapshot a workspace, reload it onto a fresh
+# resource, or mutate a backend out of band. Retiring these needs snapshot
+# and namespace support in the harness, not another case file.
+
 import asyncio
 import logging
 import os
@@ -24,18 +32,24 @@ from pathlib import Path
 import boto3
 from moto.server import ThreadedMotoServer
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from cases import meta_stat_line  # noqa: E402
-from cases import run_meta_cases  # noqa: E402
-from cases import run_meta_overlay_cases  # noqa: E402
+# Importing mirage while this directory is on sys.path resolves the
+# `redis` package to integ/redis.py (mirage swallows the resulting
+# ImportError as "redis extra not installed", and the half-executed
+# shadow module strips this directory from sys.path, breaking the
+# caller's next sibling import). Import mirage with the directory off
+# the path, mirroring integ/redis.py's own guard.
+_INTEG_DIR = str(Path(__file__).resolve().parent)
+_INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
+_ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
+sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
 
 from mirage import MountMode, Workspace  # noqa: E402
-from mirage.resource.disk import DiskResource  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
-from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
-from mirage.types import ConsistencyPolicy, PathSpec  # noqa: E402
+from mirage.types import ConsistencyPolicy, FileStat, PathSpec  # noqa: E402
+
+if _ON_PATH:
+    sys.path.insert(0, _INTEG_DIR)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 BUCKET = "mirage-integ-meta"
@@ -44,7 +58,26 @@ CREDS = dict(aws_access_key_id="testing",
              region_name="us-east-1")
 
 
-async def run_overlay_snapshot_roundtrip(ws: Workspace, fresh) -> None:
+def _meta_field(st: FileStat, field: str) -> str:
+    if field == "mode":
+        value = oct(st.mode)[2:] if st.mode is not None else "-"
+    elif field == "uid":
+        value = str(st.uid) if st.uid is not None else "-"
+    elif field == "gid":
+        value = str(st.gid) if st.gid is not None else "-"
+    else:
+        # First 19 chars ("2026-01-02T15:30:00") so the Z vs +00:00 suffix
+        # never reaches the byte-diffed truth file.
+        value = st.modified[:19] if st.modified else "-"
+    return f"{field}={value}"
+
+
+def meta_stat_line(st: FileStat, fields: tuple[str, ...]) -> str:
+    return " ".join(_meta_field(st, field) for field in fields)
+
+
+async def run_overlay_snapshot_roundtrip(ws: Workspace,
+                                         fresh: S3Resource) -> None:
     # Overlay attrs live in namespace NODES, so they must survive a
     # snapshot even though the s3 resource is rebuilt fresh at load
     # (s3 snapshots redact creds and require a resources= override).
@@ -62,7 +95,7 @@ async def run_overlay_snapshot_roundtrip(ws: Workspace, fresh) -> None:
     shutil.rmtree(snap.parent)
 
 
-async def run_overlay_orphan_gc(config) -> None:
+async def run_overlay_orphan_gc(config: S3Config) -> None:
     # A chmod on a slot-less backend (s3) creates an attribute overlay in
     # the namespace. When the object is deleted out-of-band (another agent,
     # the raw API), the overlay is orphaned. Under ALWAYS, a stat that the
@@ -95,35 +128,13 @@ async def run_snapshot_roundtrip() -> None:
 
 
 async def main() -> None:
-    print("##### ram #####")
-    await run_meta_cases(
-        Workspace({"/data": RAMResource()}, mode=MountMode.WRITE))
-
-    print("##### disk #####")
-    root = tempfile.mkdtemp(prefix="mirage-integ-meta-disk-")
-    try:
-        await run_meta_cases(
-            Workspace({"/data": DiskResource(root=root)},
-                      mode=MountMode.WRITE))
-    finally:
-        shutil.rmtree(root)
-
-    print("##### redis #####")
-    prefix = f"mirage-integ-meta-{uuid.uuid4().hex[:8]}/"
-    resource = RedisResource(url=REDIS_URL, key_prefix=prefix)
-    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
-    try:
-        await run_meta_cases(ws)
-    finally:
-        await ws.execute("rm -rf /data/metad")
-
-    print("##### s3 (overlay) #####")
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
     server.start()
     host, port = server.get_host_and_port()
     endpoint = f"http://{host}:{port}"
-    config = S3Config(bucket=BUCKET,
+    bucket = f"{BUCKET}-{uuid.uuid4().hex[:8]}"
+    config = S3Config(bucket=bucket,
                       region="us-east-1",
                       endpoint_url=endpoint,
                       aws_access_key_id="testing",
@@ -131,9 +142,8 @@ async def main() -> None:
                       path_style=True)
     try:
         boto3.client("s3", endpoint_url=endpoint,
-                     **CREDS).create_bucket(Bucket=BUCKET)
+                     **CREDS).create_bucket(Bucket=bucket)
         s3_ws = Workspace({"/data": S3Resource(config)}, mode=MountMode.WRITE)
-        await run_meta_overlay_cases(s3_ws)
         await run_overlay_snapshot_roundtrip(s3_ws, S3Resource(config))
         await run_overlay_orphan_gc(config)
     finally:

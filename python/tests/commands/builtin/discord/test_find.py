@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.discord import COMMANDS
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 from mirage.types import PathSpec
 
 GUILDS = [{"id": "G1", "name": "myguild"}]

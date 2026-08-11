@@ -23,8 +23,11 @@ try:
 except ImportError:
     fuse = None
 
+from mirage.fuse.backend import MountBackend, prepare_backend
+from mirage.fuse.darwin import install_macfuse_extensions
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
+from mirage.types import JsonValue
 from mirage.workspace.session.session import Session
 
 
@@ -38,7 +41,10 @@ def _prepare_mountpoint(mountpoint: str) -> None:
         os.rmdir(mountpoint)
 
 
-def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
+def _run_fuse(fs: MirageFS,
+              mountpoint: str,
+              foreground: bool,
+              backend: MountBackend = MountBackend.FUSE) -> None:
     # direct_io: the kernel ignores st_size and keeps issuing reads until the
     # backend returns EOF, which is what makes size-unknown (API-backed) files
     # readable by tools that never fstat (cat, grep).
@@ -49,13 +55,28 @@ def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
     # uid=-1/gid=-1 (win32): the WinFsp-FUSE builtin that presents all files
     # as owned by the mounting user; POSIX uid/gid values reported by getattr
     # have no meaningful SID mapping on Windows (see the WinFsp FAQ).
+    # macFUSE needs its Darwin-only callbacks (setattr_x, renamex) declared
+    # before the operations struct is built; without them the FSKit shim
+    # fails every create/mkdir with ENOSYS after the op already applied,
+    # and rename never reaches userspace. No-op off macOS.
+    install_macfuse_extensions()
     win_opts = {"uid": -1, "gid": -1} if sys.platform == "win32" else {}
+    opts: dict[str, JsonValue] = {"attr_timeout": 0}
+    if backend is MountBackend.FSKIT:
+        # The recipe verified on a real macFUSE 5.x FSKit mount (issue #82):
+        # backend=fskit plus a volname, and NO direct_io. Do not "restore"
+        # direct_io here on the theory that it is merely inert on this path;
+        # the only reported working mount omits it, and this is not a
+        # configuration we can test in CI.
+        opts["backend"] = backend.value
+        opts["volname"] = os.path.basename(mountpoint.rstrip("/"))
+    else:
+        opts["direct_io"] = True
     fuse.FUSE(fs,
               mountpoint,
               nothreads=True,
               foreground=foreground,
-              direct_io=True,
-              attr_timeout=0,
+              **opts,
               **win_opts)
 
 
@@ -68,8 +89,14 @@ def _await_ready(thread: threading.Thread,
         # _prepare_mountpoint removed the directory and WinFsp recreates it
         # when the filesystem is live, so bare existence is the ready signal
         # (os.path.ismount does not recognize WinFsp directory mounts).
-        if os.path.ismount(mountpoint) or (sys.platform == "win32"
-                                           and os.path.lexists(mountpoint)):
+        # FSKit does NOT get that shortcut: macFUSE creates the /Volumes
+        # entry while mounting and leaves the empty directory behind when
+        # the handoff fails, so existence there says nothing about liveness.
+        # The macOS integ job caught exactly that, reporting a failed mount
+        # as a confusing ENOENT on the first read.
+        if os.path.ismount(mountpoint):
+            return
+        if sys.platform == "win32" and os.path.lexists(mountpoint):
             return
         if not thread.is_alive():
             raise RuntimeError(
@@ -81,14 +108,32 @@ def _await_ready(thread: threading.Thread,
         f"{timeout:g}s")
 
 
-def mount_background(ops: Ops,
-                     mountpoint: str,
-                     root_prefix: str = "",
-                     session: Session | None = None) -> threading.Thread:
+def mount_background(
+        ops: Ops,
+        mountpoint: str,
+        root_prefix: str = "",
+        session: Session | None = None,
+        backend: str | MountBackend = MountBackend.FUSE) -> threading.Thread:
+    """Mount in a background thread and return once the tree is live.
+
+    Args:
+        ops (Ops): the op facade to serve.
+        mountpoint (str): where to mount.
+        root_prefix (str): mount root; non-empty scopes the tree.
+        session (Session | None): bind ops to this session's mount grants.
+        backend (str | MountBackend): kernel interface to use.
+
+    Returns:
+        threading.Thread: the thread serving the mount.
+    """
+    resolved = prepare_backend(backend,
+                               ops=ops,
+                               mountpoint=mountpoint,
+                               root_prefix=root_prefix)
     fs = MirageFS(ops, root_prefix=root_prefix, session=session)
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(target=_run_fuse,
-                         args=(fs, mountpoint, True),
+                         args=(fs, mountpoint, True, resolved),
                          daemon=True)
     t.start()
     _await_ready(t, mountpoint)
@@ -100,7 +145,9 @@ def mount(ops: Ops | None = None,
           foreground: bool = True,
           fs: MirageFS | None = None,
           daemon: bool = False,
-          post_fork=None) -> None:
+          post_fork=None,
+          backend: str | MountBackend = MountBackend.FUSE) -> None:
+    resolved = prepare_backend(backend, ops=ops, mountpoint=mountpoint)
     if fs is None:
         if ops is None:
             raise ValueError("mount requires either ops or a prebuilt fs")
@@ -113,11 +160,11 @@ def mount(ops: Ops | None = None,
         os.setsid()
         if post_fork:
             post_fork()
-        _run_fuse(fs, mountpoint, foreground=True)
+        _run_fuse(fs, mountpoint, True, resolved)
         return
     t = threading.Thread(
         target=_run_fuse,
-        args=(fs, mountpoint, foreground),
+        args=(fs, mountpoint, foreground, resolved),
         daemon=True,
     )
     if post_fork:

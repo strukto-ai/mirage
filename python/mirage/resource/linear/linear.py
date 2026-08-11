@@ -15,11 +15,11 @@
 from typing import Any
 
 from mirage.accessor.linear import LinearAccessor
+from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.read import read
 from mirage.core.linear.readdir import readdir
 from mirage.core.linear.stat import stat
 from mirage.resource.base import BaseResource
-from mirage.resource.linear.config import LinearConfig
 from mirage.resource.linear.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
@@ -38,6 +38,10 @@ class LinearResource(BaseResource):
     accessor: LinearAccessor
     name: str = ResourceName.LINEAR
     caches_reads: bool = True
+    # Every file is sized at its parent's readdir from the listing payload
+    # (comments.jsonl via one bounded comments call), so stat always reports
+    # the rendered byte length and fskit mounts serve exact reads.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _LINEAR_OPS
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
@@ -51,8 +55,8 @@ class LinearResource(BaseResource):
 
         for fn in COMMANDS:
             self.register(fn)
-        for fn in LINEAR_VFS_OPS:
-            self.register_op(fn)
+        for op in LINEAR_VFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)

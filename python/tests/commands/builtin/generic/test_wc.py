@@ -208,26 +208,27 @@ def test_format_wc_default_with_label():
 
 def test_format_wc_args_l():
     counts = WCCounts(lines=2, words=4, bytes_=20)
-    assert format_wc(counts, args_l=True) == "2"
-    assert format_wc(counts, args_l=True, label="/f.txt") == "2 /f.txt"
+    assert format_wc(counts, lines=True) == "2"
+    assert format_wc(counts, lines=True, label="/f.txt") == "2 /f.txt"
 
 
 def test_format_wc_w_c_m():
     counts = WCCounts(lines=2, words=4, bytes_=20, chars=18)
-    assert format_wc(counts, w=True) == "4"
-    assert format_wc(counts, c=True) == "20"
-    assert format_wc(counts, m=True) == "18"
+    assert format_wc(counts, words=True) == "4"
+    assert format_wc(counts, bytes_=True) == "20"
+    assert format_wc(counts, chars=True) == "18"
 
 
 def test_format_wc_combines_lines_and_max_line_length():
     counts = WCCounts(lines=2, max_line_length=11)
-    assert format_wc(counts, args_l=True, L=True) == "      2      11"
+    assert format_wc(counts, lines=True,
+                     max_line_length=True) == "      2      11"
 
 
 def test_format_wc_combines_selected_counts_in_canonical_order():
     counts = WCCounts(lines=2, words=4, bytes_=20, chars=18)
-    assert format_wc(counts, args_l=True, w=True, c=True,
-                     m=True) == "      2       4      18      20"
+    assert format_wc(counts, lines=True, words=True, bytes_=True,
+                     chars=True) == "      2       4      18      20"
 
 
 def test_wc_counts_merge():
@@ -248,7 +249,7 @@ async def test_format_multi_single_path_emits_trailing_newline():
     async def fake_read(_path):
         return b"hello\n"
 
-    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    out, err = await format_multi(paths, read=fake_read, lines=True)
     assert out == b"1 /a.txt\n"
     assert err == b""
 
@@ -264,7 +265,7 @@ async def test_format_multi_multi_path_emits_total_and_trailing_newline():
     async def fake_read(path):
         return data[path.virtual]
 
-    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    out, err = await format_multi(paths, read=fake_read, lines=True)
     assert err == b""
     assert out.endswith(b"\n")
     lines = out.decode().rstrip("\n").split("\n")
@@ -278,7 +279,7 @@ async def test_format_multi_accepts_sync_read_returning_bytes():
     def sync_read(_path):
         return b"x\n"
 
-    out, err = await format_multi(paths, read=sync_read, args_l=True)
+    out, err = await format_multi(paths, read=sync_read, lines=True)
     assert out == b"1 /a.txt\n"
     assert err == b""
 
@@ -289,7 +290,7 @@ async def test_format_multi_empty_paths_returns_empty():
     async def fake_read(_path):
         return b""
 
-    out, err = await format_multi([], read=fake_read, args_l=True)
+    out, err = await format_multi([], read=fake_read, lines=True)
     assert out == b""
     assert err == b""
 
@@ -306,7 +307,7 @@ async def test_format_multi_missing_operand_reports_and_totals():
             raise FileNotFoundError(path.virtual)
         return b"hello\n"
 
-    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    out, err = await format_multi(paths, read=fake_read, lines=True)
     assert out == b"1 /a.txt\n1 total\n"
     assert err == b"wc: /m.txt: No such file or directory\n"
 
@@ -321,7 +322,7 @@ async def test_format_multi_all_missing_zero_total():
     async def fake_read(path):
         raise FileNotFoundError(path.virtual)
 
-    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    out, err = await format_multi(paths, read=fake_read, lines=True)
     assert out == b"0 total\n"
     assert err == (b"wc: /m1.txt: No such file or directory\n"
                    b"wc: /m2.txt: No such file or directory\n")
@@ -336,6 +337,6 @@ async def _async_byte_read(_path):
 async def test_format_multi_accepts_async_iterator_read():
     paths = [PathSpec.from_str_path("/a.txt")]
 
-    out, err = await format_multi(paths, read=_async_byte_read, args_l=True)
+    out, err = await format_multi(paths, read=_async_byte_read, lines=True)
     assert out == b"1 /a.txt\n"
     assert err == b""

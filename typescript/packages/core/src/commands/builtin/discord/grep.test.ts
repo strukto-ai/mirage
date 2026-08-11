@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runGrep(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = DISCORD_GREP[0]
@@ -82,7 +82,7 @@ describe('discord grep', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('/guilds/G1/messages/search')
@@ -123,7 +123,7 @@ describe('discord grep', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { index: idx, transport },
     )
     const lines = out.stdout.split('\n').filter((l) => l !== '')

@@ -272,15 +272,13 @@ def test_resource_get_state_redacts(mod, cls, cfg_cls, kwargs, leaks):
     assert "<REDACTED>" in blob
 
 
-def test_github_resource_get_state_redacts(monkeypatch):
+def test_github_resource_get_state_redacts():
     from mirage.resource.github import GitHubConfig, GitHubResource
-    monkeypatch.setattr(
-        "mirage.resource.github.github.fetch_default_branch_sync",
-        lambda *a, **k: "main")
-    monkeypatch.setattr("mirage.resource.github.github.fetch_tree_sync",
-                        lambda *a, **k: ({}, False))
+
+    # No fetch to stub: the constructor takes the tree, so building one
+    # for a state check costs nothing.
     cfg = GitHubConfig(token="GH-TOKEN-LEAK")
-    p = GitHubResource(cfg, owner="o", repo="r", ref="main")
+    p = GitHubResource(cfg, "o", "r", "main", "main", {})
     state = p.get_state()
     assert state["config"]["token"] == "<REDACTED>"
     assert "redacted_fields" not in state

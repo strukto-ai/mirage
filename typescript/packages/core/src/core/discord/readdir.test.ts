@@ -20,6 +20,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './_client.ts'
 import { dateRangeDescending, readdir, snowflakeToDate } from './readdir.ts'
+import { historyJsonlBytes, memberJsonBytes } from './render.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -278,6 +279,66 @@ describe('readdir /<guild>/members', () => {
     expect(lookup.entry?.resourceType).toBe('discord/member')
     expect(lookup.entry?.name).toBe('alice')
   })
+
+  it('stores the rendered member size on each listing entry', async () => {
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/discord', [
+      [
+        'My Server__G1',
+        new IndexEntry({
+          id: 'G1',
+          name: 'My Server',
+          resourceType: 'discord/guild',
+          vfsName: 'My Server__G1',
+        }),
+      ],
+    ])
+    const member = { user: { id: 'U1', username: 'alice' }, nick: 'al' }
+    const t = new FakeDiscordTransport((_m, endpoint) =>
+      endpoint === '/guilds/G1/members' ? [member] : null,
+    )
+    await readdir(
+      new DiscordAccessor(t),
+      spec('/mnt/discord/My Server__G1/members', '/mnt/discord'),
+      idx,
+    )
+    const lookup = await idx.get('/mnt/discord/My Server__G1/members/alice__U1.json')
+    expect(lookup.entry?.size).toBe(memberJsonBytes(member).byteLength)
+  })
+})
+
+describe('readdir /<guild>/channels/<ch>/<date>', () => {
+  it('stores the rendered chat.jsonl size on the date listing', async () => {
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/discord/My Server__G1/channels', [
+      [
+        'general__C1',
+        new IndexEntry({
+          id: 'C1',
+          name: 'general',
+          resourceType: 'discord/channel',
+          vfsName: 'general__C1',
+          remoteTime: '175928847299117056',
+        }),
+      ],
+    ])
+    const messages = [
+      { id: '1', content: 'hello', attachments: [] },
+      { id: '2', content: 'world', attachments: [] },
+    ]
+    const t = new FakeDiscordTransport((_m, endpoint) =>
+      endpoint === '/channels/C1/messages' ? messages : null,
+    )
+    await readdir(
+      new DiscordAccessor(t),
+      spec('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30', '/mnt/discord'),
+      idx,
+    )
+    const lookup = await idx.get(
+      '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
+    )
+    expect(lookup.entry?.size).toBe(historyJsonlBytes(messages).byteLength)
+  })
 })
 
 describe('readdir /<guild>/channels/<ch>', () => {
@@ -396,15 +457,33 @@ describe('readdir /<guild>/channels/<ch>', () => {
 })
 
 describe('readdir unrecognized paths', () => {
-  it('returns [] for non-date 4-segment paths', async () => {
+  it('raises ENOENT for non-date 4-segment paths', async () => {
     const idx = new RAMIndexCacheStore()
-    // 4-segment with non-date last part — must not match date_dir rule
+    // 4-segment with non-date last part — must not match the date_dir rule,
+    // and an unrecognized shape is ENOENT rather than an empty listing that
+    // reads as a real, empty directory.
     const t = new FakeDiscordTransport(() => null)
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1/extra', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual([])
+    await expect(
+      readdir(
+        new DiscordAccessor(t),
+        spec('/mnt/discord/My Server__G1/channels/general__C1/extra', '/mnt/discord'),
+        idx,
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('raises ENOTDIR for a file path', async () => {
+    const idx = new RAMIndexCacheStore()
+    const t = new FakeDiscordTransport(() => null)
+    await expect(
+      readdir(
+        new DiscordAccessor(t),
+        spec(
+          '/mnt/discord/My Server__G1/channels/general__C1/2026-06-01/chat.jsonl',
+          '/mnt/discord',
+        ),
+        idx,
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 })

@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import posixpath
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.email._client import fetch_attachment, fetch_message
+from mirage.core.email.render import message_json_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -55,4 +55,4 @@ async def read(
     folder = parts[1] if prefix else parts[0]
     uid = result.entry.id
     msg = await fetch_message(accessor, folder, uid)
-    return json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode()
+    return message_json_bytes(msg)

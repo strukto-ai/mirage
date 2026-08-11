@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode } from '@struktoai/mirage-core'
+import { MountMode, SLACK } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { SlackResource } from './slack.ts'
@@ -131,7 +131,7 @@ describe('SlackResource integration', () => {
     }
   })
 
-  it('slack-get-users command returns filtered users', async () => {
+  it('the slack CLI list-members verb returns filtered users', async () => {
     globalThis.fetch = vi.fn((url: string | URL | Request) => {
       const u = urlOf(url)
       if (u.includes('users.list')) {
@@ -151,8 +151,9 @@ describe('SlackResource integration', () => {
 
     const slack = new SlackResource({ token: 'xoxb-test' })
     const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
+    ws.registerCli('slack', SLACK, { token: 'xoxb-test' })
     try {
-      const result = await ws.execute('slack-get-users --query alice')
+      const result = await ws.execute('slack list-members --query alice')
       expect(result.exitCode).toBe(0)
       const users = JSON.parse(result.stdoutText) as { id: string; name: string }[]
       expect(users).toHaveLength(1)

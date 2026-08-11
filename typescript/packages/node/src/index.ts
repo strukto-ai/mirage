@@ -59,6 +59,18 @@ export {
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/redis/file.ts'
 export { FuseManager } from './workspace/fuse.ts'
 export { MirageFS, type MirageFSOptions, type FuseAttr } from './fuse/fs.ts'
+export { MountCore, type MountCoreOptions } from './fuse/core.ts'
+export { classifyErrno, classifyError } from './fuse/errors.ts'
+export {
+  checkMountpoint,
+  checkPlatform,
+  checkSizes,
+  FSKIT_MOUNT_ROOT,
+  prepareBackend,
+  requireKernelBackend,
+  resolveBackend,
+  unsizedMounts,
+} from './fuse/backend.ts'
 export {
   mount as fuseMount,
   mountBackground as fuseMountBackground,
@@ -84,6 +96,7 @@ export {
   type DatabricksProfile,
 } from './resource/databricks_volume/profile.ts'
 export {
+  normalizeS3Config,
   redactConfig as redactS3Config,
   type S3Config,
   type S3ConfigRedacted,
@@ -241,7 +254,7 @@ export {
   redactSlackConfig,
   type SlackConfig,
   type SlackConfigRedacted,
-} from './resource/slack/config.ts'
+} from '@struktoai/mirage-core'
 export { SSHResource, type SSHResourceState } from './resource/ssh/ssh.ts'
 export {
   normalizeSshConfig,
@@ -264,13 +277,14 @@ export {
 export { NEXTCLOUD_PROMPT } from './resource/nextcloud/prompt.ts'
 export { NEXTCLOUD_COMMANDS } from './commands/builtin/nextcloud/index.ts'
 export { NEXTCLOUD_OPS } from './ops/nextcloud/index.ts'
+export { buildDeltaHook as buildNextcloudDeltaHook, NextcloudWalk } from './core/nextcloud/watch.ts'
 export { DiscordResource, type DiscordResourceState } from './resource/discord/discord.ts'
 export {
   normalizeDiscordConfig,
   redactDiscordConfig,
   type DiscordConfig,
   type DiscordConfigRedacted,
-} from './resource/discord/config.ts'
+} from '@struktoai/mirage-core'
 export { TrelloResource, type TrelloResourceState } from './resource/trello/trello.ts'
 export {
   normalizeTrelloConfig,
@@ -284,15 +298,16 @@ export {
   redactLinearConfig,
   type LinearConfig,
   type LinearConfigRedacted,
-} from './resource/linear/config.ts'
+} from '@struktoai/mirage-core'
 export { NotionResource, type NotionResourceState } from './resource/notion/notion.ts'
 export {
   normalizeNotionConfig,
   redactNotionConfig,
   type NotionConfig,
   type NotionConfigRedacted,
-} from './resource/notion/config.ts'
+} from '@struktoai/mirage-core'
 export { LangfuseResource, type LangfuseResourceState } from './resource/langfuse/langfuse.ts'
+export { JaegerResource, type JaegerResourceState } from './resource/jaeger/jaeger.ts'
 export {
   normalizeLangfuseConfig,
   redactLangfuseConfig,
@@ -336,6 +351,14 @@ export {
 } from './resource/gslides/config.ts'
 export { GDriveResource, type GDriveResourceState } from './resource/gdrive/gdrive.ts'
 export {
+  Mem0Resource,
+  OneDriveResource,
+  SharePointResource,
+  type Mem0Config,
+  type OneDriveConfig,
+  type SharePointConfig,
+} from '@struktoai/mirage-core'
+export {
   normalizeGDriveConfig,
   redactGDriveConfig,
   type GDriveConfig,
@@ -362,6 +385,13 @@ export {
   type GmailConfig,
   type GmailConfigRedacted,
 } from './resource/gmail/config.ts'
+export { GCalResource, type GCalResourceState } from './resource/gcal/gcal.ts'
+export {
+  normalizeGCalConfig,
+  redactGCalConfig,
+  type GCalConfig,
+  type GCalConfigRedacted,
+} from './resource/gcal/config.ts'
 export { EmailResource, type EmailResourceState } from './resource/email/email.ts'
 export {
   buildEmailConfig,
@@ -375,7 +405,15 @@ export {
 } from './resource/email/index.ts'
 export { EmailAccessor } from './accessor/email.ts'
 export { EMAIL_COMMANDS } from './commands/builtin/email/index.ts'
+export { HIMALAYA } from './commands/cli/builtin/himalaya/index.ts'
 export { EMAIL_OPS } from './ops/email/index.ts'
+export { DaytonaRuntime } from './runtime/sandbox/daytona/runtime.ts'
+export { LocalRuntime } from './runtime/python/local.ts'
+export { DAYTONA_CONFIG_KEYS, type DaytonaConfig } from './runtime/sandbox/daytona/config.ts'
+export { E2BRuntime } from './runtime/sandbox/e2b/runtime.ts'
+export { E2B_CONFIG_KEYS, type E2BConfig } from './runtime/sandbox/e2b/config.ts'
+export { DockerRuntime } from './runtime/sandbox/docker/runtime.ts'
+export { DOCKER_CONFIG_KEYS, type DockerConfig } from './runtime/sandbox/docker/config.ts'
 export {
   buildResource,
   knownResources,
@@ -384,3 +422,4 @@ export {
 } from './resource/registry.ts'
 export { DISK_COMMANDS } from './commands/builtin/disk/index.ts'
 export { REDIS_COMMANDS } from './commands/builtin/redis/index.ts'
+export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'

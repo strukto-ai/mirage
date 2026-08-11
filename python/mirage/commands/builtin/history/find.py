@@ -17,19 +17,17 @@ from functools import partial
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.find import find as find_core
 from mirage.core.history.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, StatPath
 from mirage.types import PathSpec
 
 
-@command("find",
-         resource="history",
-         spec=SPECS["find"],
-         provision=metadata_provision)
+@command("find", resource="history", spec=SPECS["find"])
 async def find(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
@@ -45,7 +43,10 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    L: bool = False,
+    links: LinkView | None = None,
+    stat_path: StatPath | None = None,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_find(
         list(paths),
@@ -61,4 +62,7 @@ async def find(
         path=path,
         mindepth=mindepth,
         empty=empty,
+        links=links,
+        stat_path=stat_path,
+        follow=L,
     )

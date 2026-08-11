@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.mem0.scope import ScopeLevel, detect
 from mirage.core.mem0.search import search_memories_rendered
 from mirage.io.types import ByteSource, IOResult
@@ -76,7 +76,7 @@ async def search(
     index: IndexCacheStore = NULL_INDEX,
     prefix: str = "",
     cwd: PathSpec | None = None,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise UsageError("search: query is required")

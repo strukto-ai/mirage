@@ -12,16 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from mirage.commands.cli.types import CLISpec
+from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS, CommandSpec
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+
+def _described(text: str | None) -> str:
+    """A description, or man's placeholder when the spec carries none.
+
+    Args:
+        text (str | None): the spec's description.
+    """
+    return text if text is not None else "(no description)"
 
 
 @dataclass
@@ -58,7 +71,7 @@ def _render_options_table(spec: CommandSpec) -> list[str]:
         short = opt.short if opt.short is not None else ""
         long = opt.long if opt.long is not None else ""
         desc = opt.description if opt.description is not None else ""
-        lines.append(f"| {short} | {long} | {opt.value_kind.value} | {desc} |")
+        lines.append(f"| {short} | {long} | {opt.type} | {desc} |")
     lines.append("")
     return lines
 
@@ -69,8 +82,7 @@ def _render_man_entry(name: str, hits: list[_ManHit]) -> str:
     lines: list[str] = []
     lines.append(f"# {name}")
     lines.append("")
-    lines.append(spec.description if spec.
-                 description is not None else "(no description)")
+    lines.append(_described(spec.description))
     lines.append("")
     lines.extend(_render_options_table(spec))
     lines.append("## RESOURCES")
@@ -110,14 +122,55 @@ def _render_shell_builtin_man(name: str, spec: CommandSpec) -> str:
     lines: list[str] = []
     lines.append(f"# {name}")
     lines.append("")
-    lines.append(spec.description if spec.
-                 description is not None else "(no description)")
+    lines.append(_described(spec.description))
     lines.append("")
     lines.extend(_render_options_table(spec))
     lines.append("## RESOURCES")
     lines.append("")
     lines.append("- shell builtin")
     return "\n".join(lines) + "\n"
+
+
+def _render_cli_entry(head: str, verbs: Sequence[str],
+                      spec: CLISpec) -> str | None:
+    """The page for one node of an installed CLI, None when verbs miss.
+
+    The page is the node's own ``--help``, rendered by the one renderer
+    that serves ``--help`` and the bare-group refusal, so a CLI's manual
+    cannot drift from the program. A tree is a manual with sections:
+    ``man linear`` lists the verbs and ``man linear issue create`` is
+    the page for one leaf.
+
+    Args:
+        head (str): installed head word, as typed.
+        verbs (Sequence[str]): verb words after the head, aliases
+            allowed.
+        spec (CLISpec): the installed program tree.
+    """
+    found = find_node(spec, verbs)
+    if found is None:
+        return None
+    node, path = found
+    # The root's dialect, so a manual page reads exactly like the
+    # --help it renders from.
+    return node_help(" ".join((head, ) + path), node, spec.usage_style)
+
+
+def _render_cli_index(registry: MountRegistry) -> list[str]:
+    """The installed-CLI section of the bare ``man`` listing.
+
+    Args:
+        registry (MountRegistry): registry holding the installs.
+    """
+    installs = registry.clis.items()
+    if not installs:
+        return []
+    lines = ["# clis", ""]
+    for name, install in sorted(installs.items()):
+        desc = _described(install.spec.description)
+        lines.append(f"- {name} \u2014 {desc}")
+    lines.append("")
+    return lines
 
 
 def _render_man_index(session: Session, registry: MountRegistry) -> str:
@@ -156,22 +209,54 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
             key=lambda c: c.name,
         )
         for cmd in resource_cmds:
-            desc = (cmd.spec.description if cmd.spec.description is not None
-                    else "(no description)")
+            desc = _described(cmd.spec.description)
             lines.append(f"- {cmd.name} \u2014 {desc}")
         for cmd in all_cmds:
             if (m.is_general_command(cmd.name)
                     and cmd.name not in general_seen):
                 general_seen[cmd.name] = cmd
         lines.append("")
+    lines.extend(_render_cli_index(registry))
     lines.append("# general")
     lines.append("")
     for name in sorted(general_seen):
-        cmd = general_seen[name]
-        desc = (cmd.spec.description
-                if cmd.spec.description is not None else "(no description)")
+        desc = _described(general_seen[name].spec.description)
         lines.append(f"- {name} \u2014 {desc}")
     return "\n".join(lines) + "\n"
+
+
+def _cli_man(
+    install: CLIInstall, verbs: Sequence[str], cmd_str: str,
+    registry: MountRegistry
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """The page (or pages) for an installed head word.
+
+    A CLI may not take a general command's name, but a mount can
+    register a custom command under any name, so both pages can exist
+    for one word. The CLI goes first: it is the one dispatch would run.
+
+    Args:
+        install (CLIInstall): the installed CLI, head word included.
+        verbs (Sequence[str]): verb words after the head, aliases
+            allowed.
+        cmd_str (str): the line, for the execution node.
+        registry (MountRegistry): registry holding the mounts.
+    """
+    head = install.name
+    entry = _render_cli_entry(head, verbs, install.spec)
+    if entry is None:
+        typed = " ".join([head, *verbs])
+        err = f"man: no entry for {typed}\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=1,
+                                                         stderr=err)
+    sections = [entry]
+    hits = _collect_man_hits(head, registry) if not verbs else []
+    if hits:
+        sections.append(_render_man_entry(head, hits))
+    out = "\n".join(sections).encode()
+    return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 
 
 async def handle_man(
@@ -183,18 +268,24 @@ async def handle_man(
         out = _render_man_index(session, registry).encode()
         return out, IOResult(), ExecutionNode(command="man", exit_code=0)
     name = args[0]
+    cmd_str = "man " + " ".join(args)
+    # Only an installed head word reads the words after it: they are its
+    # verb path. Everything else keeps man's older shape and documents
+    # args[0].
+    install = registry.clis.get(name)
+    if install is not None:
+        return _cli_man(install, args[1:], cmd_str, registry)
     hits = _collect_man_hits(name, registry)
     if not hits:
         spec_key = _SHELL_BUILTIN_MAN.get(name)
         spec = SPECS.get(spec_key) if spec_key is not None else None
         if spec is not None:
             out = _render_shell_builtin_man(name, spec).encode()
-            return out, IOResult(), ExecutionNode(command=f"man {name}",
-                                                  exit_code=0)
+            return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
         err = f"man: no entry for {name}\n".encode()
         return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command=f"man {name}",
+                              stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,
                                                          stderr=err)
     out = _render_man_entry(name, hits).encode()
-    return out, IOResult(), ExecutionNode(command=f"man {name}", exit_code=0)
+    return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)

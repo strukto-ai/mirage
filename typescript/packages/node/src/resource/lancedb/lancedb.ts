@@ -42,6 +42,9 @@ export interface LanceDBResourceOptions {
 export class LanceDBResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.LANCEDB
   readonly cachesReads: boolean
+  // readdir seeds exact card sizes from the widened select and stat falls
+  // back to rendering the row itself, so sizes are exact either way.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   readonly prompt: string = LANCEDB_PROMPT
   readonly config: LanceDBConfigResolved
@@ -61,8 +64,9 @@ export class LanceDBResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     await this.store.close()
+    await super.close()
   }
 
   ops(): readonly RegisteredOp[] {

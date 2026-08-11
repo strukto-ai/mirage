@@ -26,6 +26,15 @@ import {
   listWorkspaces,
 } from './_client.ts'
 import {
+  normalizeBoard,
+  normalizeCard,
+  normalizeLabel,
+  normalizeList,
+  normalizeMember,
+  normalizeWorkspace,
+  toJsonBytes,
+} from './normalize.ts'
+import {
   boardDirname,
   cardDirname,
   labelFilename,
@@ -124,6 +133,31 @@ export async function readdir(
         }),
       ])
       names.push(`${prefix}/workspaces/${dirname}`)
+      if (index !== undefined) {
+        // workspace.json renders the workspace object this listing already
+        // fetched, so its exact size is free here.
+        await index.setDir(`${virtualKey}/${dirname}`, [
+          [
+            'workspace.json',
+            new IndexEntry({
+              id: pickString(ws, 'id'),
+              name: 'workspace.json',
+              resourceType: 'trello/workspace_json',
+              vfsName: 'workspace.json',
+              size: toJsonBytes(normalizeWorkspace(ws)).byteLength,
+            }),
+          ],
+          [
+            'boards',
+            new IndexEntry({
+              id: pickString(ws, 'id'),
+              name: 'boards',
+              resourceType: 'trello/boards_dir',
+              vfsName: 'boards',
+            }),
+          ],
+        ])
+      }
     }
     if (index !== undefined) await index.setDir(virtualKey, entries)
     return names
@@ -133,7 +167,11 @@ export async function readdir(
 
   if (parts.length === 2 && parts[0] === 'workspaces') {
     if (index !== undefined) {
+      const cached = await index.listDir(virtualKey)
+      if (cached.entries !== undefined && cached.entries !== null) return cached.entries
       await ensureLookup(accessor, index, filter, prefix, 'workspaces', virtualKey)
+      const listing = await index.listDir(virtualKey)
+      if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     }
     return [`${prefix}/${key}/workspace.json`, `${prefix}/${key}/boards`]
   }
@@ -166,6 +204,48 @@ export async function readdir(
         }),
       ])
       names.push(`${prefix}/${key}/${dirname}`)
+      // board.json's normalizer only uses fields this listing already
+      // carries, so its exact size is free here.
+      await index.setDir(`${virtualKey}/${dirname}`, [
+        [
+          'board.json',
+          new IndexEntry({
+            id: pickString(board, 'id'),
+            name: 'board.json',
+            resourceType: 'trello/board_json',
+            vfsName: 'board.json',
+            size: toJsonBytes(normalizeBoard(board)).byteLength,
+            remoteTime: pickString(board, 'dateLastActivity'),
+          }),
+        ],
+        [
+          'members',
+          new IndexEntry({
+            id: pickString(board, 'id'),
+            name: 'members',
+            resourceType: 'trello/members_dir',
+            vfsName: 'members',
+          }),
+        ],
+        [
+          'labels',
+          new IndexEntry({
+            id: pickString(board, 'id'),
+            name: 'labels',
+            resourceType: 'trello/labels_dir',
+            vfsName: 'labels',
+          }),
+        ],
+        [
+          'lists',
+          new IndexEntry({
+            id: pickString(board, 'id'),
+            name: 'lists',
+            resourceType: 'trello/lists_dir',
+            vfsName: 'lists',
+          }),
+        ],
+      ])
     }
     await index.setDir(virtualKey, entries)
     return names
@@ -173,8 +253,12 @@ export async function readdir(
 
   if (parts.length === 4 && parts[0] === 'workspaces' && parts[2] === 'boards') {
     if (index !== undefined) {
+      const cached = await index.listDir(virtualKey)
+      if (cached.entries !== undefined && cached.entries !== null) return cached.entries
       const parentKey = parts.slice(0, 3).join('/')
       await ensureLookup(accessor, index, filter, prefix, parentKey, virtualKey)
+      const listing = await index.listDir(virtualKey)
+      if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     }
     return [
       `${prefix}/${key}/board.json`,
@@ -214,6 +298,7 @@ export async function readdir(
           resourceType: 'trello/member',
           remoteTime: '',
           vfsName: filename,
+          size: toJsonBytes(normalizeMember(member)).byteLength,
         }),
       ])
       names.push(`${prefix}/${key}/${filename}`)
@@ -249,6 +334,7 @@ export async function readdir(
           resourceType: 'trello/label',
           remoteTime: '',
           vfsName: filename,
+          size: toJsonBytes(normalizeLabel(label)).byteLength,
         }),
       ])
       names.push(`${prefix}/${key}/${filename}`)
@@ -287,6 +373,29 @@ export async function readdir(
         }),
       ])
       names.push(`${prefix}/${key}/${dirname}`)
+      // list.json's normalizer only uses fields this listing already
+      // carries, so its exact size is free here.
+      await index.setDir(`${virtualKey}/${dirname}`, [
+        [
+          'list.json',
+          new IndexEntry({
+            id: pickString(lst, 'id'),
+            name: 'list.json',
+            resourceType: 'trello/list_json',
+            vfsName: 'list.json',
+            size: toJsonBytes(normalizeList(lst)).byteLength,
+          }),
+        ],
+        [
+          'cards',
+          new IndexEntry({
+            id: pickString(lst, 'id'),
+            name: 'cards',
+            resourceType: 'trello/cards_dir',
+            vfsName: 'cards',
+          }),
+        ],
+      ])
     }
     await index.setDir(virtualKey, entries)
     return names
@@ -299,8 +408,12 @@ export async function readdir(
     parts[4] === 'lists'
   ) {
     if (index !== undefined) {
+      const cached = await index.listDir(virtualKey)
+      if (cached.entries !== undefined && cached.entries !== null) return cached.entries
       const parentKey = parts.slice(0, 5).join('/')
       await ensureLookup(accessor, index, filter, prefix, parentKey, virtualKey)
+      const listing = await index.listDir(virtualKey)
+      if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     }
     return [`${prefix}/${key}/list.json`, `${prefix}/${key}/cards`]
   }
@@ -336,6 +449,32 @@ export async function readdir(
         }),
       ])
       names.push(`${prefix}/${key}/${dirname}`)
+      // card.json's normalizer only uses fields this listing already
+      // carries, so its exact size is free here; comments.jsonl needs a
+      // per-card actions call and stays size-unknown.
+      await index.setDir(`${virtualKey}/${dirname}`, [
+        [
+          'card.json',
+          new IndexEntry({
+            id: pickString(card, 'id'),
+            name: 'card.json',
+            resourceType: 'trello/card_json',
+            vfsName: 'card.json',
+            size: toJsonBytes(normalizeCard(card)).byteLength,
+            remoteTime: pickString(card, 'dateLastActivity'),
+          }),
+        ],
+        [
+          'comments.jsonl',
+          new IndexEntry({
+            id: pickString(card, 'id'),
+            name: 'comments.jsonl',
+            resourceType: 'trello/comments_jsonl',
+            vfsName: 'comments.jsonl',
+            remoteTime: pickString(card, 'dateLastActivity'),
+          }),
+        ],
+      ])
     }
     await index.setDir(virtualKey, entries)
     return names
@@ -349,11 +488,18 @@ export async function readdir(
     parts[6] === 'cards'
   ) {
     if (index !== undefined) {
+      const cached = await index.listDir(virtualKey)
+      if (cached.entries !== undefined && cached.entries !== null) return cached.entries
       const parentKey = parts.slice(0, 7).join('/')
       await ensureLookup(accessor, index, filter, prefix, parentKey, virtualKey)
+      const listing = await index.listDir(virtualKey)
+      if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     }
     return [`${prefix}/${key}/card.json`, `${prefix}/${key}/comments.jsonl`]
   }
 
-  return []
+  // An unrecognized path is not an empty directory: returning [] made `ls` and
+  // `tree` report a bogus path as a real-but-empty one, and left `rg` without a
+  // message.
+  throw enoent(virtualKey)
 }

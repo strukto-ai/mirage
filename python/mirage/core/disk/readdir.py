@@ -15,11 +15,11 @@
 from pathlib import Path
 
 import aiofiles.os
-from aiofiles.os import path as aio_path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.types import PathSpec
+from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -48,10 +48,17 @@ async def readdir(accessor: DiskAccessor,
     if listing.entries is not None:
         return listing.entries
     p = _resolve(root, path)
-    if not await aio_path.isdir(p):
-        raise NotADirectoryError(str(p))
     base = "/" + path.strip("/")
-    raw = await aiofiles.os.listdir(p)
+    # The kernel already separates ENOENT (a component does not exist) from
+    # ENOTDIR (a component exists but is not a directory); let listdir make
+    # that call instead of collapsing both into one errno. Restamped onto the
+    # PathSpec so the virtual path, never the real fs path, is reported.
+    try:
+        raw = await aiofiles.os.listdir(p)
+    except FileNotFoundError as exc:
+        raise enoent(path_spec) from exc
+    except NotADirectoryError as exc:
+        raise enotdir(path_spec) from exc
     entries = sorted(base.rstrip("/") + "/" + name for name in raw)
     virtual_entries = sorted((prefix + e if prefix else e) for e in entries)
     index_entries = [(e.rsplit("/", 1)[-1],

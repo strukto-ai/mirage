@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
+import { enoent } from '../../../../../utils/errors.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
 import type { DispatchFn } from '../types.ts'
@@ -40,7 +41,7 @@ function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): Dispat
       if (files.has(k)) {
         return Promise.resolve([new FileStat({ name, type: FileType.TEXT }), new IOResult()])
       }
-      return Promise.reject(new Error(`not found: ${k}`))
+      return Promise.reject(enoent(k))
     }
     if (op === 'read') return Promise.resolve([files.get(k) ?? null, new IOResult()])
     if (op === 'readdir') {
@@ -65,7 +66,9 @@ function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): Dispat
 describe('crossmount cp relay', () => {
   it('records the source as a read so the cache is populated', async () => {
     const files = new Map([['/src/a.txt', new Uint8Array([1, 2, 3])]])
-    const dispatch = makeDispatch(files, new Set(['/src']))
+    // Both mount roots exist, like every real mount: cp probes the
+    // destination's parent before creating anything under it.
+    const dispatch = makeDispatch(files, new Set(['/src', '/dst']))
     const [, io] = await runCp([spec('/src/a.txt'), spec('/dst/a.txt')], {}, dispatch)
     expect(files.get('/dst/a.txt')).toEqual(new Uint8Array([1, 2, 3]))
     expect(Object.keys(io.reads)).toEqual(['/src/a.txt'])

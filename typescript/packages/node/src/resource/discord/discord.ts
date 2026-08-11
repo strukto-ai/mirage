@@ -14,13 +14,12 @@
 
 import {
   BaseResource,
-  DISCORD_API,
   DISCORD_COMMANDS,
   DISCORD_PROMPT,
   DISCORD_OPS,
   DISCORD_WRITE_PROMPT,
   DiscordAccessor,
-  HttpDiscordTransport,
+  NodeDiscordTransport,
   PathSpec,
   ResourceName,
   discordRead,
@@ -34,21 +33,13 @@ import {
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
-import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } from './config.ts'
+import {
+  redactDiscordConfig,
+  type DiscordConfig,
+  type DiscordConfigRedacted,
+} from '@struktoai/mirage-core'
 
 const resolveDiscordGlob = makeResolveGlob(discordReaddir)
-
-class NodeDiscordTransport extends HttpDiscordTransport {
-  constructor(private readonly token: string) {
-    super()
-  }
-  protected baseUrl(): string {
-    return DISCORD_API
-  }
-  protected authHeaders(): Record<string, string> {
-    return { Authorization: `Bot ${this.token}` }
-  }
-}
 
 export interface DiscordResourceState {
   type: string
@@ -58,6 +49,10 @@ export interface DiscordResourceState {
 export class DiscordResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.DISCORD
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: chat.jsonl and members/*.json
+  // are rendered at readdir from payloads the listing already fetched, and
+  // attachments carry Discord's CDN byte count.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = DISCORD_PROMPT
   readonly writePrompt: string = DISCORD_WRITE_PROMPT
@@ -67,14 +62,10 @@ export class DiscordResource extends BaseResource implements Resource {
   constructor(config: DiscordConfig) {
     super()
     this.config = config
-    this.accessor = new DiscordAccessor(new NodeDiscordTransport(config.token))
+    this.accessor = new DiscordAccessor(new NodeDiscordTransport(config.token, config.baseUrl))
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 

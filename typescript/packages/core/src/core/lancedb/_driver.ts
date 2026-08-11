@@ -16,6 +16,7 @@ export type LanceRow = Record<string, unknown>
 
 export interface LanceDriver {
   listTables(): Promise<string[]>
+  tableColumns(table: string): Promise<string[]>
   distinct(
     table: string,
     column: string,

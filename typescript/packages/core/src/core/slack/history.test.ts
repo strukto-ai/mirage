@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getHistoryJsonl } from './history.ts'
+import { fetchRecentMessages, getHistoryJsonl } from './history.ts'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
 
@@ -115,5 +115,16 @@ describe('getHistoryJsonl', () => {
     })
     await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
     expect(calls).toBe(1)
+  })
+})
+
+describe('fetchRecentMessages', () => {
+  it('fetches one page and sorts ascending by ts', async () => {
+    const t = new FakeTransport(() => ({
+      ok: true,
+      messages: [{ ts: '3.0' }, { ts: '1.0' }, { ts: '2.0' }],
+    }))
+    const messages = await fetchRecentMessages(new SlackAccessor(t), 'C1', 3)
+    expect(messages.map((m) => m.ts)).toEqual(['1.0', '2.0', '3.0'])
   })
 })

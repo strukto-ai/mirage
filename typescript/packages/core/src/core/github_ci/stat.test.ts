@@ -60,3 +60,36 @@ describe('github_ci stat modified', () => {
     expect(s.modified).toBe('2026-04-05T00:00:00Z')
   })
 })
+
+describe('github_ci stat parent-listing failures', () => {
+  class FailingTransport implements CITransport {
+    constructor(private readonly err: Error) {}
+    get(): Promise<unknown> {
+      return Promise.reject(this.err)
+    }
+    getBytes(): Promise<Uint8Array> {
+      return Promise.reject(this.err)
+    }
+    getPaginated(): Promise<unknown[]> {
+      return Promise.reject(this.err)
+    }
+  }
+
+  function failingAccessor(err: Error): GitHubCIAccessor {
+    return new GitHubCIAccessor({ transport: new FailingTransport(err), owner: 'o', repo: 'r' })
+  }
+
+  it('propagates a backend failure instead of reporting ENOENT', async () => {
+    const boom = Object.assign(new Error('403 rate limit exceeded'), { status: 403 })
+    await expect(
+      stat(failingAccessor(boom), spec('/runs/CI__123'), new RAMIndexCacheStore()),
+    ).rejects.toThrow('403 rate limit exceeded')
+  })
+
+  it('still reports ENOENT when the parent is genuinely missing', async () => {
+    const gone = Object.assign(new Error('/runs'), { code: 'ENOENT' })
+    await expect(
+      stat(failingAccessor(gone), spec('/runs/CI__123'), new RAMIndexCacheStore()),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})

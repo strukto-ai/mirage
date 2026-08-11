@@ -19,7 +19,7 @@ import {
   materializeStdout,
   stripPrefixFromPathKwargs,
 } from './resolve.ts'
-import { CommandSpec, OperandKind, Option } from './spec/types.ts'
+import { CommandSpec, Option } from './spec/types.ts'
 
 describe('getExtension', () => {
   it('returns the dotted extension for simple paths', () => {
@@ -63,7 +63,7 @@ describe('materializeStdout', () => {
 
 describe('stripPrefixFromPathKwargs', () => {
   const spec = new CommandSpec({
-    options: [new Option({ short: '-o', valueKind: OperandKind.PATH })],
+    options: [new Option({ short: '-o', type: 'path' })],
   })
 
   it('strips a matching prefix from PATH-kind flag values', () => {

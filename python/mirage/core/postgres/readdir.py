@@ -15,17 +15,10 @@
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.postgres import _client
-from mirage.core.postgres.scope import detect_scope
+from mirage.core.postgres.scope import ENTITY_FILES, detect_scope
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-
-def is_dir_name(child: str) -> bool:
-    # Entries are recognized by extension, so classification never needs the
-    # stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    return not (name.endswith(".json") or name.endswith(".jsonl"))
 
 
 async def readdir(accessor: PostgresAccessor,
@@ -53,10 +46,7 @@ async def readdir(accessor: PostgresAccessor,
                                     virtual_key, index, prefix, raw)
     if scope.level == "entity":
         base = raw.rstrip("/")
-        return [
-            f"{prefix}{base}/schema.json",
-            f"{prefix}{base}/rows.jsonl",
-        ]
+        return [f"{prefix}{base}/{name}" for name in ENTITY_FILES]
     raise enoent(path)
 
 

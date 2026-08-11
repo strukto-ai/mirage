@@ -17,13 +17,12 @@ import functools
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
-from mirage.commands.builtin.generic_bind.provision import \
-    write_metadata_provision
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.gridfs.readdir import readdir
 from mirage.core.gridfs.rm import rm_r
 from mirage.core.gridfs.rmdir import rmdir
@@ -85,11 +84,7 @@ async def _rm(
     return None, [f"removed '{label}'"] if verbose else []
 
 
-@command("rm",
-         resource="gridfs",
-         spec=SPECS["rm"],
-         write=True,
-         provision=write_metadata_provision)
+@command("rm", resource="gridfs", spec=SPECS["rm"], write=True)
 async def rm(
     accessor: GridFSAccessor,
     paths: list[PathSpec],
@@ -101,7 +96,7 @@ async def rm(
     v: bool = False,
     d: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("rm: missing operand")

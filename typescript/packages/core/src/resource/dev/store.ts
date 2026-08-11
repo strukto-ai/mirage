@@ -22,23 +22,52 @@ function strip(key: string): string {
   return stripSlash(key)
 }
 
+// Real backing store plus a synthetic /null, /zero overlay. The synthetic
+// device names read as empty/zeros and swallow writes until they are
+// deleted (GNU: `rm /dev/null` succeeds and the path is gone). A deleted
+// name is tombstoned; the next write stores real bytes, which is GNU's
+// rm-then-redirect recreation as a regular file.
 export class DevFiles extends Map<string, Uint8Array> {
+  private readonly tombstones = new Set<string>()
+
+  private syntheticActive(name: string): boolean {
+    return DEV_NAMES.has(name) && !this.tombstones.has(name) && !super.has('/' + name)
+  }
+
+  private syntheticBytes(name: string): Uint8Array {
+    return name === 'null' ? new Uint8Array(0) : new Uint8Array(ZERO_CHUNK_SIZE)
+  }
+
   override has(key: string): boolean {
-    return DEV_NAMES.has(strip(key))
+    return super.has(key) || this.syntheticActive(strip(key))
   }
 
   override get(key: string): Uint8Array | undefined {
+    if (super.has(key)) return super.get(key)
     const name = strip(key)
-    if (name === 'null') return new Uint8Array(0)
-    if (name === 'zero') return new Uint8Array(ZERO_CHUNK_SIZE)
+    if (this.syntheticActive(name)) return this.syntheticBytes(name)
     return undefined
   }
 
-  override set(_key: string, _value: Uint8Array): this {
+  override set(key: string, value: Uint8Array): this {
+    const name = strip(key)
+    if (this.syntheticActive(name)) return this
+    super.set(key, value)
+    this.tombstones.delete(name)
     return this
   }
 
-  override delete(_key: string): boolean {
+  override delete(key: string): boolean {
+    const name = strip(key)
+    if (super.has(key)) {
+      super.delete(key)
+      if (DEV_NAMES.has(name)) this.tombstones.add(name)
+      return true
+    }
+    if (this.syntheticActive(name)) {
+      this.tombstones.add(name)
+      return true
+    }
     return false
   }
 
@@ -47,22 +76,26 @@ export class DevFiles extends Map<string, Uint8Array> {
   }
 
   override get size(): number {
-    return DEV_NAMES.size
+    let synthetic = 0
+    for (const name of ['null', 'zero']) {
+      if (this.syntheticActive(name)) synthetic += 1
+    }
+    return synthetic + super.size
   }
 
   override *keys(): MapIterator<string> {
-    yield '/null'
-    yield '/zero'
+    for (const [k] of this.entries()) yield k
   }
 
   override *values(): MapIterator<Uint8Array> {
-    yield new Uint8Array(0)
-    yield new Uint8Array(ZERO_CHUNK_SIZE)
+    for (const [, v] of this.entries()) yield v
   }
 
   override *entries(): MapIterator<[string, Uint8Array]> {
-    yield ['/null', new Uint8Array(0)]
-    yield ['/zero', new Uint8Array(ZERO_CHUNK_SIZE)]
+    for (const name of ['null', 'zero']) {
+      if (this.syntheticActive(name)) yield ['/' + name, this.syntheticBytes(name)]
+    }
+    yield* super.entries()
   }
 
   override [Symbol.iterator](): MapIterator<[string, Uint8Array]> {

@@ -14,9 +14,9 @@
 
 import tree_sitter
 
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.io import IOResult
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
@@ -104,24 +104,23 @@ async def handle_background(
 
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)
 
+    # Non-interactive bash announces nothing on launch ("[1] <pid>" is
+    # interactive-only); the job stays discoverable via $! and `jobs`.
     job = job_table.submit(command=cmd_str,
                            run=_run_bg,
                            cwd=bg_session.cwd,
                            agent=agent_id or "",
                            session_id=session.session_id)
     session.last_bg_job_id = job.id
-    job_line = f"[{job.id}]\n".encode()
 
     if right is None:
-        return None, IOResult(stderr=job_line), ExecutionNode(
+        return None, IOResult(), ExecutionNode(
             op="&",
             exit_code=0,
             children=[ExecutionNode(command=cmd_str, exit_code=0)])
 
     right_stdout, right_io, right_exec = await execute_node(
         right, session, stdin, call_stack)
-    right_stderr = await materialize(right_io.stderr)
-    right_io.stderr = (job_line + right_stderr if right_stderr else job_line)
     children = [
         ExecutionNode(command=cmd_str, exit_code=0),
         right_exec,

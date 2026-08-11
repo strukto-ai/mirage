@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -56,7 +57,7 @@ async def bc(
     *texts: str,
     stdin: ByteSource | None = None,
     args_l: bool = False,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     raw = await _read_stdin_async(stdin)
     if raw is None:

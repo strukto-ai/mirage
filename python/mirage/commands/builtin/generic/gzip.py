@@ -1,15 +1,26 @@
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
 
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.constants import flag_kwarg_name
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def extract_level(extra: dict[str, Any]) -> int:
+def extract_level(fl: FlagView) -> int:
+    """The compression level -1..-9 asked for, or zlib's default.
+
+    The digits are short-only options, so each is its own dest -- except
+    ``-1``, which the parser disambiguates to ``args_1``
+    (``AMBIGUOUS_NAMES``). Reading the bag by the bare digit therefore
+    missed ``gzip -1`` entirely.
+
+    Args:
+        fl (FlagView): Flag view constructed with the gzip spec.
+    """
     for n in range(9, 0, -1):
-        if extra.get(str(n)):
+        if fl.as_bool(flag_kwarg_name(str(n))):
             return n
     return zlib.Z_DEFAULT_COMPRESSION
 

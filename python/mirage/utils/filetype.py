@@ -21,6 +21,7 @@ EXTENSION_MAP: dict[str, FileType] = {
     "tsv": FileType.CSV,
     "txt": FileType.TEXT,
     "md": FileType.TEXT,
+    "log": FileType.TEXT,
     "py": FileType.TEXT,
     "js": FileType.TEXT,
     "ts": FileType.TEXT,
@@ -33,17 +34,50 @@ EXTENSION_MAP: dict[str, FileType] = {
     "gif": FileType.IMAGE_GIF,
     "zip": FileType.ZIP,
     "gz": FileType.GZIP,
+    "gzip": FileType.GZIP,
     "pdf": FileType.PDF,
-    "parquet": FileType.PARQUET,
-    "orc": FileType.ORC,
-    "feather": FileType.FEATHER,
-    "arrow": FileType.FEATHER,
-    "ipc": FileType.FEATHER,
-    "h5": FileType.HDF5,
-    "hdf5": FileType.HDF5,
 }
 
 DEFAULT_TYPE = FileType.BINARY
+
+# Extension-guessed like upstream mailers' mime_guess, as a deliberate
+# fixed subset: the stdlib mimetypes module consults platform tables,
+# and the python and TypeScript implementations must guess identically
+# for serialized bytes to match. Anything else is
+# application/octet-stream, which every client treats as "download me".
+MIME_BY_EXTENSION: dict[str, str] = {
+    "csv": "text/csv",
+    "gif": "image/gif",
+    "gz": "application/gzip",
+    "htm": "text/html",
+    "html": "text/html",
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "json": "application/json",
+    "md": "text/markdown",
+    "pdf": "application/pdf",
+    "png": "image/png",
+    "svg": "image/svg+xml",
+    "tar": "application/x-tar",
+    "txt": "text/plain",
+    "xml": "text/xml",
+    "zip": "application/zip",
+}
+
+OCTET_STREAM = "application/octet-stream"
+
+
+def mime_type_for(filename: str) -> str:
+    """Guess a MIME content type from the filename's extension.
+
+    Args:
+        filename (str): a file's basename.
+    """
+    _, dot, extension = filename.rpartition(".")
+    if not dot:
+        return OCTET_STREAM
+    return MIME_BY_EXTENSION.get(extension.lower(), OCTET_STREAM)
+
 
 _MIMETYPE_MAP: dict[str, FileType] = {
     "application/pdf": FileType.PDF,
@@ -68,6 +102,26 @@ def guess_type(path: str) -> FileType:
     """
     ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
     return EXTENSION_MAP.get(ext, DEFAULT_TYPE)
+
+
+IMAGE_TYPE_BY_EXTENSION: dict[str, FileType] = {
+    "png": FileType.IMAGE_PNG,
+    "jpg": FileType.IMAGE_JPEG,
+    "jpeg": FileType.IMAGE_JPEG,
+    "gif": FileType.IMAGE_GIF,
+}
+
+
+def image_type_for_extension(ext: str) -> FileType:
+    """Return the FileType for a bare image extension.
+
+    Args:
+        ext (str): extension without the dot (e.g. ``png``).
+
+    Returns:
+        FileType: matched image type, or BINARY for anything else.
+    """
+    return IMAGE_TYPE_BY_EXTENSION.get(ext.lower(), FileType.BINARY)
 
 
 def filetype_from_mimetype(mime: str) -> FileType:

@@ -15,7 +15,13 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { createShellParser, findSyntaxError, type ShellParser } from './parse.ts'
+import {
+  createShellParser,
+  findSyntaxError,
+  findUnterminatedBacktick,
+  stripLineContinuation,
+  type ShellParser,
+} from './parse.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -191,5 +197,44 @@ describe('(( reparse: subshell that immediately opens a subshell', () => {
 
   it('still reports an unrelated syntax error', () => {
     expect(parser.parse('if then').hasError).toBe(true)
+  })
+})
+
+describe('stripLineContinuation', () => {
+  it.each([
+    // An odd-length trailing run ends in a live continuation.
+    ['echo a\\', 'echo a'],
+    ['echo a\\\\\\', 'echo a\\\\'],
+    ['echo \\', 'echo '],
+    // An even-length run is all escaped backslashes, so nothing goes.
+    ['echo a\\\\', 'echo a\\\\'],
+    ['echo a', 'echo a'],
+    ['echo a\\ b', 'echo a\\ b'],
+  ])('%j -> %j', (command, expected) => {
+    expect(stripLineContinuation(command)).toBe(expected)
+  })
+})
+
+describe('findUnterminatedBacktick', () => {
+  it.each(['echo `echo a', 'echo "`echo \'`\'`"', 'echo a`', '`'])(
+    'flags the open region in %j',
+    (command) => {
+      expect(findUnterminatedBacktick(command)).not.toBeNull()
+    },
+  )
+
+  it.each([
+    'echo `echo a`',
+    'echo `echo a` `echo b`',
+    // Single quotes protect a backtick, double quotes do not.
+    "echo '`'",
+    'echo "`echo a`"',
+    'echo "\\`"',
+    // Only a backslash escapes inside the region.
+    'echo `echo \\`nested\\``',
+    'echo a',
+    'cat <<EOF\nplain\nEOF',
+  ])('accepts balanced %j', (command) => {
+    expect(findUnterminatedBacktick(command)).toBeNull()
   })
 })

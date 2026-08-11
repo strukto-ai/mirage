@@ -40,11 +40,10 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
             modified=item.get("modified_at") or "",
             extra={"box_id": item["id"]},
         )
-    size = item.get("size")
     remote_time = item.get("modified_at") or ""
     return FileStat(
         name=vfs_name,
-        size=size if size else None,
+        size=item.get("size"),
         type=guess_type(vfs_name),
         modified=remote_time,
         fingerprint=remote_time or None,
@@ -95,7 +94,9 @@ async def stat(
             # threaded index, so the readdir above populates a NULL store
             # that can't be read back. Resolve the id directly instead.
             item = await resolve_item(accessor, path_parts(path))
-            if item is None:
+            if item is None or resource_type_for(item) == "box/weblink":
+                # Weblinks are hidden from listings; a direct lookup must
+                # not resurface a sizeless, unreadable entry.
                 raise enoent(virtual)
             return _stat_from_item(item)
     if result.entry.resource_type == "box/folder":

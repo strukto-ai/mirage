@@ -26,11 +26,12 @@ import { stat as dbxStat } from '../../../core/databricks_volume/stat.ts'
 import { readStream as dbxStream } from '../../../core/databricks_volume/stream.ts'
 import { unlink as dbxUnlink } from '../../../core/databricks_volume/unlink.ts'
 import { writeBytes as dbxWrite } from '../../../core/databricks_volume/write.ts'
-import type { CommandIO } from '../generic_bind/index.ts'
+import { type CommandIO, rangeOf } from '../generic_bind/index.ts'
 
 export const DATABRICKS_VOLUME_IO: CommandIO<DatabricksVolumeAccessor> = {
   readdir: dbxReaddir,
   readBytes: dbxRead,
+  readRange: rangeOf(dbxRead),
   readStream: dbxStream,
   stat: dbxStat,
   isMounted: () => true,

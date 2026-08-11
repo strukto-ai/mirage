@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from mirage.core.jq import is_streamable_jsonl_expr
+from mirage.core.jq import is_streamable_jsonl_expr, parse_json_docs
 from mirage.core.ram.read import read_bytes
 from mirage.observe.context import RecordingScope
 from mirage.resource.disk.disk import DiskResource
@@ -25,7 +25,7 @@ from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
-from .conftest import (SAMPLE_JSONL, collect, jq, mem_ws, run_raw,
+from .conftest import (SAMPLE_JSONL, collect, jq, jq_all, mem_ws, run_raw,
                        write_to_backend)
 
 
@@ -45,7 +45,7 @@ class TestJqJsonl:
 
     def test_jsonl_file_select(self, backend):
         write_to_backend(backend, "/tmp/data.jsonl", SAMPLE_JSONL)
-        result = jq(backend, "/tmp/data.jsonl", ".[] | select(.age > 28)")
+        result = jq_all(backend, "/tmp/data.jsonl", ".[] | select(.age > 28)")
         assert len(result) == 2
         assert result[0]["name"] == "alice"
         assert result[1]["name"] == "carol"
@@ -57,7 +57,7 @@ class TestJqJsonl:
 
     def test_jsonl_file_iteration(self, backend):
         write_to_backend(backend, "/tmp/data.jsonl", SAMPLE_JSONL)
-        result = jq(backend, "/tmp/data.jsonl", ".[] | .name")
+        result = jq_all(backend, "/tmp/data.jsonl", ".[] | .name")
         assert result == ["alice", "bob", "carol"]
 
     def test_ndjson_extension(self, backend):
@@ -70,11 +70,14 @@ class TestJqJsonl:
         with pytest.raises(json.JSONDecodeError):
             jq(backend, "/tmp/data.json", ".")
 
-    def test_jsonl_stdin_fallback(self):
+    def test_jsonl_stdin_is_a_value_stream(self):
+        # jq applies the program to each document on stdin, so `length` is
+        # each object's own key count, not the number of documents. Verified
+        # against the jq binary: three 2-key objects print "2" three times.
         ws = mem_ws()
         stdout, _ = run_raw(ws, "jq length", stdin=SAMPLE_JSONL)
-        result = json.loads(collect(stdout))
-        assert result == 3
+        lines = collect(stdout).decode().strip().splitlines()
+        assert [json.loads(line) for line in lines] == [2, 2, 2]
 
     def test_json_stdin_unchanged(self):
         ws = mem_ws()
@@ -186,11 +189,21 @@ class TestJqStreamingVerification:
     def test_jsonl_select_streaming_correct(self):
         data = self._make_large_jsonl(100)
         ws = self._ws_with_jsonl(data)
-        stdout, _ = run_raw(ws, "jq '.[] | select(.id > 95)' /m/data.jsonl")
+        # -c so each surviving document is one line; the streaming path
+        # pretty-prints by default, like jq itself.
+        stdout, _ = run_raw(ws, "jq -c '.[] | select(.id > 95)' /m/data.jsonl")
         raw = collect(stdout).decode()
         lines = [json.loads(x) for x in raw.strip().splitlines() if x.strip()]
         assert len(lines) == 4
         assert all(item["id"] > 95 for item in lines)
+
+    def test_jsonl_streaming_pretty_prints_by_default(self):
+        data = self._make_large_jsonl(3)
+        ws = self._ws_with_jsonl(data)
+        stdout, _ = run_raw(ws, "jq '.[] | select(.id > 0)' /m/data.jsonl")
+        raw = collect(stdout).decode()
+        assert raw.startswith("{\n  ")
+        assert len(parse_json_docs(raw.encode())) == 2
 
     def test_disk_jsonl_streaming(self, tmp_path):
         data = self._make_large_jsonl(50)

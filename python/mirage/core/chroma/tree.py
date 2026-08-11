@@ -75,17 +75,19 @@ def build_dir_entries(
 
     for path, metadata in sorted(files.items()):
         slug = path.strip("/")
-        size = metadata_int_or_none(metadata, "size")
         updated_at = metadata_or_none(metadata, "updated_at")
+        # The path tree's `size` describes the producer's source document,
+        # not the chunk join mirage serves, so it rides in extra and never
+        # becomes the reported byte length: sizes.ensure_dir_sizes measures
+        # the rendered bytes instead.
         entry = IndexEntry(
             id=slug,
             name=gnu_basename(path),
             resource_type="file",
-            size=size,
             remote_time=updated_at or "",
             extra={
                 "slug": slug,
-                "size": size,
+                "source_size": metadata_int_or_none(metadata, "size"),
                 "created_at": metadata_or_none(metadata, "created_at"),
                 "updated_at": updated_at,
             },

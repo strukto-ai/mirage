@@ -5,6 +5,7 @@ from typing import Any
 from mirage.accessor.dify import DifyAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dify._client import list_all_documents
+from mirage.types import JsonValue
 from mirage.utils.path import gnu_basename, parent
 
 logger = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ def extract_document_size(document: dict[str, Any]) -> int | None:
     return None
 
 
-def timestamp_to_iso(value: object) -> str:
+def timestamp_to_iso(value: JsonValue) -> str:
     if value is None:
         return ""
     if isinstance(value, (int, float)):

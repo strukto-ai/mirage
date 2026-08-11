@@ -19,8 +19,8 @@ import pytest
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.read import read
-from mirage.resource.linear.config import LinearConfig
 from mirage.types import PathSpec
 
 _ISSUE_PATH = ("/teams/ENG__Engineering__TEAM1/issues"

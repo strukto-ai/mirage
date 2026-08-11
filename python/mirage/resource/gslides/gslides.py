@@ -33,6 +33,10 @@ class GSlidesResource(BaseResource):
     accessor: GSlidesAccessor
     name: str = ResourceName.GSLIDES
     caches_reads: bool = True
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 

@@ -15,24 +15,27 @@
 import { NOOPAccessor } from '../accessor/base.ts'
 import { applyIo } from '../cache/file/io.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
-import { applyOpSafeguard, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
+import { applyOpLimit, runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import { getExtension } from '../commands/resolve.ts'
 import { IOResult } from '../io/types.ts'
 import { eaccesReadOnly } from '../utils/errors.ts'
+import { Policies, postOpsGate, preOpsGate } from '../policy/index.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { runWithRevisions } from '../observe/context.ts'
+import { runWithMountPrefix, runWithRevisions } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
-import { NO_FOLLOW_OPS } from '../ops/config.ts'
+import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
+import { isMissingPath } from '../utils/errors.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { Reconciler } from './reconcile.ts'
-import { effectiveMountMode } from '../context/session_context.ts'
+import { effectiveMountMode, MountNotAllowedError } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
@@ -47,6 +50,10 @@ const DISPATCH_WRITE_OPS = new Set([
   'rmdir',
   'rename',
 ])
+// setattr mutates the mount but keeps its own overlay bookkeeping in
+// the metadata builtin, so it is a write for policy admission without
+// joining the dispatcher's post-write invalidation path.
+const POLICY_WRITE_OPS = new Set([...DISPATCH_WRITE_OPS, 'setattr'])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
 
@@ -54,6 +61,7 @@ export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & Resource
   private readonly opsRegistry: OpsRegistry
+  private readonly policies: Policies
   readonly reconciler: Reconciler
 
   constructor(
@@ -61,11 +69,31 @@ export class Dispatcher {
     cache: FileCache & Resource,
     opsRegistry: OpsRegistry,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+    policies?: Policies,
   ) {
     this.namespace = namespace
     this.cache = cache
     this.opsRegistry = opsRegistry
+    this.policies = policies ?? new Policies()
     this.reconciler = new Reconciler(cache, namespace, opsRegistry, consistency)
+  }
+
+  /**
+   * The namespace's own answer for a path no backend serves.
+   *
+   * Child mounts and symlinks are structure the door owns, so a
+   * directory that exists only because a mount or link sits below it
+   * still lists and stats. Null for any other op, or when the
+   * namespace knows nothing at `virtual`.
+   */
+  private namespaceResult(opName: string, virtual: string): string[] | FileStat | null {
+    if (opName === 'readdir') {
+      return namespaceListing(this.namespace.mountPrefixes(), this.namespace, virtual)
+    }
+    if (opName === 'stat') {
+      return namespaceStat(this.namespace.mountPrefixes(), this.namespace, virtual)
+    }
+    return null
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
@@ -74,16 +102,49 @@ export class Dispatcher {
       const followed = this.namespace.follow(path.virtual)
       if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
     }
-    const [resource, scope, mode] = await this.namespace.resolve(p.virtual, false)
+    let resolved: [Resource, PathSpec, MountMode]
+    try {
+      resolved = await this.namespace.resolve(p.virtual, false)
+    } catch (err) {
+      // No mount serves the path, but the namespace may still know a
+      // directory there (a deeper mount, a link). No mount means no
+      // cache to keep straight and no owning prefix (the gates see ''),
+      // but admission still fires: a policy that bounds readdir or stat
+      // by path must cover the synthetic answer too. A real but
+      // ungranted mount is the same case: a granted mount below it
+      // already put this path's name in a listing, so walking down to
+      // the grant must answer, and the merged names are
+      // session-filtered individually, so nothing of the mount's own
+      // content leaks.
+      const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
+      const fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
+      if (fallback === null) throw err
+      const fallbackWrite = POLICY_WRITE_OPS.has(opName)
+      await preOpsGate(this.policies, opName, p, fallbackWrite, '')
+      const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
+      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
+      return [gated, new IOResult()]
+    }
+    const [resource, scope, mode] = resolved
     const mount = this.namespace.mountFor(p.virtual)
+    const mountPrefix = mount?.prefix ?? '/'
+    // Admission policies fire at the door, before the warm-cache early
+    // return below: a cached read must be refused exactly like a cold
+    // one, or the cache becomes a policy bypass. This dispatcher is the
+    // one door in TypeScript: shell internals, programmatic access, and
+    // FUSE all route through Workspace.dispatch.
+    const opWrite = POLICY_WRITE_OPS.has(opName)
+    await preOpsGate(this.policies, opName, p, opWrite, mountPrefix)
     const caches = cachesReads(resource)
     if (caches && mount !== null && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
-        return [cached, new IOResult({ reads: { [p.virtual]: cached } })]
+        const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, cached)
+        const served =
+          warmBound !== null ? ((await applyOpLimit(cached, warmBound)) as Uint8Array) : cached
+        return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
-    const mountPrefix = mount?.prefix ?? '/'
     if (
       effectiveMountMode(mountPrefix, mode) === MountMode.READ &&
       this.opsRegistry.find(opName, resource.kind)?.write === true
@@ -118,50 +179,71 @@ export class Dispatcher {
         ...fullArgs.slice(1),
       ]
     }
-    // Per-op command safeguards bind to the executing (post-follow)
+    // Per-op command limits bind to the executing (post-follow)
     // mount, and the timeout window covers only the backend op — cache
     // probes and post-write invalidation stay outside the budget —
     // mirroring Python's Mount.execute_op.
-    const opOverride = mount?.commandSafeguards.get(opName) ?? null
+    const opOverride = mount?.commandLimits.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
     let result
+    // Backends name their records against the mount-relative key, so the
+    // prefix has to be active while the op runs or the record loses the
+    // mount it belongs to. Mirrors Python's Ops._call.
     try {
-      result = await runWithRevisions(
-        mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
-        async () =>
-          runWithTimeout(
-            Promise.resolve(
-              this.opsRegistry.call(
-                opName,
-                resource.kind,
-                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                scope,
-                fullArgs,
-                fullKwargs,
+      result = await runWithMountPrefix(rstripSlash(mountPrefix), () =>
+        runWithRevisions(
+          mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
+          async () =>
+            runWithTimeout(
+              Promise.resolve(
+                this.opsRegistry.call(
+                  opName,
+                  resource.kind,
+                  resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                  scope,
+                  fullArgs,
+                  fullKwargs,
+                ),
               ),
+              opTimeout,
+              opName,
             ),
-            opTimeout,
-            opName,
-          ),
+        ),
       )
     } catch (err) {
-      await this.reconciler.onOpMissing(opName, p.virtual, err)
-      throw err
+      const fallback = isMissingPath(err) ? this.namespaceResult(opName, p.virtual) : null
+      if (fallback === null) {
+        await this.reconciler.onOpMissing(opName, p.virtual, err)
+        throw err
+      }
+      result = fallback
     }
-    result = await applyOpSafeguard(result, opOverride)
+    if (opName === 'readdir' && Array.isArray(result)) {
+      result = mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual)
+    }
     if (DISPATCH_WRITE_OPS.has(opName)) {
-      await this.invalidateAfterWriteByPath(p.virtual)
+      const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
+      await this.invalidateAfterWriteByPath(p.virtual, observed)
       if (renameDst !== null) {
         await this.invalidateAfterWriteByPath(renameDst.virtual)
       }
     }
     if (opName === 'stat' && result instanceof FileStat) {
-      return [mergeOverlayStat(this.namespace.metaFor(p.virtual), result), new IOResult()]
+      result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
+    }
+    const bound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
+    if (bound !== null) {
+      result = await applyOpLimit(result, bound)
     }
     return [result, new IOResult()]
   }
 
-  async invalidateAfterWriteByPath(rawPath: string): Promise<void> {
+  /** Drop the whole file cache (post-remote-line invalidation). */
+  async clearFileCache(): Promise<void> {
+    await this.cache.clear()
+  }
+
+  async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
     // invalidate the written directory itself instead of its parent
@@ -169,7 +251,7 @@ export class Dispatcher {
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.mountFor(path)
     if (mount === null) return
-    await this.namespace.clearTimes(path)
+    await this.namespace.clearTimes(path, observed)
     if (cachesReads(mount.resource)) {
       await this.cache.remove(path)
     }

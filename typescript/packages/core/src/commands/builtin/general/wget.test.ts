@@ -34,9 +34,10 @@ function mockFetch(respBody: string, status = 200): void {
 
 async function runWget(
   texts: string[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{
   out: string
+  err: string
   exitCode: number
   writes: Record<string, Uint8Array | AsyncIterable<Uint8Array>>
 }> {
@@ -50,7 +51,7 @@ async function runWget(
     cwd: '/',
     resource,
   })
-  if (result === null) return { out: '', exitCode: -1, writes: {} }
+  if (result === null) return { out: '', err: '', exitCode: -1, writes: {} }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -58,7 +59,12 @@ async function runWget(
       : out instanceof Uint8Array
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), exitCode: ioResult.exitCode, writes: ioResult.writes }
+  return {
+    out: DEC.decode(buf),
+    err: await ioResult.stderrStr(),
+    exitCode: ioResult.exitCode,
+    writes: ioResult.writes,
+  }
 }
 
 describe('wget', () => {
@@ -70,14 +76,16 @@ describe('wget', () => {
     globalThis.fetch = original
   })
 
-  it('saves URL basename by default', async () => {
+  // Real wget puts its progress report on stderr and nothing on stdout.
+  it('saves URL basename by default and reports on stderr', async () => {
     const r = await runWget(['https://x.test/path/doc.pdf'])
     expect(r.writes['doc.pdf']).toBeInstanceOf(Uint8Array)
-    expect(r.out).toContain('saved 9 bytes to doc.pdf')
+    expect(r.out).toBe('')
+    expect(r.err).toContain("'doc.pdf' saved [9/9]")
   })
 
   it('-O specifies destination', async () => {
-    const r = await runWget(['https://x.test/file'], { O: '/tmp/dest.bin' })
+    const r = await runWget(['https://x.test/file'], { args_O: '/tmp/dest.bin' })
     const written = r.writes['/tmp/dest.bin']
     expect(written).toBeInstanceOf(Uint8Array)
     if (written instanceof Uint8Array) {
@@ -90,14 +98,48 @@ describe('wget', () => {
     expect(r.out).toBe('')
   })
 
-  it('--spider checks without saving', async () => {
+  it('--spider checks without saving and reports on stderr', async () => {
     const r = await runWget(['https://x.test/exists'], { spider: true })
     expect(Object.keys(r.writes)).toHaveLength(0)
-    expect(r.out).toMatch(/Spider mode:.*exists \(9 bytes\)/)
+    expect(r.out).toBe('')
+    expect(r.err).toBe('Remote file exists.\n')
   })
 
-  it('missing URL returns exit 1', async () => {
-    const r = await runWget([])
-    expect(r.exitCode).toBe(1)
+  it('missing URL is a usage error with exit 1', async () => {
+    await expect(runWget([])).rejects.toMatchObject({ exitCode: 1 })
+  })
+
+  // Pinned against GNU Wget 1.25.0: any 4xx/5xx is exit 8, and the -O target
+  // is still created (empty), because wget truncates it before it learns the
+  // response code.
+  it('exits 8 on a 404 and still creates an empty destination', async () => {
+    mockFetch('not found', 404)
+    const r = await runWget(['https://x.test/missing'], { args_O: '/tmp/w.txt' })
+    expect(r.exitCode).toBe(8)
+    expect(r.err).toContain('ERROR 404:')
+    const written = r.writes['/tmp/w.txt']
+    expect(written).toBeInstanceOf(Uint8Array)
+    if (written instanceof Uint8Array) expect(written.byteLength).toBe(0)
+  })
+
+  it('-q keeps exit 8 but silences the message', async () => {
+    mockFetch('not found', 404)
+    const r = await runWget(['https://x.test/missing'], { args_O: '/tmp/w.txt', q: true })
+    expect(r.exitCode).toBe(8)
+    expect(r.err).toBe('')
+  })
+
+  it('--spider on a 404 exits 8 with the broken-link message', async () => {
+    mockFetch('not found', 404)
+    const r = await runWget(['https://x.test/missing'], { spider: true })
+    expect(r.exitCode).toBe(8)
+    expect(r.err).toBe('Remote file does not exist -- broken link!!!\n')
+  })
+
+  it('reports a refused connection as exit 4', async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new TypeError('fetch failed'))) as typeof fetch
+    const r = await runWget(['http://127.0.0.1:1/x'])
+    expect(r.exitCode).toBe(4)
+    expect(r.err).toContain('failed: Connection refused.')
   })
 })

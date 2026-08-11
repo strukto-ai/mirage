@@ -18,7 +18,7 @@ import {
   type PathSpec,
   rstripSlash,
 } from '@struktoai/mirage-core'
-import { enotdir } from '@struktoai/mirage-core'
+import { readdirError } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { RedisIndexEntry } from './entry.ts'
 import { norm } from './utils.ts'
@@ -42,7 +42,12 @@ export async function readdir(
   const store = accessor.store
   const p = norm(virtual)
   if (!(await store.hasDir(p))) {
-    throw enotdir(path)
+    throw await readdirError(
+      path,
+      p,
+      (k) => store.hasFile(k),
+      (k) => store.hasDir(k),
+    )
   }
   const dirPrefix = p === '/' ? '/' : `${p}/`
   const seen = new Set<string>()

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from collections.abc import Iterable
 
 from mirage.utils.fnmatch import fnmatch
 
@@ -56,6 +57,46 @@ def norm(path: str) -> str:
     return "/" + path.strip("/")
 
 
+def norm_dir(path: str) -> str:
+    """Normalize a virtual path to its trailing-slash directory form.
+
+    Args:
+        path: A virtual path string.
+
+    Returns:
+        The path with one leading and one trailing slash
+        (``"foo/bar"`` -> ``"/foo/bar/"``, ``""`` -> ``"/"``), the form
+        prefix comparisons need so ``/a/`` cannot match ``/ab``.
+    """
+    stripped = path.strip("/")
+    return "/" + stripped + "/" if stripped else "/"
+
+
+def owner_prefix(prefixes: Iterable[str], path: str) -> str | None:
+    """The longest mount prefix owning ``path``, or None.
+
+    The one longest-prefix rule dispatch resolves a path by, shared so a
+    registry, an ops facade, a runtime routing table and a link filter
+    cannot drift: a prefix owns its own root (with or without a trailing
+    slash) and everything at a path boundary below it, so ``/a/`` owns
+    ``/a`` and ``/a/b`` but never ``/ab``. The winner is returned in its
+    input spelling, letting each caller keep its own convention.
+
+    Args:
+        prefixes (Iterable[str]): candidate mount prefixes, any spelling.
+        path (str): the virtual path to resolve.
+    """
+    target = norm_dir(path)
+    best: str | None = None
+    best_len = -1
+    for prefix in prefixes:
+        p = norm_dir(prefix)
+        if target.startswith(p) and len(p) > best_len:
+            best = prefix
+            best_len = len(p)
+    return best
+
+
 def parent(path: str) -> str:
     """Return the parent directory of a normalized virtual key.
 
@@ -68,6 +109,26 @@ def parent(path: str) -> str:
     """
     i = path.rfind("/")
     return path[:i] if i > 0 else "/"
+
+
+def ancestors(path: str) -> list[str]:
+    """Return the proper ancestors of a normalized key, outermost first.
+
+    ``"/"`` is left out: every store treats the mount root as an existing
+    directory, so it is never a component worth probing. Used by the
+    store-backed backends (ram, redis) to walk a destination's parent
+    chain the way ``rename(2)`` resolves it.
+
+    Args:
+        path (str): A normalized virtual path (leading slash, no trailing
+            slash).
+
+    Returns:
+        list[str]: ``"/a/b/c"`` -> ``["/a", "/a/b"]``; ``"/a"`` and ``"/"``
+        -> ``[]``.
+    """
+    parts = path.strip("/").split("/")
+    return ["/" + "/".join(parts[:i]) for i in range(1, len(parts))]
 
 
 def resolve_path(path: str, cwd: str) -> str:
@@ -165,24 +226,24 @@ def expand_tilde(word: str, home: str | None) -> str:
     return word
 
 
-def rebase_raw(paths: list[str], original: str, raw: str) -> list[str]:
+def respell_raw(paths: list[str], original: str, raw: str) -> list[str]:
     """Rewrite the base of walked output paths to the as-typed form.
 
     Used by walkers like ``find``/``grep -r``: results are absolute (start
     path plus subpath), but when the start path was typed relatively the
-    output should show it that way. Maps :func:`rebase_one` over ``paths``.
+    output should show it that way. Maps :func:`respell_one` over ``paths``.
 
-    Because :func:`rebase_one` only rewrites the leading base prefix, this
+    Because :func:`respell_one` only rewrites the leading base prefix, this
     also works on formatted lines whose path is the prefix, e.g. grep's
     ``path:line``.
 
     Example::
 
-        rebase_raw(["/data/sub/x", "/data/y"], "/data", ".")
+        respell_raw(["/data/sub/x", "/data/y"], "/data", ".")
             -> ["./sub/x", "./y"]
-        rebase_raw(["/data/sub/x:hit"], "/data/sub", "sub")
+        respell_raw(["/data/sub/x:hit"], "/data/sub", "sub")
             -> ["sub/x:hit"]
-        rebase_raw(["/data/x"], "/data", "/data")   # absolute arg
+        respell_raw(["/data/x"], "/data", "/data")   # absolute arg
             -> ["/data/x"]                          # unchanged
 
     Args:
@@ -199,10 +260,10 @@ def rebase_raw(paths: list[str], original: str, raw: str) -> list[str]:
     """
     if raw == original:
         return paths
-    return [rebase_one(p, original, raw) for p in paths]
+    return [respell_one(p, original, raw) for p in paths]
 
 
-def rebase_one(path: str, original: str, raw: str) -> str:
+def respell_one(path: str, original: str, raw: str) -> str:
     """Rewrite a single path's ``original`` base to the as-typed ``raw``.
 
     Only the leading ``original`` prefix is rewritten, so any suffix after
@@ -210,18 +271,21 @@ def rebase_one(path: str, original: str, raw: str) -> str:
 
     Example::
 
-        rebase_one("/data/sub/x", "/data", ".")      -> "./sub/x"
-        rebase_one("/data/sub", "/data/sub", "sub")  -> "sub"
-        rebase_one("/data/x:hit", "/data", ".")      -> "./x:hit"
-        rebase_one("/other/x", "/data", ".")         -> "/other/x"  # no match
-        rebase_one("/data/x", "/data", "/data")      -> "/data/x"   # absolute
+        respell_one("/data/sub/x", "/data", ".")      -> "./sub/x"
+        respell_one("/data/sub", "/data/sub", "sub")  -> "sub"
+        respell_one("/data/x:hit", "/data", ".")      -> "./x:hit"
+        respell_one("/other/x", "/data", ".")         -> "/other/x"  # no match
+        respell_one("/data/x", "/data", "/data")      -> "/data/x"   # absolute
+        respell_one("/data/sub/x", "/data", "")       -> "sub/x"     # bare
 
     Args:
         path (str): An absolute path at or under ``original`` (optionally with
             a trailing ``:...`` suffix).
         original (str): The resolved absolute base (traversal root).
         raw (str): The as-typed base (``PathSpec.raw_path``); equal to
-            ``original`` leaves ``path`` unchanged.
+            ``original`` leaves ``path`` unchanged. The empty string is the
+            synthetic no-operand spelling (GNU ``grep -r`` with no path):
+            results render as bare names relative to the base.
 
     Returns:
         str: ``path`` with its ``original`` base replaced by ``raw``.
@@ -229,11 +293,41 @@ def rebase_one(path: str, original: str, raw: str) -> str:
     if raw == original:
         return path
     base = original.rstrip("/")
-    if path == base:
-        return raw
+    if path == base or (base == "" and path == "/"):
+        return raw or "."
     if path.startswith(base + "/"):
+        if raw == "":
+            return path[len(base) + 1:]
         return raw.rstrip("/") + path[len(base):]
     return path
+
+
+def drop_trailing_segments(path: str, count: int) -> str:
+    """The prefix of ``path`` with ``count`` trailing segments removed.
+
+    The ancestor counterpart of :func:`respell_one`: it names a path above
+    another one while keeping the original spelling, so a relative
+    argument stays relative. ``count`` is clamped so the result never
+    loses every segment, which would leave an empty string where a path
+    belongs.
+
+    Example::
+
+        drop_trailing_segments("a/b/c", 1)   -> "a/b"
+        drop_trailing_segments("/x/y/z", 2)  -> "/x"
+        drop_trailing_segments("a/b", 5)     -> "a/b"   # clamped
+
+    Args:
+        path (str): The path as typed.
+        count (int): How many trailing segments to drop.
+    """
+    if count <= 0:
+        return path
+    parts = path.rstrip("/").split("/")
+    if count >= len([part for part in parts if part]):
+        return path
+    joined = "/".join(parts[:-count])
+    return joined if joined else "/"
 
 
 def gnu_basename(path: str, suffix: str | None = None) -> str:

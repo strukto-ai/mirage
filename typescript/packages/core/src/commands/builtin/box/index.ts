@@ -13,27 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../../accessor/box.ts'
-import { read as boxRead } from '../../../core/box/read.ts'
-import { stat as boxStat } from '../../../core/box/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { BOX_GREP } from './grep.ts'
 import { BOX_IO } from './io.ts'
 import { BOX_RG } from './rg.ts'
+import { withDefaultProvisions } from '../generic_bind/provision.ts'
+import { resolveGlobOf } from '../generic_bind/adapter.ts'
 
 const BOX_OVERRIDES = new Set(['grep', 'rg'])
 
 export const BOX_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<BoxAccessor>({
-    resource: ResourceName.BOX,
-    readBytes: boxRead,
-    statEntry: boxStat,
-  }),
   ...makeGenericCommands<BoxAccessor>(ResourceName.BOX, BOX_IO, {
     overrides: BOX_OVERRIDES,
   }),
-  ...BOX_GREP,
-  ...BOX_RG,
+  ...withDefaultProvisions(
+    [...BOX_GREP, ...BOX_RG],
+    BOX_IO.stat,
+    resolveGlobOf(BOX_IO),
+    BOX_IO.readdir,
+  ),
 ]

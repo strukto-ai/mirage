@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.notion.config import NotionConfig
+from mirage.core.notion.config import NotionConfig
 
 __all__ = ["NotionConfig", "NotionResource"]
 

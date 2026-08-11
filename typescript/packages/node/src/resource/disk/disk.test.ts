@@ -64,9 +64,11 @@ describe('DiskResource — fs methods', () => {
     expect(new TextDecoder().decode(data)).toBe('hello')
   })
 
-  it('writeFile creates parent dirs', async () => {
-    await res.writeFile(spec('/a/b/c.txt'), new TextEncoder().encode('deep'))
-    expect(new TextDecoder().decode(await res.readFile(spec('/a/b/c.txt')))).toBe('deep')
+  it('writeFile does not create parent dirs', async () => {
+    // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent.
+    await expect(
+      res.writeFile(spec('/a/b/c.txt'), new TextEncoder().encode('deep')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('appendFile concatenates', async () => {
@@ -130,12 +132,14 @@ describe('DiskResource — fs methods', () => {
   })
 
   it('rmR removes a directory recursively', async () => {
+    await res.mkdir(spec('/d'))
     await res.writeFile(spec('/d/x.txt'), new TextEncoder().encode('x'))
     await res.rmR(spec('/d'))
     expect(await res.exists(spec('/d'))).toBe(false)
   })
 
   it('du sums file sizes under a path', async () => {
+    await res.mkdir(spec('/d'))
     await res.writeFile(spec('/d/a'), new Uint8Array([1, 2, 3]))
     await res.writeFile(spec('/d/b'), new Uint8Array([4, 5]))
     expect(await res.du(spec('/d'))).toBe(5)

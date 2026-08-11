@@ -27,7 +27,8 @@ from mirage.core.redis.append import append_bytes
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy
 from mirage.core.redis.create import create
-from mirage.core.redis.du import du, du_all
+from mirage.core.redis.du import entries as du_entries
+from mirage.core.redis.du import size as du_size
 from mirage.core.redis.exists import exists
 from mirage.core.redis.find import find
 from mirage.core.redis.mkdir import mkdir
@@ -64,8 +65,8 @@ _REDIS_OPS = {
     "mkdir": mkdir,
     "read_stream": read_stream,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,
@@ -78,6 +79,8 @@ class RedisResource(BaseResource):
 
     accessor: RedisAccessor
     name: str = ResourceName.REDIS
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     index_ttl: float = 0
     _ops: dict[str, Any] = _REDIS_OPS
     PROMPT: str = PROMPT
@@ -88,12 +91,22 @@ class RedisResource(BaseResource):
         key_prefix: str = "mirage:fs:",
     ) -> None:
         super().__init__()
+        self.url = url
+        self.key_prefix = key_prefix
         self._store = RedisStore(url=url, key_prefix=key_prefix)
         self.accessor = RedisAccessor(self._store)
         for fn in REDIS_COMMANDS:
             self.register(fn)
         for ro in REDIS_OPS:
             self.register_op(ro)
+
+    def storage_id(self) -> str:
+        # The server URL (host, port and db) plus the key prefix pin the
+        # keyspace two mounts would share. The prefix is joined path-like
+        # so nested prefixes collapse onto one key.
+        prefix = self.key_prefix.strip("/")
+        base = f"{self.name}:{self.url}"
+        return f"{base}/{prefix}" if prefix else base
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

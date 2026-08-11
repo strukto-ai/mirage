@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
 import tree_sitter
 
 from mirage.shell import parse
@@ -19,7 +20,8 @@ from mirage.shell.helpers import (get_command_name, get_for_parts,
                                   get_if_branches, get_list_parts, get_parts,
                                   get_pipeline_commands, get_redirects,
                                   get_text, get_while_parts)
-from mirage.shell.parse import find_syntax_error
+from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
+                                strip_line_continuation)
 from mirage.shell.types import NodeType as NT
 
 
@@ -304,3 +306,48 @@ def test_multibyte_text_before_the_opener_does_not_shift_offsets():
 
 def test_unrelated_syntax_error_still_reports():
     assert parse("if then").has_error
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # An odd-length trailing run ends in a live continuation.
+        ("echo a\\", "echo a"),
+        ("echo a\\\\\\", "echo a\\\\"),
+        ("echo \\", "echo "),
+        # An even-length run is all escaped backslashes, so nothing goes.
+        ("echo a\\\\", "echo a\\\\"),
+        ("echo a\\\\\\\\", "echo a\\\\\\\\"),
+        ("echo a", "echo a"),
+        ("echo a\\ b", "echo a\\ b"),
+    ])
+def test_strip_line_continuation(command, expected):
+    assert strip_line_continuation(command) == expected
+
+
+@pytest.mark.parametrize("command", [
+    "echo `echo a",
+    "echo \"`echo '`'`\"",
+    "echo a`",
+    "`",
+])
+def test_find_unterminated_backtick_flags_open_region(command):
+    assert find_unterminated_backtick(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo `echo a`",
+        "echo `echo a` `echo b`",
+        # Single quotes protect a backtick, double quotes do not.
+        "echo '`'",
+        'echo "`echo a`"',
+        'echo "\\`"',
+        # Only a backslash escapes inside the region.
+        "echo `echo \\`nested\\``",
+        "echo a",
+        "cat <<EOF\nplain\nEOF",
+    ])
+def test_find_unterminated_backtick_accepts_balanced(command):
+    assert find_unterminated_backtick(command) is None

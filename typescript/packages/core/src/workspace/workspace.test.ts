@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { CacheConfig } from '../cache/file/config.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { MountMode, ResourceName, type PathSpec } from '../types.ts'
@@ -130,6 +131,15 @@ describe('Workspace custom cache option', () => {
       this.store.delete(key)
       return Promise.resolve()
     }
+    evictPrefix(prefix: string): Promise<void> {
+      for (const key of [...this.store.keys()]) {
+        if (key.startsWith(prefix)) this.store.delete(key)
+      }
+      return Promise.resolve()
+    }
+    evictPaths(paths: Iterable<string>): void {
+      for (const key of paths) this.store.delete(key)
+    }
     exists(key: string | PathSpec): Promise<boolean> {
       const k = typeof key === 'string' ? key : key.mountPath
       return Promise.resolve(this.store.has(k))
@@ -149,10 +159,14 @@ describe('Workspace custom cache option', () => {
     }
   }
 
-  it('accepts a user-supplied FileCache', () => {
+  it('refuses a built store where the cache config goes', () => {
+    // Every CacheConfig field is optional, so this typechecks; before
+    // the guard it built a RAM cache instead and the supplied store
+    // never saw a read, a write, or a close.
     const cache = new StubCache()
-    const ws = new Workspace({}, { cache })
-    expect(ws).toBeDefined()
+    expect(() => new Workspace({}, { cache: cache as unknown as CacheConfig })).toThrow(
+      /not a built store/,
+    )
   })
 })
 

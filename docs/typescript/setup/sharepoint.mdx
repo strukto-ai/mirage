@@ -1,0 +1,43 @@
+---
+title: SharePoint
+icon: microsoft
+description: Mount SharePoint sites and document libraries through Microsoft Graph from Node or the browser.
+---
+
+`SharePointResource` shares its file-operation backend with OneDrive. Its additional resolver maps SharePoint sites and document libraries onto the virtual tree.
+
+```ts
+import { MountMode, SharePointResource, Workspace } from '@struktoai/mirage-node'
+
+const sharepoint = new SharePointResource({
+  accessToken: () => getMicrosoftGraphToken(),
+  tenantHost: 'contoso.sharepoint.com',
+})
+
+const ws = new Workspace({ '/sharepoint': sharepoint }, { mode: MountMode.WRITE })
+await ws.execute('ls /sharepoint/')
+await ws.execute('ls /sharepoint/Engineering/Documents/')
+```
+
+An unscoped mount uses `/site/library/path`. To hide the site and library levels, configure `site` and `drive` together; `keyPrefix` can narrow that drive further.
+
+```ts
+new SharePointResource({
+  accessToken,
+  site: 'Engineering',
+  drive: 'Documents',
+  keyPrefix: 'Reports/2026',
+})
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `accessToken` | required | Token string or sync/async callback. Redacted in snapshots. |
+| `tenantHost` | unset | Keep only sites whose `webUrl` belongs to this host. |
+| `siteFilter` | `*` | Microsoft Graph site search expression. |
+| `site`, `drive` | unset | Configure both to scope the mount to one library. |
+| `keyPrefix` | unset | Folder subtree inside the scoped library. |
+| `timeout` | `30` | Request and copy-monitor timeout in seconds. |
+| `maxRetries` | `5` | Retries for Graph throttling and transient failures. |
+
+Node and browser expose the same API. Filesystem behavior and snapshot version pinning mirror the [Python SharePoint resource](/python/resource/sharepoint).

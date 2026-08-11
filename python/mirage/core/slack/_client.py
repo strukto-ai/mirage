@@ -16,8 +16,8 @@ from typing import Any
 
 import aiohttp
 
+from mirage.core.slack.config import SlackConfig
 from mirage.resource.secrets import reveal_secret
-from mirage.resource.slack.config import SlackConfig
 
 
 def _auth_token(config: SlackConfig, method: str) -> str:

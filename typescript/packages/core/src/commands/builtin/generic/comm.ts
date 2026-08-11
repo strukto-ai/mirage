@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -102,6 +104,7 @@ export async function commGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('comm'))
   if (paths.length > 2) throw extraOperandError(CommandName.COMM, paths[2]?.rawPath ?? '')
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('comm: requires two paths\n') })]
@@ -111,20 +114,19 @@ export async function commGeneric(
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const zeroTerminated = opts.flags.z === true || opts.flags.zero_terminated === true
+  const zeroTerminated = fl.asBool('zero_terminated')
   const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data1)
   const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data2)
   let stderr = ''
-  if (opts.flags.check_order === true) {
+  if (fl.asBool('check_order')) {
     if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
     else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
   }
-  const suppress1 = opts.flags.args_1 === true
-  const suppress2 = opts.flags['2'] === true
-  const suppress3 = opts.flags['3'] === true
+  const suppress1 = fl.asBool('args_1')
+  const suppress2 = fl.asBool('2')
+  const suppress3 = fl.asBool('3')
   const merged = commMerge(lines1, lines2)
-  const delimiter =
-    typeof opts.flags.output_delimiter === 'string' ? opts.flags.output_delimiter : '\t'
+  const delimiter = fl.asStr('output_delimiter') ?? '\t'
   const output = formatComm(
     merged,
     suppress1,
@@ -132,7 +134,7 @@ export async function commGeneric(
     suppress3,
     delimiter,
     zeroTerminated ? '\0' : '\n',
-    opts.flags.total === true,
+    fl.asBool('total'),
   )
   const result: ByteSource = ENC.encode(output)
   return [

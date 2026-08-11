@@ -141,3 +141,26 @@ describe('Session.fork', () => {
     expect(original.arrays.A).toEqual(['1'])
   })
 })
+
+describe('ownRecord', () => {
+  it('session records treat prototype-colliding names as ordinary keys', () => {
+    const session = new Session({ sessionId: 's' })
+    session.env.__proto__ = '5'
+    expect(session.env.__proto__).toBe('5')
+    expect(Object.getPrototypeOf(session.env)).toBe(null)
+    // A helper defeats TS resolving `.toString` to the Object method.
+    const read = (record: Record<string, string>, name: string): string | undefined => record[name]
+    expect(read(session.env, 'toString')).toBeUndefined()
+    expect('toString' in session.functions).toBe(false)
+  })
+
+  it('fork keeps the null prototype and copies prototype-named entries', () => {
+    const session = new Session({ sessionId: 's' })
+    session.env.__proto__ = '5'
+    const forked = session.fork()
+    expect(forked.env.__proto__).toBe('5')
+    expect(Object.getPrototypeOf(forked.env)).toBe(null)
+    forked.env.__proto__ = '6'
+    expect(session.env.__proto__).toBe('5')
+  })
+})

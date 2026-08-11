@@ -38,6 +38,9 @@ export const HISTORY_PREFIX = '/.bash_history'
 export class HistoryViewResource extends BaseResource implements Resource {
   readonly kind = ResourceName.HISTORY
   readonly cachesReads = false
+  // The view renders from in-memory events, so stat() sizes it by
+  // rendering: cheap, no network, and never null.
+  readonly sizesAlwaysKnown = true
   readonly accessor: HistoryAccessor
 
   constructor(observer: Observer) {
@@ -46,10 +49,6 @@ export class HistoryViewResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 

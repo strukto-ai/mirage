@@ -14,6 +14,7 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { afterIdPages } from './paginate.ts'
+import { historyJsonlBytes } from './render.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 
@@ -50,6 +51,7 @@ async function* streamMessagesForDay(
     lastIdFn: (m) => (m as DiscordMessage).id,
     pageSize,
     startAfter: after,
+    newestFirst: true,
   })) {
     const inRange = page.filter((m) => BigInt(m.id) <= beforeBig)
     if (inRange.length > 0) yield inRange
@@ -81,7 +83,22 @@ export async function getHistoryJsonl(
   dateStr: string,
 ): Promise<Uint8Array> {
   const messages = await listMessagesForDay(accessor, channelId, dateStr)
-  if (messages.length === 0) return new Uint8Array()
-  const lines = messages.map((m) => JSON.stringify(m))
-  return new TextEncoder().encode(lines.join('\n') + '\n')
+  return historyJsonlBytes(messages)
+}
+
+export async function fetchRecentMessages(
+  accessor: DiscordAccessor,
+  channelId: string,
+  limit = 20,
+): Promise<Record<string, unknown>[]> {
+  const page = await accessor.transport.call('GET', `/channels/${channelId}/messages`, { limit })
+  const items = Array.isArray(page)
+    ? page.filter((m): m is Record<string, unknown> => m !== null && typeof m === 'object')
+    : []
+  items.sort((a, b) => {
+    const ai = BigInt(typeof a.id === 'string' ? a.id : '0')
+    const bi = BigInt(typeof b.id === 'string' ? b.id : '0')
+    return ai < bi ? -1 : ai > bi ? 1 : 0
+  })
+  return items
 }

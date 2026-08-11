@@ -26,12 +26,6 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-def is_dir_name(child: str) -> bool | None:
-    # Cold listings mark folders with a trailing slash; warm index-cache
-    # entries are slash-less, so classification falls back to stat.
-    return True if child.endswith("/") else None
-
-
 def unique_shared_drive_name(name: str, existing_names: set[str]) -> str:
     if name not in existing_names:
         return name
@@ -124,6 +118,7 @@ async def readdir(
         )
         entries.append((filename, entry, is_dir))
 
+    complete = True
     if not key and folder_id == "root":
         # Shared Drive enumeration is best-effort: if the account can't list
         # them (missing scope, API error), still return My Drive contents.
@@ -134,6 +129,7 @@ async def readdir(
         except Exception:
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []
+            complete = False
         existing_names = {name for name, _, _ in entries}
         for d in shared_drives:
             name = d["name"]
@@ -151,7 +147,18 @@ async def readdir(
     # Deterministic vfs order: glob expansion and walkers follow readdir
     # order, so sort by rendered filename (Drive returns modifiedTime desc).
     entries.sort(key=lambda e: e[0])
-    await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
+    if complete:
+        await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
+    else:
+        # Caching a listing we know is short would pin a My-Drive-only root
+        # until the entry expires, so the mount would keep hiding Shared
+        # Drives after the cause clears (a just-granted scope) with no way to
+        # force a refresh. The entries are still real, so cache those and
+        # leave the directory uncached: child lookups stay warm and the next
+        # readdir retries enumeration.
+        child_prefix = "/" if virtual_key == "/" else virtual_key + "/"
+        for name, entry, _ in entries:
+            await index.put(child_prefix + name, entry)
     path_prefix = f"/{key}/" if key else "/"
     result_paths = []
     for name, _, is_folder in entries:

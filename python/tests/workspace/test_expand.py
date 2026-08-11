@@ -20,6 +20,7 @@ from mirage.shell import parse
 from mirage.shell.call_stack import CallStack
 from mirage.shell.helpers import get_parts
 from mirage.types import PathSpec
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand import (classify_parts, classify_word,
                                      expand_and_classify, expand_node,
                                      expand_parts)
@@ -57,6 +58,7 @@ def _mock_registry(prefixes=None):
             If None, matches everything.
     """
     reg = MagicMock()
+    reg.clis = CLIRegistry()
 
     def _mount_for(path):
         if prefixes is None:

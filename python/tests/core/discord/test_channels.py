@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.discord.channels import list_channels
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 
 
 @pytest.fixture

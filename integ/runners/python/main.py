@@ -15,7 +15,6 @@
 import argparse
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -29,9 +28,15 @@ from mirage.types import ConsistencyPolicy  # noqa: E402
 HOST = "python"
 
 
-def _emit_or_record(emit: list[dict] | None, report: harness.Report | None,
-                    target_id: str, case: dict, exit_code: int, out: str,
-                    err: str, elapsed: float) -> None:
+def _emit_or_record(emit: list[dict] | None,
+                    report: harness.Report | None,
+                    target_id: str,
+                    case: dict,
+                    exit_code: int,
+                    out: str,
+                    err: str,
+                    elapsed: float,
+                    check_out: str | None = None) -> None:
     if emit is not None:
         emit.append({
             "target": target_id,
@@ -39,10 +44,12 @@ def _emit_or_record(emit: list[dict] | None, report: harness.Report | None,
             "exit": exit_code,
             "stdout": out,
             "stderr": err,
+            "check": check_out,
         })
     elif report is not None:
-        report.record(target_id, case["id"],
-                      harness.compare(case, exit_code, out, err, elapsed))
+        report.record(
+            target_id, case["id"],
+            harness.compare(case, exit_code, out, err, elapsed, check_out))
 
 
 async def run_consistency_case(target: dict, case: dict,
@@ -68,12 +75,22 @@ async def run_target(target: dict, cases: list[dict], root: Path,
         for mount in target["mounts"]:
             await harness.seed_fixture(ws, mount.get("fixture"), mount["path"],
                                        root)
+            if mount.get("seed_root"):
+                await harness.seed_mount_root(ws, mount["path"])
+        # Sessions a case can name via its "session" field. Mount grants take
+        # either the mapping form ({"/data": "read"}) or the list form
+        # (["/data"], which inherits the mount's own mode).
+        for session_id, mounts in (target.get("sessions") or {}).items():
+            ws.create_session(session_id, mounts=mounts)
+        primary = target["mounts"][0]["path"]
         for case in selected:
             if "consistency" in case:
                 continue
-            exit_code, out, err, elapsed = await harness.run_case(ws, case)
-            _emit_or_record(emit, report, target["id"], case, exit_code, out,
-                            err, elapsed)
+            bound = harness.bind_mount(case, primary)
+            exit_code, out, err, elapsed, check_out = await harness.run_case(
+                ws, bound)
+            _emit_or_record(emit, report, target["id"], bound, exit_code, out,
+                            err, elapsed, check_out)
     finally:
         await cleanup()
     for case in selected:
@@ -84,16 +101,38 @@ async def run_target(target: dict, cases: list[dict], root: Path,
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", action="append", dest="targets")
+    parser.add_argument("--facet", dest="facet")
     parser.add_argument("--emit", dest="emit")
+    parser.add_argument("--strict", action="store_true")
+    # A facet can be split across CI jobs (core's databases and vector
+    # stores run in integ-database/integ-data), so a job names the
+    # services it knowingly does not provision. Anything skipping outside
+    # this list is a broken job, which is the whole point of --strict.
+    parser.add_argument("--allow-skip", dest="allow_skip", default="")
     args = parser.parse_args()
 
     root = harness.integ_root()
     manifest = harness.load_targets(root)
+    services = harness.load_services(root)
     cases = harness.load_cases(root)
 
-    selected = args.targets or list(manifest)
+    # Targets are grouped into facets so CI can run one backend family per job;
+    # a target with no facet belongs to "core", which the shared battery runs.
+    if args.facet:
+        selected = [
+            tid for tid, t in manifest.items()
+            if (t.get("facet") or "core") == args.facet
+        ]
+        if not selected:
+            print(f"no targets in facet {args.facet!r}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        selected = args.targets or list(manifest)
     report = None if args.emit else harness.Report()
     emit: list[dict] | None = [] if args.emit else None
+    ran = 0
+    allow_skip = harness.parse_allow_skip(services, args.allow_skip)
+    env_skipped: list[str] = []
     for target_id in selected:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
@@ -102,23 +141,34 @@ async def main() -> None:
         if target["mounts"][0]["resource"] not in adapters.BUILDERS:
             print(f"skip [{target_id}]: no {HOST} adapter", file=sys.stderr)
             continue
-        if (target.get("service") == "nextcloud"
-                and not os.environ.get("NEXTCLOUD_URL")):
-            print(f"skip [{target_id}]: NEXTCLOUD_URL not set",
+        missing = harness.missing_env(services, target, HOST)
+        if missing:
+            print(f"skip [{target_id}]: {', '.join(missing)} not set",
                   file=sys.stderr)
-            continue
-        if (target.get("service") == "gws" and not os.environ.get("GWS_URL")):
-            print(f"skip [{target_id}]: GWS_URL not set", file=sys.stderr)
-            continue
-        if (target.get("service") == "email"
-                and not os.environ.get("EMAIL_HOST")):
-            print(f"skip [{target_id}]: EMAIL_HOST not set", file=sys.stderr)
-            continue
-        if (target.get("service") == "slack"
-                and not os.environ.get("SLACK_URL")):
-            print(f"skip [{target_id}]: SLACK_URL not set", file=sys.stderr)
+            if target.get("service") not in allow_skip:
+                env_skipped.append(f"{target_id} ({', '.join(missing)})")
             continue
         await run_target(target, cases, root, report, emit)
+        ran += 1
+
+    # A skip is one line on stderr and exit 0, so a facet whose service
+    # never came up (or whose env var got renamed in the workflow)
+    # reports green having tested nothing. Every facet has targets on
+    # both hosts, so zero of them running is always a broken job.
+    if args.facet and ran == 0:
+        print(f"facet {args.facet!r} ran no targets", file=sys.stderr)
+        sys.exit(2)
+
+    # The facet guard above only fires when *every* target skipped, so a
+    # two-target facet that loses one still reports green. CI passes
+    # --strict, which starts every service its facet declares, so there a
+    # missing variable is a broken job rather than a local convenience.
+    if args.strict and env_skipped:
+        print(
+            f"strict: {len(env_skipped)} target(s) skipped for missing "
+            f"env: {'; '.join(env_skipped)}",
+            file=sys.stderr)
+        sys.exit(2)
 
     if args.emit:
         Path(args.emit).write_text(json.dumps(emit))

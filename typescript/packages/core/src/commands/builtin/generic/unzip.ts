@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -26,6 +28,85 @@ interface ZipEntry {
   name: string
   size: number
   data: Uint8Array
+}
+
+// Info-ZIP's wording and spacing, verbatim (two spaces after the colon).
+const CAUTION_PREFIX = 'caution: filename not matched:  '
+
+// Info-ZIP matches filespecs against the encoded name, so `?` stands for
+// one byte, not one code point: `?.txt` misses `é.txt` and `??.txt` hits
+// it. Both sides are flattened to one UTF-16 unit per byte so the regex
+// counts bytes.
+function byteString(s: string): string {
+  const bytes = ENC.encode(s)
+  let out = ''
+  for (const b of bytes) out += String.fromCharCode(b)
+  return out
+}
+
+function memberRegex(pattern: string): RegExp {
+  let out = '^'
+  let i = 0
+  while (i < pattern.length) {
+    const ch = pattern[i] ?? ''
+    if (ch === '*') {
+      while (pattern[i] === '*') i++
+      out += '[\\s\\S]*'
+      continue
+    }
+    if (ch === '?') {
+      out += '[\\s\\S]'
+      i++
+      continue
+    }
+    if (ch === '[') {
+      let j = i + 1
+      if (pattern[j] === '!' || pattern[j] === '^') j++
+      if (pattern[j] === ']') j++
+      while (j < pattern.length && pattern[j] !== ']') j++
+      if (j >= pattern.length) {
+        out += '\\['
+        i++
+        continue
+      }
+      let cls = pattern.slice(i + 1, j).replace(/\\/g, '\\\\')
+      if (cls.startsWith('!')) cls = '^' + cls.slice(1)
+      out += '[' + cls + ']'
+      i = j + 1
+      continue
+    }
+    out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    i++
+  }
+  return new RegExp(out + '$')
+}
+
+interface MemberSelection {
+  selected: ZipEntry[]
+  unmatched: string[]
+}
+
+// Info-ZIP walks the archive in order and charges each entry to the
+// first filespec that matches it, so a spec shadowed by an earlier one
+// reports "filename not matched" even when its file was printed.
+function selectEntries(entries: ZipEntry[], members: readonly string[]): MemberSelection {
+  if (members.length === 0) return { selected: entries, unmatched: [] }
+  const regexes = members.map((m) => memberRegex(byteString(m)))
+  const hit = members.map(() => false)
+  const selected: ZipEntry[] = []
+  for (const e of entries) {
+    const name = byteString(e.name)
+    const idx = regexes.findIndex((r) => r.test(name))
+    if (idx === -1) continue
+    hit[idx] = true
+    selected.push(e)
+  }
+  const unmatched = members.filter((_, i) => hit[i] !== true)
+  return { selected, unmatched }
+}
+
+function cautionText(unmatched: readonly string[]): string {
+  return unmatched.map((m) => CAUTION_PREFIX + m + '\n').join('')
 }
 
 function readU16LE(data: Uint8Array, offset: number): number {
@@ -93,11 +174,13 @@ async function ensureParents(
 
 export async function unzipGeneric(
   paths: PathSpec[],
+  members: readonly string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('unzip'))
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('unzip: missing operand\n') })]
   }
@@ -105,13 +188,14 @@ export async function unzipGeneric(
   if (archivePath === undefined) return [null, new IOResult()]
   const data = await materialize(stream(archivePath))
   const entries = await readZipEntries(data)
+  const { selected, unmatched } = selectEntries(entries, members)
 
-  const listMode = opts.flags.args_l === true
-  const testMode = opts.flags.t === true
-  const pipeMode = opts.flags.p === true
-  const quiet = opts.flags.q === true
+  const listMode = fl.asBool('args_l')
+  const testMode = fl.asBool('t')
+  const pipeMode = fl.asBool('p')
+  const quiet = fl.asBool('q')
   const mountPrefix = mountPrefixOf(archivePath.virtual, archivePath.resourcePath)
-  const destRaw = typeof opts.flags.d === 'string' ? opts.flags.d : '/'
+  const destRaw = fl.asStr('d') ?? '/'
   const dest =
     mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
       ? destRaw.slice(mountPrefix.length)
@@ -121,14 +205,26 @@ export async function unzipGeneric(
 
   if (listMode) {
     const lines = ['  Length      Name', '---------  ----']
-    for (const e of entries) {
+    for (const e of selected) {
       lines.push(`${String(e.size).padStart(9, ' ')}  ${e.name}`)
     }
     const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
+    // GNU -l prints no caution lines and only exits 11 when the member
+    // list matched nothing at all.
+    if (members.length > 0 && selected.length === 0) {
+      return [out, new IOResult({ exitCode: 11 })]
+    }
     return [out, new IOResult()]
   }
 
   if (testMode) {
+    // GNU -t reports unmatched members on stdout and counts them as
+    // errors.
+    if (unmatched.length > 0) {
+      const msg =
+        cautionText(unmatched) + `At least one error was detected in ${archivePath.virtual}.\n`
+      return [ENC.encode(msg), new IOResult({ exitCode: 11 })]
+    }
     const msg = `No errors detected in ${archivePath.virtual}\n`
     const out: ByteSource = ENC.encode(msg)
     return [out, new IOResult()]
@@ -136,7 +232,7 @@ export async function unzipGeneric(
 
   if (pipeMode) {
     const chunks: Uint8Array[] = []
-    for (const e of entries) {
+    for (const e of selected) {
       if (!e.name.endsWith('/')) chunks.push(e.data)
     }
     let total = 0
@@ -148,22 +244,38 @@ export async function unzipGeneric(
       offset += c.byteLength
     }
     const out: ByteSource = merged
+    if (unmatched.length > 0) {
+      return [out, new IOResult({ exitCode: 11, stderr: ENC.encode(cautionText(unmatched)) })]
+    }
     return [out, new IOResult()]
   }
 
   const writes: Record<string, Uint8Array> = {}
   const outputLines: string[] = []
-  for (const e of entries) {
-    if (e.name.endsWith('/')) continue
+  for (const e of selected) {
     const entryName = lstripSlash(e.name)
-    const outPath = rstripSlash(dest) + '/' + entryName
+    const outPath = rstripSlash(dest) + '/' + rstripSlash(entryName)
+    const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath
+    if (e.name.endsWith('/')) {
+      // A directory entry is the only record an empty directory leaves,
+      // so it has to be recreated even though nothing is written inside
+      // it.
+      await mkdir(makePathSpec(outPath), true)
+      if (!quiet) outputLines.push(`   creating: ${reportPath}/`)
+      continue
+    }
     await ensureParents(mkdir, outPath)
     await write(makePathSpec(outPath), e.data)
-    const reportPath = mountPrefix !== '' ? mountPrefix + outPath : outPath
     writes[outPath] = e.data
     if (!quiet) outputLines.push(`  inflating: ${reportPath}`)
   }
   const stdout: ByteSource | null =
     outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
+  if (unmatched.length > 0) {
+    return [
+      stdout,
+      new IOResult({ exitCode: 11, stderr: ENC.encode(cautionText(unmatched)), writes }),
+    ]
+  }
   return [stdout, new IOResult({ writes })]
 }

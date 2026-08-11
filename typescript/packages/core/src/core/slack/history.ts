@@ -80,13 +80,37 @@ export async function fetchMessagesForDay(
   return messages
 }
 
+// The single renderer behind both read and the readdir-time size, so
+// stat().size == len(read()) by construction.
+export function messagesToJsonl(messages: SlackMessage[]): Uint8Array {
+  if (messages.length === 0) return new Uint8Array(0)
+  const lines = messages.map((m) => JSON.stringify(m))
+  return encoder.encode(lines.join('\n') + '\n')
+}
+
 export async function getHistoryJsonl(
   accessor: SlackAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<Uint8Array> {
   const messages = await fetchMessagesForDay(accessor, channelId, dateStr)
-  if (messages.length === 0) return new Uint8Array(0)
-  const lines = messages.map((m) => JSON.stringify(m))
-  return encoder.encode(lines.join('\n') + '\n')
+  return messagesToJsonl(messages)
+}
+
+export async function fetchRecentMessages(
+  accessor: SlackAccessor,
+  channelId: string,
+  limit = 20,
+): Promise<Record<string, unknown>[]> {
+  const data = await accessor.transport.call('conversations.history', {
+    channel: channelId,
+    limit: String(limit),
+  })
+  const messages = Array.isArray(data.messages) ? (data.messages as Record<string, unknown>[]) : []
+  messages.sort(
+    (a, b) =>
+      parseFloat(typeof a.ts === 'string' ? a.ts : '0') -
+      parseFloat(typeof b.ts === 'string' ? b.ts : '0'),
+  )
+  return messages
 }

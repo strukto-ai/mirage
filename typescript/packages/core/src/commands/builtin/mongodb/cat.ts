@@ -21,7 +21,6 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { catGeneric } from '../generic/cat.ts'
-import { fileReadProvision } from './_provision.ts'
 
 const resolveGlob = resolveGlobOf(MONGODB_IO)
 
@@ -47,5 +46,4 @@ export const MONGODB_CAT = command({
   resource: ResourceName.MONGODB,
   spec: specOf('cat'),
   fn: catCommand,
-  provision: fileReadProvision,
 })

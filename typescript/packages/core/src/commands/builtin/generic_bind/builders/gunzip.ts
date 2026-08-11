@@ -18,6 +18,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const GUNZIP_BUILDER: Builder = {
   name: 'gunzip',
   write: true,
+  requirements: ['write', 'unlink'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const { write, unlink } = ops

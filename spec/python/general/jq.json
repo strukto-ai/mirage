@@ -1,5 +1,223 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "chroma": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "dify": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "discord": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "disk": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "email": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gdocs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "github": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "github_ci": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gmail": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gsheets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "gslides": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "hf_buckets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "jaeger": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "lancedb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "langfuse": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "linear": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "mem0": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "mongodb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "nextcloud": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "notion": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "postgres": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "qdrant": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "slack": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
+      "trello": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
@@ -13,6 +231,7 @@
       "disk",
       "dropbox",
       "email",
+      "gcal",
       "gdocs",
       "gdrive",
       "github",
@@ -22,6 +241,7 @@
       "gsheets",
       "gslides",
       "hf_buckets",
+      "jaeger",
       "lancedb",
       "langfuse",
       "linear",
@@ -41,45 +261,157 @@
       "trello"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": "-r",
-      "value_kind": "none",
-      "value_optional": false
+      "description": "Use null as the single input value",
+      "long": "--null-input",
+      "short": "-n",
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": "-c",
-      "value_kind": "none",
-      "value_optional": false
+      "description": "Read each line as a string instead of JSON",
+      "long": "--raw-input",
+      "short": "-R",
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Read all inputs into one array",
+      "long": "--slurp",
       "short": "-s",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
+    },
+    {
+      "description": "Compact instead of pretty-printed output",
+      "long": "--compact-output",
+      "short": "-c",
+      "type": "bool"
+    },
+    {
+      "description": "Output strings without quotes or escapes",
+      "long": "--raw-output",
+      "short": "-r",
+      "type": "bool"
+    },
+    {
+      "description": "Implies -r and writes NUL after each output",
+      "long": "--raw-output0",
+      "type": "bool"
+    },
+    {
+      "description": "Implies -r and writes no trailing newline",
+      "long": "--join-output",
+      "short": "-j",
+      "type": "bool"
+    },
+    {
+      "description": "Escape non-ASCII characters in output",
+      "long": "--ascii-output",
+      "short": "-a",
+      "type": "bool"
+    },
+    {
+      "description": "Sort object keys on output",
+      "long": "--sort-keys",
+      "short": "-S",
+      "type": "bool"
+    },
+    {
+      "description": "Set the exit status from the last output",
+      "long": "--exit-status",
+      "short": "-e",
+      "type": "bool"
+    },
+    {
+      "description": "Indent with tabs",
+      "long": "--tab",
+      "type": "bool"
+    },
+    {
+      "description": "Indent with n spaces (max 7)",
+      "long": "--indent",
+      "type": "int"
+    },
+    {
+      "description": "Disable colored output (already the default)",
+      "long": "--monochrome-output",
+      "short": "-M",
+      "type": "bool"
+    },
+    {
+      "description": "Accepted for compatibility; output is one buffer",
+      "long": "--unbuffered",
+      "type": "bool"
+    },
+    {
+      "description": "Read the filter from a file",
+      "long": "--from-file",
+      "short": "-f",
+      "type": "path"
+    },
+    {
+      "description": "Read each input as its [path, leaf] events",
+      "long": "--stream",
+      "type": "bool"
+    },
+    {
+      "description": "Read and write RS-delimited JSON text sequences",
+      "long": "--seq",
+      "type": "bool"
+    },
+    {
+      "description": "Set $name to a string value",
+      "long": "--arg",
+      "pair": true,
+      "type": "str"
+    },
+    {
+      "description": "Set $name to a JSON value",
+      "long": "--argjson",
+      "pair": true,
+      "type": "str"
+    },
+    {
+      "description": "Set $name to a file's contents",
+      "long": "--rawfile",
+      "pair": true,
+      "type": "path"
+    },
+    {
+      "description": "Set $name to a file's documents, as an array",
+      "long": "--slurpfile",
+      "pair": true,
+      "type": "path"
+    },
+    {
+      "description": "Read the remaining operands as positional string values",
+      "long": "--args",
+      "type": "bool"
+    },
+    {
+      "description": "Read the remaining operands as positional JSON values",
+      "long": "--jsonargs",
+      "type": "bool"
+    },
+    {
+      "description": "Show this help and exit",
+      "long": "--help",
+      "short": "-h",
+      "type": "bool"
     }
   ],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "provided_by": [
+        "-f"
+      ],
+      "type": "str"
     }
   ],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "text_when": [
+      "--args",
+      "--jsonargs"
+    ],
+    "type": "path"
   }
 }

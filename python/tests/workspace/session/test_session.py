@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
+
 from mirage.types import MountMode
 from mirage.workspace.session import Session
+from mirage.workspace.session.session import (CHILD_SHELL_FIELDS,
+                                              INHERITED_FIELDS,
+                                              TRANSIENT_FIELDS)
 
 
 def test_session_defaults():
@@ -189,3 +194,38 @@ def test_fork_deep_copies_mutable_containers():
     forked.arrays["A"].append("2")
     assert "NEW" not in original.env
     assert original.arrays["A"] == ["1"]
+
+
+def test_every_field_is_classified_as_inherited_or_transient():
+    declared = {f.name for f in dataclasses.fields(Session)}
+    classified = set(INHERITED_FIELDS) | set(TRANSIENT_FIELDS)
+    assert declared == classified
+
+
+def test_child_shell_fields_are_a_subset_of_the_declared_fields():
+    declared = {f.name for f in dataclasses.fields(Session)}
+    assert set(CHILD_SHELL_FIELDS) <= declared
+
+
+def test_fork_carries_every_inherited_field():
+    original = Session(session_id="orig", script_name="/data/run.sh")
+    assert original.fork().script_name == "/data/run.sh"
+
+
+def test_snapshot_and_restore_undo_a_child_shell():
+    session = Session(session_id="s", cwd="/data", env={"A": "1"})
+    saved = session.snapshot()
+    session.cwd = "/other"
+    session.env["A"] = "2"
+    session.functions["f"] = []
+    session.script_name = "run.sh"
+    session.restore(saved)
+    assert session.cwd == "/data"
+    assert session.env == {"A": "1"}
+    assert session.functions == {}
+    assert session.script_name is None
+
+
+def test_argv0_keeps_an_empty_script_name():
+    assert Session(session_id="s").argv0 == "mirage"
+    assert Session(session_id="s", script_name="").argv0 == ""

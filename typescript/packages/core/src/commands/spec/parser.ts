@@ -13,16 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolvePath } from '../../utils/path.ts'
-import { AMBIGUOUS_NAMES, NUMERIC_SHORT } from './constants.ts'
-import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
+import { type CompiledSpec, compileSpec, expandLong } from './compile.ts'
+import {
+  ARG_PLACEHOLDER,
+  FLOAT_VALUE,
+  flagKwargName,
+  INT_VALUE,
+  NUMERIC_SHORT,
+} from './constants.ts'
+import { expandOldStyle } from './oldstyle.ts'
+import { type CommandSpec, type ValueType, ParsedArgs, type FlagValue } from './types.ts'
 
+// Record a value flag occurrence under its canonical dest. Both spellings
+// of one option land on the same key, so the last occurrence wins
+// regardless of spelling (GNU: `cp --update=all -u` is `--update=older`)
+// and `multiple` options accumulate in true command-line order
+// (`sort -k1 --key=2` is `[1, 2]`).
 function setValueFlag(
-  flags: Record<string, string | boolean | string[]>,
-  name: string,
+  flags: Record<string, FlagValue>,
+  cs: CompiledSpec,
+  spelling: string,
   value: string,
-  repeatFlags: ReadonlySet<string>,
 ): void {
-  if (repeatFlags.has(name)) {
+  const name = cs.destOf(spelling)
+  if (cs.multipleDests.has(name)) {
     const prev = flags[name]
     if (Array.isArray(prev)) {
       prev.push(value)
@@ -34,6 +48,45 @@ function setValueFlag(
   }
 }
 
+// Fold one option occurrence into the operand base directory. Called
+// after every value-flag record. Only the spec's declared operandBase
+// option moves the base, and it moves it the way a chdir does: relative
+// to wherever the previous occurrence left it, so `-C d1 ... -C ../d2`
+// lands in d1/../d2. The resolved absolute path replaces the raw value
+// in the flag bag, so the later path-flag pass has nothing left to do.
+function rebase(
+  flags: Record<string, string | boolean | number | string[]>,
+  cs: CompiledSpec,
+  spelling: string,
+  value: string,
+  base: string,
+): string {
+  if (cs.baseDest === null || cs.destOf(spelling) !== cs.baseDest) return base
+  const moved = resolvePath(value, base)
+  const bag = flags[cs.baseDest]
+  if (Array.isArray(bag) && bag.length > 0) {
+    // An accumulating option already appended the raw value; the
+    // resolved one replaces it so nothing resolves it twice.
+    bag[bag.length - 1] = moved
+  } else {
+    flags[cs.baseDest] = moved
+  }
+  return moved
+}
+
+// Record a boolean flag occurrence under its canonical dest. A count flag
+// accumulates occurrences into a number (`-vvv` and `-v -v -v` both land
+// as 3); every other boolean flag is sticky true.
+function setBoolFlag(flags: Record<string, FlagValue>, cs: CompiledSpec, spelling: string): void {
+  const name = cs.destOf(spelling)
+  if (cs.countDests.has(name)) {
+    const prev = flags[name]
+    flags[name] = typeof prev === 'number' ? prev + 1 : 1
+  } else {
+    flags[name] = true
+  }
+}
+
 interface MixedCluster {
   bools: string[]
   valueFlag: string
@@ -42,22 +95,18 @@ interface MixedCluster {
 
 // getopt-style cluster of bool flags ending in a value flag, e.g. -ne / -nepat.
 // Returns null when any character is unknown or no value flag terminates it.
-function matchMixedCluster(
-  tok: string,
-  boolFlags: ReadonlySet<string>,
-  valueFlags: ReadonlySet<string>,
-): MixedCluster | null {
+function matchMixedCluster(tok: string, cs: CompiledSpec): MixedCluster | null {
   const bools: string[] = []
   const chars = tok.slice(1)
   for (let idx = 0; idx < chars.length; idx++) {
     const ch = chars[idx]
     if (ch === undefined) break
     const name = `-${ch}`
-    if (boolFlags.has(name)) {
+    if (cs.boolSpellings.has(name)) {
       bools.push(name)
       continue
     }
-    if (valueFlags.has(name)) {
+    if (cs.valueSpellings.includes(name)) {
       const rest = chars.slice(idx + 1)
       return { bools, valueFlag: name, attached: rest.length > 0 ? rest : null }
     }
@@ -66,62 +115,33 @@ function matchMixedCluster(
   return null
 }
 
-export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): ParsedArgs {
-  const boolFlags = new Set<string>()
-  const valueFlags = new Set<string>()
-  const optionalValueFlags = new Set<string>()
-  const longBoolFlags = new Set<string>()
-  const longValueFlags = new Set<string>()
-  const longOptionalFlags = new Set<string>()
-  const valueFlagKinds = new Map<string, OperandKind>()
-  const repeatFlags = new Set<string>()
-  let numericShorthandFlag: string | null = null
+export function parseCommand(
+  spec: CommandSpec,
+  argv: string[],
+  cwd: string,
+  env?: Readonly<Record<string, string>>,
+): ParsedArgs {
+  const cs = compileSpec(spec)
 
-  for (const opt of spec.options) {
-    if (opt.short !== null) {
-      if (opt.valueKind === OperandKind.NONE) {
-        boolFlags.add(opt.short)
-      } else if (opt.valueOptional) {
-        boolFlags.add(opt.short)
-        optionalValueFlags.add(opt.short)
-        valueFlagKinds.set(opt.short, opt.valueKind)
-      } else {
-        valueFlags.add(opt.short)
-        valueFlagKinds.set(opt.short, opt.valueKind)
-        if (opt.repeatable) repeatFlags.add(opt.short)
-        if (opt.numericShorthand) numericShorthandFlag = opt.short
-      }
-    }
-    if (opt.long !== null) {
-      if (opt.valueKind === OperandKind.NONE) {
-        longBoolFlags.add(opt.long)
-      } else if (opt.valueOptional) {
-        // GNU optional argument: bare form is boolean, value only attaches
-        // via `=`; a detached next token is an operand.
-        longBoolFlags.add(opt.long)
-        longOptionalFlags.add(opt.long)
-        valueFlagKinds.set(opt.long, opt.valueKind)
-      } else {
-        longValueFlags.add(opt.long)
-        valueFlagKinds.set(opt.long, opt.valueKind)
-        if (opt.repeatable) repeatFlags.add(opt.long)
-      }
-    }
-  }
-
-  const restKind: OperandKind | null = spec.rest !== null ? spec.rest.kind : null
+  // tar's old option style is expanded before anything else reads the
+  // line, so classification, routing and dispatch all scan the same
+  // dashed words; scanOrigins maps each of them back to the caller's
+  // argv slot (every synthesized token to the cluster's own slot).
+  const old = spec.oldOptionStyle ? expandOldStyle(cs, argv) : null
+  const scanArgv = old !== null ? old.argv : argv
+  const scanOrigins = old !== null ? old.origins : argv.map((_, idx) => idx)
 
   const cachePaths: string[] = []
   const filteredArgv: string[] = []
   // origIndices[j] = argv position of filteredArgv[j]
   const origIndices: number[] = []
   let i = 0
-  while (i < argv.length) {
-    const cur = argv[i]
+  while (i < scanArgv.length) {
+    const cur = scanArgv[i]
     if (cur === '--cache') {
       i += 1
       for (;;) {
-        const next = argv[i]
+        const next = scanArgv[i]
         if (next === undefined || next.startsWith('-')) break
         cachePaths.push(resolvePath(next, cwd))
         i += 1
@@ -129,13 +149,13 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     } else {
       if (cur !== undefined) {
         filteredArgv.push(cur)
-        origIndices.push(i)
+        origIndices.push(scanOrigins[i] ?? i)
       }
       i += 1
     }
   }
 
-  const flags: Record<string, string | boolean | string[]> = {}
+  const flags: Record<string, FlagValue> = {}
   const rawArgs: string[] = []
   // rawIndices[k] = argv position of rawArgs[k]
   const rawIndices: number[] = []
@@ -149,20 +169,40 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // argv slots (filteredArgv drops --cache tokens, rawArgs keeps only
   // operands); kinds must be written at the original positions or one
   // dropped token shifts every later kind onto the wrong word.
-  const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
+  const wordKinds: (ValueType | null)[] = new Array<ValueType | null>(argv.length).fill(null)
+  if (old !== null && old.cluster !== null) {
+    // A cluster carries no dash, so leaving it null would send it to the
+    // shape heuristic and a path-shaped one (`tar sub/a.tgz`) would reach
+    // dispatch resolved and unreadable as letters.
+    wordKinds[0] = 'str'
+  }
+  // The directory the next path operand resolves against, and where it
+  // was for each word already read. It only ever moves for a spec that
+  // declares operandBase, so every other command records null throughout
+  // and the classifier keeps using the session cwd.
+  let base = cwd
+  const wordBases: (string | null)[] = new Array<string | null>(argv.length).fill(null)
+  const rawBases: string[] = []
   const warnings: string[] = []
   const invalidOptions: string[] = []
+  const ambiguousOptions: [string, readonly string[]][] = []
+  const optionErrorKinds: string[] = []
   const needsValueOptions: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
   // flag never corrupts pattern/path classification.
-  const lenientDashOperands = restKind === OperandKind.TEXT
+  const lenientDashOperands = cs.restKind !== null && cs.restKind !== 'path' && !cs.remainder
   i = 0
   let endOfFlags = false
 
   while (i < filteredArgv.length) {
     const tok = filteredArgv[i]
     if (tok === undefined) break
+
+    if (!endOfFlags && spec.ignoreTokens.has(tok)) {
+      i += 1
+      continue
+    }
 
     if (tok === '--' && !endOfFlags) {
       endOfFlags = true
@@ -173,33 +213,79 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     if (endOfFlags) {
       rawArgs.push(tok)
       rawIndices.push(origIndices[i] ?? -1)
+      rawBases.push(base)
       i += 1
       continue
     }
 
     if (tok.startsWith('--')) {
-      if (longBoolFlags.has(tok)) {
-        flags[tok] = true
+      // getopt_long: an exact spelling always wins; otherwise an
+      // unambiguous prefix expands to its declared spelling (grep --rec)
+      // and an ambiguous one is refused with every possibility.
+      // Free-text commands keep exact-only matching: their unknown dash
+      // tokens are operands, not typos.
+      const eqPos = tok.indexOf('=')
+      const typed = eqPos === -1 ? tok : tok.slice(0, eqPos)
+      let spelling = typed
+      if (!cs.dest.has(typed) && !lenientDashOperands) {
+        const candidates = expandLong(cs, typed)
+        if (candidates.length === 1) {
+          spelling = candidates[0] ?? typed
+        } else if (candidates.length > 1) {
+          ambiguousOptions.push([typed, candidates])
+          optionErrorKinds.push('ambiguous')
+          i += 1
+          continue
+        }
+      }
+      const etok = eqPos === -1 ? spelling : spelling + tok.slice(eqPos)
+      const isPair = cs.pairDests.has(cs.destOf(spelling))
+      if (cs.longBoolSpellings.has(etok)) {
+        setBoolFlag(flags, cs, etok)
         i += 1
-      } else if (longValueFlags.has(tok) && i + 1 < filteredArgv.length) {
-        setValueFlag(flags, tok, filteredArgv[i + 1] ?? '', repeatFlags)
-        wordKinds[origIndices[i + 1] ?? -1] = valueFlagKinds.get(tok) ?? null
+      } else if (isPair && eqPos === -1 && i + 2 < filteredArgv.length) {
+        // Two tokens, both recorded under the one dest, so the command
+        // reads the accumulated list in twos.
+        setValueFlag(flags, cs, spelling, filteredArgv[i + 1] ?? '')
+        setValueFlag(flags, cs, spelling, filteredArgv[i + 2] ?? '')
+        // The first token names the value and is always textual; the
+        // option's own kind describes the second.
+        wordKinds[origIndices[i + 1] ?? -1] = 'str'
+        wordKinds[origIndices[i + 2] ?? -1] = cs.kindOf.get(spelling) ?? null
+        i += 3
+      } else if (!isPair && cs.longValueSpellings.has(etok) && i + 1 < filteredArgv.length) {
+        setValueFlag(flags, cs, etok, filteredArgv[i + 1] ?? '')
+        wordKinds[origIndices[i + 1] ?? -1] = cs.kindOf.get(etok) ?? null
+        if (cs.destOf(etok) === cs.baseDest) wordBases[origIndices[i + 1] ?? -1] = base
+        base = rebase(flags, cs, etok, filteredArgv[i + 1] ?? '', base)
         i += 2
+      } else if (isPair) {
+        if (eqPos === -1) {
+          needsValueOptions.push(spelling)
+        } else {
+          // A two-token option has no `=` form (jq refuses `--arg=name`
+          // as an unknown option).
+          invalidOptions.push(tok)
+          optionErrorKinds.push('invalid')
+        }
+        i += 1
       } else {
-        const eq = tok.indexOf('=')
         if (
-          eq !== -1 &&
-          (longValueFlags.has(tok.slice(0, eq)) || longOptionalFlags.has(tok.slice(0, eq)))
+          eqPos !== -1 &&
+          (cs.longValueSpellings.has(spelling) || cs.longOptionalSpellings.has(spelling))
         ) {
-          setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
-        } else if (longValueFlags.has(tok)) {
+          setValueFlag(flags, cs, spelling, tok.slice(eqPos + 1))
+          base = rebase(flags, cs, spelling, tok.slice(eqPos + 1), base)
+        } else if (cs.longValueSpellings.has(etok)) {
           // Declared value flag at end of line with no argument.
-          needsValueOptions.push(tok)
+          needsValueOptions.push(etok)
         } else if (lenientDashOperands) {
           rawArgs.push(tok)
           rawIndices.push(origIndices[i] ?? -1)
+          rawBases.push(base)
         } else {
           invalidOptions.push(tok)
+          optionErrorKinds.push('invalid')
         }
         i += 1
       }
@@ -207,15 +293,16 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
 
     if (tok.startsWith('-') && tok.length > 1) {
-      if (numericShorthandFlag !== null && NUMERIC_SHORT.test(tok)) {
-        flags[numericShorthandFlag] = tok.slice(1)
+      if (cs.numericDest !== null && NUMERIC_SHORT.test(tok)) {
+        flags[cs.numericDest] = tok.slice(1)
         i += 1
         continue
       }
       let matchedOptional = false
-      for (const vf of optionalValueFlags) {
+      for (const vf of cs.attachSpellings) {
         if (tok.startsWith(vf) && tok.length > vf.length) {
-          setValueFlag(flags, vf, tok.slice(vf.length), repeatFlags)
+          setValueFlag(flags, cs, vf, tok.slice(vf.length))
+          base = rebase(flags, cs, vf, tok.slice(vf.length), base)
           i += 1
           matchedOptional = true
           break
@@ -223,54 +310,64 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       }
       if (matchedOptional) continue
       let matchedValue = false
-      for (const vf of valueFlags) {
+      for (const vf of cs.valueSpellings) {
         if (tok === vf && i + 1 < filteredArgv.length) {
-          setValueFlag(flags, vf, filteredArgv[i + 1] ?? '', repeatFlags)
-          wordKinds[origIndices[i + 1] ?? -1] = valueFlagKinds.get(vf) ?? null
+          setValueFlag(flags, cs, vf, filteredArgv[i + 1] ?? '')
+          wordKinds[origIndices[i + 1] ?? -1] = cs.kindOf.get(vf) ?? null
+          if (cs.destOf(vf) === cs.baseDest) wordBases[origIndices[i + 1] ?? -1] = base
+          base = rebase(flags, cs, vf, filteredArgv[i + 1] ?? '', base)
           i += 2
           matchedValue = true
           break
         }
         if (tok.startsWith(vf) && tok.length > vf.length) {
-          setValueFlag(flags, vf, tok.slice(vf.length), repeatFlags)
+          setValueFlag(flags, cs, vf, tok.slice(vf.length))
+          base = rebase(flags, cs, vf, tok.slice(vf.length), base)
           i += 1
           matchedValue = true
           break
         }
       }
-      if (matchedValue) continue
+      if (matchedValue) {
+        continue
+      }
 
-      if (boolFlags.has(tok)) {
-        flags[tok] = true
+      if (cs.boolSpellings.has(tok)) {
+        setBoolFlag(flags, cs, tok)
         i += 1
         continue
       }
 
       let allBool = true
       for (const ch of tok.slice(1)) {
-        if (!boolFlags.has(`-${ch}`)) {
+        if (!cs.boolSpellings.has(`-${ch}`)) {
           allBool = false
           break
         }
       }
       if (allBool && tok.length > 1) {
-        for (const ch of tok.slice(1)) flags[`-${ch}`] = true
+        for (const ch of tok.slice(1)) setBoolFlag(flags, cs, `-${ch}`)
         i += 1
         continue
       }
 
-      const mixed = matchMixedCluster(tok, boolFlags, valueFlags)
+      const mixed = matchMixedCluster(tok, cs)
       if (mixed !== null) {
         if (mixed.attached !== null) {
-          for (const name of mixed.bools) flags[name] = true
-          setValueFlag(flags, mixed.valueFlag, mixed.attached, repeatFlags)
+          for (const name of mixed.bools) setBoolFlag(flags, cs, name)
+          setValueFlag(flags, cs, mixed.valueFlag, mixed.attached)
+          base = rebase(flags, cs, mixed.valueFlag, mixed.attached, base)
           i += 1
           continue
         }
         if (i + 1 < filteredArgv.length) {
-          for (const name of mixed.bools) flags[name] = true
-          setValueFlag(flags, mixed.valueFlag, filteredArgv[i + 1] ?? '', repeatFlags)
-          wordKinds[origIndices[i + 1] ?? -1] = valueFlagKinds.get(mixed.valueFlag) ?? null
+          for (const name of mixed.bools) setBoolFlag(flags, cs, name)
+          setValueFlag(flags, cs, mixed.valueFlag, filteredArgv[i + 1] ?? '')
+          wordKinds[origIndices[i + 1] ?? -1] = cs.kindOf.get(mixed.valueFlag) ?? null
+          if (cs.destOf(mixed.valueFlag) === cs.baseDest) {
+            wordBases[origIndices[i + 1] ?? -1] = base
+          }
+          base = rebase(flags, cs, mixed.valueFlag, filteredArgv[i + 1] ?? '', base)
           i += 2
           continue
         }
@@ -279,7 +376,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       if (lenientDashOperands || NUMERIC_SHORT.test(tok)) {
         rawArgs.push(tok)
         rawIndices.push(origIndices[i] ?? -1)
-      } else if (valueFlags.has(tok)) {
+        rawBases.push(base)
+      } else if (cs.valueSpellings.includes(tok)) {
         // A declared value flag with no argument left on the line.
         needsValueOptions.push(tok.slice(1))
       } else if (mixed !== null && mixed.attached === null) {
@@ -289,12 +387,13 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         // GNU reports the first offending character, not the token.
         let bad = tok.slice(1, 2)
         for (const ch of tok.slice(1)) {
-          if (!boolFlags.has(`-${ch}`) && !valueFlags.has(`-${ch}`)) {
+          if (!cs.boolSpellings.has(`-${ch}`) && !cs.valueSpellings.includes(`-${ch}`)) {
             bad = ch
             break
           }
         }
         invalidOptions.push(bad)
+        optionErrorKinds.push('invalid')
       }
       i += 1
       continue
@@ -302,48 +401,145 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
     rawArgs.push(tok)
     rawIndices.push(origIndices[i] ?? -1)
+    rawBases.push(base)
+    // The first operand ends option parsing outright under
+    // argparse's REMAINDER, so a script's own flags reach the script
+    // of being read as the interpreter's.
+    if (cs.remainder) endOfFlags = true
     i += 1
   }
 
-  const positional: OperandKind[] = spec.positional
-    .filter((op) => !op.providedBy.some((name) => name in flags))
-    .map((op) => op.kind)
+  // Snapshot before defaults land, because "typed" and "present" stop being
+  // the same set one line below. A dialect that echoes the options a line
+  // carried (clap's missing-argument usage) needs the former, and key order is
+  // the order they were scanned in.
+  const typedDests = Object.keys(flags)
+
+  // An option's declared variable lands exactly where a default does, so it
+  // gets the same coercion, the same choices test, the same PATH resolution
+  // and the same required credit. Filling it after the parse instead would
+  // leave an int unchecked and a path a bare string. It goes in ahead of the
+  // defaults because it outranks one, it yields to anything the line typed,
+  // and it lands below the snapshot because clap's usage line distinguishes
+  // an option the line carried from one the environment supplied.
+  for (const [destName, variable] of cs.envByDest) {
+    if (destName in flags) continue
+    const supplied = env?.[variable]
+    if (supplied === undefined || supplied === '') continue
+    flags[destName] = cs.multipleDests.has(destName) ? [supplied] : supplied
+  }
+
+  // Declared defaults land as if typed, before choices/required checks
+  // and before PATH/TEXT flag-value collection, so a PATH default
+  // resolves and routes and a default always satisfies required. A
+  // multiple dest holds lists, so its default is a one-element list.
+  for (const [destName, defaultValue] of cs.defaults) {
+    if (!(destName in flags)) {
+      flags[destName] = cs.multipleDests.has(destName) ? [defaultValue] : defaultValue
+    }
+  }
+
+  // Int-typed values are refused before choices, argparse's order (type
+  // conversion runs before the choices test). The bare boolean form of
+  // an optional-value flag is exempt, like choices.
+  const invalidIntOptions: [string, string][] = []
+  for (const destName of cs.intDests) {
+    const value = flags[destName]
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!INT_VALUE.test(part)) invalidIntOptions.push([destName, part])
+    }
+  }
+  const invalidFloatOptions: [string, string][] = []
+  for (const destName of cs.floatDests) {
+    const value = flags[destName]
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!FLOAT_VALUE.test(part)) invalidFloatOptions.push([destName, part])
+    }
+  }
+
+  const invalidValueOptions: [string, string, readonly string[]][] = []
+  for (const [destName, allowed] of cs.choicesByDest) {
+    const value = flags[destName]
+    // The bare boolean form of an optional-value flag is exempt.
+    const candidates = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+    for (const part of candidates) {
+      if (!allowed.includes(part)) invalidValueOptions.push([destName, part, allowed])
+    }
+  }
+
+  const missingRequiredOptions = cs.requiredDests.filter((destName) => !(destName in flags))
+
+  const supplying = spec.positional.filter(
+    (op) => !op.providedBy.some((name) => cs.destOf(name) in flags),
+  )
+  const positional: ValueType[] = supplying.map((op) => op.type)
+
+  // A required slot the line left empty. Counted against the surviving slots
+  // rather than the declared ones, so a flag standing in for a slot
+  // (providedBy) satisfies it the same way a word would.
+  const missingRequiredOperands = supplying
+    .filter((op, index) => op.required && rawArgs.length <= index)
+    .map((op) => (op.name === '' ? ARG_PLACEHOLDER : op.name))
+  if (spec.rest !== null && spec.rest.required && rawArgs.length <= supplying.length) {
+    missingRequiredOperands.push(spec.rest.name === '' ? ARG_PLACEHOLDER : spec.rest.name)
+  }
+
+  // A flag can turn the rest slot textual for this line only (jq's
+  // --args makes every later operand a positional string rather than an
+  // input file). Only classification moves: unknown dash tokens stay as
+  // strict as the declared kind makes them.
+  const restKind: ValueType | null = spec.rest?.textWhen.some((name) => cs.destOf(name) in flags)
+    ? 'str'
+    : cs.restKind
 
   // Overflow operands past the declared positional slots pass through
   // classified like the last slot (TEXT when there is none), so a
   // fixed-arity command receives them and raises its own extra-operand
   // UsageError (#452). The parser classifies, it never drops or raises.
-  const overflowKind: OperandKind = positional.at(-1) ?? OperandKind.TEXT
+  const overflowKind: ValueType = positional.at(-1) ?? 'str'
 
-  const classified: [string, OperandKind][] = []
-  const rawOperands: [string, OperandKind][] = []
+  const classified: [string, ValueType][] = []
+  const rawOperands: [string, ValueType][] = []
   for (let j = 0; j < rawArgs.length; j++) {
     const arg = rawArgs[j]
     if (arg === undefined) continue
-    let kind: OperandKind
+    let kind: ValueType
     if (j < positional.length) {
-      kind = positional[j] ?? OperandKind.TEXT
+      kind = positional[j] ?? 'str'
     } else if (restKind !== null) {
       kind = restKind
     } else {
       kind = overflowKind
     }
-    if (kind === OperandKind.PATH) {
-      classified.push([resolvePath(arg, cwd), OperandKind.PATH])
-      rawOperands.push([arg, OperandKind.PATH])
+    if (kind === 'path') {
+      // Against the base an operandBase option left in effect at this
+      // position, which is the session cwd for every command that
+      // declares none.
+      const here = rawBases[j] ?? cwd
+      classified.push([resolvePath(arg, here), 'path'])
+      rawOperands.push([arg, 'path'])
+      const baseIdx = rawIndices[j]
+      if (here !== cwd && baseIdx !== undefined && baseIdx >= 0) wordBases[baseIdx] = here
     } else {
-      classified.push([arg, OperandKind.TEXT])
-      rawOperands.push([arg, OperandKind.TEXT])
+      classified.push([arg, kind])
+      rawOperands.push([arg, kind])
     }
     const origIdx = rawIndices[j]
     if (origIdx !== undefined && origIdx >= 0) wordKinds[origIdx] = kind
   }
 
   const pathFlagValues: string[] = []
-  for (const [flagName, kind] of valueFlagKinds) {
-    if (kind !== OperandKind.PATH || !(flagName in flags)) continue
+  for (const [flagName, kind] of cs.kindByDest) {
+    if (kind !== 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
-    if (Array.isArray(val)) {
+    if (Array.isArray(val) && cs.pairDests.has(flagName)) {
+      // Only the odd slots are the paths: the even ones name them.
+      const paired = val.map((part, index) => (index % 2 ? resolvePath(part, cwd) : part))
+      flags[flagName] = paired
+      pathFlagValues.push(...paired.filter((_, index) => index % 2 === 1))
+    } else if (Array.isArray(val)) {
       const resolvedList = val.map((part) => resolvePath(part, cwd))
       flags[flagName] = resolvedList
       pathFlagValues.push(...resolvedList)
@@ -355,8 +551,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   }
 
   const textFlagValues: string[] = []
-  for (const [flagName, kind] of valueFlagKinds) {
-    if (kind !== OperandKind.TEXT || !(flagName in flags)) continue
+  for (const [flagName, kind] of cs.kindByDest) {
+    if (kind === 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
     if (Array.isArray(val)) {
       textFlagValues.push(...val)
@@ -374,17 +570,25 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     textFlagValues,
     warnings,
     invalidOptions,
+    ambiguousOptions,
+    optionErrorKinds,
     needsValueOptions,
+    invalidValueOptions,
+    invalidIntOptions,
+    invalidFloatOptions,
+    missingRequiredOptions,
+    missingRequiredOperands,
+    typedDests,
+    oldOptionNeedsValue: old !== null ? old.needsValue : null,
     wordKinds,
+    wordBases,
   })
 }
 
-export function parseToKwargs(parsed: ParsedArgs): Record<string, string | boolean | string[]> {
-  const result: Record<string, string | boolean | string[]> = {}
+export function parseToKwargs(parsed: ParsedArgs): Record<string, FlagValue> {
+  const result: Record<string, FlagValue> = {}
   for (const [key, value] of Object.entries(parsed.flags)) {
-    let clean = key.replace(/^-+/, '').replaceAll('-', '_')
-    clean = AMBIGUOUS_NAMES[clean] ?? clean
-    result[clean] = value
+    result[flagKwargName(key)] = value
   }
   return result
 }

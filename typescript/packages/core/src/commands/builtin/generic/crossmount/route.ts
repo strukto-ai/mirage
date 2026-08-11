@@ -20,6 +20,7 @@ import { runFanout } from './fanout/index.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
+import type { FlagValue } from '../../../spec/types.ts'
 
 // Run a command whose path operands span mounts. Every command combines
 // per-mount work under one of three strategies (see Strategy): STREAM merges
@@ -33,10 +34,12 @@ export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   runSingle: RunSingle,
   stdin: ByteSource | null = null,
+  // Maps an operand to its storage identity (RELAY's transfer commands).
+  storageKey?: (path: PathSpec) => string,
 ): Promise<CrossResult> {
   try {
     // isCrossMount gated on CROSS_MOUNT_COMMANDS membership, so the name is
@@ -44,7 +47,7 @@ export async function handleCrossMount(
     const cmd = cmdName as Cmd
     const strategy = strategyFor(cmd, flagKwargs)
     if (strategy === Strategy.RELAY) {
-      return await runRelay(cmd, scopes, flagKwargs, dispatch)
+      return await runRelay(cmd, scopes, flagKwargs, dispatch, storageKey)
     }
     if (strategy === Strategy.STREAM) {
       return await runStream(cmd, scopes, textArgs, flagKwargs, runSingle)

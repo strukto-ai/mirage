@@ -58,8 +58,8 @@ The same task, three ways. Same answer; very different agent surface.
 ## What Mirage gives the agent
 
 - **One stable tool surface** (`terminal`) regardless of how many backends are mounted.
-- **Pipes and composability** because everything is a stream of bytes — `cat /s3/data/2026-04.parquet | grep error | jq '.user' | sort | uniq -c`.
-- **Format-aware reads** — `cat` on `.parquet` / `.feather` / `.orc` returns a formatted table; `head -n 5` on `.jsonl` returns the first 5 messages; `grep` on a Slack channel directory pushes down to `search.messages` automatically.
+- **Pipes and composability** because everything is a stream of bytes — `cat /s3/logs/2026-04.jsonl | grep error | jq '.user' | sort | uniq -c`.
+- **Format-aware reads** — `head -n 5` on `.jsonl` returns the first 5 messages; `grep` on a Slack channel directory pushes down to `search.messages` automatically.
 - **One mental model** for the agent: *"the workspace is a filesystem; use shell."*
 - **One mental model** for you: *"if I can mount it, the agent can use it."*
 

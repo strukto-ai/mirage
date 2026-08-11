@@ -24,7 +24,9 @@ export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   const attrs = await new Promise<Stats>((resolveFn, rejectFn) => {
-    sftp.lstat(remote, (err, stats) => {
+    // Follow symlinks (stat, not lstat), like the Python core: reads
+    // follow the link, so the reported size must be the target's.
+    sftp.stat(remote, (err, stats) => {
       if (err !== undefined) {
         if (isNoSuchFile(err)) rejectFn(enoent(p))
         else rejectFn(err)

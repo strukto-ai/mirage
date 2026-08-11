@@ -64,6 +64,8 @@ _DISK_OPS = {
 class DiskResource(BaseResource):
 
     name: str = ResourceName.DISK
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     accessor: DiskAccessor
     index_ttl: float = 60
     _ops: dict[str, Any] = _DISK_OPS
@@ -72,11 +74,22 @@ class DiskResource(BaseResource):
     def __init__(self, root: str) -> None:
         super().__init__()
         self.root = Path(root).resolve()
+        # The mount root is infrastructure, not a path component a caller
+        # asked for, so it is created here rather than on demand by the
+        # first write: writes must report ENOENT for a missing parent the
+        # way GNU does. Mirrors TypeScript, where DiskResource.open() does
+        # the same `mkdir(root, {recursive: true})`.
+        self.root.mkdir(parents=True, exist_ok=True)
         self.accessor = DiskAccessor(self.root)
         for fn in DISK_COMMANDS:
             self.register(fn)
         for ro in DISK_OPS:
             self.register_op(ro)
+
+    def storage_id(self) -> str:
+        # The resolved root is the storage: two DiskResources built on the
+        # same directory are one store, however they were spelled.
+        return f"{self.name}:{self.root}"
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

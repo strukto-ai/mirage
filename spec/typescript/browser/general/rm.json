@@ -1,5 +1,85 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gdocs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gsheets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gslides": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "opfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
@@ -8,112 +88,61 @@
       "box",
       "databricks_volume",
       "dropbox",
+      "gcal",
       "gdocs",
       "gdrive",
       "gsheets",
       "gslides",
+      "onedrive",
       "opfs",
       "ram",
-      "s3"
+      "s3",
+      "sharepoint"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-r",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-R",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-f",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-v",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-d",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-i",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-I",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--preserve-root",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--no-preserve-root",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--one-file-system",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "type": "path"
   }
 }

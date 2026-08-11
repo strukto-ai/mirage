@@ -21,7 +21,7 @@ from mirage.workspace.snapshot import requires_resource_override, to_state_dict
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 
-def _build_override_resources(
+async def _build_override_resources(
         override: dict[str, Any] | None) -> dict[str, Any]:
     if not override:
         return {}
@@ -35,7 +35,8 @@ def _build_override_resources(
         config = block.get("config") or {}
         if resource_name is None:
             continue
-        out[norm_mount_prefix(prefix)] = build_resource(resource_name, config)
+        out[norm_mount_prefix(prefix)] = await build_resource(
+            resource_name, config)
     return out
 
 
@@ -81,7 +82,7 @@ async def clone_workspace_with_override(src_ws: Workspace,
         Workspace: a new, independent workspace.
     """
     state = await to_state_dict(src_ws)
-    override_resources = _build_override_resources(override)
+    override_resources = await _build_override_resources(override)
     existing = _existing_redacted_resources(src_ws,
                                             state,
                                             skip=set(override_resources))

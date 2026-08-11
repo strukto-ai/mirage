@@ -18,7 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { pasteGeneric } from './paste.ts'
 
-function opts(flags: Record<string, string | boolean | string[]> = {}): CommandOpts {
+function opts(flags: Record<string, string | boolean | number | string[]> = {}): CommandOpts {
   return { stdin: null, flags, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts
 }
 

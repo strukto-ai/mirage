@@ -12,84 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-import type { S3Config } from '../s3/config.ts'
+import { makeRegionAlias, type S3AliasConfig, type S3AliasConfigRedacted } from '../s3_alias.ts'
 
-export interface AliyunConfig {
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+export interface AliyunConfig extends S3AliasConfig {
   region: string
-  endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
 }
 
-export interface AliyunConfigRedacted {
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
-  region: string
-  endpoint: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
+export type AliyunConfigRedacted = S3AliasConfigRedacted
 
-const AliyunConfigSchema = z.object({
-  bucket: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
-  region: z.string(),
-  endpoint: z.string(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
-})
+const alias = makeRegionAlias<AliyunConfig, AliyunConfigRedacted>(
+  (config) => `https://s3.oss-${config.region}.aliyuncs.com`,
+)
 
-export function resolvedAliyunEndpoint(config: AliyunConfig): string {
-  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
-  const region = config.region
-  return `https://s3.oss-${region}.aliyuncs.com`
-}
-
-export function aliyunToS3Config(config: AliyunConfig): S3Config {
-  return {
-    bucket: config.bucket,
-    region: config.region,
-    endpoint: resolvedAliyunEndpoint(config),
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
-    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-    ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  }
-}
-
-export function redactAliyunConfig(config: AliyunConfig): AliyunConfigRedacted {
-  return redactConfigWithSchema(AliyunConfigSchema, {
-    ...config,
-    endpoint: resolvedAliyunEndpoint(config),
-  }) as unknown as AliyunConfigRedacted
-}
-
-export function normalizeAliyunConfig(input: Record<string, unknown>): AliyunConfig {
-  return normalizeFields(input, {
-    rename: {
-      access_key_id: 'accessKeyId',
-      secret_access_key: 'secretAccessKey',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      key_prefix: 'keyPrefix',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as AliyunConfig
-}
+export const resolvedAliyunEndpoint = alias.resolvedEndpoint
+export const aliyunToS3Config = alias.toS3Config
+export const redactAliyunConfig = alias.redact
+export const normalizeAliyunConfig = alias.normalize

@@ -40,3 +40,8 @@ ARITH_SIGN = 1 << 63
 # Recursion budget for variables holding expressions (`x="1+2"; $((x))`),
 # mirroring bash's expression recursion limit.
 ARITH_MAX_DEPTH = 16
+
+# What the shell calls itself when no script is running, bash's "bash".
+# A nested `bash`/`sh` overrides it through Session.script_name, and
+# `Session.argv0` is the one place the two are folded together.
+SHELL_ARGV0 = "mirage"

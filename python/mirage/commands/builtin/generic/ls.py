@@ -1,14 +1,92 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.formatting import format_ls_long
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.io.types import IOResult
+from mirage.ops.types import ChildMounts, LinkView
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
 from mirage.utils.key_prefix import rekey
-from mirage.utils.path import rebase_one
+from mirage.utils.path import CycleError, respell_one
+
+Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
+Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
+
+LS_OK = 0
+LS_MINOR_PROBLEM = 1
+LS_FAILURE = 2
+
+
+@dataclass(frozen=True, slots=True)
+class LsWarning:
+    """One diagnostic plus how serious GNU ls considers it.
+
+    Args:
+        message (str): The rendered `ls: ...` stderr line.
+        serious (bool): True when the failure was on a command-line operand
+            (GNU exit 2); False for problems met while listing or
+            recursing below an operand (GNU exit 1).
+    """
+
+    message: str
+    serious: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Operand:
+    """One ls operand once its kind is known.
+
+    ``row`` is set when the operand is not a directory: GNU prints those
+    first, as one block with no header. ``groups`` holds one
+    ``(dir, entries)`` pair per directory listed under the operand — one
+    for a plain listing, the whole pre-order subtree under ``-R``. Both
+    empty means the operand could not be accessed.
+    """
+    path: PathSpec
+    row: FileStat | None
+    groups: list[tuple[PathSpec, list[FileStat]]]
+
+
+@dataclass(frozen=True, slots=True)
+class WalkResult:
+    """Outcome of listing one directory.
+
+    Args:
+        entries (list[FileStat]): The stats to render for this directory.
+        warnings (list[LsWarning]): Diagnostics collected at or below this
+            directory.
+        listed (bool): False when the directory itself could not be opened, so
+            callers skip emitting a `dir:` header for it.
+    """
+
+    entries: list[FileStat] = field(default_factory=list)
+    warnings: list[LsWarning] = field(default_factory=list)
+    listed: bool = True
+
+
+def exit_status_for(warnings: list[LsWarning]) -> int:
+    """Collapse diagnostics into a GNU ls exit status.
+
+    GNU ratchets the status upward: a serious problem (bad command-line
+    operand) always wins, a minor one only upgrades a clean run.
+
+    Args:
+        warnings (list[LsWarning]): Diagnostics gathered over every operand.
+
+    Returns:
+        0 when clean, 1 for minor problems only, 2 if any was serious.
+    """
+    if any(w.serious for w in warnings):
+        return LS_FAILURE
+    return LS_MINOR_PROBLEM if warnings else LS_OK
+
+
+# GNU -F suffixes: a directory gets "/", a symlink "@". The link mark
+# rides the row's type, so it needs no separate lookup.
+_CLASSIFY_SUFFIX = {FileType.DIRECTORY: "/", FileType.SYMLINK: "@"}
 
 
 def format_simple(entries: list[FileStat],
@@ -16,19 +94,58 @@ def format_simple(entries: list[FileStat],
                   classify: bool = False) -> list[str]:
     out: list[str] = []
     for e in entries:
-        is_dir = classify and e.type == FileType.DIRECTORY
-        out.append(e.name + "/" if is_dir else e.name)
+        suffix = ""
+        if classify and e.type is not None:
+            suffix = _CLASSIFY_SUFFIX.get(e.type, "")
+        out.append(e.name + suffix)
     return out
+
+
+def _primary_value(entry: FileStat, sort_by: LsSortBy) -> str | int:
+    if sort_by is LsSortBy.TIME:
+        return entry.modified or ""
+    if sort_by is LsSortBy.SIZE:
+        return entry.size or 0
+    return entry.name
+
+
+def _order_rows(rows: list[FileStat], sort_by: LsSortBy,
+                reverse: bool) -> list[int]:
+    """Indices of ``rows`` in GNU ls order.
+
+    GNU's `-t`/`-S` comparators fall back to the name when the timestamps or
+    sizes tie, and `-r` negates the whole comparison, tie-break included. A
+    stable name sort followed by the primary key reproduces the first half;
+    reversing the finished order reproduces the second.
+
+    Args:
+        rows (list[FileStat]): The stats to order.
+        sort_by (LsSortBy): The active sort key.
+        reverse (bool): Whether `-r` is in effect.
+    """
+    order = sorted(range(len(rows)), key=lambda i: rows[i].name)
+    if sort_by is not LsSortBy.NAME:
+        # -t and -S list newest/largest first.
+        order.sort(key=lambda i: _primary_value(rows[i], sort_by),
+                   reverse=True)
+    if reverse:
+        order.reverse()
+    return order
+
+
+def sort_stats(entries: list[FileStat], sort_by: LsSortBy,
+               reverse: bool) -> list[FileStat]:
+    return [entries[i] for i in _order_rows(entries, sort_by, reverse)]
 
 
 async def _file_entry(
     path: PathSpec,
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    stat: Stat,
     index: IndexCacheStore,
 ) -> FileStat | None:
     try:
         s = await stat(path, index)
-    except (FileNotFoundError, ValueError):
+    except (OSError, ValueError):
         return None
     if s.type == FileType.DIRECTORY:
         return None
@@ -37,47 +154,106 @@ async def _file_entry(
     return s.model_copy(update={"name": path.raw_path})
 
 
-async def walk(
-    path: PathSpec,
-    *,
-    readdir: Callable[[PathSpec, IndexCacheStore | None],
-                      Awaitable[list[str]]],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    all_files: bool = False,
-    sort_by: LsSortBy = LsSortBy.NAME,
-    reverse: bool = False,
-    recursive: bool = False,
-    list_dir: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-) -> tuple[list[FileStat], list[str]]:
-    warnings: list[str] = []
-    if list_dir:
-        try:
-            listed = await stat(path, index)
-        except (FileNotFoundError, ValueError) as exc:
-            detail = fs_strerror(exc) or exc
-            warnings.append(f"ls: cannot access '{path.raw_path}': {detail}")
-            return [], warnings
-        # GNU ls -d prints the operand as given.
-        return [listed.model_copy(update={"name": path.raw_path})], warnings
+async def _deref_entry(
+    directory: PathSpec,
+    link: FileStat,
+    links: LinkView,
+    stat: Stat,
+    index: IndexCacheStore,
+) -> FileStat | None:
+    """The target's stat for a link child under -L, or None if unreadable.
 
+    GNU ``ls -L`` reports the referenced file while keeping the link's
+    own name, so a dangling link falls back to the link row rather than
+    dropping out of the listing.
+
+    Args:
+        directory (PathSpec): the directory being listed.
+        link (FileStat): the link's own row, whose name is kept.
+        links (LinkView): the namespace's symlink facts.
+        stat (Stat): backend stat.
+        index (IndexCacheStore): listing cache.
+    """
+    child = directory.virtual.rstrip("/") + "/" + link.name
     try:
-        entries = await readdir(path, index)
-    except (FileNotFoundError, ValueError, NotADirectoryError) as exc:
-        file_entry = await _file_entry(path, stat, index)
-        if file_entry is not None:
-            return [file_entry], warnings
-        warnings.append(
-            f"ls: cannot access '{path.raw_path}': {fs_strerror(exc) or exc}")
-        return [], warnings
+        target = links.resolve(child)
+    except CycleError:
+        return None
+    spec = PathSpec(virtual=target,
+                    directory=target,
+                    resolved=False,
+                    resource_path=rekey(directory.virtual,
+                                        directory.resource_path, target))
+    try:
+        return (await stat(spec, index)).model_copy(update={"name": link.name})
+    except (OSError, ValueError):
+        return None
 
-    if not entries:
-        file_entry = await _file_entry(path, stat, index)
-        if file_entry is not None:
-            return [file_entry], warnings
 
+def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
+    """The row for an operand that is itself a symlink, else None.
+
+    A link has no backend inode, so readdir and stat both fail on one;
+    without this a link operand reads as a missing file, and a dangling
+    link fails the whole listing (GNU prints its row and exits 0).
+    Named with the operand's own spelling, like every other ls row.
+
+    Args:
+        path (PathSpec): the operand being listed.
+        links (LinkView | None): the namespace's symlink facts.
+    """
+    if links is None:
+        return None
+    row = links.stat_at(path.virtual)
+    if row is None:
+        return None
+    return row.model_copy(update={"name": path.raw_path})
+
+
+def _child_spec(path: PathSpec, name: str) -> PathSpec:
+    child = path.child(name)
+    return PathSpec(virtual=child,
+                    directory=child,
+                    resolved=False,
+                    resource_path=rekey(path.virtual, path.resource_path,
+                                        child))
+
+
+async def _stat_entries(
+    path: PathSpec,
+    names: list[str],
+    *,
+    stat: Stat,
+    all_files: bool,
+    index: IndexCacheStore,
+    links: LinkView | None = None,
+    deref: bool = False,
+    child_mounts: ChildMounts | None = None,
+) -> tuple[list[FileStat], list[LsWarning]]:
+    """Stat every name in a directory, plus the symlinks living there.
+
+    Args:
+        path (PathSpec): the directory being listed.
+        names (list[str]): entry paths from the backend readdir.
+        stat (Stat): backend stat.
+        all_files (bool): keep dotfiles.
+        index (IndexCacheStore): listing cache.
+        links (LinkView | None): the namespace's symlink facts. Links
+            have no backend inode, so readdir never names them; merging
+            here means every caller (plain, -R, -F, -l, sorting) sees
+            them without knowing they are special.
+        deref (bool): -L, report the target's stat under the link's own
+            name instead of the link row. A dereferenced directory link
+            then carries FileType.DIRECTORY, which is what makes -R
+            descend it.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names under a directory. A nested mount is namespace
+            structure the backend readdir cannot name, merged here like
+            a link row.
+    """
     stats: list[FileStat] = []
-    for entry in entries:
+    warnings: list[LsWarning] = []
+    for entry in names:
         entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
@@ -85,95 +261,262 @@ async def walk(
                                                   path.resource_path, entry))
         try:
             s = await stat(entry_spec, index)
-        except (FileNotFoundError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
+            # An entry below an operand is never a command-line arg, so
+            # GNU treats it as a minor problem (exit 1).
             warnings.append(
-                f"ls: cannot access '{entry}': {fs_strerror(exc) or exc}")
+                LsWarning(
+                    f"ls: cannot access '{entry}': {fs_strerror(exc) or exc}",
+                    False))
             continue
         if not all_files and s.name.startswith("."):
             continue
         stats.append(s)
-
-    if sort_by is LsSortBy.TIME:
-        stats.sort(key=lambda s: s.modified or "", reverse=not reverse)
-    elif sort_by is LsSortBy.SIZE:
-        stats.sort(key=lambda s: s.size or 0, reverse=not reverse)
-    else:
-        stats.sort(key=lambda s: s.name, reverse=reverse)
-
-    if recursive:
-        nested: list[FileStat] = []
-        for s in stats:
-            nested.append(s)
-            if s.type == FileType.DIRECTORY:
-                child_path = path.child(s.name)
-                child_spec = PathSpec(virtual=child_path,
-                                      directory=child_path,
-                                      resolved=False,
-                                      resource_path=rekey(
-                                          path.virtual, path.resource_path,
-                                          child_path))
-                sub, sub_ws = await walk(child_spec,
-                                         readdir=readdir,
-                                         stat=stat,
-                                         all_files=all_files,
-                                         sort_by=sort_by,
-                                         reverse=reverse,
-                                         recursive=True,
-                                         list_dir=False,
-                                         index=index)
-                nested.extend(sub)
-                warnings.extend(sub_ws)
-        stats = nested
-
+    seen = {s.name for s in stats}
+    for link in (links.children(path.virtual) if links is not None else []):
+        if link.name in seen:
+            continue
+        if not all_files and link.name.startswith("."):
+            continue
+        seen.add(link.name)
+        resolved = (await _deref_entry(path, link, links, stat, index)
+                    if deref and links is not None else None)
+        stats.append(resolved if resolved is not None else link)
+    for name in (child_mounts(path.virtual)
+                 if child_mounts is not None else []):
+        if name in seen:
+            continue
+        if not all_files and name.startswith("."):
+            continue
+        seen.add(name)
+        stats.append(FileStat(name=name, type=FileType.DIRECTORY))
     return stats, warnings
 
 
-async def walk_grouped(
+async def probe_operand(
     path: PathSpec,
     *,
-    readdir: Callable[[PathSpec, IndexCacheStore | None],
-                      Awaitable[list[str]]],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    readdir: Readdir,
+    stat: Stat,
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
+    recursive: bool = False,
+    command_line_arg: bool = True,
     index: IndexCacheStore = NULL_INDEX,
-) -> tuple[list[tuple[PathSpec, list[FileStat]]], list[str]]:
-    """Recursive walk that returns one (dir, entries) group per directory
-    visited, in pre-order. Mirrors GNU `ls -R` output structure.
+    links: LinkView | None = None,
+    deref: bool = False,
+    child_mounts: ChildMounts | None = None,
+) -> tuple[Operand, list[LsWarning]]:
+    """List one operand and report whether it turned out to be a directory.
+
+    Args:
+        path (PathSpec): the operand to list.
+        readdir (Readdir): backend directory lister.
+        stat (Stat): backend stat.
+        all_files (bool): keep dotfiles.
+        sort_by (LsSortBy): active sort key.
+        reverse (bool): reverse the sort.
+        recursive (bool): descend, emitting one group per directory (-R).
+        command_line_arg (bool): False below an operand, where GNU downgrades
+            a failure to a minor problem (exit 1).
+        index (IndexCacheStore): listing cache.
+        links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names. Under ``-R`` a backend-served listing withholds the
+            merge and a child-mount root is never descended (the walk
+            cannot read another mount's backend, so the cross-mount
+            fan-out assembles those groups); a directory only the
+            namespace serves still renders its own group from it.
     """
-    groups: list[tuple[PathSpec, list[FileStat]]] = []
-    warnings: list[str] = []
-    here, sub_ws = await walk(path,
-                              readdir=readdir,
-                              stat=stat,
-                              all_files=all_files,
-                              sort_by=sort_by,
-                              reverse=reverse,
-                              recursive=False,
-                              list_dir=False,
-                              index=index)
-    warnings.extend(sub_ws)
-    groups.append((path, here))
-    for s in here:
-        if s.type == FileType.DIRECTORY:
-            child_path = path.child(s.name)
-            child_spec = PathSpec(virtual=child_path,
-                                  directory=child_path,
-                                  resolved=False,
-                                  resource_path=rekey(path.virtual,
-                                                      path.resource_path,
-                                                      child_path))
-            sub_groups, sub_ws2 = await walk_grouped(child_spec,
-                                                     readdir=readdir,
-                                                     stat=stat,
-                                                     all_files=all_files,
-                                                     sort_by=sort_by,
-                                                     reverse=reverse,
-                                                     index=index)
-            groups.extend(sub_groups)
-            warnings.extend(sub_ws2)
-    return groups, warnings
+    warnings: list[LsWarning] = []
+    structure_only = False
+    try:
+        names = await readdir(path, index)
+    except (OSError, ValueError) as exc:
+        row = await _file_entry(path, stat, index)
+        if row is not None:
+            return Operand(path, row, []), warnings
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return Operand(path, link_row, []), warnings
+        if child_mounts is None or not child_mounts(path.virtual):
+            warnings.append(
+                LsWarning(
+                    f"ls: cannot access '{path.raw_path}': "
+                    f"{fs_strerror(exc) or exc}", command_line_arg))
+            return Operand(path, None, []), warnings
+        # No backend serves it, but the namespace owes it children (a
+        # nested mount, a link's ancestors), so the door lists it as a
+        # directory and ls must agree: the merge below renders those
+        # rows from an empty backend listing. Under -R this group still
+        # renders; only descent into a child-mount root is withheld,
+        # because that listing is another backend's and the cross-mount
+        # fan-out assembles it.
+        names = []
+        structure_only = True
+
+    if not names and not structure_only:
+        row = await _file_entry(path, stat, index)
+        if row is not None:
+            return Operand(path, row, []), warnings
+        # Backends without real directories answer readdir on a link
+        # with an empty list instead of raising, so the link operand has
+        # to be caught here too or it renders as an empty directory.
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return Operand(path, link_row, []), warnings
+
+    entries, entry_ws = await _stat_entries(
+        path,
+        names,
+        stat=stat,
+        all_files=all_files,
+        index=index,
+        links=links,
+        deref=deref,
+        child_mounts=child_mounts if structure_only else
+        (None if recursive else child_mounts))
+    warnings.extend(entry_ws)
+    entries = sort_stats(entries, sort_by, reverse)
+    groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
+    if recursive:
+        for entry in entries:
+            if entry.type != FileType.DIRECTORY:
+                continue
+            child_path = _child_spec(path, entry.name)
+            if structure_only and (child_mounts is None
+                                   or not child_mounts(child_path.virtual)):
+                # A child-mount root: its listing is another backend's,
+                # so the cross-mount fan-out renders that group.
+                continue
+            child, child_ws = await probe_operand(child_path,
+                                                  readdir=readdir,
+                                                  stat=stat,
+                                                  all_files=all_files,
+                                                  sort_by=sort_by,
+                                                  reverse=reverse,
+                                                  recursive=True,
+                                                  command_line_arg=False,
+                                                  index=index,
+                                                  links=links,
+                                                  deref=deref,
+                                                  child_mounts=child_mounts)
+            groups.extend(child.groups)
+            warnings.extend(child_ws)
+    return Operand(path, None, groups), warnings
+
+
+async def walk(
+    path: PathSpec,
+    *,
+    readdir: Readdir,
+    stat: Stat,
+    all_files: bool = False,
+    sort_by: LsSortBy = LsSortBy.NAME,
+    reverse: bool = False,
+    recursive: bool = False,
+    list_dir: bool = False,
+    command_line_arg: bool = True,
+    index: IndexCacheStore = NULL_INDEX,
+    links: LinkView | None = None,
+    deref: bool = False,
+    child_mounts: ChildMounts | None = None,
+) -> WalkResult:
+    """Flat listing for one operand: a directory's entries, or the operand
+    itself when it is not one. ``recursive`` flattens the whole subtree in
+    ``ls -R`` order.
+
+    Args:
+        path (PathSpec): the operand to list.
+        readdir (Readdir): backend directory lister.
+        stat (Stat): backend stat.
+        all_files (bool): keep dotfiles.
+        sort_by (LsSortBy): active sort key.
+        reverse (bool): reverse the sort.
+        recursive (bool): descend into subdirectories.
+        list_dir (bool): stat the operand itself instead of listing it (-d).
+        command_line_arg (bool): False below an operand, where GNU downgrades
+            a failure to a minor problem (exit 1).
+        index (IndexCacheStore): listing cache.
+        links (LinkView | None): the namespace's symlink facts.
+        child_mounts (ChildMounts | None): session-filtered child-mount
+            names to merge into a directory listing.
+    """
+    if list_dir:
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return WalkResult([link_row])
+        try:
+            listed = await stat(path, index)
+        except (OSError, ValueError) as exc:
+            if child_mounts is not None and child_mounts(path.virtual):
+                # No backend serves it, but the namespace owes it
+                # children, so the door stats it as a directory and -d
+                # must print the same row.
+                return WalkResult(
+                    [FileStat(name=path.raw_path, type=FileType.DIRECTORY)])
+            detail = fs_strerror(exc) or exc
+            return WalkResult(warnings=[
+                LsWarning(f"ls: cannot access '{path.raw_path}': {detail}",
+                          command_line_arg)
+            ],
+                              listed=False)
+        # GNU ls -d prints the operand as given.
+        return WalkResult([listed.model_copy(update={"name": path.raw_path})])
+
+    operand, warnings = await probe_operand(path,
+                                            readdir=readdir,
+                                            stat=stat,
+                                            all_files=all_files,
+                                            sort_by=sort_by,
+                                            reverse=reverse,
+                                            recursive=recursive,
+                                            command_line_arg=command_line_arg,
+                                            index=index,
+                                            links=links,
+                                            deref=deref,
+                                            child_mounts=child_mounts)
+    if operand.row is not None:
+        return WalkResult([operand.row], warnings)
+    entries = [e for _, group in operand.groups for e in group]
+    return WalkResult(entries, warnings, listed=bool(operand.groups))
+
+
+async def _operand_key(
+    operand: Operand,
+    *,
+    sort_by: LsSortBy,
+    stat: Stat,
+    index: IndexCacheStore,
+) -> FileStat:
+    """Sort row for one operand, named with the operand's own spelling."""
+    if operand.row is not None:
+        return operand.row
+    if sort_by is LsSortBy.NAME:
+        return FileStat(name=operand.path.raw_path, type=FileType.DIRECTORY)
+    try:
+        s = await stat(operand.path, index)
+    except (OSError, ValueError):
+        # The stat only supplies a sort key; an operand that cannot be
+        # statted sorts as if it had none rather than failing the listing.
+        return FileStat(name=operand.path.raw_path, type=FileType.DIRECTORY)
+    return s.model_copy(update={"name": operand.path.raw_path})
+
+
+async def _sorted_operands(
+    operands: list[Operand],
+    *,
+    sort_by: LsSortBy,
+    reverse: bool,
+    stat: Stat,
+    index: IndexCacheStore,
+) -> list[Operand]:
+    keys = [
+        await _operand_key(o, sort_by=sort_by, stat=stat, index=index)
+        for o in operands
+    ]
+    return [operands[i] for i in _order_rows(keys, sort_by, reverse)]
 
 
 def _render_group(
@@ -191,12 +534,18 @@ def _render_group(
         results.extend(format_simple(entries, classify=classify))
 
 
+def _finish(results: list[str],
+            warnings: list[LsWarning]) -> tuple[bytes, IOResult]:
+    stderr = format_optional_records([w.message for w in warnings])
+    return format_records(results), IOResult(
+        stderr=stderr, exit_code=exit_status_for(warnings))
+
+
 async def ls(
     paths: list[PathSpec],
     *,
-    readdir: Callable[[PathSpec, IndexCacheStore | None],
-                      Awaitable[list[str]]],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    readdir: Readdir,
+    stat: Stat,
     long: bool = False,
     one_per_line: bool = False,
     all_files: bool = False,
@@ -207,59 +556,101 @@ async def ls(
     list_dir: bool = False,
     classify: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    links: LinkView | None = None,
+    deref: bool = False,
+    child_mounts: ChildMounts | None = None,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
-    warnings: list[str] = []
+    warnings: list[LsWarning] = []
 
-    if recursive and not list_dir:
-        for p_idx, p in enumerate(paths):
-            groups, sub_ws = await walk_grouped(p,
-                                                readdir=readdir,
-                                                stat=stat,
-                                                all_files=all_files,
-                                                sort_by=sort_by,
-                                                reverse=reverse,
-                                                index=index)
-            warnings.extend(sub_ws)
-            for g_idx, (dir_spec, entries) in enumerate(groups):
-                if p_idx > 0 or g_idx > 0:
-                    results.append("")
-                header = rebase_one(dir_spec.virtual, p.virtual, p.raw_path)
-                results.append(f"{header}:")
-                _render_group(results,
-                              entries,
-                              long=long,
-                              one_per_line=one_per_line,
-                              human=human,
-                              classify=classify)
-    else:
+    if list_dir:
+        # -d turns every operand into a plain row, sorted together and
+        # printed with no headers.
+        rows: list[FileStat] = []
         for p in paths:
-            entries, sub_ws = await walk(p,
-                                         readdir=readdir,
-                                         stat=stat,
-                                         all_files=all_files,
-                                         sort_by=sort_by,
-                                         reverse=reverse,
-                                         recursive=False,
-                                         list_dir=list_dir,
-                                         index=index)
-            warnings.extend(sub_ws)
+            result = await walk(p,
+                                readdir=readdir,
+                                stat=stat,
+                                list_dir=True,
+                                index=index,
+                                links=links,
+                                deref=deref,
+                                child_mounts=child_mounts)
+            rows.extend(result.entries)
+            warnings.extend(result.warnings)
+        if len(rows) > 1:
+            rows = sort_stats(rows, sort_by, reverse)
+        _render_group(results,
+                      rows,
+                      long=long,
+                      one_per_line=one_per_line,
+                      human=human,
+                      classify=classify)
+        return _finish(results, warnings)
+
+    operands: list[Operand] = []
+    for p in paths:
+        operand, p_ws = await probe_operand(p,
+                                            readdir=readdir,
+                                            stat=stat,
+                                            all_files=all_files,
+                                            sort_by=sort_by,
+                                            reverse=reverse,
+                                            recursive=recursive,
+                                            index=index,
+                                            links=links,
+                                            deref=deref,
+                                            child_mounts=child_mounts)
+        warnings.extend(p_ws)
+        operands.append(operand)
+    if len(operands) > 1:
+        operands = await _sorted_operands(operands,
+                                          sort_by=sort_by,
+                                          reverse=reverse,
+                                          stat=stat,
+                                          index=index)
+
+    # GNU names every listed directory once there is more than one operand
+    # (or under -R); a lone directory operand is listed bare.
+    headed = recursive or len(paths) > 1
+    rows = [o.row for o in operands if o.row is not None]
+    _render_group(results,
+                  rows,
+                  long=long,
+                  one_per_line=one_per_line,
+                  human=human,
+                  classify=classify)
+    printed = bool(rows)
+    for operand in operands:
+        for dir_spec, entries in operand.groups:
+            if headed:
+                if printed:
+                    results.append("")
+                header = respell_one(dir_spec.virtual, operand.path.virtual,
+                                     operand.path.raw_path)
+                results.append(f"{header}:")
             _render_group(results,
                           entries,
                           long=long,
                           one_per_line=one_per_line,
                           human=human,
                           classify=classify)
+            printed = True
 
-    output = format_records(results)
-    stderr = format_optional_records(warnings)
-    exit_code = 1 if warnings and not results else 0
-    return output, IOResult(stderr=stderr, exit_code=exit_code)
+    return _finish(results, warnings)
 
 
 __all__ = [
+    "LS_FAILURE",
+    "LS_MINOR_PROBLEM",
+    "LS_OK",
+    "LsWarning",
+    "Operand",
+    "WalkResult",
+    "exit_status_for",
     "format_simple",
     "ls",
+    "probe_operand",
+    "sort_stats",
     "walk",
-    "walk_grouped",
 ]

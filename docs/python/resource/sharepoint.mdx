@@ -31,6 +31,7 @@ config = SharePointConfig(
     # site="Engineering",                    # mount one site
     # drive="Documents",                     # mount one library
     # key_prefix="team/reports",             # mount one folder subtree
+    # graph_base_url="https://graph.microsoft.us/v1.0",  # non-worldwide root
     # timeout=30,
     # max_retries=5,
 )
@@ -53,12 +54,16 @@ drives for you. Both `READ` and `WRITE` modes are supported.
 | `site`         | No       | Scope the mount to one site; use together with `drive`            |
 | `drive`        | No       | Scope the mount to one document library; use together with `site` |
 | `key_prefix`   | No       | Folder path exposed as the mount root in a scoped library         |
+| `graph_base_url` | No     | Full service root, for any deployment but the worldwide one       |
 | `timeout`      | No       | Request timeout in seconds (default `30`)                          |
 | `max_retries`  | No       | Max retries on `429`/`5xx` with backoff (default `5`)             |
 
 `access_token` accepts either a static string or a `Callable[[], str]` provider.
 With a callable, the resource refreshes the token on `401`, so long-running
 mounts survive token expiry.
+
+`graph_base_url` selects the Graph deployment, and means the same here as for
+OneDrive: see [The service root](/python/resource/onedrive#the-service-root).
 
 ## Filesystem Layout
 

@@ -16,6 +16,15 @@ export function makeAbortError(): DOMException {
   return new DOMException('execute aborted', 'AbortError')
 }
 
+/** Fold two optional abort signals into one; either aborting aborts. */
+export function mergeSignals(
+  a: AbortSignal | null | undefined,
+  b: AbortSignal | null | undefined,
+): AbortSignal | undefined {
+  if (a != null && b != null) return AbortSignal.any([a, b])
+  return a ?? b ?? undefined
+}
+
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted === true) {

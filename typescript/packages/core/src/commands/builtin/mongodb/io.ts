@@ -14,7 +14,7 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { read as mongodbRead } from '../../../core/mongodb/read.ts'
-import { isDirName, readdir as mongodbReaddir } from '../../../core/mongodb/readdir.ts'
+import { readdir as mongodbReaddir } from '../../../core/mongodb/readdir.ts'
 import { stat as mongodbStat } from '../../../core/mongodb/stat.ts'
 import { readStream as mongodbStream } from '../../../core/mongodb/stream.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
@@ -25,6 +25,5 @@ export const MONGODB_IO: CommandIO<MongoDBAccessor> = {
   readStream: (accessor, path) => mongodbStream(accessor, path),
   stat: mongodbStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

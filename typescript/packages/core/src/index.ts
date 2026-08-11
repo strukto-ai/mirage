@@ -14,24 +14,34 @@
 
 export { VERSION } from './version.ts'
 export {
-  CommandSafeguard,
-  type CommandSafeguardInit,
+  Limit,
+  type LimitInit,
   ConsistencyPolicy,
   CapacityState,
   type CapacityResult,
   type CopyFn,
   type CopyStrategy,
   DriftPolicy,
+  Delta,
+  type DeltaInit,
+  FileChangeKind,
+  FileEvent,
+  type FileEventInit,
+  FileMetadata,
+  type FileMetadataInit,
   FileStat,
   type FileStatInit,
   FileType,
   type FindFn,
+  KERNEL_BACKENDS,
+  MountBackend,
   MountMode,
   type MoveFn,
   type MoveStrategy,
   type NativeCopy,
   type NativeMove,
   OnExceed,
+  OverflowPolicy,
   PathSpec,
   type PathSpecInit,
   type PolymorphicReadFn,
@@ -43,7 +53,27 @@ export {
   type ReadStreamFn,
   ResourceName,
   type StatFn,
+  type WalkEntry,
+  type WalkFn,
 } from './types.ts'
+export {
+  type DeltaHook,
+  ListingDeltaHook,
+  type QueueFactory,
+  QueueClosed,
+  QueueOverflowError,
+  RAMWatchQueue,
+  type RAMWatchQueueOptions,
+  specFor,
+  statFingerprint,
+  type SupportsChanges,
+  type WatchMount,
+  type WatchOptions,
+  type WatchQueue,
+  type WatchRegistry,
+  type WatchRuntime,
+  Watcher,
+} from './watch/index.ts'
 export {
   captureFingerprints,
   checkDrift,
@@ -62,7 +92,13 @@ export type {
   SessionSnapshot,
   WorkspaceStateDict,
 } from './workspace/snapshot/types.ts'
-export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
+export {
+  BaseResource,
+  type FindOptions,
+  type Resource,
+  sizesAlwaysKnown,
+  throwUnsupported,
+} from './resource/base.ts'
 export {
   hasRedactedSecret,
   REDACTED_SECRET,
@@ -105,12 +141,14 @@ export { makeGenericOps } from './ops/generic/factory.ts'
 export { extractWriteData } from './ops/write_args.ts'
 export { RAM_COMMANDS } from './commands/builtin/ram/index.ts'
 export {
-  DEFAULT_COMMAND_SAFEGUARDS,
-  FALLBACK_SAFEGUARD,
+  DEFAULT_COMMAND_LIMITS,
+  FALLBACK_LIMIT,
+  OutputCapPolicy,
   resolveAcrossMounts,
-  resolveSafeguard,
-} from './commands/safeguard.ts'
-export { CommandTimeoutError, SafeguardExceededError } from './commands/builtin/utils/safeguard.ts'
+  resolveProducer,
+  resolveLimit,
+} from './policy/builtin/output_cap.ts'
+export { CommandTimeoutError, LimitExceededError } from './commands/builtin/utils/limit.ts'
 export { GENERAL_COMMANDS } from './commands/builtin/general/index.ts'
 export { GENERAL_BC } from './commands/builtin/general/bc.ts'
 export { GENERAL_CURL } from './commands/builtin/general/curl.ts'
@@ -123,17 +161,22 @@ export {
   AMBIGUOUS_NAMES,
   CommandSpec,
   type CommandSpecInit,
+  type FlagValue,
+  flagKwargName,
+  FlagView,
   Operand,
   type OperandInit,
-  OperandKind,
+  type ValueType,
   Option,
   type OptionInit,
   ParsedArgs,
   type ParsedArgsInit,
   parseCommand,
   parseToKwargs,
+  specFlagNames,
   specOf,
   SPECS,
+  UsageStyle,
 } from './commands/spec/index.ts'
 export { type ByteSource, IOResult, type IOResultInit, materialize } from './io/types.ts'
 export { CachableAsyncIterator } from './io/cachable_iterator.ts'
@@ -150,32 +193,37 @@ export {
 export { OpRecord, type OpRecordInit } from './observe/record.ts'
 export { LogEntry, type LogEntryInit } from './observe/log_entry.ts'
 export { type EventDict, Observer } from './observe/observer.ts'
-export { type ObserverStore, RAMObserverStore } from './observe/store.ts'
+export { type ObserverStore, ObserverStoreBase, RAMObserverStore } from './observe/store.ts'
 export { NamespaceStore, type NodeFields } from './workspace/mount/namespace/store.ts'
 export { RAMNamespaceStore } from './workspace/mount/namespace/ram.ts'
 export { HISTORY_PREFIX, HistoryViewResource } from './resource/history/history.ts'
+export { HISTORY_COMMANDS } from './commands/builtin/history/index.ts'
 export {
   record,
   recordStream,
   revisionFor,
+  runWithMountPrefix,
   runWithRecording,
   runWithRevisions,
-  setVirtualPrefix,
+  withMountPrefix,
 } from './observe/context.ts'
-export { guessType } from './utils/filetype.ts'
+export { guessType, mimeTypeFor } from './utils/filetype.ts'
+export {
+  assertHeaderValue,
+  encodeBase64Lines,
+  encodeText as encodeMimeText,
+  foldAddressList,
+  foldContentDisposition,
+  foldUnstructured,
+  type EncodedText,
+} from './utils/mime.ts'
 export { newSessionId, newWorkspaceId, uuid7 } from './utils/ids.ts'
 export { Accessor, NOOPAccessor, RAMAccessor } from './accessor/index.ts'
-export { cat as featherCat, describe as featherDescribe } from './core/filetype/feather.ts'
-export { cat as hdf5Cat, describe as hdf5Describe } from './core/filetype/hdf5.ts'
-export { cat as parquetCat, describe as parquetDescribe } from './core/filetype/parquet.ts'
-export {
-  makeFiletypeCommands,
-  type FiletypeCommandsOptions,
-} from './commands/builtin/filetype_factory/factory.ts'
 export {
   type Builder,
   type BuilderFn,
   type CommandIO,
+  type DuOps,
   type MakeGenericCommandsOptions,
   defaultProvision,
   makeCopyProvision,
@@ -188,18 +236,13 @@ export {
   makeSedProvision,
   makeTransformProvision,
   metadataProvision,
+  overlaidStat,
   pureProvision,
+  rangeOf,
   resolveGlobOf,
   withDefaultProvisions,
   writeMetadataProvision,
 } from './commands/builtin/generic_bind/index.ts'
-export {
-  FILETYPE_ENTRIES,
-  type FiletypeEntry,
-  type FiletypeModule,
-  type FiletypeReadBytesFn,
-  type StatEntryFn,
-} from './commands/builtin/filetype_factory/extensions.ts'
 export { numberLines } from './commands/builtin/generic/cat.ts'
 export { CUT_OPEN_END, cutBytes, cutStream, parseCutRanges } from './commands/builtin/cut_helper.ts'
 export { cutGeneric } from './commands/builtin/generic/cut.ts'
@@ -244,11 +287,22 @@ export { unzipGeneric } from './commands/builtin/generic/unzip.ts'
 export { zipGeneric } from './commands/builtin/generic/zip_cmd.ts'
 export { tarGeneric } from './commands/builtin/generic/tar.ts'
 export { realpathGeneric } from './commands/builtin/generic/realpath.ts'
-export { findGeneric, findSizeMtimeError, invalidFindArg } from './commands/builtin/generic/find.ts'
+export {
+  findGeneric,
+  findSizeMtimeError,
+  invalidFindArg,
+  linkResults,
+} from './commands/builtin/generic/find.ts'
 export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
-export { duGeneric } from './commands/builtin/generic/du.ts'
+export {
+  DEFAULT_MAX_DU_ENTRIES,
+  duGeneric,
+  parseDepth,
+  parseDuFlags,
+  runDu,
+} from './commands/builtin/generic/du.ts'
 export { treeGeneric } from './commands/builtin/generic/tree.ts'
 export { lsGeneric } from './commands/builtin/generic/ls.ts'
 export { fileGeneric } from './commands/builtin/generic/file.ts'
@@ -260,8 +314,14 @@ export { sha512sumGeneric } from './commands/builtin/generic/sha512sum.ts'
 export { jqGeneric } from './commands/builtin/generic/jq.ts'
 export { grepGeneric } from './commands/builtin/generic/grep.ts'
 export { rgGeneric } from './commands/builtin/generic/rg.ts'
-export { cpGeneric, cpWalk } from './commands/builtin/generic/cp.ts'
-export { mvGeneric } from './commands/builtin/generic/mv.ts'
+export {
+  cpFlags,
+  cpGeneric,
+  cpWalk,
+  parseCpFlags,
+  type CpFlags,
+} from './commands/builtin/generic/cp.ts'
+export { mvFlags, mvGeneric, parseMvFlags, type MvFlags } from './commands/builtin/generic/mv.ts'
 export { awkGeneric } from './commands/builtin/generic/awk.ts'
 export { catGeneric } from './commands/builtin/generic/cat.ts'
 export { headGeneric } from './commands/builtin/generic/head.ts'
@@ -272,7 +332,15 @@ export { fmtGeneric } from './commands/builtin/generic/fmt.ts'
 export { headStream } from './commands/builtin/generic/head.ts'
 export { basenameFn } from './commands/builtin/generic/basename.ts'
 export { dirnameFn } from './commands/builtin/generic/dirname.ts'
-export { gnuBasename, gnuDirname, norm, parent, posixNormpath, resolvePath } from './utils/path.ts'
+export {
+  ancestors,
+  gnuBasename,
+  gnuDirname,
+  norm,
+  parent,
+  posixNormpath,
+  resolvePath,
+} from './utils/path.ts'
 export { shlexSplit } from './utils/shlex.ts'
 export {
   DEFAULT_MAX_GLOB_MATCHES,
@@ -282,7 +350,8 @@ export {
   resolveGlobWith,
   spellMatch,
 } from './utils/glob_walk.ts'
-export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'
+export { detectFileType, formatFileResult } from './commands/builtin/file_helper.ts'
+export { FILE_MIME_MAP, MIME_SYMLINK } from './commands/builtin/constants.ts'
 export {
   type AggregateResult,
   concatAggregate,
@@ -379,35 +448,18 @@ export {
   type SedCommand,
 } from './commands/builtin/sed_helper.ts'
 export { readTar, type TarEntry, writeTar } from './commands/builtin/tar_helper.ts'
-export {
-  cut as featherCut,
-  grep as featherGrep,
-  head as featherHead,
-  stat as featherStat,
-  tail as featherTail,
-  wc as featherWc,
-} from './core/filetype/feather.ts'
-export {
-  cut as hdf5Cut,
-  grep as hdf5Grep,
-  head as hdf5Head,
-  stat as hdf5Stat,
-  tail as hdf5Tail,
-  wc as hdf5Wc,
-} from './core/filetype/hdf5.ts'
-export {
-  cut as parquetCut,
-  grep as parquetGrep,
-  head as parquetHead,
-  stat as parquetStat,
-  tail as parquetTail,
-  wc as parquetWc,
-} from './core/filetype/parquet.ts'
 export { Precision, ProvisionResult, type ProvisionResultInit } from './provision/types.ts'
 export { IndexEntry, type IndexEntryInit, ResourceType } from './cache/index/config.ts'
 export { drainBudget, type FileCache, validateMaxDrainBytes } from './cache/file/mixin.ts'
 export { CacheEntry, type CacheEntryInit } from './cache/file/entry.ts'
-export { defaultFingerprint, parseLimit } from './cache/file/utils.ts'
+export { CacheType, type CacheConfig, type RedisCacheConfig } from './cache/file/config.ts'
+export {
+  buildFileCache,
+  registerFileCacheStore,
+  type FileCacheFactory,
+  type FileCacheStore,
+} from './workspace/workspace/cache.ts'
+export { defaultFingerprint, globEscape, parseLimit } from './cache/file/utils.ts'
 export { RAMFileCacheStore } from './cache/file/ram.ts'
 export { applyIo, readFingerprint } from './cache/file/io.ts'
 export {
@@ -485,29 +537,90 @@ export {
   isCrossMount,
 } from './workspace/executor/cross_mount.ts'
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
+export { Runtime, type RuntimeEntry } from './runtime/base.ts'
+export { LanguageRuntime } from './runtime/language.ts'
+export { PythonRuntime } from './runtime/python/base.ts'
+export { JsRuntime } from './runtime/js/base.ts'
+export { bindCommands, DEFAULT_ENTRIES, runtimeBindingsFor, VFSRuntime } from './runtime/table.ts'
 export {
-  bindCommands,
-  runtimeBindingsFor,
-  DEFAULT_ENTRIES,
-  VfsRuntime,
+  coerceRuntimeConfig,
+  HOME_CONFIG_KEYS,
+  type HomeConfig,
+  type RuntimeConfig,
+} from './runtime/config.ts'
+export { CrossMountError, EvalError } from './runtime/errors.ts'
+export {
+  planFlush,
+  RuntimeVFS,
+  type FlushKind,
+  type VFSEntry,
+  type VFSStat,
+} from './runtime/vfs.ts'
+export {
+  EVALUATOR,
+  isEvaluator,
+  LINE_EXECUTOR,
+  isLineExecutor,
+  type Evaluator,
+  type LineExecutor,
+} from './runtime/mixin.ts'
+export {
+  type EvalResult,
+  type EvalStatus,
+  type EvalValue,
   type RunArgs,
   type RunResult,
-  type Runtime,
-  type RuntimeEntry,
-} from './workspace/executor/runtime.ts'
+  type RuntimeOptions,
+} from './runtime/types.ts'
 export {
-  commandFacts,
+  parsedCommands,
   decideLine,
+  evaluatorOf,
+  policyContextFromPayload,
+  policyContextPayload,
   ScriptSource,
-  RoutingDecisionError,
-  type CommandFacts,
-  type RoutingDecision,
-  type RouteContext,
-  type RouteFn,
-  type RouteScript,
-} from './workspace/executor/route/index.ts'
-export { buildRuntime, candidates, RUNTIMES } from './workspace/executor/runtime_table.ts'
-export type { JsRuntime } from './workspace/executor/js/interface.ts'
+  parseVerdict,
+  DenyResult,
+  PolicyDeny,
+  PolicyError,
+  RouteResult,
+  type PolicyResult,
+  type ParsedCommand,
+  type PolicyDecision,
+  type PolicyContext,
+  type PolicyFn,
+  type PolicyScript,
+  type PolicyVerdict,
+} from './runtime/policy/index.ts'
+export {
+  MountRootPolicy,
+  Policies,
+  PolicyDenied,
+  SpecPolicy,
+  VALIDITY,
+  hasParentsFlag,
+  postExecuteGate,
+  wildcardRegex,
+  type Action,
+  type CommandContext,
+  type Deny,
+  type ExecuteResultContext,
+  type GuardSpec,
+  type MountRootQuery,
+  type OpsContext,
+  type OpsResultContext,
+  type Policy,
+} from './policy/index.ts'
+export { buildRuntime, candidates, registerRuntime, RUNTIMES } from './runtime/table.ts'
+// The concrete runtime classes stay unexported on purpose: buildRuntime
+// is the one construction door, and a config block reaches it as a plain
+// object. Exporting the config TYPE is what makes that object checkable,
+// so `buildRuntime('pyodide', { config: cfg })` refuses a misspelled key
+// at compile time instead of at first run.
+export type { PyodideConfig } from './runtime/python/pyodide.ts'
+export { RemoteSandbox } from './runtime/sandbox/base.ts'
+export { type NormalizedSandboxConfig, type SandboxConfig } from './runtime/sandbox/config.ts'
+export { stdinPath, stdinRedirect } from './runtime/sandbox/constants.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
 export { handleRedirect } from './workspace/executor/redirect.ts'
@@ -573,6 +686,7 @@ export { MountEntry, type MountInit } from './workspace/mount/mount.ts'
 export { normMountPrefix } from './workspace/snapshot/utils.ts'
 export {
   command,
+  type CommandDispatch,
   type CommandFn,
   type CommandFnResult,
   type CommandOptions,
@@ -583,6 +697,27 @@ export {
   RegisteredCommand,
   type RegisteredCommandInit,
 } from './commands/config.ts'
+export {
+  CLISpec,
+  type CLISpecInit,
+  type CLIVerbFn,
+  type CLIVerbOpts,
+  type CLIConfigModel,
+  type CLIInvocation,
+  type WalkFlagBag,
+  WalkResult,
+  type WalkResultInit,
+} from './commands/cli/types.ts'
+export { cliSpecFor, registerCliSpec, unregisterCliSpec } from './commands/cli/specs.ts'
+export { GWS } from './commands/cli/builtin/gws/index.ts'
+export { SLACK } from './commands/cli/builtin/slack/index.ts'
+export { DISCORD } from './commands/cli/builtin/discord/index.ts'
+export { NTN } from './commands/cli/builtin/ntn/index.ts'
+export { LINEAR } from './commands/cli/builtin/linear/index.ts'
+export { GIT } from './commands/cli/builtin/git/index.ts'
+export { nodeHelp, walk } from './commands/cli/walk.ts'
+export { CLIRegistry } from './workspace/cli/registry.ts'
+export type { CLIInstall } from './workspace/cli/types.ts'
 export {
   COMPOUND_EXTENSIONS,
   getExtension,
@@ -628,11 +763,12 @@ export {
   type S3HttpAgents,
 } from './resource/s3/config.ts'
 export { remapCommandsResource, remapOpsResource } from './resource/s3/remap.ts'
+export { s3StorageId } from './resource/s3/storage_id.ts'
 export { S3_PROMPT } from './resource/s3/prompt.ts'
 export { SCOPE_ERROR as S3_SCOPE_ERROR } from './core/s3/constants.ts'
 export { copy } from './core/s3/copy.ts'
 export { create } from './core/s3/create.ts'
-export { du, duAll } from './core/s3/du.ts'
+export { size as s3DuSize, entries as s3DuEntries } from './core/s3/du/index.ts'
 export { exists } from './core/s3/exists.ts'
 export { find } from './core/s3/find.ts'
 export { mkdir } from './core/s3/mkdir.ts'
@@ -660,18 +796,33 @@ export {
 } from './core/slack/_client_browser.ts'
 export { SlackAccessor } from './accessor/slack.ts'
 export {
+  normalizeSlackConfig,
+  redactSlackConfig,
+  SlackConfigSchema,
+  type SlackConfig,
+  type SlackConfigRedacted,
+} from './core/slack/config.ts'
+export {
   DISCORD_API,
   type DiscordMethod,
   DiscordApiError,
   type DiscordResponse,
   type DiscordTransport,
   HttpDiscordTransport,
+  NodeDiscordTransport,
 } from './core/discord/_client.ts'
 export {
   BrowserDiscordTransport,
   type BrowserDiscordTransportOptions,
 } from './core/discord/_client_browser.ts'
 export { DiscordAccessor, type DiscordResourceLike } from './accessor/discord.ts'
+export {
+  DiscordConfigSchema,
+  normalizeDiscordConfig,
+  redactDiscordConfig,
+  type DiscordConfig,
+  type DiscordConfigRedacted,
+} from './core/discord/config.ts'
 export { SLACK_COMMANDS } from './commands/builtin/slack/index.ts'
 export { SLACK_OPS } from './ops/slack/index.ts'
 export { read as slackRead } from './core/slack/read.ts'
@@ -700,6 +851,13 @@ export {
   type LinearTransport,
 } from './core/linear/_client.ts'
 export { LinearAccessor, type LinearResourceLike } from './accessor/linear.ts'
+export {
+  LinearConfigSchema,
+  normalizeLinearConfig,
+  redactLinearConfig,
+  type LinearConfig,
+  type LinearConfigRedacted,
+} from './core/linear/config.ts'
 export { LINEAR_COMMANDS } from './commands/builtin/linear/index.ts'
 export { LINEAR_OPS } from './ops/linear/index.ts'
 export { read as linearRead } from './core/linear/read.ts'
@@ -707,6 +865,13 @@ export { readdir as linearReaddir, type LinearReaddirFilter } from './core/linea
 export { stat as linearStat } from './core/linear/stat.ts'
 export { LINEAR_PROMPT, LINEAR_WRITE_PROMPT } from './resource/linear/prompt.ts'
 export { NotionAccessor, type NotionResourceLike } from './accessor/notion.ts'
+export {
+  normalizeNotionConfig,
+  NotionConfigSchema,
+  redactNotionConfig,
+  type NotionConfig,
+  type NotionConfigRedacted,
+} from './core/notion/config.ts'
 export {
   HttpNotionTransport,
   MCPNotionTransport,
@@ -740,6 +905,20 @@ export { readdir as langfuseReaddir } from './core/langfuse/readdir.ts'
 export { stat as langfuseStat } from './core/langfuse/stat.ts'
 export { LANGFUSE_PROMPT } from './resource/langfuse/prompt.ts'
 export { detectScope as langfuseDetectScope, type LangfuseScope } from './core/langfuse/scope.ts'
+export {
+  HttpJaegerTransport,
+  JaegerApiError,
+  isTraceId as jaegerIsTraceId,
+  type JaegerTransport,
+} from './core/jaeger/_client.ts'
+export { JaegerAccessor, type JaegerResourceLike } from './accessor/jaeger.ts'
+export { JAEGER_COMMANDS } from './commands/builtin/jaeger/index.ts'
+export { JAEGER_OPS } from './ops/jaeger/index.ts'
+export { read as jaegerRead } from './core/jaeger/read.ts'
+export { readdir as jaegerReaddir } from './core/jaeger/readdir.ts'
+export { stat as jaegerStat } from './core/jaeger/stat.ts'
+export { JAEGER_PROMPT } from './resource/jaeger/prompt.ts'
+export { detectScope as jaegerDetectScope, type JaegerScope } from './core/jaeger/scope.ts'
 export { read as trelloRead } from './core/trello/read.ts'
 export { readdir as trelloReaddir, type TrelloReaddirFilter } from './core/trello/readdir.ts'
 export { stat as trelloStat } from './core/trello/stat.ts'
@@ -807,9 +986,11 @@ export {
 export { listAnnotations as githubCiListAnnotations } from './core/github_ci/annotations.ts'
 export { GITHUB_CI_PROMPT } from './resource/github_ci/prompt.ts'
 export {
+  CALENDAR_API_BASE,
   DOCS_API_BASE,
   DRIVE_API_BASE,
   DRIVE_UPLOAD_BASE,
+  FORMS_API_BASE,
   GMAIL_API_BASE,
   GoogleApiError,
   SHEETS_API_BASE,
@@ -817,9 +998,11 @@ export {
   TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
   TokenManager,
+  calendarBase,
   docsBase,
   driveBase,
   driveUploadBase,
+  formsBase,
   gmailBase,
   sheetsBase,
   slidesBase,
@@ -849,6 +1032,33 @@ export {
   listAllFiles as googleDriveListAllFiles,
   listFiles as googleDriveListFiles,
 } from './core/google/drive.ts'
+export { GCalAccessor } from './accessor/gcal.ts'
+export { GCAL_COMMANDS } from './commands/builtin/gcal/index.ts'
+export { GCAL_OPS } from './ops/gcal/index.ts'
+export { read as gcalRead } from './core/gcal/read.ts'
+export { readdir as gcalReaddir } from './core/gcal/readdir.ts'
+export { stat as gcalStat } from './core/gcal/stat.ts'
+export { unlink as gcalUnlink } from './core/gcal/unlink.ts'
+export {
+  deleteEvent as gcalDeleteEvent,
+  listCalendars as gcalListCalendars,
+  listEvents as gcalListEvents,
+} from './core/gcal/client.ts'
+export {
+  clampedHhmm as gcalClampedHhmm,
+  dayBounds as gcalDayBounds,
+  daysCovered as gcalDaysCovered,
+  eventSpan as gcalEventSpan,
+  validDay as gcalValidDay,
+  windowBounds as gcalWindowBounds,
+} from './core/gcal/day.ts'
+export { GCAL_PROMPT, GCAL_WRITE_PROMPT } from './resource/gcal/prompt.ts'
+export {
+  makeCalendarDirname as gcalMakeCalendarDirname,
+  makeEventFilename as gcalMakeEventFilename,
+  parseCalendarDirname as gcalParseCalendarDirname,
+  parseEventFilename as gcalParseEventFilename,
+} from './resource/gcal/event_entry.ts'
 export { GDocsAccessor } from './accessor/gdocs.ts'
 export { GDOCS_COMMANDS } from './commands/builtin/gdocs/index.ts'
 export { GDOCS_OPS } from './ops/gdocs/index.ts'
@@ -912,6 +1122,85 @@ export {
 export { readdir as gdriveReaddir } from './core/gdrive/readdir.ts'
 export { stat as gdriveStat } from './core/gdrive/stat.ts'
 export { GDRIVE_PROMPT } from './resource/gdrive/prompt.ts'
+export {
+  DEFAULT_GRAPH_API,
+  GRAPH_VERSION,
+  type AccessTokenProvider,
+  type MsGraphConfig,
+  type MsGraphConfigResolved,
+  graphApi,
+  resolveMsGraphConfig,
+} from './core/msgraph/config.ts'
+export {
+  MAX_BACKOFF as MSGRAPH_MAX_BACKOFF,
+  RETRY_STATUSES as MSGRAPH_RETRY_STATUSES,
+  GraphError,
+  graphDelete,
+  graphGet,
+  graphGetBytes,
+  graphHeaders,
+  graphList,
+  graphPatch,
+  graphPost,
+  graphPostMonitor,
+  graphPutBytes,
+  graphStream,
+  pollMonitor,
+  uploadChunk,
+} from './core/msgraph/client.ts'
+export { DriveLoc } from './core/msgraph/drive.ts'
+export {
+  OneDriveAccessor,
+  type OneDriveConfig,
+  type OneDriveConfigRedacted,
+  type OneDriveConfigResolved,
+  OneDriveConfigSchema,
+  normalizeOneDriveConfig,
+  oneDriveBase,
+  oneDriveItemUrl,
+  oneDriveRefPath,
+  redactOneDriveConfig,
+  resolveOneDriveConfig,
+} from './accessor/onedrive.ts'
+export { ONEDRIVE_COMMANDS } from './commands/builtin/onedrive/index.ts'
+export { ONEDRIVE_OPS } from './ops/onedrive/index.ts'
+export * as onedrive from './core/onedrive/index.ts'
+export { OneDriveResource } from './resource/onedrive/onedrive.ts'
+export { ONEDRIVE_PROMPT } from './resource/onedrive/prompt.ts'
+export {
+  SharePointAccessor,
+  type SharePointConfig,
+  type SharePointConfigRedacted,
+  type SharePointConfigResolved,
+  SharePointConfigSchema,
+  type ResolvedSharePointPath,
+  normalizeSharePointConfig,
+  redactSharePointConfig,
+  resolveSharePointConfig,
+  sharePointItemUrl,
+  sharePointRefPath,
+} from './accessor/sharepoint.ts'
+export { SHAREPOINT_COMMANDS } from './commands/builtin/sharepoint/index.ts'
+export { SHAREPOINT_OPS } from './ops/sharepoint/index.ts'
+export * as sharepoint from './core/sharepoint/index.ts'
+export { SharePointResource } from './resource/sharepoint/sharepoint.ts'
+export { SHAREPOINT_PROMPT } from './resource/sharepoint/prompt.ts'
+export { Mem0Accessor } from './accessor/mem0.ts'
+export { MEM0_COMMANDS } from './commands/builtin/mem0/index.ts'
+export { MEM0_OPS } from './ops/mem0/index.ts'
+export * as mem0 from './core/mem0/index.ts'
+export {
+  type Mem0Config,
+  type Mem0ConfigRedacted,
+  type Mem0ConfigResolved,
+  Mem0ConfigSchema,
+  type Mem0ScopeKind,
+  normalizeMem0Config,
+  redactMem0Config,
+  resolveMem0Config,
+} from './resource/mem0/config.ts'
+export { Mem0Resource } from './resource/mem0/mem0.ts'
+export { MEM0_PROMPT } from './resource/mem0/prompt.ts'
 export {
   DROPBOX_API_BASE,
   DROPBOX_CONTENT_BASE,
@@ -1152,7 +1441,7 @@ export {
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './utils/slash.ts'
-export { mountKey, mountPrefixOf, rekey, stripMount } from './utils/key_prefix.ts'
+export { mountKey, mountPrefixOf, mountedPath, rekey, stripMount } from './utils/key_prefix.ts'
 export * as keyPrefix from './utils/key_prefix.ts'
 export { fnmatch } from './utils/fnmatch.ts'
 export {
@@ -1169,15 +1458,25 @@ export {
   treeHasEmpty,
 } from './commands/builtin/findEval.ts'
 export {
+  eexist,
   eisdir,
   enoent,
+  enoentWithMessage,
   enotdir,
   enotsup,
   errorVirtualPath,
+  fsErrorLine,
   type FsError,
+  fsStrerror,
   gnuStrerror,
+  isFsError,
   isMissingOp,
+  isMissingPath,
+  operandSpelling,
   type MissingOpError,
+  noMount,
+  type NoMountError,
+  readdirError,
 } from './utils/errors.ts'
 
 export {

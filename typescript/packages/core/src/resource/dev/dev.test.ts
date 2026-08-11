@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { MountMode, PathSpec, ResourceName } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { RAMResource } from '../ram/ram.ts'
 import { DevResource } from './dev.ts'
@@ -34,6 +35,14 @@ function call(
   ...args: unknown[]
 ): Promise<unknown> {
   return registry.call(name, ResourceName.RAM, dev.accessor, PathSpec.fromStrPath(path), args)
+}
+
+async function makeWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ops = new OpsRegistry()
+  const data = new RAMResource()
+  ops.registerResource(data)
+  return new Workspace({ '/data': data }, { mode: MountMode.WRITE, ops, shellParser: parser })
 }
 
 describe('DevResource', () => {
@@ -82,6 +91,68 @@ describe('DevResource', () => {
     const { dev, registry } = setupOps()
     const entries = (await call(registry, 'readdir', dev, '/')) as string[]
     expect(entries.sort()).toEqual(['/null', '/zero'])
+  })
+})
+
+describe('dev file removal (GNU rm /dev/null semantics)', () => {
+  it('rm /dev/null exits 0 and the path is gone', async () => {
+    const ws = await makeWs()
+    const rm = await ws.execute('rm /dev/null')
+    expect(rm.exitCode).toBe(0)
+    expect(rm.stdoutText).toBe('')
+    expect(new TextDecoder().decode(rm.stderr)).toBe('')
+    const ls = await ws.execute('ls /dev')
+    expect(ls.stdoutText.split('\n')).toContain('zero')
+    expect(ls.stdoutText.split('\n')).not.toContain('null')
+    const cat = await ws.execute('cat /dev/null')
+    expect(cat.exitCode).not.toBe(0)
+    expect(new TextDecoder().decode(cat.stderr)).toMatch(/No such file or directory/)
+    await ws.close()
+  })
+
+  it('rm -v /dev/null prints a true removed claim', async () => {
+    const ws = await makeWs()
+    const rm = await ws.execute('rm -v /dev/null')
+    expect(rm.exitCode).toBe(0)
+    expect(rm.stdoutText).toBe("removed '/dev/null'\n")
+    const ls = await ws.execute('ls /dev')
+    expect(ls.stdoutText.split('\n')).not.toContain('null')
+    await ws.close()
+  })
+
+  it('rm -rf /dev/null removes the file too', async () => {
+    const ws = await makeWs()
+    const rm = await ws.execute('rm -rf /dev/null')
+    expect(rm.exitCode).toBe(0)
+    const ls = await ws.execute('ls /dev')
+    expect(ls.stdoutText.split('\n')).not.toContain('null')
+    await ws.close()
+  })
+
+  it('a redirect recreates a removed /dev/null as a regular file', async () => {
+    const ws = await makeWs()
+    await ws.execute('rm /dev/null')
+    const write = await ws.execute('echo recreated > /dev/null')
+    expect(write.exitCode).toBe(0)
+    const cat = await ws.execute('cat /dev/null')
+    expect(cat.stdoutText).toBe('recreated\n')
+    const test = await ws.execute('if [ -f /dev/null ]; then echo regular; fi')
+    expect(test.stdoutText).toBe('regular\n')
+    await ws.close()
+  })
+
+  it('rm /dev/zero is symmetric', async () => {
+    const ws = await makeWs()
+    const rm = await ws.execute('rm /dev/zero')
+    expect(rm.exitCode).toBe(0)
+    const ls = await ws.execute('ls /dev')
+    expect(ls.stdoutText.split('\n')).toContain('null')
+    expect(ls.stdoutText.split('\n')).not.toContain('zero')
+    const write = await ws.execute('echo z > /dev/zero')
+    expect(write.exitCode).toBe(0)
+    const cat = await ws.execute('cat /dev/zero')
+    expect(cat.stdoutText).toBe('z\n')
+    await ws.close()
   })
 })
 

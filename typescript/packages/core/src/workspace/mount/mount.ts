@@ -17,26 +17,36 @@ import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
   CommandDispatch,
   CommandFn,
+  CommandFnResult,
   CommandOpts,
   RegisteredCommand,
 } from '../../commands/config.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
-import type { StatOverlay } from '../../ops/config.ts'
+import type {
+  ChildMounts,
+  LinkView,
+  MountView,
+  ReaddirPath,
+  StatOverlay,
+  StatPath,
+} from '../../ops/types.ts'
 
 const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
-import { resolveSafeguard } from '../../commands/safeguard.ts'
-import { applyOpSafeguard, runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
-import type { CommandSpec } from '../../commands/spec/types.ts'
+import { resolveLimit } from '../../policy/index.ts'
+import { CommandTimeoutError, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
+import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { runWithRevisions, setVirtualPrefix } from '../../observe/context.ts'
+import { mergeSignals } from '../abort.ts'
+import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
-import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
-import type { Runtime } from '../executor/runtime.ts'
+import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import type { Runtime } from '../../runtime/base.ts'
 import { eaccesReadOnly, enotsup } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'
@@ -87,7 +97,7 @@ export class MountEntry {
   private readonly cmds = new Map<CmdKey, RegisteredCommand>()
   private readonly generalCmds = new Map<string, RegisteredCommand>()
   private readonly cmdSpecs = new Map<string, CommandSpec>()
-  readonly commandSafeguards = new Map<string, CommandSafeguard>()
+  readonly commandLimits = new Map<string, Limit>()
   private readonly ops = new Map<OpKey, RegisteredOp>()
   private readonly generalOps = new Map<string, RegisteredOp>()
   private readonly crossCmds = new Map<string, RegisteredCommand>()
@@ -216,7 +226,8 @@ export class MountEntry {
   }
 
   filetypeHandlers(cmdName: string): Record<string, CommandFn> {
-    const fns: Record<string, CommandFn> = {}
+    // Null prototype: filetype names are registration-controlled.
+    const fns: Record<string, CommandFn> = Object.create(null) as Record<string, CommandFn>
     for (const [key, rc] of this.cmds) {
       if (rc.name === cmdName && rc.filetype !== null) {
         if (!(rc.filetype in fns)) fns[rc.filetype] = rc.fn
@@ -376,7 +387,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     texts: string[],
-    flags: Record<string, string | boolean | string[]>,
+    flags: Record<string, FlagValue>,
     opts: {
       stdin?: ByteSource | null
       cwd?: string
@@ -386,7 +397,13 @@ export class MountEntry {
       execAllowed?: boolean
       runtime?: Runtime
       statOverlay?: StatOverlay
-      safeguardOverride?: CommandSafeguard | null
+      links?: LinkView
+      statPath?: StatPath
+      readdirPath?: ReaddirPath
+      childMounts?: ChildMounts
+      mounts?: MountView
+      signal?: AbortSignal
+      limitOverride?: Limit | null
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
     const extension =
@@ -438,11 +455,15 @@ export class MountEntry {
       ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
       ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
       ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
+      ...(opts.links !== undefined ? { links: opts.links } : {}),
+      ...(opts.statPath !== undefined ? { statPath: opts.statPath } : {}),
+      ...(opts.readdirPath !== undefined ? { readdirPath: opts.readdirPath } : {}),
+      ...(opts.childMounts !== undefined ? { childMounts: opts.childMounts } : {}),
+      ...(opts.mounts !== undefined ? { mounts: opts.mounts } : {}),
     }
 
-    setVirtualPrefix(mountPrefix)
-    try {
-      return await runWithCacheManager(this.cacheManager, () =>
+    return runWithMountPrefix(mountPrefix, () =>
+      runWithCacheManager(this.cacheManager, () =>
         runWithRevisions(
           this.revisions.size > 0 ? this.revisions : null,
           async (): Promise<[ByteSource | null, IOResult]> => {
@@ -462,39 +483,70 @@ export class MountEntry {
                   }),
                 ]
               }
-              // The dispatch-level guard only sees default safeguards
+              // The dispatch-level guard only sees default limits
               // (the mount is unknown before routing), so the
               // mount-resolved timeout must also bound the command
               // body: eager commands do their work inside cmd.fn,
               // where the stream-consumption guard never runs.
-              const resolvedSafeguard = resolveSafeguard(
+              // limitOverride carries the origin mount's cap across
+              // a warm-cache redirect; a null one is "no opinion" and
+              // must not shadow the serving mount's own table (a
+              // path-less command with cwd outside every mount resolves
+              // no origin, but the serving mount's cap still applies —
+              // python always reads the serving mount).
+              const resolvedLimit = resolveLimit(
                 cmdName,
-                cmd.safeguard,
-                opts.safeguardOverride !== undefined
-                  ? opts.safeguardOverride
-                  : (this.commandSafeguards.get(cmdName) ?? null),
+                [],
+                cmd.limit,
+                opts.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
               )
-              const cmdTimeout =
-                resolvedSafeguard !== null ? resolvedSafeguard.timeoutSeconds : null
-              const result = await runWithTimeout(
-                Promise.resolve(cmd.fn(accessor, expandedPaths, texts, cmdOpts)),
-                cmdTimeout,
-                cmdName,
-              )
+              const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
+              // runWithTimeout abandons the promise, it cannot cancel
+              // it; the aborted signal lets a runtime kill what it
+              // spawned (python cancels the task instead). The ambient
+              // opts.signal is a background job's kill channel, folded
+              // into the same wire. timeoutSeconds rides along so an
+              // engine that executes on the event loop (quickjs) can
+              // interrupt itself when the timer cannot fire.
+              const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
+              const runSignal = mergeSignals(guard?.signal, opts.signal)
+              const runOpts =
+                runSignal !== undefined
+                  ? {
+                      ...cmdOpts,
+                      signal: runSignal,
+                      ...(cmdTimeout !== null && cmdTimeout > 0
+                        ? { timeoutSeconds: cmdTimeout }
+                        : {}),
+                    }
+                  : cmdOpts
+              let result: CommandFnResult
+              try {
+                result = await runWithTimeout(
+                  Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
+                  cmdTimeout,
+                  cmdName,
+                )
+              } catch (err) {
+                if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
+                throw err
+              }
               if (result !== null) {
-                // TODO: hand back a finalization context separately
-                // instead of stamping policy onto io.safeguard.
-                result[1].safeguard = resolvedSafeguard
-                return result
+                // A warm-cache redirect already resolved the origin
+                // mount's cap (limitOverride); fold it as the
+                // declared bound since the origin prefix is not ours.
+                result[1].producer =
+                  opts.limitOverride != null
+                    ? { command: cmdName, prefixes: [], declared: resolvedLimit }
+                    : { command: cmdName, prefixes: [this.prefix], declared: cmd.limit ?? null }
+                return wrapMountStreams(result, mountPrefix)
               }
             }
             return [null, new IOResult()]
           },
         ),
-      )
-    } finally {
-      setVirtualPrefix('')
-    }
+      ),
+    )
   }
 
   async executeOp(
@@ -526,20 +578,54 @@ export class MountEntry {
       ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
     }
     const accessor = this.resource.accessor ?? NOOP_ACCESSOR
-    const opOverride = this.commandSafeguards.get(opName) ?? null
+    // Per-op caps are policy and fire at the op door (postOps); only
+    // the timeout stays here, bounding the backend call itself.
+    const opOverride = this.commandLimits.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    return runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-      for (const op of levels) {
-        const result = await runWithTimeout(
-          Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
-          opTimeout,
-          opName,
-        )
-        if (result !== null && result !== undefined) return applyOpSafeguard(result, opOverride)
-      }
-      return null
-    })
+    return runWithMountPrefix(mountPrefix, () =>
+      runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
+        for (const op of levels) {
+          const result = await runWithTimeout(
+            Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
+            opTimeout,
+            opName,
+          )
+          if (result !== null && result !== undefined) return result
+        }
+        return null
+      }),
+    )
   }
+}
+
+// Push `mountPrefix` back during lazy consumption of anything the command
+// handed back, so a deferred backend read names its record the same way an
+// eager one does. Dedup by identity: a stream that appears both as the
+// primary stdout and in IOResult.reads/writes is wrapped once.
+// Mirrors python's _wrap_cmd_streams.
+function wrapMountStreams(
+  result: [ByteSource | null, IOResult],
+  mountPrefix: string,
+): [ByteSource | null, IOResult] {
+  const [stream, io] = result
+  const seen = new Map<ByteSource, ByteSource>()
+  const wrap = (obj: ByteSource): ByteSource => {
+    if (obj instanceof Uint8Array) return obj
+    const hit = seen.get(obj)
+    if (hit !== undefined) return hit
+    let wrapped: ByteSource
+    if (obj instanceof CachableAsyncIterator) {
+      obj.wrapSource((src) => withMountPrefix(mountPrefix, src))
+      wrapped = obj
+    } else {
+      wrapped = withMountPrefix(mountPrefix, obj)
+    }
+    seen.set(obj, wrapped)
+    return wrapped
+  }
+  for (const [k, v] of Object.entries(io.reads)) io.reads[k] = wrap(v)
+  for (const [k, v] of Object.entries(io.writes)) io.writes[k] = wrap(v)
+  return [stream !== null ? wrap(stream) : null, io]
 }
 
 function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (string | null)[]> {

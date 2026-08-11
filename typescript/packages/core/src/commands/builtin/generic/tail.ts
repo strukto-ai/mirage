@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -42,13 +44,14 @@ export async function tailGeneric(
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('tail'))
   stream = cacheAwareStreamEager(stream)
-  const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
-  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
+  const nRaw = fl.asStr('n') ?? null
+  const cRaw = fl.asStr('c') ?? null
   const numErr = numberFlagError('tail', nRaw, cRaw)
   if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(numErr) })]
-  const qFlag = opts.flags.q === true
-  const vFlag = opts.flags.v === true
+  const qFlag = fl.asBool('q')
+  const vFlag = fl.asBool('v')
   const [lines, plusMode] = parseN(nRaw)
   const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
 

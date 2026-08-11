@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "which_runnable_prints_the_name",
+      "seq": 915,
+      "targets": [
+        "ram"
+      ],
+      "command": "which cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "which_miss_is_silent",
+      "seq": 916,
+      "targets": [
+        "ram"
+      ],
+      "command": "which nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "which_keyword_is_not_a_command",
+      "seq": 917,
+      "targets": [
+        "ram"
+      ],
+      "command": "which if",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "which_all_found_exit_rule",
+      "seq": 918,
+      "targets": [
+        "ram"
+      ],
+      "command": "which cat nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "cat\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "which_no_operand_exits_1",
+      "seq": 919,
+      "targets": [
+        "ram"
+      ],
+      "command": "which",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "which_s_reports_through_the_status",
+      "seq": 920,
+      "targets": [
+        "ram"
+      ],
+      "command": "which -s cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "which_invalid_option",
+      "seq": 921,
+      "targets": [
+        "ram"
+      ],
+      "command": "which -z cat",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "which: -z: invalid option\nwhich: usage: which [-as] name [name ...]\n"
+      }
+    }
+  ]
+}

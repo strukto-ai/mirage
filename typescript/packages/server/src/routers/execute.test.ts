@@ -41,6 +41,41 @@ describe('execute router', () => {
     await app.close()
   })
 
+  it('honors a cwd for the line', async () => {
+    const app = buildApp()
+    await createWs(app, 'ecwd')
+    await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ecwd/execute',
+      payload: { command: 'mkdir -p /sub && echo -n nested > /sub/f.txt' },
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ecwd/execute',
+      payload: { command: 'cat f.txt', cwd: '/sub' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<{ stdout: string; exitCode: number }>()
+    expect(body.exitCode).toBe(0)
+    expect(body.stdout).toBe('nested')
+    await app.close()
+  })
+
+  it('passes the runtime argument through to execution', async () => {
+    const app = buildApp()
+    await createWs(app, 'ert')
+    // An unknown entry name fails loud inside Workspace.execute,
+    // proving the field reaches the runtime argument.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/ert/execute',
+      payload: { command: 'echo hi', runtime: 'no-such-runtime' },
+    })
+    expect(res.statusCode).toBe(500)
+    expect(res.json<{ detail: string }>().detail).toContain('unknown runtime')
+    await app.close()
+  })
+
   it('passes base64 stdin to command execution', async () => {
     const app = buildApp()
     await createWs(app, 'estdin')

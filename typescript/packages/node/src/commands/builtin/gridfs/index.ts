@@ -14,14 +14,12 @@
 
 import {
   ResourceName,
-  makeFiletypeCommands,
   makeGenericCommands,
+  resolveGlobOf,
+  withDefaultProvisions,
   type RegisteredCommand,
 } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
-import { read as gridfsRead } from '../../../core/gridfs/read.ts'
-import { stat as gridfsStat } from '../../../core/gridfs/stat.ts'
-import { GRIDFS_DU } from './du.ts'
 import { GRIDFS_IO } from './io.ts'
 import { GRIDFS_MKDIR } from './mkdir.ts'
 import { GRIDFS_RM } from './rm.ts'
@@ -32,21 +30,16 @@ import { GRIDFS_TOUCH } from './touch.ts'
 // gridfs-specific behaviours kept as overrides: no real directories
 // (mkdir -p, rm not-empty), write-tracking (touch/tee), du_multi
 // aggregation, and the index-threaded, missing-operand stat.
-const GRIDFS_OVERRIDES = new Set(['stat', 'du', 'rm', 'mkdir', 'tee', 'touch'])
+const GRIDFS_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
 
 export const GRIDFS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeFiletypeCommands<GridFSAccessor>({
-    resource: ResourceName.GRIDFS,
-    readBytes: gridfsRead,
-    statEntry: gridfsStat,
-  }),
   ...makeGenericCommands<GridFSAccessor>(ResourceName.GRIDFS, GRIDFS_IO, {
     overrides: GRIDFS_OVERRIDES,
   }),
-  ...GRIDFS_STAT,
-  ...GRIDFS_DU,
-  ...GRIDFS_RM,
-  ...GRIDFS_MKDIR,
-  ...GRIDFS_TEE,
-  ...GRIDFS_TOUCH,
+  ...withDefaultProvisions(
+    [...GRIDFS_STAT, ...GRIDFS_RM, ...GRIDFS_MKDIR, ...GRIDFS_TEE, ...GRIDFS_TOUCH],
+    GRIDFS_IO.stat,
+    resolveGlobOf(GRIDFS_IO),
+    GRIDFS_IO.readdir,
+  ),
 ]

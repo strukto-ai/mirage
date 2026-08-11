@@ -16,6 +16,7 @@ import { materialize } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
+import { ancestors } from '../../utils/path.ts'
 import { Workspace } from '../workspace.ts'
 import { getTestParser } from './workspace_fixture.ts'
 
@@ -29,6 +30,12 @@ export interface IntegrationWS {
 
 function put(res: RAMResource, path: string, data: string | Uint8Array): void {
   res.store.files.set(path, typeof data === 'string' ? ENC.encode(data) : data)
+  // RAM keeps directories explicitly, so seeding a file without them builds a
+  // store no write could produce: readdir and stat both refuse a parent that
+  // is not in `store.dirs`, which made `ls /data/logs` and `test -d
+  // /data/logs` answer as if nothing was there. Mirrors memory_create_file in
+  // the python fixture, which mkdir's each ancestor.
+  for (const dir of ancestors(path)) res.store.dirs.add(dir)
 }
 
 /**

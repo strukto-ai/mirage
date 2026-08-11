@@ -18,7 +18,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { ReturnSignal } from '../executor/command.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
@@ -86,6 +86,9 @@ export async function executeProgram(
       stdout = bgStdout
       io = bgIo
       lastExec = bgExec
+      // Launching a job is itself a statement: bash sets $? to 0
+      // (the launch status), so `false; cmd & echo $?` prints 0.
+      session.lastExitCode = bgIo.exitCode
       i += 2
     } else {
       let s: ByteSource | null

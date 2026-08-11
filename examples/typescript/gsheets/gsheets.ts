@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   GSheetsResource,
+  GWS,
   MountMode,
   Workspace,
   type FileStat,
@@ -62,8 +63,11 @@ function printOut(label: string, out: string, err: string, max = 500): void {
 }
 
 async function main(): Promise<void> {
-  const resource = new GSheetsResource(buildConfig())
+  const config = buildConfig()
+  const resource = new GSheetsResource(config)
   const ws = new Workspace({ '/gsheets': resource }, { mode: MountMode.WRITE })
+  // The gws verbs are a CLI install, separate from the mount.
+  ws.registerCli('gws', GWS, { ...config })
   try {
     const root = await run(ws, 'ls /gsheets/')
     printOut('ls /gsheets/', root.out, root.err)
@@ -124,26 +128,26 @@ async function main(): Promise<void> {
     }
     console.log(`Created: ${sheetId}`)
 
-    console.log('\n=== gws sheets +write (A1:B2) ===')
+    console.log('\n=== gws sheets write (A1:B2) ===')
     const writeValues = JSON.stringify([
       ['hello', 'world'],
       ['foo', 'bar'],
     ])
     const write = await run(
       ws,
-      `gws sheets +write --spreadsheet ${sheetId} --range "A1:B2" --json-values '${writeValues}'`,
+      `gws sheets write --spreadsheet ${sheetId} --range "A1:B2" --json-values '${writeValues}'`,
     )
     console.log(`Written: ${write.out.slice(0, 80)}`)
 
-    console.log('\n=== gws sheets +append (A:B) ===')
+    console.log('\n=== gws sheets append (A:B) ===')
     const append = await run(
       ws,
-      `gws sheets +append --spreadsheet ${sheetId} --range "A:B" --json-values '[["appended", "row"]]'`,
+      `gws sheets append --spreadsheet ${sheetId} --range "A:B" --json-values '[["appended", "row"]]'`,
     )
     console.log(`Appended: ${append.out.slice(0, 80)}`)
 
-    console.log('\n=== gws sheets +read (A1:B3) ===')
-    const read = await run(ws, `gws sheets +read --spreadsheet ${sheetId} --range "A1:B3"`)
+    console.log('\n=== gws sheets read (A1:B3) ===')
+    const read = await run(ws, `gws sheets read --spreadsheet ${sheetId} --range "A1:B3"`)
     console.log(read.out.trim())
 
     console.log(`\nOpen: https://docs.google.com/spreadsheets/d/${sheetId}/edit`)

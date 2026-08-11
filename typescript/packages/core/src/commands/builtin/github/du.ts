@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { du as githubDu, duAll as githubDuAll } from '../../../core/github/du.ts'
+import { size as githubDu, entries as githubDuAll } from '../../../core/github/du/index.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { GITHUB_IO } from './io.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { duGeneric } from '../generic/du.ts'
+import { metadataProvision } from './provision.ts'
+import { IOResult } from '../../../io/types.ts'
+import { runDu } from '../generic/du.ts'
 
 const resolveGlob = resolveGlobOf(GITHUB_IO)
 
@@ -29,14 +31,16 @@ async function duCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return duGeneric(
-    resolved,
+  const idx = opts.index ?? undefined
+  const out = await runDu(
+    paths,
     opts,
-    (p) => githubDu(accessor, p),
-    (p) => githubDuAll(accessor, p),
+    (targets) => resolveGlob(accessor, targets, idx),
+    (p) => GITHUB_IO.stat(accessor, p, idx),
+    (p) => githubDu(accessor, p, idx),
+    (p) => githubDuAll(accessor, p, idx),
   )
+  return [out.stdout, new IOResult({ stderr: out.stderr, exitCode: out.exitCode })]
 }
 
 export const GITHUB_DU = command({
@@ -44,4 +48,5 @@ export const GITHUB_DU = command({
   resource: ResourceName.GITHUB,
   spec: specOf('du'),
   fn: duCommand,
+  provision: metadataProvision,
 })

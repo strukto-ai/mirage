@@ -98,6 +98,23 @@ class CacheManager:
         await self._index.invalidate_dir(virtual + "/")
         await self._invalidate_parent(virtual)
 
+    async def drop_prefix(self) -> None:
+        """Drop every cached body under this mount, path unspecified.
+
+        For a mutation that names no path: an account CLI writes to its
+        service by id, so nothing here can say which file changed, only
+        that this mount's bytes may no longer match the service. Clearing
+        the listing alone is not enough, because an already-read body is
+        served warm and would keep answering with the pre-write content.
+
+        Over-evicts when this mount is the root and another mount sits
+        beneath it, since keys are compared by prefix. That costs a
+        refetch, which is the safe direction to be wrong in.
+        """
+        if not self._caches_reads or self._file_cache is None:
+            return
+        await self._file_cache.evict_prefix(self._prefix + "/")
+
     async def _invalidate_parent(self, virtual: str) -> None:
         parent = virtual.rsplit("/", 1)[0] or "/"
         await self._index.invalidate_dir(parent)

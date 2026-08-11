@@ -18,7 +18,7 @@ import type { RegisteredCommand } from '../../commands/config.ts'
 import { appendBytes as appendCore } from '../../core/ram/append.ts'
 import { copy as copyCore } from '../../core/ram/copy.ts'
 import { create as createCore } from '../../core/ram/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/ram/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/ram/du/index.ts'
 import { exists as existsCore } from '../../core/ram/exists.ts'
 import { find as findCore, type FindOptions as RAMFindOptions } from '../../core/ram/find.ts'
 import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
@@ -55,6 +55,8 @@ export interface RAMResourceState {
 export class RAMResource extends BaseResource implements Resource {
   readonly kind = ResourceName.RAM
   readonly cachesReads: boolean = false
+  // byte store: stat() sizes every file from metadata
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   readonly store = new RAMStore()
   readonly accessor = new RAMAccessor(this.store)
@@ -71,8 +73,8 @@ export class RAMResource extends BaseResource implements Resource {
     mkdir: mkdirCore,
     read_stream: streamCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -81,10 +83,6 @@ export class RAMResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 
@@ -153,7 +151,7 @@ export class RAMResource extends BaseResource implements Resource {
   }
 
   du(path: PathSpec): Promise<number> {
-    return duCore(this.accessor, path)
+    return duSizeCore(this.accessor, path)
   }
 
   find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {

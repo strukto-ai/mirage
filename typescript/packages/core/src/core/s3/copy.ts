@@ -15,13 +15,23 @@
 import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
+import { enoent } from '../../utils/errors.ts'
 import { loadS3Module, rawPathOf, s3Key, withClient } from './_client.ts'
+import { exists } from './exists.ts'
 
 export async function copy(accessor: S3Accessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const { CopyObjectCommand } = await loadS3Module(accessor.config)
   const srcKey = s3Key(rawPathOf(src), accessor.config)
   const dstKey = s3Key(rawPathOf(dst), accessor.config)
   const { bucket } = accessor.config
+  if (srcKey === dstKey) {
+    // Copying an object onto its own key is a no-op we must not send:
+    // AWS and MinIO reject it, but a store that accepts it would pair
+    // with rename's delete and destroy the only copy. A missing source
+    // still has to fail (#150).
+    if (!(await exists(accessor, src))) throw enoent(src)
+    return
+  }
   await withClient(accessor.config, async (client) => {
     await client.send(
       new CopyObjectCommand({

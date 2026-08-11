@@ -18,11 +18,11 @@ import { appendBytes as diskAppend } from '../../../core/disk/append.ts'
 import { SCOPE_ERROR } from '../../../core/disk/constants.ts'
 import { copy as diskCopy } from '../../../core/disk/copy.ts'
 import { create as diskCreate } from '../../../core/disk/create.ts'
-import { du as diskDu, duAll as diskDuAll } from '../../../core/disk/du.ts'
+import { size as diskDu, entries as diskDuAll } from '../../../core/disk/du/index.ts'
 import { exists as diskExists } from '../../../core/disk/exists.ts'
 import { find as diskFind } from '../../../core/disk/find.ts'
 import { mkdir as diskMkdir } from '../../../core/disk/mkdir.ts'
-import { read as diskRead } from '../../../core/disk/read.ts'
+import { read as diskRead, readRange as diskReadRange } from '../../../core/disk/read.ts'
 import { readdir as diskReaddir } from '../../../core/disk/readdir.ts'
 import { rename as diskRename } from '../../../core/disk/rename.ts'
 import { rmR as diskRmR } from '../../../core/disk/rm.ts'
@@ -37,6 +37,7 @@ import { writeBytes as diskWrite } from '../../../core/disk/write.ts'
 export const DISK_IO: CommandIO<DiskAccessor> = {
   readdir: diskReaddir,
   readBytes: diskRead,
+  readRange: diskReadRange,
   readStream: diskStream,
   stat: diskStat,
   isMounted: (a) => a.root !== '',
@@ -55,6 +56,5 @@ export const DISK_IO: CommandIO<DiskAccessor> = {
   append: diskAppend,
   setAttrs: diskSetAttrs,
   find: diskFind,
-  duTotal: diskDu,
-  duAll: diskDuAll,
+  du: { size: diskDu, entries: diskDuAll },
 }

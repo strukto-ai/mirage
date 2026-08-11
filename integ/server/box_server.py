@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 from aiohttp import web
@@ -36,6 +37,16 @@ def freeze_clock(base: datetime) -> None:
     global BASE_TIME, MODIFIED
     BASE_TIME = base
     MODIFIED = base.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+
+def _content_hit(query: str, text: str) -> bool:
+    # Real Box indexes content by whole words, so `foo` never matches
+    # `foobar`. Modelling that is what lets the battery prove grep/rg
+    # push-down cannot silently drop substring matches; a substring fake
+    # would agree with a full scan and test nothing. Names stay substring:
+    # extra hits there only over-fetch, which the local scan filters.
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(query)}(?![A-Za-z0-9_])",
+                     text) is not None
 
 
 def _error(status: int, code: str, message: str) -> web.Response:
@@ -114,6 +125,18 @@ class FakeBox:
             "content": content,
             "sha1": hashlib.sha1(content).hexdigest(),
             "version": 1,
+        }
+        self.items[item["id"]] = item
+        return item
+
+    def add_web_link(self, parent_id: str, name: str, url: str) -> dict:
+        item = {
+            "type": "web_link",
+            "id": self._new_id(),
+            "name": name,
+            "parent": parent_id,
+            "modified_at": MODIFIED,
+            "url": url,
         }
         self.items[item["id"]] = item
         return item
@@ -269,6 +292,22 @@ class BoxServer:
         if self.state.child_by_name(parent_id, name) is not None:
             return _error(409, "item_name_in_use", f"{name} already exists")
         item = self.state.add_folder(parent_id, name)
+        return web.json_response(self.state.render(item), status=201)
+
+    async def create_web_link(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return _error(401, "unauthorized", "missing bearer token")
+        body = await request.json()
+        parent_id = body.get("parent", {}).get("id", "")
+        name = body.get("name", "")
+        parent = self.state.items.get(parent_id)
+        if parent is None or parent["type"] != "folder":
+            return _error(404, "not_found", "parent folder not found")
+        if not name:
+            return _error(400, "bad_request", "name is required")
+        if self.state.child_by_name(parent_id, name) is not None:
+            return _error(409, "item_name_in_use", f"{name} already exists")
+        item = self.state.add_web_link(parent_id, name, body.get("url", ""))
         return web.json_response(self.state.render(item), status=201)
 
     async def folder_info(self, request: web.Request) -> web.Response:
@@ -481,7 +520,7 @@ class BoxServer:
             matched = match_name and query in it["name"].lower()
             if not matched and match_content and it["type"] == "file":
                 text = it["content"].decode("utf-8", "ignore").lower()
-                matched = query in text
+                matched = _content_hit(query, text)
             if matched:
                 hits.append(it)
         hits.sort(key=lambda it: it["name"])
@@ -504,6 +543,7 @@ def build_app(server: BoxServer) -> web.Application:
     app.router.add_get("/2.0/folders/{folder_id}/items", server.list_items)
     app.router.add_get("/2.0/folders/{folder_id}", server.folder_info)
     app.router.add_post("/2.0/folders", server.create_folder)
+    app.router.add_post("/2.0/web_links", server.create_web_link)
     app.router.add_get("/2.0/files/{file_id}", server.file_info)
     app.router.add_get("/2.0/files/{file_id}/content", server.download)
     app.router.add_post("/2.0/files/content", server.upload)

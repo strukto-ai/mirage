@@ -1,0 +1,182 @@
+{
+  "suite": "errors",
+  "cases": [
+    {
+      "id": "py_rejects_ts_only_name",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "TypeScript-only"
+      }
+    },
+    {
+      "id": "ts_rejects_py_only_name",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "Python-only"
+      }
+    },
+    {
+      "id": "unknown_name",
+      "world": {
+        "runtimes": [
+          "ghost",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "unknown runtime"
+      }
+    },
+    {
+      "id": "py_config_typo",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "wasi",
+            "config": {
+              "homee": "/x"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "homee"
+      }
+    },
+    {
+      "id": "ts_config_typo",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "pyodide",
+            "config": {
+              "homee": "/x"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "unknown runtime config key 'homee'"
+      }
+    },
+    {
+      "id": "wasi_bad_home",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          {
+            "name": "wasi",
+            "config": {
+              "home": "/nonexistent-wasi-build"
+            }
+          },
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "cpython-wasi-build"
+      }
+    },
+    {
+      "id": "syntax_error_exit2",
+      "world": {
+        "runtimes": [
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo (",
+          "expect": {
+            "exit": 2,
+            "stderr": "mirage: syntax error near '('\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "syntax_error_unclamped",
+      "world": {
+        "runtimes": [
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "if then fi this-is-a-deliberately-long-unparsable-line-well-past-forty-chars",
+          "expect": {
+            "exit": 2,
+            "stderr": "mirage: syntax error near 'if then fi this-is-a-deliberately-long-unparsable-line-well-past-forty-chars'\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "syntax_error_beats_policy",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policy": "{'deny': 'nothing runs'}"
+      },
+      "steps": [
+        {
+          "command": "echo (",
+          "expect": {
+            "exit": 2,
+            "stderr_contains": "syntax error"
+          }
+        },
+        {
+          "command": "echo hi",
+          "expect": {
+            "exit": 126,
+            "stderr_contains": "policy denied: nothing runs"
+          }
+        }
+      ]
+    }
+  ]
+}

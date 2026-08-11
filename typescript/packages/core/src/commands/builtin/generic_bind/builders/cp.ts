@@ -12,26 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../io/types.ts'
-import type { NativeCopy, PathSpec } from '../../../../types.ts'
+import type { IndexCacheStore } from '../../../../cache/index/store.ts'
+import type { StatOverlay } from '../../../../ops/types.ts'
+import type { Accessor } from '../../../../accessor/base.ts'
+import type { NativeCopy, PathSpec, StatFn } from '../../../../types.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
-import { cpGeneric } from '../../generic/cp.ts'
-import type { Builder } from '../adapter.ts'
+import { cpGeneric, parseCpFlags } from '../../generic/cp.ts'
+import type { Builder, CommandIO } from '../adapter.ts'
+import { FlagView } from '../../../spec/types.ts'
+import { specOf } from '../../../spec/builtins.ts'
+
+// The backend stat, merged with the namespace attr overlay if any. cp/mv
+// freshness checks (-u) must see touch/chmod overlay state, exactly like
+// ls and stat rendering.
+export function overlayableStat(
+  ops: CommandIO,
+  accessor: Accessor,
+  index: IndexCacheStore | undefined,
+  statOverlay: StatOverlay | undefined,
+): StatFn {
+  if (statOverlay === undefined) return (p) => ops.stat(accessor, p, index)
+  return async (p) => statOverlay(p.virtual, await ops.stat(accessor, p, index))
+}
 
 export const CP_BUILDER: Builder = {
   name: 'cp',
   write: true,
+  requirements: ['copy'],
   fn: (ops, accessor, paths, _texts, opts) => {
-    if (paths.length < 2) {
-      return Promise.resolve([
-        null,
-        new IOResult({ exitCode: 1, stderr: new TextEncoder().encode('cp: missing operand\n') }),
-      ])
-    }
-    const { copy, dirCopy, find, isDirName } = ops
+    const { copy, dirCopy, find, mkdir } = ops
     if (copy === undefined) {
       throw new Error('cp: backend provides no copy op')
     }
+    const idx = opts.index ?? undefined
     // No native find op: fall back to a readdir walk (mirrors Python's
     // _make_find). Passing the index lets stat classify entries from the
     // cache instead of re-fetching, matching the find command.
@@ -44,28 +57,27 @@ export const CP_BUILDER: Builder = {
               {
                 readdir: (spec, i) => ops.readdir(accessor, spec, i),
                 stat: (spec, i) => ops.stat(accessor, spec, i),
-                isDirName:
-                  isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
               },
               options,
-              opts.index ?? undefined,
+              idx,
             )
-    const recursive = opts.flags.r === true || opts.flags.R === true || opts.flags.a === true
+    const parsed = parseCpFlags(new FlagView(opts.flags, specOf('cp')))
     const strategy: NativeCopy = {
       copy: (src: PathSpec, target: PathSpec) => copy(accessor, src, target),
       find: findFn,
       ...(dirCopy === undefined
         ? {}
         : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
+      ...(mkdir === undefined ? {} : { mkdir: (p: PathSpec) => mkdir(accessor, p) }),
     }
     return cpGeneric(
       paths,
-      (p: PathSpec) => ops.stat(accessor, p, opts.index ?? undefined),
+      overlayableStat(ops, accessor, idx, opts.statOverlay),
       strategy,
-      recursive,
-      opts.flags.n === true,
-      opts.flags.v === true,
-      opts.index ?? undefined,
+      parsed,
+      idx,
+      undefined,
+      (p: PathSpec) => ops.readdir(accessor, p, idx),
     )
   },
 }

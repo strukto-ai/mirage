@@ -4,24 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ram": "tsx ram.ts",
-    "disk": "tsx disk.ts",
-    "redis": "tsx redis.ts",
-    "opfs": "tsx opfs.ts",
-    "s3": "tsx s3.ts",
-    "fuse": "tsx fuse.ts",
-    "s3_cases": "tsx s3_cases.ts",
-    "mongodb": "tsx mongodb.ts",
-    "notion": "tsx notion.ts",
-    "postgres": "tsx postgres.ts",
-    "safeguard": "tsx safeguard.ts",
-    "chroma": "tsx chroma.ts",
-    "lancedb": "tsx lancedb.ts",
-    "qdrant": "tsx qdrant.ts",
-    "ssh": "tsx ssh.ts",
-    "runtime": "tsx runtime.ts",
+    "battery": "tsx runners/typescript/main.ts",
+    "fuse": "tsx fuse/fuse.ts",
+    "notion:conformance": "tsx ntn_conformance.ts",
+    "notion:mcp-parity": "tsx notion_mcp_parity.ts",
+    "prisma:setup": "prisma generate --schema prisma/schema.prisma && prisma db push --schema prisma/schema.prisma --skip-generate",
+    "runtime": "tsx runtime/run.ts",
     "slack:server": "tsx server/slack.ts",
-    "slack:setup": "prisma generate --schema prisma/schema.prisma && prisma db push --schema prisma/schema.prisma --skip-generate"
+    "trello:server": "tsx server/trello.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
@@ -37,7 +27,7 @@
     "mongodb": "^6.0.0",
     "pg": "^8.0.0",
     "ssh2": "^1.16.0",
-    "@pydantic/monty": "0.0.19-beta.4"
+    "@pydantic/monty": "0.0.19"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

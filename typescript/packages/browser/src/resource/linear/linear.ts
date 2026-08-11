@@ -54,6 +54,10 @@ export interface LinearResourceState {
 export class LinearResource implements Resource {
   readonly kind: string = ResourceName.LINEAR
   readonly cachesReads: boolean = true
+  // Every file is sized at its parent's readdir from the listing payload
+  // (comments.jsonl via one bounded comments call), so stat always reports
+  // the rendered byte length and fskit mounts serve exact reads.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 600
   readonly prompt: string = LINEAR_PROMPT
   readonly writePrompt: string = LINEAR_WRITE_PROMPT

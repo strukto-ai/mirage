@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind.provision import \
+    with_default_provisions
 from mirage.commands.builtin.postgres.grep import grep
 from mirage.commands.builtin.postgres.head import head
 from mirage.commands.builtin.postgres.io import IO as _IO
@@ -28,9 +30,6 @@ COMMANDS = [
         _IO,
         overrides=_POSTGRES_OVERRIDES,
     ),
-    grep,
-    head,
-    rg,
-    tail,
-    wc,
+    *with_default_provisions([grep, head, rg, tail, wc], _IO.stat,
+                             _IO.resolve_glob, _IO.readdir),
 ]

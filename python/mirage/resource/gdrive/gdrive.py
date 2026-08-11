@@ -31,6 +31,10 @@ class GoogleDriveResource(BaseResource):
     accessor: GDriveAccessor
     name: str = ResourceName.GDRIVE
     caches_reads: bool = True
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
 
@@ -44,8 +48,8 @@ class GoogleDriveResource(BaseResource):
 
         for fn in COMMANDS:
             self.register(fn)
-        for fn in GDRIVE_VFS_OPS:
-            self.register_op(fn)
+        for op in GDRIVE_VFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)

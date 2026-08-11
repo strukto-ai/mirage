@@ -19,11 +19,15 @@ from dataclasses import dataclass
 import tree_sitter
 
 from mirage.shell.arith import evaluate_arith
+from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
+                                array_indices, array_slice, array_values)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
+from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.glob_walk import escape_glob
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
@@ -50,6 +54,11 @@ _PATTERN_OPS = _REPLACE_OPS | _STRIP_OPS | _CASE_OPS
 _MULTIWORD_AT_OPS = frozenset({":"}) | _STRIP_OPS | _REPLACE_OPS | _CASE_OPS
 
 _LITERAL_ARG_TYPES = frozenset({NT.WORD, NT.NUMBER, "regex"})
+
+# Quote-carrying operand nodes: in pattern position their value matches
+# literally, exactly as a quoted case pattern does.
+_QUOTED_ARG_TYPES = frozenset(
+    {NT.STRING, NT.RAW_STRING, NT.ANSI_C_STRING, NT.TRANSLATED_STRING})
 
 # Operators that handle unset themselves, so `set -u` must not fire
 # on the lookup that feeds them.
@@ -107,7 +116,7 @@ def _lookup_var(var: str,
     if var.isdigit():
         idx = int(var)
         if idx == 0:
-            return "mirage"
+            return session.argv0
         if call_stack and call_stack.get_positional(idx):
             return call_stack.get_positional(idx)
         if positional and 0 < idx <= len(positional):
@@ -121,8 +130,7 @@ def _lookup_var(var: str,
             return local_val
     arrays = getattr(session, "arrays", None)
     if arrays and var in arrays:
-        arr = arrays[var]
-        return arr[0] if arr else ""
+        return array_get(arrays[var], 0)
     if var == "PWD":
         return session.cwd
     if var == "HOME":
@@ -201,46 +209,142 @@ def _parse_braces(node: tree_sitter.Node) -> _BraceParse:
                        groups=tuple(tuple(g) for g in groups))
 
 
-def _expand_dollar_refs(text: str, session: Session,
-                        call_stack: CallStack | None) -> str:
-    """Expand ``$name``/``${name}`` references embedded in a pattern.
+def _escaped_find(text: str, start: int, quote: str) -> int:
+    """Index of the next unescaped ``quote``, -1 when it never closes.
 
-    Pattern operands (``${f%$ext}``) arrive as opaque ``regex`` nodes
-    whose ``$``-references have no child nodes; resolve them textually
-    while keeping every other character (glob syntax) literal.
+    Args:
+        text (str): the token being scanned.
+        start (int): first index inside the quotes.
+        quote (str): the closing character.
+    """
+    i = start
+    n = len(text)
+    while i < n:
+        if text[i] == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if text[i] == quote:
+            return i
+        i += 1
+    return -1
+
+
+def _ref_end(text: str, start: int) -> tuple[str, int] | None:
+    """A ``$name``/``${name}`` reference starting after the ``$``.
+
+    Args:
+        text (str): the token being scanned.
+        start (int): index of the character after ``$``.
+
+    Returns:
+        The name and the index past the reference, or None when the
+        ``$`` starts no reference and stays literal.
+    """
+    n = len(text)
+    j = start
+    braced = j < n and text[j] == "{"
+    if braced:
+        j += 1
+    k = j
+    while k < n and (text[k].isalnum() or text[k] == "_"):
+        k += 1
+    name = text[j:k]
+    if not name:
+        return None
+    if braced:
+        if k >= n or text[k] != "}":
+            return None
+        k += 1
+    return name, k
+
+
+def _dquoted_pattern(inner: str, session: Session,
+                     call_stack: CallStack | None) -> str:
+    """A double-quoted pattern segment: everything in it is literal.
+
+    Args:
+        inner (str): the text between the double quotes.
+        session (Session): shell session for name resolution.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(inner)
+    while i < n:
+        ch = inner[i]
+        if ch == "\\" and i + 1 < n and inner[i + 1] in '$`"\\':
+            out.append(escape_glob(inner[i + 1]))
+            i += 2
+            continue
+        if ch == "$" and i + 1 < n:
+            ref = _ref_end(inner, i + 1)
+            if ref is not None:
+                name, nxt = ref
+                out.append(escape_glob(_lookup_var(name, session, call_stack)))
+                i = nxt
+                continue
+        out.append(escape_glob(ch))
+        i += 1
+    return "".join(out)
+
+
+def _pattern_text(text: str, session: Session,
+                  call_stack: CallStack | None) -> str:
+    """Render an opaque pattern token with bash quoting semantics.
+
+    Pattern operands (``${f%$ext}``, ``${v#x"a*"}``) arrive as opaque
+    ``regex`` nodes tree-sitter does not parse further, but bash still
+    honors quoting inside them: quoted segments (single, double, or
+    ANSI-C) match literally, a backslash binds the next character, an
+    unquoted ``$``-reference splices a live pattern while a
+    double-quoted one splices literal text, and every other character -
+    glob syntax included - stays live. Literal text is spelled in
+    one-character classes because fnmatch has no escape character.
 
     Args:
         text (str): the raw pattern text.
         session (Session): shell session for name resolution.
         call_stack (CallStack | None): function-call scope, if any.
     """
-    if "$" not in text:
+    if not any(c in text for c in "$\\'\""):
         return text
     out: list[str] = []
     i = 0
     n = len(text)
     while i < n:
         ch = text[i]
-        if ch != "$" or i + 1 >= n:
-            out.append(ch)
-            i += 1
+        if ch == "\\" and i + 1 < n:
+            out.append(escape_glob(text[i + 1]))
+            i += 2
             continue
-        j = i + 1
-        braced = text[j] == "{"
-        if braced:
-            j += 1
-        start = j
-        while j < n and (text[j].isalnum() or text[j] == "_"):
-            j += 1
-        name = text[start:j]
-        if not name or (braced and (j >= n or text[j] != "}")):
-            out.append(ch)
-            i += 1
-            continue
-        if braced:
-            j += 1
-        out.append(_lookup_var(name, session, call_stack))
-        i = j
+        if ch == "\'":
+            end = text.find("\'", i + 1)
+            if end != -1:
+                out.append(escape_glob(text[i + 1:end]))
+                i = end + 1
+                continue
+        if ch == '"':
+            end = _escaped_find(text, i + 1, '"')
+            if end != -1:
+                out.append(
+                    _dquoted_pattern(text[i + 1:end], session, call_stack))
+                i = end + 1
+                continue
+        if ch == "$" and i + 1 < n:
+            if text[i + 1] == "\'":
+                end = _escaped_find(text, i + 2, "\'")
+                if end != -1:
+                    out.append(escape_glob(decode_ansi_c(text[i + 2:end])))
+                    i = end + 1
+                    continue
+            ref = _ref_end(text, i + 1)
+            if ref is not None:
+                name, nxt = ref
+                out.append(_lookup_var(name, session, call_stack))
+                i = nxt
+                continue
+        out.append(ch)
+        i += 1
     return "".join(out)
 
 
@@ -250,8 +354,13 @@ async def _expand_operand(node: tree_sitter.Node, expand_child: ExpandChild,
     if node.type == NT.CONCATENATION:
         return await _expand_group(tuple(node.children), expand_child,
                                    pattern_mode, session, call_stack)
+    if pattern_mode and node.type in _QUOTED_ARG_TYPES:
+        # Quoted pattern text matches literally, the same rule case
+        # patterns follow: the value, inner expansions included, is
+        # escaped so its glob characters match themselves.
+        return escape_glob(await expand_child(node))
     if pattern_mode and node.type in _LITERAL_ARG_TYPES:
-        return _expand_dollar_refs(get_text(node), session, call_stack)
+        return _pattern_text(get_text(node), session, call_stack)
     return await expand_child(node)
 
 
@@ -468,30 +577,32 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
     if p.subscript is not None and p.var_name is not None:
         arr = arrays.get(p.var_name)
         if arr is None:
-            scalar = env.get(p.var_name, "")
-            arr = [scalar] if scalar else []
+            # A scalar is element 0 of a one-element array, even when
+            # empty: ${#x[@]} is 1 for x="" but 0 for an unset name.
+            arr = [env[p.var_name]] if p.var_name in env else []
         var_in_env = p.var_name in arrays or p.var_name in env
         if p.subscript in ("@", "*"):
+            # ${a[@]} and friends see only the assigned elements: a hole
+            # left by `unset a[i]` (or skipped by a[9]=v) neither expands
+            # nor counts, though it keeps the later indices in place.
+            values = array_values(arr)
             if p.indirect_op:
-                return " ".join(str(i) for i in range(len(arr)))
+                return " ".join(str(i) for i in array_indices(arr))
             if p.length_op:
-                return str(len(arr))
+                return str(len(values))
             if p.op == ":":
                 sliced = _slice_array(arr, groups, env)
                 return " ".join(sliced)
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
-                return " ".join(_value_op(p.op, el, groups, env) for el in arr)
-            val = " ".join(arr)
+                return " ".join(
+                    _value_op(p.op, el, groups, env) for el in values)
+            val = " ".join(values)
         else:
             idx = _array_index(p.subscript, env)
             if idx < 0:
-                idx += len(arr)
-            if 0 <= idx < len(arr):
-                val = arr[idx]
-                var_in_env = True
-            else:
-                val = ""
-                var_in_env = False
+                idx += array_extent(arr)
+            val = array_get(arr, idx)
+            var_in_env = array_has(arr, idx)
     elif p.var_name:
         if call_stack:
             local_val = call_stack.get_local(p.var_name)
@@ -499,8 +610,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                 val = local_val
                 var_in_env = True
         if not var_in_env and p.var_name in arrays:
-            arr = arrays[p.var_name]
-            val = arr[0] if arr else ""
+            val = array_get(arrays[p.var_name], 0)
             var_in_env = True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
@@ -560,25 +670,55 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
     return _value_op(p.op, val, groups, env)
 
 
-def _slice_array(arr: list[str], groups: list[str],
+def _slice_array(arr: ShellArray, groups: list[str],
                  env: dict[str, str]) -> list[str]:
+    """Resolve ``${a[@]:offset:length}`` against a shell array.
+
+    Args:
+        arr (ShellArray): the array being sliced.
+        groups (list[str]): the raw offset and length words.
+        env (dict[str, str]): environment for the arithmetic context.
+    """
     if not groups:
-        return arr
+        return array_values(arr)
     offset = _arith_int(groups[0], env)
     if offset is None:
-        return arr
+        return array_values(arr)
     length = None
     if len(groups) > 1:
         length = _arith_int(groups[1], env)
         if length is None:
-            return arr
-    if offset < 0:
-        offset = max(0, len(arr) + offset)
-    if length is None:
-        return arr[offset:]
-    if length < 0:
-        return arr[offset:max(offset, len(arr) + length)]
-    return arr[offset:offset + length]
+            return array_values(arr)
+    return array_slice(arr, offset, length)
+
+
+def _is_at_splat(p: _BraceParse) -> bool:
+    """Whether a parsed "${...}" splats one word per element.
+
+    Two spellings mean the same thing: an ``@`` subscript on a name
+    (``${a[@]}``) and the positional parameters themselves (``${@}``,
+    which bash word-splits exactly like the bare ``$@``). ``${*}`` and
+    ``${a[*]}`` are excluded because they join.
+
+    Args:
+        p (_BraceParse): the parsed brace expansion.
+    """
+    if p.subscript == "@":
+        return True
+    return p.subscript is None and p.var_name == "@"
+
+
+def _positional_args(session: Session,
+                     call_stack: CallStack | None) -> list[str]:
+    """The positional parameters in scope, function args winning.
+
+    Args:
+        session (Session): shell session state.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    if call_stack and call_stack.get_all_positional():
+        return call_stack.get_all_positional()
+    return getattr(session, "positional_args", None) or []
 
 
 def is_multiword_at(node: tree_sitter.Node) -> bool:
@@ -593,10 +733,15 @@ def is_multiword_at(node: tree_sitter.Node) -> bool:
     Args:
         node (tree_sitter.Node): the ``expansion`` node.
     """
+    if node.type == NT.SIMPLE_EXPANSION:
+        # Bare "$@" is the positional splat. It word-splits exactly like
+        # "${a[@]}" and stitches onto surrounding literals the same way,
+        # so it takes the same path rather than a rule of its own.
+        return get_text(node).strip() == "$@"
     if node.type != NT.EXPANSION:
         return False
     p = _parse_braces(node)
-    if p.subscript != "@" or p.length_op:
+    if not _is_at_splat(p) or p.length_op:
         return False
     if p.indirect_op or p.op is None:
         return True
@@ -618,16 +763,30 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): nested-node expander for op operands.
     """
+    if node.type == NT.SIMPLE_EXPANSION:
+        return _positional_args(session, call_stack)
     p = _parse_braces(node)
-    arrays = getattr(session, "arrays", {})
-    arr = arrays.get(p.var_name)
+    arr: list[str | None] | None
+    if p.subscript is None and p.var_name == "@":
+        # "${@}" splats the positional parameters; every op below then
+        # applies per element, which is what bash does for "${@/x/y}".
+        # A slice is the exception: bash numbers the parameters from 1
+        # there, so index 0 is the shell's own name and "${@:0}" yields
+        # it ahead of $1. Pinned on bash 5.2.37; macOS bash 3.2 drops
+        # it, so probe this one in docker, not locally.
+        params: list[str | None] = [*_positional_args(session, call_stack)]
+        arr = [session.argv0, *params] if p.op == ":" else params
+    else:
+        arrays = getattr(session, "arrays", {})
+        arr = arrays.get(p.var_name)
     if arr is None:
-        scalar = session.env.get(p.var_name or "", "")
-        arr = [scalar] if scalar else []
+        name = p.var_name or ""
+        arr = [session.env[name]] if name in session.env else []
     if p.indirect_op:
-        return [str(i) for i in range(len(arr))]
+        return [str(i) for i in array_indices(arr)]
+    values = array_values(arr)
     if p.op is None:
-        return list(arr)
+        return values
     groups: list[str] = []
     for gi, group in enumerate(p.groups):
         pattern_mode = gi == 0 and p.op in _PATTERN_OPS
@@ -635,4 +794,4 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
                                           session, call_stack))
     if p.op == ":":
         return _slice_array(arr, groups, session.env)
-    return [_value_op(p.op, el, groups, session.env) for el in arr]
+    return [_value_op(p.op, el, groups, session.env) for el in values]

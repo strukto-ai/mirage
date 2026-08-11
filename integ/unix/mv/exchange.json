@@ -1,0 +1,181 @@
+{
+  "cases": [
+    {
+      "id": "mv_exchange_swaps",
+      "seq": 613050,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvx1 && printf 'ONE\\n' > /data/mvx1/a.txt && printf 'TWO\\n' > /data/mvx1/b.txt && mv --exchange /data/mvx1/a.txt /data/mvx1/b.txt && cat /data/mvx1/a.txt /data/mvx1/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "TWO\nONE\n",
+        "stderr": ""
+      },
+      "flags": [
+        "exchange"
+      ]
+    },
+    {
+      "id": "mv_exchange_verbose",
+      "seq": 613051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvx2 && printf '1\\n' > /data/mvx2/a.txt && printf '2\\n' > /data/mvx2/b.txt && mv -v --exchange /data/mvx2/a.txt /data/mvx2/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "exchanged '/data/mvx2/a.txt' <-> '/data/mvx2/b.txt'\n",
+        "stderr": ""
+      },
+      "flags": [
+        "exchange",
+        "v"
+      ]
+    },
+    {
+      "id": "mv_exchange_missing_side",
+      "seq": 613052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv --exchange /data/a.txt /data/mvx_nosuch.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot exchange '/data/a.txt' and '/data/mvx_nosuch.txt': No such file or directory\n"
+      },
+      "flags": [
+        "exchange"
+      ]
+    },
+    {
+      "id": "mv_exchange_backup_conflict",
+      "seq": 613053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv -b --exchange /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot combine --backup with --exchange, -n, or --update=none-fail\nTry 'mv --help' for more information.\n"
+      },
+      "flags": [
+        "exchange",
+        "b"
+      ]
+    },
+    {
+      "id": "mv_exchange_preserves_existing_holding_name",
+      "seq": 613083,
+      "command": "mkdir -p /data/mvx3 && printf 'A\\n' > /data/mvx3/a.txt && printf 'B\\n' > /data/mvx3/b.txt && printf 'PRECIOUS\\n' > /data/mvx3/b.txt.~xchg~ && mv --exchange /data/mvx3/a.txt /data/mvx3/b.txt && cat /data/mvx3/a.txt /data/mvx3/b.txt /data/mvx3/b.txt.~xchg~",
+      "expect": {
+        "exit": 0,
+        "stdout": "B\nA\nPRECIOUS\n",
+        "stderr": ""
+      },
+      "flags": [
+        "exchange"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
+    }
+  ]
+}

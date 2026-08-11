@@ -12,19 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { ExecutionNode } from '../../types.ts'
-import type { JsRuntime } from './interface.ts'
-import { QuickJsUnavailableError } from './types.ts'
+import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import type { LanguageRuntime } from '../../../runtime/language.ts'
+import { QuickJsUnavailableError } from '../../../runtime/js/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 export interface HandleJsDeps {
-  runtime: JsRuntime
+  runtime: LanguageRuntime
 }
 
 function readAllBytes(data: unknown): Promise<Uint8Array> {
@@ -52,6 +54,8 @@ export async function handleJs(
     env: Record<string, string>
     code: string | null
     module: boolean
+    signal?: AbortSignal
+    timeoutSeconds?: number
   },
   deps: HandleJsDeps,
 ): Promise<Result> {
@@ -95,13 +99,15 @@ export async function handleJs(
       env: opts.env,
       stdin: stdinBytes,
       flags: { module },
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
     })
-    return [
-      result.stdout.length > 0 ? result.stdout : null,
-      new IOResult({ exitCode: result.exitCode, stderr: result.stderr }),
-      new ExecutionNode({ command: cmdStr, exitCode: result.exitCode }),
-    ]
+    const [stdout, io] = runOutput(result)
+    return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode })]
   } catch (err) {
+    // An in-VM limit interrupt is a timeout, not an interpreter
+    // failure: let it reach the workspace's 124 handler.
+    if (err instanceof CommandTimeoutError) throw err
     if (err instanceof QuickJsUnavailableError) {
       return [
         null,

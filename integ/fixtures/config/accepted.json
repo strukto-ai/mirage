@@ -1,0 +1,95 @@
+{
+  "note": "Workspace configs both loaders must accept. The counterpart to rejected.json, and the reason it exists: TypeScript checks keys against hand-written tables that mirror Python's pydantic models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears here at least once, which turns that drift into a failing test. Values are only as real as validation demands — no resource is built and no script is read, both loaders stop at the shape.",
+  "cases": [
+    {
+      "name": "top level: every key",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "clis": { "sl": { "cli": "slack" } },
+        "runtimes": ["node"],
+        "policy": "policy.py",
+        "guards": [{ "reason": "no rm here", "commands": ["rm"], "paths": ["/d/*"] }],
+        "mode": "write",
+        "consistency": "lazy",
+        "default_session_id": "s1",
+        "default_agent_id": "a1",
+        "workspace_id": "w1",
+        "cache": { "type": "ram" },
+        "index": { "type": "ram" },
+        "store": { "type": "ram" }
+      }
+    },
+    {
+      "name": "mount block: every key",
+      "config": {
+        "mounts": {
+          "/d": {
+            "resource": "ram",
+            "mode": "read",
+            "config": { "root": "/tmp/x" },
+            "command_limits": { "cat": { "max_bytes": 1024, "on_exceed": "error" } },
+            "backend": "vfs",
+            "mountpoint": "/mnt/d"
+          }
+        }
+      }
+    },
+    {
+      "name": "cache and index: every ram key",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "cache": { "type": "ram", "limit": "1MB", "max_drain_bytes": 8 },
+        "index": { "type": "ram", "ttl": 5 }
+      }
+    },
+    {
+      "name": "cache and index: every redis key",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "cache": {
+          "type": "redis",
+          "limit": "1MB",
+          "max_drain_bytes": 8,
+          "url": "redis://localhost:6379/0",
+          "key_prefix": "mirage:cache:"
+        },
+        "index": {
+          "type": "redis",
+          "ttl": 5,
+          "url": "redis://localhost:6379/0",
+          "key_prefix": "mirage:index:"
+        }
+      }
+    },
+    {
+      "name": "store: every key, one backend per plane",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "store": {
+          "type": "redis",
+          "url": "redis://localhost:6379/0",
+          "key_prefix": "mirage:",
+          "root": "/tmp/state",
+          "namespace": { "type": "ram" },
+          "observer": { "type": "disk", "root": "/tmp/observer" },
+          "workspace": {
+            "type": "s3",
+            "bucket": "b",
+            "region": "us-east-1",
+            "endpoint_url": "http://localhost:9000",
+            "path_style": true,
+            "timeout": 5,
+            "key_prefix": "mirage/"
+          }
+        }
+      }
+    },
+    {
+      "name": "clis entry: the script form takes a runtime and a config",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "clis": { "tool": { "script": "tool.py", "runtime": "py", "config": { "token": "t" } } }
+      }
+    }
+  ]
+}

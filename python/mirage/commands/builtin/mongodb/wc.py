@@ -17,11 +17,11 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 format_stdin, parse_flags)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
-from mirage.commands.builtin.mongodb._provision import file_read_provision
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb._client import count_documents
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import MongoDBDocumentsScope, detect_scope
@@ -29,17 +29,14 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("wc",
-         resource="mongodb",
-         spec=SPECS["wc"],
-         provision=file_read_provision)
+@command("wc", resource="mongodb", spec=SPECS["wc"])
 async def wc(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

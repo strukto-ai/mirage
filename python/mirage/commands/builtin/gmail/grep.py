@@ -22,7 +22,7 @@ from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.gmail.read import read as gmail_read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.scope import detect_scope
@@ -39,7 +39,7 @@ async def grep_provision(
     paths: list[PathSpec],
     *texts: str,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor,
@@ -59,7 +59,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
@@ -72,7 +72,11 @@ async def grep(
 
     if paths and pattern is not None and "\n" not in pattern and not shaping:
         scope = detect_scope(paths[0])
-        if scope.use_native:
+        # Provider search matches whole words while grep matches
+        # substrings, and the native path returns search results verbatim
+        # as the output, so a bare literal would under-report. Only -w
+        # makes the two agree; otherwise fall through to the scan.
+        if scope.use_native and fl.as_bool("w"):
             file_prefix = mount_prefix_of(paths[0].virtual,
                                           paths[0].resource_path) or ""
             rows = await search_messages(

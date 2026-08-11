@@ -19,7 +19,10 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.zip_cmd import zip_cmd as generic_zip
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.builtin.generic_bind.archive_io import walk_of
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 
 
@@ -32,10 +35,14 @@ async def zip_cmd(
     r: bool = False,
     j: bool = False,
     q: bool = False,
+    y: bool = False,
+    x: list[str] | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    links: LinkView | None = None,
+    mounts: MountView | None = None,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor) or len(paths) < 2:
+    if not ops.is_mounted(accessor) or not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_zip(paths,
@@ -43,9 +50,15 @@ async def zip_cmd(
                                                  index),
                              write_bytes=partial(ops.require(Operation.WRITE),
                                                  accessor),
+                             stat=partial(ops.stat, accessor, index=index),
+                             walk=walk_of(ops, accessor, index),
                              r=r,
                              j=j,
-                             q=q)
+                             q=q,
+                             y=y,
+                             x=x,
+                             links=links,
+                             mounts=mounts)
 
 
 BUILDER = Builder('zip',

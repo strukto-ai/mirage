@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -67,10 +69,11 @@ export async function pasteGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const delimiterValue = opts.flags.d ?? opts.flags.delimiters
+  const fl = new FlagView(opts.flags, specOf('paste'))
+  const delimiterValue = fl.asStr('delimiters')
   const delimiters = decodeDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\t')
-  const serial = opts.flags.s === true || opts.flags.serial === true
-  const zeroTerminated = opts.flags.z === true || opts.flags.zero_terminated === true
+  const serial = fl.asBool('serial')
+  const zeroTerminated = fl.asBool('zero_terminated')
   const fileLines: string[][] = []
   let stdinConsumed = false
   for (const p of paths) {

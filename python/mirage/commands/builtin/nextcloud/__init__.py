@@ -12,26 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import make_generic_commands
-from mirage.commands.builtin.nextcloud._provision import \
-    file_read_provision as _ft_provision
-from mirage.commands.builtin.nextcloud.du import du
 from mirage.commands.builtin.nextcloud.io import IO as _IO
-from mirage.core.nextcloud.read import read_bytes as _read
-
-# du keeps a wrapper because Nextcloud's du_all
-# returns a flat list (du_multi contract) rather than the generic (list,
-# total) tuple, matching the s3 override.
-_NEXTCLOUD_OVERRIDES = {"du"}
 
 COMMANDS = [
-    *make_filetype_commands(
-        "nextcloud", _IO.resolve_glob, _read, provision=_ft_provision),
-    *make_generic_commands(
-        "nextcloud",
-        _IO,
-        overrides=_NEXTCLOUD_OVERRIDES,
-    ),
-    du,
+    *make_generic_commands("nextcloud", _IO),
 ]

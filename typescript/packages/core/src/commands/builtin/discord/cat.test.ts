@@ -26,7 +26,7 @@ const DEC = new TextDecoder()
 
 async function runCat(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<string> {
   const cmd = DISCORD_CAT[0]
@@ -109,7 +109,7 @@ describe('discord cat', () => {
           ),
         }),
       ],
-      { n: true },
+      { number: true },
       { index: idx, transport },
     )
     expect(out.startsWith('     1\t')).toBe(true)

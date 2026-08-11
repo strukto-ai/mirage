@@ -51,6 +51,21 @@ class BaseResource:
     # at load. See docs/home/snapshot.mdx for the contract.
     SUPPORTS_SNAPSHOT: bool = False
 
+    # Whether stat() can size every regular file without fetching its
+    # content, i.e. FileStat.size is None only for directories. True for
+    # byte stores that keep a length in their metadata (ram, disk, redis,
+    # s3, gridfs); False for resources that render content on read, where
+    # the size is unknowable until the bytes exist (slack, gmail, notion,
+    # postgres rows.jsonl, dify documents).
+    #
+    # The FUSE path does not need this: direct_io + attr_timeout=0 +
+    # hydrate-on-open make size-unknown files read correctly anyway. FSKit
+    # has no direct_io equivalent, so a mount there is driven entirely by
+    # the reported size and a False resource would serve silent empty
+    # files. mount-time checks refuse rather than let that happen; see
+    # docs/python/setup/fuse.mdx.
+    SIZES_ALWAYS_KNOWN: bool = False
+
     def __init__(
         self,
         index: IndexConfig | None = None,
@@ -62,6 +77,35 @@ class BaseResource:
         self._ops_list: list[RegisteredOp] = []
         self._index: IndexCacheStore
         self.set_index(index)
+
+    @classmethod
+    async def build(cls, *args: Any, **kwargs: Any) -> "BaseResource":
+        """Construct a resource, awaiting any setup it needs first.
+
+        The default just calls the constructor: most backends open
+        nothing at build time, so there is nothing to await. A backend
+        whose setup needs I/O overrides this and keeps ``__init__``
+        free of network calls — a constructor cannot await, so doing
+        the I/O there means doing it with a blocking client, which
+        stalls whatever event loop the caller runs on.
+
+        Mirrors the TypeScript ``ResourceFactory``
+        (``node/src/resource/registry.ts``), which is uniformly
+        ``(config) => Promise<Resource>`` for the same reason. Named
+        ``build`` rather than TypeScript's ``create`` because ``create``
+        is already an op name (make an empty file, what ``touch``
+        calls): ops are served by ``__getattr__``, which only runs when
+        normal lookup fails, so a real ``create`` on the class would
+        shadow every backend's create op.
+
+        Args:
+            *args (Any): forwarded to the constructor.
+            **kwargs (Any): forwarded to the constructor.
+
+        Returns:
+            BaseResource: a fresh instance, ready to mount.
+        """
+        return cls(*args, **kwargs)
 
     def set_index(self, config: IndexConfig | None = None) -> None:
         cfg = (config if config is not None else IndexConfig(
@@ -87,6 +131,21 @@ class BaseResource:
                            paths: list[str | PathSpec],
                            prefix: str = "") -> list[PathSpec]:
         raise NotImplementedError
+
+    def storage_id(self) -> str:
+        """Identity of the storage this resource reads and writes.
+
+        Two mounts whose resources return the same value address the same
+        bytes, so a move between them must refuse rather than copy the
+        object over itself and then unlink the source. The default treats
+        every instance as its own storage, which is the safe direction to
+        be wrong in: a false "different" only keeps the pre-existing
+        behavior, while a false "same" would refuse a legitimate move.
+        Backends whose config pins the storage (a disk root, a bucket and
+        key prefix) override this so two separately constructed instances
+        pointing at one target still compare equal.
+        """
+        return f"{self.name}:{id(self):x}"
 
     async def statfs(self) -> CapacityResult:
         """Capacity of this backend for df. Default: UNKNOWN (rendered as

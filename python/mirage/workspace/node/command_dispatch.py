@@ -15,22 +15,26 @@
 import asyncio
 from typing import Any
 
-from mirage.commands.builtin.utils.safeguard import run_with_timeout
-from mirage.commands.safeguard import resolve_safeguard
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.runtime.route import RoutingDecision
+from mirage.policy import CommandContext, resolve_limit
+from mirage.runtime.policy import PolicyDecision
+from mirage.shell.bytes import encode_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command
-from mirage.types import PathSpec, word_text
+from mirage.types import PathSpec, Producer, word_text
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
+from mirage.workspace.executor.command.routing import (path_flag_scopes,
+                                                       positional_scopes)
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.route import NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS
+from mirage.workspace.route import (NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
+                                    dereferences, reports_link)
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -44,8 +48,8 @@ from mirage.workspace.executor.builtins import (  # isort: skip
     handle_ln, handle_local, handle_man, handle_printenv, handle_printf,
     handle_read, handle_readlink, handle_return, handle_set, handle_shift,
     handle_sleep, handle_source, handle_test, handle_timeout, handle_touch,
-    handle_trap, handle_type, handle_unset, handle_whoami, handle_xargs,
-    link_flags, prepare_mv, strip_link_operands)
+    handle_trap, handle_type, handle_unset, handle_which, handle_whoami,
+    handle_xargs, link_flags, prepare_mv, strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -113,7 +117,7 @@ async def execute_command(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Dispatch a command node by name."""
     name = get_command_name(node)
@@ -183,7 +187,7 @@ async def _dispatch_command_body(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     parent = node.parent
     if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
@@ -192,7 +196,7 @@ async def _dispatch_command_body(
                 for sc in child.named_children:
                     content = await expand_node(sc, session, execute_fn,
                                                 call_stack)
-                    stdin = content.encode() + b"\n"
+                    stdin = encode_text(content) + b"\n"
                     break
 
     # Process substitution: <(cmd) feeds inner stdout as stdin.
@@ -222,9 +226,9 @@ async def _dispatch_command_body(
 
     argv = await expand_argv(parts, session, execute_fn, call_stack, registry)
 
-    # Safeguards resolve against the expanded name, so `$CMD`-style
+    # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
-    resolved = resolve_safeguard(argv.name) if argv.name else None
+    resolved = resolve_limit(argv.name) if argv.name else None
     timeout = (resolved.timeout_seconds if resolved is not None else None)
     body = _run_argv(recurse, dispatch, registry, namespace, execute_fn, argv,
                      session, stdin, call_stack, job_table, cancel,
@@ -234,6 +238,11 @@ async def _dispatch_command_body(
     xtrace = bool(session.shell_options.get("xtrace"))
     stdout, io, exec_node = await run_with_timeout(body, timeout, argv.name
                                                    or "?")
+    if io.producer is None and argv.name:
+        # Builtins and other non-mount routes return no rider; stamp the
+        # expanded name here so post_execute policies keyed on a command
+        # (echo, printf, ...) still see it.
+        io.producer = Producer(command=argv.name)
     if proc_sub_stderr:
         io.stderr = b"".join(proc_sub_stderr) + await materialize(io.stderr)
         exec_node.stderr = io.stderr
@@ -255,12 +264,40 @@ async def _run_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RoutingDecision | None = None,
+    routing_decision: PolicyDecision | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler."""
     name = argv.name
     args = list(argv.args)
     operands = list(argv.operands)
+
+    # ── admission policies ──────────────────────
+    # The one chokepoint every command class passes through: shell
+    # builtins, namespace-routed commands (touch/chmod/ln -s), job
+    # builtins, shell functions, and mount commands all route below, so
+    # the hook must fire here, not in handle_command. Paths are the
+    # operands as typed plus path-valued flags (shuf -o DEST); refusals
+    # win over flag parsing, routing, and runtime placement.
+    if name:
+        scopes = [p for p in operands if isinstance(p, PathSpec)]
+        scopes.extend(path_flag_scopes(name, args, session.cwd))
+        deny = await registry.policies.pre_command(
+            CommandContext(command=name,
+                           paths=tuple(scopes),
+                           operands=tuple(
+                               positional_scopes(name, args, session.cwd,
+                                                 operands)),
+                           argv=tuple(args),
+                           cwd=session.cwd,
+                           registry=registry))
+        if deny is not None:
+            err = deny.message.encode()
+            cmd_str = " ".join([name, *args])
+            return None, IOResult(exit_code=deny.exit_code,
+                                  stderr=err), ExecutionNode(
+                                      command=cmd_str,
+                                      exit_code=deny.exit_code,
+                                      stderr=err)
 
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.
@@ -355,13 +392,15 @@ async def _run_argv(
 
     if name in (SB.SOURCE, SB.DOT):
         path = operands[0] if operands else ""
-        return await handle_source(dispatch, execute_fn, path, session)
+        return await handle_source(dispatch, execute_fn, path, session,
+                                   [word_text(o) for o in operands[1:]])
 
     if name == SB.EVAL:
         return await handle_eval(execute_fn, args, session)
 
     if name in (SB.BASH, SB.SH):
-        return await handle_bash(execute_fn, args, session, stdin)
+        return await handle_bash(dispatch, execute_fn, args, session, stdin,
+                                 str(name))
 
     if name == SB.EXPORT:
         return await handle_export(args, session)
@@ -422,7 +461,7 @@ async def _run_argv(
         return await handle_echo(args)
 
     if name == SB.PRINTF:
-        return await handle_printf(args)
+        return await handle_printf(args, session)
 
     if name == SB.SLEEP:
         return await handle_sleep(args, cancel=cancel)
@@ -439,6 +478,9 @@ async def _run_argv(
 
     if name == SB.TYPE:
         return handle_type(args, session, registry)
+
+    if name == SB.WHICH:
+        return handle_which(args, session, registry)
 
     if name == SB.XARGS:
         return await handle_xargs(execute_fn, args, session, stdin)
@@ -458,7 +500,7 @@ async def _run_argv(
         return await handle_ln(namespace, session, operands)
 
     if name == "readlink":
-        return handle_readlink(namespace, session, operands)
+        return await handle_readlink(namespace, dispatch, session, operands)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with
     #    overlay fallback; they run their own link follow) ──
@@ -504,7 +546,9 @@ async def _run_argv(
                     namespace, dispatch, operands)
                 if early is not None:
                     return early
-            elif name not in NO_FOLLOW_COMMANDS:
+            elif not reports_link(
+                    name, argv.words) and (name not in NO_FOLLOW_COMMANDS
+                                           or dereferences(name, argv.words)):
                 operands = follow_paths(namespace, operands)
         except CycleError as exc:
             err = (f"{name}: {exc}: "

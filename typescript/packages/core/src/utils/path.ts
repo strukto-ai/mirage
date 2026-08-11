@@ -70,16 +70,34 @@ export function expandTilde(word: string, home: string | null): string {
 // Rewrite the base of walked output paths (find/grep -r results) to the
 // as-typed form (`PathSpec.rawPath`); `raw` equal to `virtual` leaves the
 // paths unchanged (the absolute-argument case).
-export function rebaseRaw(paths: string[], virtual: string, raw: string): string[] {
+export function respellRaw(paths: string[], virtual: string, raw: string): string[] {
   if (raw === virtual) return paths
-  return paths.map((p) => rebaseOne(p, virtual, raw))
+  return paths.map((p) => respellOne(p, virtual, raw))
 }
 
-export function rebaseOne(path: string, virtual: string, raw: string): string {
+// The prefix of `path` with `count` trailing segments removed. The ancestor
+// counterpart of respellOne: it names a path above another one while keeping the
+// original spelling, so a relative argument stays relative. `count` is clamped
+// so the result never loses every segment, which would leave an empty string
+// where a path belongs. Mirrors Python's drop_trailing_segments.
+export function dropTrailingSegments(path: string, count: number): string {
+  if (count <= 0) return path
+  const parts = rstripSlash(path).split('/')
+  if (count >= parts.filter((part) => part !== '').length) return path
+  const joined = parts.slice(0, parts.length - count).join('/')
+  return joined === '' ? '/' : joined
+}
+
+export function respellOne(path: string, virtual: string, raw: string): string {
   if (raw === virtual) return path
   const base = rstripSlash(virtual)
-  if (path === base) return raw
-  if (path.startsWith(base + '/')) return rstripSlash(raw) + path.slice(base.length)
+  if (path === base || (base === '' && path === '/')) return raw === '' ? '.' : raw
+  if (path.startsWith(base + '/')) {
+    // The empty raw is the synthetic no-operand spelling (GNU grep -r
+    // with no path): results render as bare names relative to the base.
+    if (raw === '') return path.slice(base.length + 1)
+    return rstripSlash(raw) + path.slice(base.length)
+  }
   return path
 }
 
@@ -87,6 +105,18 @@ export function parent(path: string): string {
   const i = path.lastIndexOf('/')
   if (i <= 0) return '/'
   return path.slice(0, i)
+}
+
+// The proper ancestors of a normalized key, outermost first: "/a/b/c" ->
+// ["/a", "/a/b"]; "/a" and "/" -> []. "/" is left out because every store
+// treats the mount root as an existing directory, so it is never a component
+// worth probing. Used by the store-backed backends (ram, redis) to walk a
+// destination's parent chain the way rename(2) resolves it.
+export function ancestors(path: string): string[] {
+  const parts = stripSlash(path).split('/')
+  const out: string[] = []
+  for (let i = 1; i < parts.length; i++) out.push(`/${parts.slice(0, i).join('/')}`)
+  return out
 }
 
 export const MAX_SYMLINK_HOPS = 40

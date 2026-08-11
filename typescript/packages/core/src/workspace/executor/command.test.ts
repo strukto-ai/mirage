@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { command } from '../../commands/config.ts'
-import { CommandSpec, Operand, OperandKind, Option } from '../../commands/spec/types.ts'
+import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { JobTable } from '../../shell/job_table.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -65,7 +65,7 @@ describe('handleCommand — command not found', () => {
 })
 
 describe('handleCommand — dispatches to mount that has the command', () => {
-  const BASIC_SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) })
+  const BASIC_SPEC = new CommandSpec({ rest: new Operand({ type: 'path' }) })
 
   it('routes to a mount whose resource registered the command', async () => {
     const ram = new StubResource('ram')
@@ -99,10 +99,10 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     const mount = reg.mountFor('/ram')
     if (mount === null) throw new Error('mount missing')
     const spec = new CommandSpec({
-      options: [new Option({ short: '-n', valueKind: OperandKind.TEXT })],
-      rest: new Operand({ kind: OperandKind.PATH }),
+      options: [new Option({ short: '-n', type: 'str' })],
+      rest: new Operand({ type: 'path' }),
     })
-    let seenFlags: Record<string, string | boolean | string[]> = {}
+    let seenFlags: Record<string, string | boolean | number | string[]> = {}
     const [cmd] = command({
       name: 'head',
       resource: 'ram',
@@ -137,7 +137,7 @@ describe('handleCommand — cross-mount', () => {
     const [cmd] = command({
       name: 'mycmd',
       resource: 'ram',
-      spec: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
+      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
       fn: () => [null, new IOResult()],
     })
     if (cmd === undefined) throw new Error('cmd missing')

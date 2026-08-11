@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.utils.escapes import interpret_escapes
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandName, FlagView
+from mirage.commands.spec.types import CommandName, FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -18,14 +18,13 @@ class TrFlags:
     truncate_set1: bool = False
 
 
-def parse_flags(flags: Mapping[str, object]) -> TrFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> TrFlags:
     fl = FlagView(flags, spec=SPECS["tr"])
     return TrFlags(
-        delete=fl.as_bool("d") or fl.as_bool("delete"),
-        squeeze=fl.as_bool("s") or fl.as_bool("squeeze_repeats"),
-        complement=(fl.as_bool("c") or fl.as_bool("C")
-                    or fl.as_bool("complement")),
-        truncate_set1=fl.as_bool("t") or fl.as_bool("truncate_set1"),
+        delete=fl.as_bool("delete"),
+        squeeze=fl.as_bool("squeeze_repeats"),
+        complement=fl.as_bool("C") or fl.as_bool("complement"),
+        truncate_set1=fl.as_bool("truncate_set1"),
     )
 
 
@@ -81,7 +80,7 @@ async def tr(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(texts) > 2:
         raise extra_operand_error(CommandName.TR, texts[2])

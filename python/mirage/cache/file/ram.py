@@ -140,6 +140,11 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
             self._cache_size = 0
             self._clear_locks()
 
+    async def evict_prefix(self, prefix: str) -> None:
+        # Snapshot first: remove() mutates _entries as it goes.
+        for key in [k for k in self._entries if k.startswith(prefix)]:
+            await self.remove(key)
+
     def evict_paths(self, paths: Iterable[str]) -> None:
         for key in paths:
             entry = self._entries.pop(key, None)

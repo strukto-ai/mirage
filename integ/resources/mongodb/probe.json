@@ -1,0 +1,112 @@
+{
+  "cases": [
+    {
+      "id": "mdb_cat_missing",
+      "seq": 620090,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /mongodb/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "mdb_write_rejected",
+      "seq": 620091,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "echo hi > /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/mongodb/mirage_integ/collections/books/documents.jsonl: Operation not supported\n"
+      }
+    },
+    {
+      "id": "mdb_sed_stream_1p",
+      "seq": 620092,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "sed -n 1p /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"_id\": 1, \"title\": \"alpha\", \"author\": \"ada\", \"year\": 2020, \"tags\": [\"fiction\", \"classic\"], \"rating\": 4.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_sed_i_readonly",
+      "seq": 620093,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "sed -i s/x/y/ /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: -i not supported on this backend: Permission denied\n"
+      }
+    },
+    {
+      "id": "mdb_prov_cat",
+      "seq": 620094,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_prov_grep",
+      "seq": 620095,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "grep x /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_prov_ls",
+      "seq": 620096,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls /mongodb/mirage_integ/collections/books",
+      "provision": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_prov_rg",
+      "seq": 620097,
+      "targets": [
+        "mongodb"
+      ],
+      "provision": true,
+      "command": "rg x /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

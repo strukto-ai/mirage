@@ -36,10 +36,38 @@ describe('core/disk/copy', () => {
     await copy(accessor, spec('/src'), spec('/dst'))
     expect(await readFile(join(root, 'dst'), 'utf-8')).toBe('CP')
   })
-  it('creates parent directories for the destination', async () => {
+  it('does not create parent directories for the destination', async () => {
+    // cp is not `mkdir -p`: GNU reports ENOENT on the destination.
     await writeFile(join(root, 'src'), 'X')
-    await copy(accessor, spec('/src'), spec('/a/b/dst'))
-    expect(await readFile(join(root, 'a/b/dst'), 'utf-8')).toBe('X')
+    await expect(copy(accessor, spec('/src'), spec('/a/b/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      // copyFile answers ENOENT for a missing source too, so the failure has
+      // to be attributed to the destination rather than assumed to be src.
+      virtualPath: '/a/b/dst',
+    })
+  })
+
+  it('blames the source when it is the missing operand', async () => {
+    await expect(copy(accessor, spec('/nope'), spec('/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/nope',
+    })
+  })
+
+  it('never leaks the host path for either operand', async () => {
+    await writeFile(join(root, 'src'), 'X')
+    const cases: { src: string; dst: string }[] = [
+      { src: '/src', dst: '/a/b/dst' },
+      { src: '/nope', dst: '/dst' },
+    ]
+    for (const { src, dst } of cases) {
+      try {
+        await copy(accessor, spec(src), spec(dst))
+        expect.unreachable()
+      } catch (err) {
+        expect((err as Error).message).not.toContain(root)
+      }
+    }
   })
   it('throws on missing source', async () => {
     await expect(copy(accessor, spec('/missing'), spec('/x'))).rejects.toMatchObject({

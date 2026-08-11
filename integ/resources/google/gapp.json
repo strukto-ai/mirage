@@ -105,7 +105,7 @@
         "gapps"
       ],
       "clear_cache": true,
-      "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets +read --spreadsheet $S --range 'Sheet1!A1:B2'",
+      "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets read --spreadsheet $S --range 'Sheet1!A1:B2'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A1:B2\",\"majorDimension\":\"ROWS\",\"values\":[[\"region\",\"revenue\"],[\"emea\",\"120\"]]}",
@@ -119,7 +119,7 @@
         "gapps"
       ],
       "clear_cache": true,
-      "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets +append --spreadsheet $S --range Sheet1 --values 'apac,90' > /dev/null && gws sheets +read --spreadsheet $S --range 'Sheet1!A3:B3'",
+      "command": "S=$(cat /sheets/owned/*.gsheet.json | jq -r .spreadsheetId) && gws sheets append --spreadsheet $S --range Sheet1 --values 'apac,90' > /dev/null && gws sheets read --spreadsheet $S --range 'Sheet1!A3:B3'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A3:B3\",\"majorDimension\":\"ROWS\",\"values\":[[\"apac\",\"90\"]]}",
@@ -272,6 +272,58 @@
         "exit": 1,
         "stdout": "",
         "stderr": "cp: cannot create regular file '/docs/owned/in2.txt': Operation not supported\n"
+      }
+    },
+    {
+      "id": "gapp_sheets_cells",
+      "seq": 520020,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '[.sheets[0].data[0].rowData[].values[].formattedValue]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"region\",\"revenue\",\"flag\",\"code\",\"exp\",\"emea\",\"120\",\"TRUE\",\"0x10\",\"1.00E+03\",\"apac\",\"90\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_cell_value_is_typed",
+      "seq": 520021,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '.sheets[0].data[0].rowData[1].values[1].effectiveValue'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"numberValue\":120}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_row_is_a_grid_row",
+      "seq": 520022,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '[.sheets[0].data[0].rowData[] | [.values[].formattedValue]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"region\",\"revenue\",\"flag\",\"code\",\"exp\"],[\"emea\",\"120\",\"TRUE\",\"0x10\",\"1.00E+03\"],[\"apac\",\"90\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gapp_sheets_cell_types_follow_user_entered",
+      "seq": 520023,
+      "targets": [
+        "gapps"
+      ],
+      "command": "cat /sheets/owned/*.gsheet.json | jq -c '[.sheets[0].data[0].rowData[1].values[] | (.userEnteredValue | keys[0])]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"stringValue\",\"numberValue\",\"boolValue\",\"stringValue\",\"numberValue\"]\n",
+        "stderr": ""
       }
     }
   ]

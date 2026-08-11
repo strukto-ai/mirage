@@ -129,7 +129,7 @@ async function runCmd(
   name: string,
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   index: IndexCacheStore,
 ): Promise<void> {
   const cmd = cmdOf(name)

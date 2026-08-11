@@ -1306,6 +1306,106 @@
         "stdout": "yes\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_stdin_missing_source",
+      "seq": 501137,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat < NOPE",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "NOPE: No such file or directory\n"
+      }
+    },
+    {
+      "id": "redirect_stdin_missing_keeps_line",
+      "seq": 501138,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo hi < NOPE; echo next",
+      "expect": {
+        "exit": 0,
+        "stdout": "next\n",
+        "stderr": "NOPE: No such file or directory\n"
+      }
+    },
+    {
+      "id": "redirect_write_target_unwritable",
+      "seq": 501139,
+      "targets": [
+        "ram",
+        "redis"
+      ],
+      "command": "echo x > NOPEDIR/f; echo next",
+      "expect": {
+        "exit": 0,
+        "stdout": "next\n",
+        "stderr": "NOPEDIR/f: No such file or directory\n"
+      }
+    },
+    {
+      "id": "redirect_write_stops_at_first_failure",
+      "seq": 501141,
+      "targets": [
+        "ram",
+        "redis"
+      ],
+      "command": "echo x > NOPEDIR/f > STOPPED; test -e STOPPED || echo skipped",
+      "expect": {
+        "exit": 0,
+        "stdout": "skipped\n",
+        "stderr": "NOPEDIR/f: No such file or directory\n"
+      }
+    },
+    {
+      "id": "redirect_write_keeps_earlier_target",
+      "seq": 501142,
+      "targets": [
+        "ram",
+        "redis"
+      ],
+      "command": "echo y > KEPT > NOPEDIR/g; test -e KEPT && wc -c < KEPT",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": "NOPEDIR/g: No such file or directory\n"
+      }
     }
   ]
 }

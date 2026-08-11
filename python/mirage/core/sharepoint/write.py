@@ -24,10 +24,13 @@ async def write_bytes(accessor: SharePointAccessor, path: PathSpec,
     item_p = resolved.item_path
     start_ms = int(time.monotonic() * 1000)
     if len(data) <= SIMPLE_UPLOAD_MAX:
-        url = item_url(drive_id, item_p, action="/content")
+        url = item_url(config, drive_id, item_p, action="/content")
         await graph_put_bytes(config, url, data)
     else:
-        session_url = item_url(drive_id, item_p, action="/createUploadSession")
+        session_url = item_url(config,
+                               drive_id,
+                               item_p,
+                               action="/createUploadSession")
         await upload_session_write(config, session_url, data)
     record("write", stripped, "sharepoint", len(data), start_ms)
     await invalidate_after_write(path)

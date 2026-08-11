@@ -1,9 +1,12 @@
-import type { CommandIO } from '@struktoai/mirage-core'
+import { type CommandIO, rangeOf } from '@struktoai/mirage-core'
 import type { NextcloudAccessor } from '../../../accessor/nextcloud.ts'
 import { SCOPE_ERROR } from '../../../core/nextcloud/constants.ts'
 import { copy } from '../../../core/nextcloud/copy.ts'
 import { create } from '../../../core/nextcloud/create.ts'
-import { du, duAll } from '../../../core/nextcloud/du.ts'
+import {
+  size as nextcloudDuSize,
+  entries as nextcloudDuEntries,
+} from '../../../core/nextcloud/du/index.ts'
 import { exists } from '../../../core/nextcloud/exists.ts'
 import { find } from '../../../core/nextcloud/find.ts'
 import { mkdir } from '../../../core/nextcloud/mkdir.ts'
@@ -22,6 +25,7 @@ export const NEXTCLOUD_IO: CommandIO<NextcloudAccessor> = {
   maxGlobMatches: SCOPE_ERROR,
   readdir,
   readBytes: read,
+  readRange: rangeOf(read),
   readStream: stream,
   stat,
   isMounted: () => true,
@@ -37,6 +41,5 @@ export const NEXTCLOUD_IO: CommandIO<NextcloudAccessor> = {
   create,
   truncate,
   find,
-  duTotal: du,
-  duAll,
+  du: { size: nextcloudDuSize, entries: nextcloudDuEntries },
 }

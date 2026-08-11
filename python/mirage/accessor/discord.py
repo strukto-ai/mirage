@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 
 
 class DiscordAccessor(Accessor):

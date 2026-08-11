@@ -23,9 +23,11 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
+from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -78,6 +80,7 @@ async def _execute_body(
             raise ContinueSignal(stdout=combined,
                                  io=merged_io,
                                  levels=sig.levels)
+        stdout = await finish_statement(stdout, io, session)
         all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)
         if (io.exit_code != 0 and session.shell_options.get("errexit")
@@ -274,6 +277,97 @@ async def _condition_loop(
     return _collect_loop_result(all_stdout, merged_io, label)
 
 
+async def handle_cfor(
+    execute_node: Callable[..., Any],
+    exprs: list[tree_sitter.Node | None],
+    body: list[tree_sitter.Node],
+    eval_expr: Callable[..., Any],
+    session: Session,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run bash's C-style for: ((init; cond; update)) around a body.
+
+    Args:
+        execute_node (Callable): recursive node executor.
+        exprs (list[tree_sitter.Node | None]): init, condition and
+            update expression slots; any may be None (`for ((;;))`).
+        body (list[tree_sitter.Node]): do_group statements.
+        eval_expr (Callable): async evaluator taking (expr, default)
+            and returning the expression's integer value, or the
+            default when the slot is empty; raises ArithError with the
+            offending expression text on an invalid expression, or
+            ReadonlyError when it assigns to a readonly variable.
+        session (Session): shell session.
+        stdin (ByteSource | None): input stream, line-buffered across
+            iterations like for/while.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    merged_io = IOResult()
+    all_stdout: list[ByteSource | None] = []
+    prev_buffer = session._stdin_buffer
+    if stdin is not None:
+        session._stdin_buffer = _line_buffer(stdin)
+        stdin = None
+    try:
+        hit_limit = True
+        try:
+            await eval_expr(exprs[0], 0)
+            for _ in range(_MAX_WHILE):
+                if await eval_expr(exprs[1], 1) == 0:
+                    hit_limit = False
+                    break
+                try:
+                    stdout, io, _ = await _execute_body(
+                        execute_node, body, session, stdin, call_stack)
+                except BreakSignal as sig:
+                    hit_limit = False
+                    if sig.stdout is not None:
+                        all_stdout.append(sig.stdout)
+                    merged_io = await merged_io.merge(sig.io)
+                    if sig.levels > 1:
+                        raise BreakSignal(stdout=_chain_streams(all_stdout),
+                                          io=merged_io,
+                                          levels=sig.levels - 1)
+                    break
+                except ContinueSignal as sig:
+                    if sig.stdout is not None:
+                        all_stdout.append(sig.stdout)
+                    merged_io = await merged_io.merge(sig.io)
+                    if sig.levels > 1:
+                        raise ContinueSignal(stdout=_chain_streams(all_stdout),
+                                             io=merged_io,
+                                             levels=sig.levels - 1)
+                    # bash runs the update expression after `continue`.
+                    await eval_expr(exprs[2], 0)
+                    continue
+                merged_io = await merged_io.merge(io)
+                all_stdout.append(stdout)
+                await eval_expr(exprs[2], 0)
+        except (ArithError, ReadonlyError) as exc:
+            # bash: the loop aborts with status 1, keeping the output
+            # of iterations that already ran.
+            if isinstance(exc, ReadonlyError):
+                err = f"bash: {exc}\n".encode()
+            else:
+                err = f"bash: ((: {exc}\n".encode()
+            merged_io = await merged_io.merge(IOResult(exit_code=1,
+                                                       stderr=err))
+            merged_io.exit_code = 1
+            return _collect_loop_result(all_stdout, merged_io, "for")
+        if hit_limit:
+            warn = (f"warning: for loop terminated after "
+                    f"{_MAX_WHILE} iterations\n").encode()
+            existing = merged_io.stderr
+            if isinstance(existing, bytes) and existing:
+                merged_io.stderr = existing + warn
+            else:
+                merged_io.stderr = warn
+    finally:
+        session._stdin_buffer = prev_buffer
+    return _collect_loop_result(all_stdout, merged_io, "for")
+
+
 async def handle_while(
     execute_node: Callable[..., Any],
     condition: tree_sitter.Node,
@@ -313,28 +407,42 @@ async def handle_until(
 async def handle_case(
     execute_node: Callable[..., Any],
     word: str,
-    items: list[tuple[list[str], list[tree_sitter.Node]]],
+    items: list[tuple[list[str], list[tree_sitter.Node], str]],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    for patterns, body in items:
-        if any(fnmatch(word, p.strip()) for p in patterns):
-            all_stdout: list[ByteSource] = []
-            merged_io = IOResult()
-            last_exec = ExecutionNode(command="case", exit_code=0)
-            for stmt in body:
-                stdout, io, last_exec = await execute_node(
-                    stmt, session, stdin, call_stack)
-                stdin = None
-                if stdout is not None:
-                    all_stdout.append(stdout)
-                merged_io = await merged_io.merge(io)
-            if len(all_stdout) == 1:
-                return all_stdout[0], merged_io, last_exec
-            combined = async_chain(*all_stdout) if all_stdout else None
-            return combined, merged_io, last_exec
-    return None, IOResult(), ExecutionNode(command="case", exit_code=0)
+    all_stdout: list[ByteSource] = []
+    merged_io = IOResult()
+    last_exec = ExecutionNode(command="case", exit_code=0)
+    ran = False
+    fallthrough = False
+    for patterns, body, terminator in items:
+        if not (fallthrough or any(fnmatch(word, p) for p in patterns)):
+            continue
+        ran = True
+        for stmt in body:
+            stdout, io, last_exec = await execute_node(stmt, session, stdin,
+                                                       call_stack)
+            stdin = None
+            stdout = await finish_statement(stdout, io, session)
+            if stdout is not None:
+                all_stdout.append(stdout)
+            merged_io = await merged_io.merge(io)
+        if terminator == ";&":
+            # Fall through: run the next arm's body without testing it.
+            fallthrough = True
+            continue
+        # ;;& keeps testing remaining patterns; ;; stops here.
+        fallthrough = False
+        if terminator != ";;&":
+            break
+    if not ran:
+        return None, IOResult(), ExecutionNode(command="case", exit_code=0)
+    if len(all_stdout) == 1:
+        return all_stdout[0], merged_io, last_exec
+    combined = async_chain(*all_stdout) if all_stdout else None
+    return combined, merged_io, last_exec
 
 
 async def handle_select(

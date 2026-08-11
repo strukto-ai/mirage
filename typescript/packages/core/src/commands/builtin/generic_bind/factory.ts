@@ -16,10 +16,10 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { FileStat, type PathSpec } from '../../../types.ts'
+import { type PathSpec } from '../../../types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { type CommandIO, type StatOp, resolveGlobOf } from './adapter.ts'
+import { type CommandIO, type StatOp, resolveGlobOf, supports } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { defaultProvision } from './provision.ts'
 
@@ -31,15 +31,7 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
     if (manager === null) return result
     const cached = await manager.cachedBytes(path)
     if (cached === null) return result
-    return new FileStat({
-      name: result.name,
-      size: cached.length,
-      modified: result.modified,
-      fingerprint: result.fingerprint,
-      revision: result.revision,
-      type: result.type,
-      extra: result.extra,
-    })
+    return result.with({ size: cached.length })
   }
 }
 
@@ -59,6 +51,9 @@ function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
   overrides?: ReadonlySet<string>
   provisionOverrides?: Record<string, ProvisionFn<A>>
+  // Per-command adapters that replace the shared adapter when one command
+  // needs a cheaper backend operation (mirrors the Python ops_overrides).
+  opsOverrides?: Record<string, CommandIO<A>>
 }
 
 export function makeGenericCommands<A extends Accessor = Accessor>(
@@ -68,25 +63,26 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
 ): RegisteredCommand[] {
   const skip = options.overrides ?? new Set<string>()
   const provOver = options.provisionOverrides ?? {}
-  const opsBase = ops as CommandIO
+  const opsOver = options.opsOverrides ?? {}
   const commands: RegisteredCommand[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
-    // A read-only backend (no write op) can't run byte-mutation commands
-    // (cp/mv/tee/gunzip/...), so don't register a command that would crash
-    // when invoked.
-    if (b.write === true && ops.write === undefined) continue
+    const baseOps = (opsOver[b.name] ?? ops) as CommandIO
+    // A backend missing an op a command cannot run without (cp/mv/tee/
+    // gunzip/...) doesn't get the command registered, rather than getting
+    // one that crashes when invoked.
+    if (!supports(baseOps, b.requirements ?? [])) continue
     const cmdOps =
-      b.read === true ? withReadCache(opsBase) : b.write === true ? opsBase : withStatCache(opsBase)
+      b.read === true ? withReadCache(baseOps) : b.write === true ? baseOps : withStatCache(baseOps)
     const fn: CommandFn = (accessor, paths, texts, opts) =>
       b.fn(cmdOps, accessor, paths, texts, opts)
     const provision =
       b.name in provOver
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)
         : b.provision !== undefined
-          ? b.provision(opsBase.stat)
-          : defaultProvision(b.name, opsBase.stat, resolveGlobOf(opsBase), opsBase.readdir)
-    const aggregate = ops.local !== false ? (b.aggregate ?? null) : null
+          ? b.provision(baseOps.stat)
+          : defaultProvision(b.name, baseOps.stat, resolveGlobOf(baseOps), baseOps.readdir)
+    const aggregate = baseOps.local !== false ? (b.aggregate ?? null) : null
     commands.push(
       ...command({
         name: b.name,

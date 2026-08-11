@@ -15,18 +15,14 @@
 // Mirror of python/tests/commands/builtin/github/test_narrow.py. The Python
 // suite drives grep/rg end-to-end against a mock GitHub API; here we test the
 // shared pieces directly: narrowScope (code-search push-down on subdirs and
-// regex-extracted literals) and filesOnlyShortcircuit (the -l short-circuit
-// that returns the narrowed file list without reading any blobs).
+// regex-extracted literals, gated on -w).
 
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { GitHubAccessor } from '../../../accessor/github.ts'
 import type { GitHubTransport } from '../../../core/github/_client.ts'
 import type { TreeEntry } from '../../../core/github/tree_entry.ts'
 import { PathSpec } from '../../../types.ts'
-import { filesOnlyShortcircuit, narrowScope } from './narrow.ts'
-
-const DEC = new TextDecoder()
+import { narrowScope } from './narrow.ts'
 
 // 150 blobs under src/ so the scope clears SCOPE_WARN (100) and search kicks in.
 function bigTree(): Record<string, TreeEntry> {
@@ -77,7 +73,7 @@ describe('narrowScope', () => {
   it('narrows a large recursive scope via code search on a literal', async () => {
     const calls: SearchCall[] = []
     const acc = makeAccessor(['src/f1.py', 'src/f2.py'], calls)
-    const res = await narrowScope(acc, [subdir()], 'import', false, true)
+    const res = await narrowScope(acc, [subdir()], 'import', false, true, true)
     expect(res.usedSearch).toBe(true)
     expect(res.fileCount).toBe(2)
     expect(res.resolved.map((p) => p.virtual).sort()).toEqual(['/src/f1.py', '/src/f2.py'])
@@ -85,21 +81,21 @@ describe('narrowScope', () => {
     expect(calls[0]?.q).toContain('path:src')
   })
 
-  it('narrows a regex scope on the extracted required literal', async () => {
+  it('skips search for a regex even under -w', async () => {
+    // A regex narrows on an extracted literal, so the searched term is only
+    // part of the match: a whole-word search for `import` never returns a file
+    // whose only token is `importos`.
     const calls: SearchCall[] = []
     const acc = makeAccessor(['src/f3.py'], calls)
-    const res = await narrowScope(acc, [subdir()], 'import.*os', false, true)
-    expect(res.usedSearch).toBe(true)
-    // "import" is the required literal pushed down; the regex stays exact since
-    // the caller still scans it over the narrowed files.
-    expect(calls[0]?.q).toContain('import')
-    expect(calls[0]?.q).not.toContain('.*')
+    const res = await narrowScope(acc, [subdir()], 'import.*os', false, true, true)
+    expect(res.usedSearch).toBe(false)
+    expect(calls).toHaveLength(0)
   })
 
   it('does not search a non-recursive scope', async () => {
     const calls: SearchCall[] = []
     const acc = makeAccessor(['src/f1.py'], calls)
-    const res = await narrowScope(acc, [subdir()], 'import', false, false)
+    const res = await narrowScope(acc, [subdir()], 'import', false, false, true)
     expect(res.usedSearch).toBe(false)
     expect(calls).toHaveLength(0)
   })
@@ -107,64 +103,19 @@ describe('narrowScope', () => {
   it('does not search a regex with no provable literal', async () => {
     const calls: SearchCall[] = []
     const acc = makeAccessor(['src/f1.py'], calls)
-    const res = await narrowScope(acc, [subdir()], 'foo|bar', false, true)
+    const res = await narrowScope(acc, [subdir()], 'foo|bar', false, true, true)
     expect(res.usedSearch).toBe(false)
     expect(calls).toHaveLength(0)
   })
-})
 
-function spec(path: string): PathSpec {
-  return new PathSpec({
-    virtual: path,
-    directory: '',
-    resourcePath: mountKey(path, ''),
-    resolved: true,
-  })
-}
-
-describe('filesOnlyShortcircuit', () => {
-  const resolved = [spec('/src/main.py'), spec('/src/utils.py')]
-  const scope = subdir()
-
-  it('emits the sorted narrowed list for a literal -l with no reads', () => {
-    const out = filesOnlyShortcircuit({ args_l: true }, 'import', resolved, scope)
-    expect(out).not.toBeNull()
-    const [bytes, io] = out as [Uint8Array, { exitCode: number }]
-    expect(io.exitCode).toBe(0)
-    expect(DEC.decode(bytes)).toContain('main.py')
-  })
-
-  it('returns null without -l', () => {
-    expect(filesOnlyShortcircuit({}, 'import', resolved, scope)).toBeNull()
-  })
-
-  it('returns null for a non-literal pattern', () => {
-    expect(filesOnlyShortcircuit({ args_l: true }, 'foo|bar', resolved, scope)).toBeNull()
-    expect(filesOnlyShortcircuit({ args_l: true }, 'imp.*rt', resolved, scope)).toBeNull()
-  })
-
-  it('returns null when a match-altering flag is present', () => {
-    for (const flag of ['i', 'w', 'v', 'c', 'o']) {
-      expect(
-        filesOnlyShortcircuit({ args_l: true, [flag]: true }, 'import', resolved, scope),
-      ).toBeNull()
-    }
-  })
-
-  it('applies a path predicate (rg --type/--glob/hidden)', () => {
-    const out = filesOnlyShortcircuit({ args_l: true }, 'import', resolved, scope, (p) =>
-      p.endsWith('main.py'),
-    )
-    const [bytes] = out as [Uint8Array, { exitCode: number }]
-    const body = DEC.decode(bytes)
-    expect(body).toContain('main.py')
-    expect(body).not.toContain('utils.py')
-  })
-
-  it('exits 1 when the predicate drops every file', () => {
-    const out = filesOnlyShortcircuit({ args_l: true }, 'import', resolved, scope, () => false)
-    const [bytes, io] = out as [Uint8Array, { exitCode: number }]
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(bytes)).toBe('')
+  it('skips search without -w', async () => {
+    // Code search matches whole words while grep matches substrings, so a
+    // bare literal would narrow to a strict subset and silently drop files
+    // that contain it only inside a longer word.
+    const calls: SearchCall[] = []
+    const acc = makeAccessor(['src/f1.py'], calls)
+    const res = await narrowScope(acc, [subdir()], 'import', false, true, false)
+    expect(res.usedSearch).toBe(false)
+    expect(calls).toHaveLength(0)
   })
 })

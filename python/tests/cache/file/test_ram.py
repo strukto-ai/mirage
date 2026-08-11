@@ -99,3 +99,27 @@ async def test_drain_task_cancelled_on_remove():
     await cache.remove("/a")
     await asyncio.sleep(0)
     assert cancelled
+
+
+@pytest.mark.asyncio
+async def test_evict_prefix_drops_only_matching_keys():
+    cache = RAMFileCacheStore()
+    await cache.set("/data/a.txt", b"a")
+    await cache.set("/data/sub/b.txt", b"bb")
+    await cache.set("/other/c.txt", b"ccc")
+    await cache.evict_prefix("/data/")
+    assert await cache.exists("/data/a.txt") is False
+    assert await cache.exists("/data/sub/b.txt") is False
+    assert await cache.exists("/other/c.txt") is True
+
+
+@pytest.mark.asyncio
+async def test_evict_prefix_reclaims_the_evicted_bytes():
+    """Eviction runs through remove(), so the LRU accounting stays
+    truthful instead of leaking the dropped entries' sizes."""
+    cache = RAMFileCacheStore()
+    await cache.set("/data/a.txt", b"12345")
+    await cache.set("/other/c.txt", b"xy")
+    await cache.evict_prefix("/data/")
+    assert cache.cache_size == 2
+    assert cache.cache_entries == 1

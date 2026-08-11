@@ -14,7 +14,7 @@
 
 import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
 import { read as gdocsRead, stream as gdocsStream } from '../../../core/gdocs/read.ts'
-import { isDirName, readdir as gdocsReaddir } from '../../../core/gdocs/readdir.ts'
+import { readdir as gdocsReaddir } from '../../../core/gdocs/readdir.ts'
 import { stat as gdocsStat } from '../../../core/gdocs/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -24,6 +24,5 @@ export const GDOCS_IO: CommandIO<GDocsAccessor> = {
   readStream: gdocsStream,
   stat: gdocsStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

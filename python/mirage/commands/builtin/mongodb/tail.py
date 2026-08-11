@@ -17,12 +17,12 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.mongodb._provision import head_tail_provision
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream
@@ -31,10 +31,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tail",
-         resource="mongodb",
-         spec=SPECS["tail"],
-         provision=head_tail_provision)
+@command("tail", resource="mongodb", spec=SPECS["tail"])
 async def tail(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
@@ -44,9 +41,9 @@ async def tail(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    f: bool = False,
+    follow: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None
     from_line: int | None = None
@@ -59,7 +56,7 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index=index)
-        if (f and len(paths) == 1
+        if (follow and len(paths) == 1
                 and detect_scope(paths[0]).level == ScopeLevel.DOCUMENTS):
             return watch_stream(accessor, paths[0], index), IOResult()
         # Collections fetch only the last N documents server-side (sort by

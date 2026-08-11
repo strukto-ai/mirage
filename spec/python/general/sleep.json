@@ -1,5 +1,6 @@
 {
   "_meta": {
+    "by_resource": {},
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
@@ -7,11 +8,7 @@
     "resources": []
   },
   "description": "Delay for a specified amount of time.",
-  "ignore_tokens": [],
-  "options": [],
-  "positional": [],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "type": "str"
   }
 }

@@ -78,7 +78,7 @@ async def test_head_multi_streaming_with_headers():
     out, _ = await head(_ops(chunks),
                         acc,
                         _paths("/data/a.txt", "/data/b.txt"),
-                        n="2")
+                        lines="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na1\na2\n"
                     b"\n==> /data/b.txt <==\nb1\nb2\n")

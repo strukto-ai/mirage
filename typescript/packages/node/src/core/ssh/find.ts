@@ -27,7 +27,7 @@ import {
 
 export interface FindOptions {
   name?: string | null
-  type?: 'f' | 'd' | 'file' | 'directory' | null
+  type?: string | null
   minSize?: number | null
   maxSize?: number | null
   maxDepth?: number | null

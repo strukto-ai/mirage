@@ -16,12 +16,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.guilds import list_guilds_stream
 from mirage.core.discord.history import (date_to_snowflake,
                                          stream_messages_for_day)
 from mirage.core.discord.members import list_members_stream
 from mirage.core.discord.search import search_guild_stream
-from mirage.resource.discord.config import DiscordConfig
 
 
 @pytest.fixture

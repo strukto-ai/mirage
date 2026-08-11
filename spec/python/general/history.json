@@ -1,5 +1,13 @@
 {
   "_meta": {
+    "by_resource": {
+      "history": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
@@ -9,84 +17,49 @@
     ]
   },
   "description": "Show command history for the session.",
-  "ignore_tokens": [],
   "options": [
     {
       "description": "Clear the command history.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-c",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
       "description": "Delete the entry at the given position; negative counts back from the end.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-d",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     },
     {
       "description": "Append the args to the history as a single entry without executing them.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-s",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
       "description": "Print the args without storing them.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-p",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": "Accepted no-op (always synced).",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Append: no-op (file and store are the same).",
       "short": "-a",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": "Accepted no-op (always synced).",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Read: no-op (file and store are the same).",
       "short": "-r",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": "Accepted no-op (always synced).",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Write: no-op (file and store are the same).",
       "short": "-w",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": "Accepted no-op (always synced).",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Read-new: no-op (file and store are the same).",
       "short": "-n",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "type": "str"
   }
 }

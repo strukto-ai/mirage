@@ -30,6 +30,7 @@ export const NodeType = Object.freeze({
   COMPOUND_STATEMENT: 'compound_statement',
   NEGATED_COMMAND: 'negated_command',
   VARIABLE_ASSIGNMENT: 'variable_assignment',
+  VARIABLE_ASSIGNMENTS: 'variable_assignments',
   FOR: 'for',
   SELECT: 'select',
   WHILE: 'while',
@@ -49,6 +50,8 @@ export const NodeType = Object.freeze({
   STRING: 'string',
   STRING_CONTENT: 'string_content',
   RAW_STRING: 'raw_string',
+  ANSI_C_STRING: 'ansi_c_string',
+  TRANSLATED_STRING: 'translated_string',
   PROCESS_SUBSTITUTION: 'process_substitution',
   EXTGLOB_PATTERN: 'extglob_pattern',
   REGEX: 'regex',
@@ -107,6 +110,8 @@ export const NodeType = Object.freeze({
   TERNARY_EXPRESSION: 'ternary_expression',
   POSTFIX_EXPRESSION: 'postfix_expression',
   ARITH_OPEN: '((',
+  ARITH_CLOSE: '))',
+  C_STYLE_FOR_STATEMENT: 'c_style_for_statement',
   TEST_OPERATOR: 'test_operator',
   SPECIAL_VARIABLE_NAME: 'special_variable_name',
   COMMENT: 'comment',
@@ -127,6 +132,17 @@ export const SET_FLAG_TO_OPTION: Readonly<Record<string, string>> = Object.freez
   x: 'xtrace',
   f: 'noglob',
 })
+
+export interface OptionWord {
+  // Shell options the word turns on or off, in the order written.
+  settings: [string, boolean][]
+  // Cluster letters that name no shell option. `set` ignores them;
+  // shell startup reads its own startup letters out of them and refuses
+  // the rest.
+  other: string
+  // Words the option took, 2 for the `-o NAME` form.
+  consumed: number
+}
 
 export const RedirectKind = Object.freeze({
   STDOUT: 'stdout',
@@ -212,6 +228,7 @@ export const ShellBuiltin = Object.freeze({
   TIMEOUT: 'timeout',
   COMMAND: 'command',
   TYPE: 'type',
+  WHICH: 'which',
   BREAK: 'break',
   CONTINUE: 'continue',
   RETURN: 'return',
@@ -219,3 +236,23 @@ export const ShellBuiltin = Object.freeze({
 } as const)
 
 export type ShellBuiltin = (typeof ShellBuiltin)[keyof typeof ShellBuiltin]
+
+/**
+ * The structural shape of a tree-sitter syntax node, so consumers can
+ * walk a parsed line without depending on a concrete tree-sitter
+ * binding (web-tree-sitter here, tree_sitter in Python). Mirrors the
+ * Python side reading nodes through shell.types.
+ */
+export interface TSNodeLike {
+  type: string
+  text: string
+  children: TSNodeLike[]
+  namedChildren: TSNodeLike[]
+  parent?: TSNodeLike | null
+  isNamed?: boolean
+  isMissing?: boolean
+  startIndex?: number
+  endIndex?: number
+  startPosition?: { row: number; column: number }
+  endPosition?: { row: number; column: number }
+}

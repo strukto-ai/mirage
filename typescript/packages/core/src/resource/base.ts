@@ -22,10 +22,11 @@ import type { RegisteredCommand } from '../commands/config.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
 import type { CapacityResult, FileStat, PathSpec } from '../types.ts'
 import { CapacityState } from '../types.ts'
+import type { DeltaHook } from '../watch/base.ts'
 
 export interface FindOptions {
   name?: string | null
-  type?: 'f' | 'd' | null
+  type?: string | null
   minSize?: number | null
   maxSize?: number | null
   maxDepth?: number | null
@@ -64,6 +65,21 @@ export interface Resource {
    * check fires at load.
    */
   readonly supportsSnapshot?: boolean
+  /**
+   * Whether {@link Resource.stat} can size every regular file without
+   * fetching its content, i.e. {@link FileStat.size} is null only for
+   * directories. True for byte stores that keep a length in their
+   * metadata (ram, disk, redis, s3, gridfs); false for resources that
+   * render content on read, where the size is unknowable until the bytes
+   * exist (slack, gmail, notion, postgres rows.jsonl, dify documents).
+   *
+   * FUSE does not need this: direct_io + attrTimeout '0' + hydrate-on-open
+   * make size-unknown files read correctly anyway. FSKit has no direct_io
+   * equivalent, so a mount there is driven entirely by the reported size
+   * and a false resource would serve silent empty files. Mirrors Python's
+   * `BaseResource.SIZES_ALWAYS_KNOWN`.
+   */
+  readonly sizesAlwaysKnown?: boolean
   readonly index?: IndexCacheStore
   readonly accessor?: Accessor
   readonly opsMap?: Record<string, unknown>
@@ -94,6 +110,12 @@ export interface Resource {
   // only where a truthful number exists (a real filesystem, or a provider
   // quota); never fabricate a total.
   statfs?(): Promise<CapacityResult>
+  // Identity of the storage behind this resource, so cp/mv can tell two
+  // prefixes over one store from two genuinely separate ones. Absent ->
+  // every mount is treated as its own storage, which only preserves the
+  // pre-existing behavior; see BaseResource.storageId.
+  storageId?(): string
+  deltaHook?(): DeltaHook
 }
 
 export function throwUnsupported(op: string): never {
@@ -104,9 +126,18 @@ export function cachesReads(resource: Resource): boolean {
   return resource.cachesReads === true
 }
 
+export function sizesAlwaysKnown(resource: Resource): boolean {
+  return resource.sizesAlwaysKnown === true
+}
+
 export abstract class BaseResource {
   readonly indexTtl: number = 600
   protected _index?: IndexCacheStore
+  // JS has no object-identity primitive, so the default storageId hands
+  // each instance a serial number the first time it is asked.
+  static #storageCounter = 0
+  #storageSeq?: number
+  #closed = false
 
   get index(): IndexCacheStore {
     let store = this._index
@@ -134,9 +165,46 @@ export abstract class BaseResource {
     return new RAMIndexCacheStore({ ttl })
   }
 
+  // Identity of the storage this resource reads and writes. Two mounts
+  // whose resources return the same value address the same bytes, so a
+  // move between them must refuse rather than copy the object onto itself
+  // and then unlink the source. The default treats every instance as its
+  // own storage, which is the safe direction to be wrong in: a false
+  // "different" only keeps the pre-existing behavior, while a false "same"
+  // would refuse a legitimate move. Backends whose config pins the storage
+  // (a disk root, a bucket and key prefix) override this so two separately
+  // constructed instances pointing at one target still compare equal.
+  storageId(): string {
+    this.#storageSeq ??= ++BaseResource.#storageCounter
+    // The serial is what makes this unique; the class name only makes the
+    // value readable when it shows up while debugging.
+    return `${this.constructor.name}:${String(this.#storageSeq)}`
+  }
+
   // Default df capacity: UNKNOWN (rendered `-`). Backends that can report
   // truthfully — a real filesystem, or a provider quota — override this.
   statfs(): Promise<CapacityResult> {
     return Promise.resolve({ state: CapacityState.UNKNOWN })
+  }
+
+  /**
+   * Release what this resource owns, exactly once. The base teardown is
+   * the index store: a mount configured `index: {type: redis}` holds a
+   * client that nothing else closes, so without this a Node process
+   * stays alive after `closeWorkspace`.
+   *
+   * A backend with its own handles (a db pool, an ssh channel) overrides
+   * this and calls `super.close()` — its accessor is its own to close,
+   * since the Accessor seam carries no lifecycle of its own.
+   *
+   * Mirrors Python `BaseResource.close` (`resource/base.py`).
+   */
+  async close(): Promise<void> {
+    if (this.#closed) return
+    this.#closed = true
+    // Deliberately `_index`, not the `index` getter: reading the getter
+    // would build a store for a resource that never used one, only to
+    // close it.
+    await this._index?.close()
   }
 }

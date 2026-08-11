@@ -15,12 +15,12 @@
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { copy as gdriveCopy } from '../../../core/gdrive/copy.ts'
 import { create as gdriveCreate } from '../../../core/gdrive/create.ts'
-import { du as gdriveDu, duAll as gdriveDuAll } from '../../../core/gdrive/du.ts'
+import { size as gdriveDu, entries as gdriveDuAll } from '../../../core/gdrive/du/index.ts'
 import { find as gdriveFind } from '../../../core/gdrive/find.ts'
 import { exists as gdriveExists } from '../../../core/gdrive/exists.ts'
 import { mkdir as gdriveMkdir } from '../../../core/gdrive/mkdir.ts'
 import { read as gdriveRead, stream as gdriveStream } from '../../../core/gdrive/read.ts'
-import { isDirName, readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
+import { readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
 import { rename as gdriveRename } from '../../../core/gdrive/rename.ts'
 import { rmR as gdriveRmR } from '../../../core/gdrive/rm.ts'
 import { rmdir as gdriveRmdir } from '../../../core/gdrive/rmdir.ts'
@@ -36,7 +36,6 @@ export const GDRIVE_IO: CommandIO<GDriveAccessor> = {
   readStream: gdriveStream,
   stat: gdriveStat,
   isMounted: () => true,
-  isDirName: (_accessor, child) => isDirName(child),
   local: false,
   write: gdriveWrite,
   exists: gdriveExists,
@@ -50,6 +49,5 @@ export const GDRIVE_IO: CommandIO<GDriveAccessor> = {
   create: gdriveCreate,
   truncate: gdriveTruncate,
   find: gdriveFind,
-  duTotal: gdriveDu,
-  duAll: gdriveDuAll,
+  du: { size: gdriveDu, entries: gdriveDuAll },
 }

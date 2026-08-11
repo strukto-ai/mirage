@@ -22,7 +22,7 @@ from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import DriftPolicy, MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import ContentDriftError, install_fingerprints
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 
 def _load(*args, **kwargs):
@@ -49,9 +49,8 @@ def test_install_fingerprints_pins_revision_and_queues_drift():
 
     mount = ws._registry.mount_for("/m/pinned.txt")
     assert mount.revisions["/m/pinned.txt"] == "v9"
-    assert ws._drift_check_pending is True
-    queued = [path for (_, path, _) in ws._pending_drift]
-    assert "/m/checked.txt" in queued
+    assert ws._drift.pending is True
+    assert "/m/checked.txt" in ws._drift.paths
 
 
 def _config() -> S3Config:

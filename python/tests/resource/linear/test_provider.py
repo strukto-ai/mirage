@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.resource.linear.config import LinearConfig
+from mirage.core.linear.config import LinearConfig
 from mirage.resource.linear.linear import LinearResource
 from mirage.types import ResourceName
 

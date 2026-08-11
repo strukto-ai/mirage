@@ -72,7 +72,7 @@ def _parse_patch(patch_text: str,
             current_hunks = []
             current_hunk_lines = []
             continue
-        m = re.match(r"@@ -(\d+)", line)
+        m = re.match(r"@@ -([0-9]+)", line)
         if m:
             if current_hunk_lines:
                 current_hunks.append((current_start, current_hunk_lines))

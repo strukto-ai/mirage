@@ -54,20 +54,11 @@ export class GSheetsResource extends BaseResource implements Resource {
   constructor(config: GSheetsConfig) {
     super()
     this.config = config
-    const tm = new TokenManager({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      refreshToken: config.refreshToken,
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-    })
+    const tm = new TokenManager(config)
     this.accessor = new GSheetsAccessor({ tokenManager: tm })
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 

@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FlagView,
   IOResult,
   ResourceName,
   command,
   resolveGlobOf,
   specOf,
-  writeMetadataProvision,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
@@ -42,8 +42,9 @@ async function mkdirCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('mkdir: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const verbose = opts.flags.v === true
-  const parents = opts.flags.p === true
+  const fl = new FlagView(opts.flags, specOf('mkdir'))
+  const verbose = fl.asBool('verbose')
+  const parents = fl.asBool('parents')
   const lines: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {
@@ -61,5 +62,4 @@ export const GRIDFS_MKDIR = command({
   spec: specOf('mkdir'),
   fn: mkdirCommand,
   write: true,
-  provision: writeMetadataProvision,
 })

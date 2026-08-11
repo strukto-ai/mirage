@@ -75,7 +75,38 @@ async def test_du_c_total(workspace):
 
 
 @pytest.mark.asyncio
-async def test_du_missing_operand_errors(workspace):
+async def test_du_without_operand_measures_the_working_directory(workspace):
+    """GNU du with no operand summarises '.', dot-spelled; no error."""
+    await workspace.ops.write("/a.txt", b"hello")
     io = await workspace.execute("du")
-    assert io.exit_code != 0
-    assert b"missing operand" in (io.stderr or b"")
+    assert io.exit_code == 0
+    assert "5\t." in io.stdout.decode().splitlines()
+
+
+@pytest.mark.asyncio
+async def test_du_reads_an_unstattable_mount_root():
+    """Redis never materialises the root entry, but the tree is real.
+
+    A failed stat is not proof of absence, so du must still report the
+    subtree instead of calling the operand unreadable. Mounted away from
+    ``/`` so the operand does not fan out across sibling mounts.
+    """
+    resource = RedisResource(url=REDIS_URL, key_prefix="test:du:root:")
+    await resource._store.clear()
+    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+    try:
+        await ws.ops.write("/data/a.txt", b"hello")
+        io = await ws.execute("du /data")
+        assert io.exit_code == 0
+        assert io.stdout.decode() == "5\t/data\n"
+        assert (io.stderr or b"") == b""
+    finally:
+        await resource._store.clear()
+        await resource._store.close()
+
+
+@pytest.mark.asyncio
+async def test_du_reports_an_unreadable_operand(workspace):
+    io = await workspace.execute("du /nope")
+    assert io.exit_code == 1
+    assert b"du: cannot access '/nope'" in (io.stderr or b"")

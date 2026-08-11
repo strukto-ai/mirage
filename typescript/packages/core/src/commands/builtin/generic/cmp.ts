@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -37,6 +39,7 @@ export async function cmpGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<[ByteSource | null, IOResult]> {
+  const fl = new FlagView(opts.flags, specOf('cmp'))
   if (paths.length > 2) throw extraOperandError(CommandName.CMP, paths[2]?.rawPath ?? '')
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('cmp: requires two paths\n') })]
@@ -55,19 +58,21 @@ export async function cmpGeneric(
     // unreadable operand) is exit 2.
     return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', err, paths) })]
   }
-  if (typeof opts.flags.i === 'string') {
-    const skip = Number.parseInt(opts.flags.i, 10)
+  const skipRaw = fl.asInt('i')
+  if (skipRaw !== undefined) {
+    const skip = skipRaw
     data1 = data1.slice(skip)
     data2 = data2.slice(skip)
   }
-  if (typeof opts.flags.n === 'string') {
-    const limit = Number.parseInt(opts.flags.n, 10)
+  const limitRaw = fl.asInt('n')
+  if (limitRaw !== undefined) {
+    const limit = limitRaw
     data1 = data1.slice(0, limit)
     data2 = data2.slice(0, limit)
   }
   if (arraysEqual(data1, data2)) return [null, new IOResult()]
-  if (opts.flags.s === true) return [null, new IOResult({ exitCode: 1 })]
-  if (opts.flags.args_l === true) {
+  if (fl.asBool('s')) return [null, new IOResult({ exitCode: 1 })]
+  if (fl.asBool('args_l')) {
     const outLines: string[] = []
     const limit = Math.min(data1.byteLength, data2.byteLength)
     for (let idx = 0; idx < limit; idx++) {
@@ -84,7 +89,7 @@ export async function cmpGeneric(
       let line = 1
       for (let k = 0; k < idx; k++) if (data1[k] === 0x0a) line += 1
       let msg = `${p0.virtual} ${p1.virtual} differ: char ${String(idx + 1)}, line ${String(line)}`
-      if (opts.flags.b === true) {
+      if (fl.asBool('b')) {
         msg += ` is ${octal(data1[idx] ?? 0)} ${String.fromCharCode(data1[idx] ?? 0)} ${octal(data2[idx] ?? 0)} ${String.fromCharCode(data2[idx] ?? 0)}`
       }
       return [formatRecords([msg]), new IOResult({ exitCode: 1 })]

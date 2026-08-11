@@ -19,13 +19,17 @@ from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes, relay, transfer_primitives)
 from mirage.commands.builtin.generic.mv import mv as generic_mv
+from mirage.commands.builtin.generic.mv import parse_mv_flags
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec, PrimitiveMove
 
 
-async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
-                 dispatch: Callable[..., Any]) -> CrossResult:
+async def run_mv(
+        scopes: list[PathSpec],
+        flag_kwargs: dict[str, FlagValue],
+        dispatch: Callable[..., Any],
+        storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.
 
     Pure wiring: copy through the transfer primitives, then unlink the
@@ -35,6 +39,10 @@ async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared mv spec.
         dispatch (Callable): Workspace operation dispatcher.
+        storage_key (Callable | None): Maps an operand to its storage
+            identity. Without it a move between two prefixes over one
+            store would copy the object onto itself and then unlink the
+            source, destroying it.
     """
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
@@ -48,5 +56,5 @@ async def run_mv(scopes: list[PathSpec], flag_kwargs: dict[str, object],
                                 readdir=primitives["readdir"],
                                 unlink=p(relay, dispatch, "unlink"),
                                 rmdir=p(relay, dispatch, "rmdir")),
-                            n=fl.as_bool("n"),
-                            v=fl.as_bool("v"))
+                            flags=parse_mv_flags(fl),
+                            backend_key=storage_key)

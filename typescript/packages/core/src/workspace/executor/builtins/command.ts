@@ -16,93 +16,13 @@ import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
-import { route } from '../../route/route.ts'
-import { Consumer } from '../../route/types.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
+import { lastOf, scanOptions } from './getopt.ts'
+import { classify, describe } from './lookup/index.ts'
 import type { Result, ExecuteStringFn } from './scope.ts'
 
 const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'
-
-// bash reserved words: reported by `command -v/-V` as keywords even
-// though the parser, not the executor, consumes them.
-const KEYWORDS: ReadonlySet<string> = new Set([
-  'if',
-  'then',
-  'else',
-  'elif',
-  'fi',
-  'case',
-  'esac',
-  'for',
-  'select',
-  'while',
-  'until',
-  'do',
-  'done',
-  'in',
-  'function',
-  'time',
-  'coproc',
-  '{',
-  '}',
-  '!',
-  '[[',
-  ']]',
-])
-
-/**
- * Split `command`'s own options from its operands.
- *
- * bash uses non-permuting getopt: option scanning stops at the first
- * non-option word (or `--`), so a flag after the target name belongs to
- * the target. Only `-p -v -V` are valid; `-p` is accepted but inert
- * (mirage has no PATH), and the last of `-v`/`-V` wins. Returns
- * `[mode, rest, bad]` where `bad` is the first invalid option or null.
- */
-export function parseFlags(args: readonly string[]): [string | null, string[], string | null] {
-  let mode: string | null = null
-  let i = 0
-  while (i < args.length) {
-    const tok = args[i] ?? ''
-    if (tok === '--') {
-      i += 1
-      break
-    }
-    if (!(tok.startsWith('-') && tok.length > 1)) break
-    for (const ch of tok.slice(1)) {
-      if (ch === 'v') mode = 'v'
-      else if (ch === 'V') mode = 'V'
-      else if (ch === 'p') continue
-      else return [null, [], `-${ch}`]
-    }
-    i += 1
-  }
-  return [mode, [...args.slice(i)], null]
-}
-
-/**
- * Classify a name for `command -v/-V` reporting.
- *
- * Every mirage-native runnable non-function name (shell builtin,
- * namespace command, or mount command) reports as 'builtin': mirage has
- * no external binaries, so there is no honest path to print, and
- * grouping them matches bash's runnable-and-in-process category (a
- * deliberate divergence from bash's file paths).
- */
-function classify(name: string, session: Session, registry: MountRegistry): string {
-  if (KEYWORDS.has(name)) return 'keyword'
-  const consumer = route(name, session, registry)
-  if (consumer === Consumer.FUNCTION) return 'function'
-  if (consumer === Consumer.UNKNOWN) return 'not_found'
-  return 'builtin'
-}
-
-function describe(name: string, kind: string): string {
-  if (kind === 'keyword') return `${name} is a shell keyword`
-  if (kind === 'function') return `${name} is a function`
-  return `${name} is a shell builtin`
-}
 
 /**
  * Run the `-v`/`-V` introspection modes.
@@ -124,7 +44,7 @@ function probe(
   let anyFound = false
   for (const name of rest) {
     const kind = classify(name, session, registry)
-    if (kind === 'not_found') {
+    if (kind === null) {
       if (mode === 'V') errLines.push(`command: ${name}: not found`)
       continue
     }
@@ -143,107 +63,6 @@ function probe(
 }
 
 /**
- * Split `type`'s options from its name operands.
- *
- * Recognizes `-t` (type word only), `-p`/`-P` (path; empty for mirage's
- * pathless builtins), `-a` (all locations; one in mirage), and `-f` (skip
- * the function table). Non-permuting like bash. Returns
- * `[mode, nofunc, rest, bad]` where `bad` is the first invalid option.
- */
-function parseTypeFlags(
-  args: readonly string[],
-): ['t' | 'p' | null, boolean, string[], string | null] {
-  let mode: 't' | 'p' | null = null
-  let nofunc = false
-  let i = 0
-  while (i < args.length) {
-    const tok = args[i] ?? ''
-    if (tok === '--') {
-      i += 1
-      break
-    }
-    if (!(tok.startsWith('-') && tok.length > 1)) break
-    for (const ch of tok.slice(1)) {
-      if (ch === 't') mode = 't'
-      else if (ch === 'p' || ch === 'P') mode = 'p'
-      else if (ch === 'a') continue
-      else if (ch === 'f') nofunc = true
-      else return [null, false, [], `-${ch}`]
-    }
-    i += 1
-  }
-  return [mode, nofunc, [...args.slice(i)], null]
-}
-
-function typeWord(kind: string): string {
-  if (kind === 'keyword') return 'keyword'
-  if (kind === 'function') return 'function'
-  return 'builtin'
-}
-
-/**
- * Run the `type` builtin (`type [-afptP] name [name ...]`).
- *
- * Mirrors `command -V` resolution (every mirage-native runnable name is a
- * shell builtin; no external paths) but uses `type`'s all-found exit rule:
- * 0 only when every name resolves. `-t` prints the classification word,
- * `-p`/`-P` print a path (always empty here), and a missing name warns on
- * stderr unless a word-only mode (`-t`/`-p`) is active.
- */
-export function handleType(
-  args: readonly string[],
-  session: Session,
-  registry: MountRegistry,
-): Result {
-  const [mode, nofunc, rest, bad] = parseTypeFlags(args)
-  const enc = new TextEncoder()
-  if (bad !== null) {
-    const err = enc.encode(
-      `type: ${bad}: invalid option\ntype: usage: type [-afptP] name [name ...]\n`,
-    )
-    return [
-      null,
-      new IOResult({ exitCode: 2, stderr: err }),
-      new ExecutionNode({ command: 'type', exitCode: 2, stderr: err }),
-    ]
-  }
-  const outLines: string[] = []
-  const errLines: string[] = []
-  let allFound = true
-  for (const name of rest) {
-    let kind: string
-    const savedFn = session.functions[name]
-    if (nofunc && savedFn !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.functions[name]
-      try {
-        kind = classify(name, session, registry)
-      } finally {
-        session.functions[name] = savedFn
-      }
-    } else {
-      kind = classify(name, session, registry)
-    }
-    if (kind === 'not_found') {
-      allFound = false
-      if (mode === null) errLines.push(`type: ${name}: not found`)
-      continue
-    }
-    if (mode === 't') outLines.push(typeWord(kind))
-    else if (mode === 'p') continue
-    else outLines.push(describe(name, kind))
-  }
-  const out = outLines.length > 0 ? enc.encode(`${outLines.join('\n')}\n`) : null
-  const err = errLines.length > 0 ? enc.encode(`${errLines.join('\n')}\n`) : new Uint8Array()
-  const code = rest.length === 0 || allFound ? 0 : 1
-  return [
-    out,
-    new IOResult({ exitCode: code, stderr: err }),
-    new ExecutionNode({ command: 'type', exitCode: code, stderr: err }),
-  ]
-}
-
-/**
  * Run the `command` builtin (`command [-pVv] name [arg ...]`).
  *
  * Without `-v`/`-V` it runs the target ignoring any shell function of the
@@ -251,7 +70,8 @@ export function handleType(
  * function table for the inner run so a shadowing function is skipped
  * while builtins and mount commands still resolve. Already expanded
  * operands are re-joined with shellJoin so they survive re-parsing as one
- * token each; the pipe stdin flows to the inner command.
+ * token each; the pipe stdin flows to the inner command. `-p` is accepted
+ * but inert (mirage has no PATH) and the last of `-v`/`-V` wins.
  */
 export async function handleCommandBuiltin(
   executeFn: ExecuteStringFn,
@@ -260,15 +80,17 @@ export async function handleCommandBuiltin(
   registry: MountRegistry,
   stdin: ByteSource | null = null,
 ): Promise<Result> {
-  const [mode, rest, bad] = parseFlags(args)
-  if (bad !== null) {
-    const err = new TextEncoder().encode(`command: ${bad}: invalid option\n${USAGE}`)
+  const scan = scanOptions(args, 'pvV')
+  if (scan.bad !== null) {
+    const err = new TextEncoder().encode(`command: ${scan.bad}: invalid option\n${USAGE}`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: 'command', exitCode: 2, stderr: err }),
     ]
   }
+  const mode = lastOf(scan.letters, 'vV')
+  const rest = scan.operands
   if (mode !== null) return probe(mode, rest, session, registry)
   if (rest.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: 'command', exitCode: 0 })]

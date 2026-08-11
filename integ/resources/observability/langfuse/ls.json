@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "id": "lf_root_ls",
+      "seq": 600000,
+      "targets": ["langfuse"],
+      "command": "ls /lf",
+      "expect": { "exit": 0, "stdout": "datasets\nprompts\nsessions\ntraces\n", "stderr": "" }
+    },
+    {
+      "id": "lf_traces_ls",
+      "seq": 600001,
+      "targets": ["langfuse"],
+      "command": "ls /lf/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "trace-alpha.json\ntrace-beta.json\ntrace-gamma.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_sessions_ls",
+      "seq": 600002,
+      "targets": ["langfuse"],
+      "command": "ls /lf/sessions",
+      "expect": { "exit": 0, "stdout": "session-one\nsession-two\n", "stderr": "" }
+    },
+    {
+      "id": "lf_session_one_ls",
+      "seq": 600003,
+      "targets": ["langfuse"],
+      "command": "ls /lf/sessions/session-one",
+      "expect": { "exit": 0, "stdout": "trace-alpha.json\ntrace-beta.json\n", "stderr": "" }
+    },
+    {
+      "id": "lf_session_two_ls",
+      "seq": 600004,
+      "targets": ["langfuse"],
+      "command": "ls /lf/sessions/session-two",
+      "expect": { "exit": 0, "stdout": "trace-gamma.json\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompts_ls",
+      "seq": 600005,
+      "targets": ["langfuse"],
+      "command": "ls /lf/prompts",
+      "expect": { "exit": 0, "stdout": "greeting\nqa-template\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_versions_ls",
+      "seq": 600006,
+      "targets": ["langfuse"],
+      "command": "ls /lf/prompts/greeting",
+      "expect": { "exit": 0, "stdout": "1.json\n2.json\n", "stderr": "" }
+    },
+    {
+      "id": "lf_prompt_single_version_ls",
+      "seq": 600007,
+      "targets": ["langfuse"],
+      "command": "ls /lf/prompts/qa-template",
+      "expect": { "exit": 0, "stdout": "1.json\n", "stderr": "" }
+    },
+    {
+      "id": "lf_datasets_ls",
+      "seq": 600008,
+      "targets": ["langfuse"],
+      "command": "ls /lf/datasets",
+      "expect": { "exit": 0, "stdout": "eval-basic\neval-empty\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_children_ls",
+      "seq": 600009,
+      "targets": ["langfuse"],
+      "command": "ls /lf/datasets/eval-basic",
+      "expect": { "exit": 0, "stdout": "items.jsonl\nruns\n", "stderr": "" }
+    },
+    {
+      "id": "lf_dataset_runs_ls",
+      "seq": 600010,
+      "targets": ["langfuse"],
+      "command": "ls /lf/datasets/eval-basic/runs",
+      "expect": { "exit": 0, "stdout": "run-alpha.jsonl\n", "stderr": "" }
+    },
+    {
+      "id": "lf_empty_dataset_children_ls",
+      "seq": 600011,
+      "targets": ["langfuse"],
+      "command": "ls /lf/datasets/eval-empty",
+      "expect": { "exit": 0, "stdout": "items.jsonl\nruns\n", "stderr": "" }
+    },
+    {
+      "id": "lf_empty_dataset_runs_ls",
+      "seq": 600012,
+      "targets": ["langfuse"],
+      "command": "ls /lf/datasets/eval-empty/runs",
+      "expect": { "exit": 0, "stdout": "", "stderr": "" }
+    }
+  ]
+}

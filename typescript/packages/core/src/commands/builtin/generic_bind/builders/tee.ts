@@ -18,19 +18,23 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const TEE_BUILDER: Builder = {
   name: 'tee',
   write: true,
+  requirements: ['write'],
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
-    const { write } = ops
+    const { write, append } = ops
     if (write === undefined) {
       throw new Error('tee: backend provides no write op')
     }
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+    // A backend that can append natively does; the rest fall back to the
+    // read-modify-write inside the generic.
     return teeGeneric(
       resolved,
       texts,
       opts,
       (p) => ops.readStream(accessor, p, idx),
       (p, d) => write(accessor, p, d),
+      append === undefined ? undefined : (p, d) => append(accessor, p, d),
     )
   },
 }

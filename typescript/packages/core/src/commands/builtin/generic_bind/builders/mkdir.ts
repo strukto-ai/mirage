@@ -13,17 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import {
+  errorVirtualPath,
+  fsStrerror,
+  isFsError,
+  operandSpelling,
+} from '../../../../utils/errors.ts'
 import { DEFAULT_DIR_MODE, parseMode } from '../../../../utils/mode.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const MKDIR_BUILDER: Builder = {
   name: 'mkdir',
   write: true,
+  requirements: ['mkdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
-    const parents = opts.flags.p === true || opts.flags.parents === true
-    const verbose = opts.flags.v === true || opts.flags.verbose === true
-    const modeFlag = opts.flags.m ?? opts.flags.mode
-    const modeText = typeof modeFlag === 'string' ? modeFlag : null
+    const fl = new FlagView(opts.flags, specOf('mkdir'))
+    const parents = fl.asBool('parents')
+    const verbose = fl.asBool('verbose')
+    const modeText = fl.asStr('mode') ?? null
     if (paths.length === 0) {
       return [
         null,
@@ -50,14 +59,27 @@ export const MKDIR_BUILDER: Builder = {
     }
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const lines: string[] = []
+    const errors: string[] = []
     for (const p of resolved) {
-      await mkdir(accessor, p, parents)
+      try {
+        await mkdir(accessor, p, parents)
+      } catch (err) {
+        // One unusable operand is not an aborted command: GNU reports it
+        // and still makes the remaining directories. The error names the path
+        // to quote: usually the operand, but `mkdir -p` blames the component
+        // of the chain it tripped on.
+        if (!isFsError(err)) throw err
+        const named = operandSpelling(errorVirtualPath(err), p)
+        errors.push(`mkdir: cannot create directory '${named}': ${String(fsStrerror(err))}`)
+        continue
+      }
       // -m applies to the named directory only; any parents made by -p keep
       // the default mode (GNU).
       if (mode !== null && setAttrs !== undefined) await setAttrs(accessor, p, { mode })
       if (verbose) lines.push(`mkdir: created directory '${p.virtual}'`)
     }
     const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
-    return [out, new IOResult()]
+    const stderr = errors.length > 0 ? new TextEncoder().encode(errors.join('\n') + '\n') : null
+    return [out, new IOResult({ stderr, exitCode: errors.length > 0 ? 1 : 0 })]
   },
 }

@@ -1,5 +1,61 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "opfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
@@ -9,17 +65,14 @@
       "databricks_volume",
       "dropbox",
       "gdrive",
+      "onedrive",
       "opfs",
       "ram",
-      "s3"
+      "s3",
+      "sharepoint"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
-  "options": [],
-  "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "type": "path"
   }
 }

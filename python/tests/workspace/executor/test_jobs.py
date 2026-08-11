@@ -142,6 +142,21 @@ def test_bare_wait_adopts_output_from_every_job_in_id_order():
     assert asyncio.run(_do()) == "a\nb\n"
 
 
+def test_job_nested_in_a_backgrounded_subshell_gets_its_own_console():
+    """A nested job's output must not land on the enclosing job's console.
+
+    The parity partner of the TypeScript regression, which is where this
+    can actually break: ``sub_recurse`` is a ``partial``, so a nested
+    ``handle_background`` passing ``sink=<its own console>`` always
+    overrides the bound default, while a hand-written closure can drop
+    the argument. When it is dropped, both nested jobs write straight to
+    the outer console, bare ``wait`` adopts nothing, and the documented
+    job-id order becomes completion order (``b\\na\\n``).
+    """
+    out, _ = asyncio.run(_run_bg("( (sleep 0.15; echo a) & echo b & wait ) &"))
+    assert out == b"a\nb\n"
+
+
 def test_bare_wait_with_no_jobs_returns_nothing():
 
     async def _do():

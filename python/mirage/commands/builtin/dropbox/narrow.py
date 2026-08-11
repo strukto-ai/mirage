@@ -16,7 +16,9 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.dropbox.io import resolve_glob
 from mirage.commands.builtin.grep_helper import (BINARY_EXTENSIONS,
-                                                 get_extension, search_query)
+                                                 get_extension,
+                                                 is_literal_pattern,
+                                                 search_query)
 from mirage.core.dropbox.search import narrow_paths
 from mirage.core.dropbox.stat import stat as dropbox_stat
 from mirage.types import FileType, PathSpec
@@ -56,6 +58,7 @@ async def narrow_scope(
     *,
     fixed_string: bool,
     recursive: bool,
+    whole_word: bool,
     exact_file_set: bool,
 ) -> tuple[list[PathSpec], bool]:
     """Resolve grep/rg scope paths, narrowing via Dropbox file search.
@@ -75,6 +78,15 @@ async def narrow_scope(
     Binary-extension candidates are dropped from the narrowed set because
     the recursive walk it replaces skips them.
 
+    Push-down also requires ``-w``. Dropbox search matches whole
+    words while grep matches substrings, so for a bare literal the
+    search result is a strict subset of the grep matches and a file
+    containing the literal only inside a longer word would be silently
+    dropped. Under ``-w`` both sides agree, and disagreement can only
+    over-fetch, which the local scan filters. A regex narrowed on an
+    extracted literal is excluded even under ``-w``, since the searched
+    term is then only part of the match.
+
     Args:
         accessor (DropboxAccessor): backend handle.
         index (IndexCacheStore): index for the glob-resolution fallback.
@@ -82,6 +94,7 @@ async def narrow_scope(
         pattern (str | None): the search pattern, or None for -f-only runs.
         fixed_string (bool): True if -F is set.
         recursive (bool): True if the scan walks directories.
+        whole_word (bool): True if -w is set; required for push-down.
         exact_file_set (bool): True when the output mode must see every
             file in scope, forcing the full walk.
 
@@ -92,8 +105,10 @@ async def narrow_scope(
     """
     query = (search_query(pattern, fixed_string)
              if pattern is not None and "\n" not in pattern else None)
-    use_search = (query is not None and recursive and not exact_file_set
-                  and accessor.config.content_search
+    literal = (pattern is not None
+               and is_literal_pattern(pattern, fixed_string))
+    use_search = (query is not None and whole_word and literal and recursive
+                  and not exact_file_set and accessor.config.content_search
                   and await _all_directories(accessor, index, paths))
     if use_search:
         assert query is not None

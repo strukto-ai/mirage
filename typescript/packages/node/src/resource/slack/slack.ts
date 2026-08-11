@@ -33,7 +33,11 @@ import {
   type RegisteredOp,
   type Resource,
 } from '@struktoai/mirage-core'
-import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
+import {
+  redactSlackConfig,
+  type SlackConfig,
+  type SlackConfigRedacted,
+} from '@struktoai/mirage-core'
 
 const resolveSlackGlob = makeResolveGlob(slackReaddir)
 
@@ -45,6 +49,11 @@ export interface SlackResourceState {
 export class SlackResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.SLACK
   readonly cachesReads: boolean = true
+  // Every listed file carries an exact size: chat.jsonl and users/*.json
+  // are rendered at readdir from payloads the listing already fetched
+  // (users.list is payload-identical to users.info, verified live), and
+  // file blobs carry Slack's upload byte count.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = SLACK_PROMPT
   readonly writePrompt: string = SLACK_WRITE_PROMPT
@@ -60,10 +69,6 @@ export class SlackResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 

@@ -15,8 +15,8 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.search import search_guild
-from mirage.resource.discord.config import DiscordConfig
 
 
 def _run(coro):

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.resource.linear.config import LinearConfig
+from mirage.core.linear.config import LinearConfig
 
 
 class LinearAccessor(Accessor):

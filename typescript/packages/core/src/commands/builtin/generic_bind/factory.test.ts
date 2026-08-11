@@ -55,4 +55,39 @@ describe('makeGenericCommands', () => {
     expect(local?.aggregate).not.toBeNull()
     expect(remote?.aggregate).toBeNull()
   })
+
+  it('skips a command whose required op the backend lacks', () => {
+    // A write op alone is not enough: rmdir needs rmdir, truncate needs
+    // truncate. Registering them anyway yields a command that can only throw.
+    const names = new Set(
+      makeGenericCommands('hf_buckets', makeOps({ write: () => Promise.resolve() })).map(
+        (c) => c.name,
+      ),
+    )
+    expect(names.has('tee')).toBe(true)
+    expect(names.has('rmdir')).toBe(false)
+    expect(names.has('truncate')).toBe(false)
+  })
+
+  it('registers ops-gated commands once the backend supplies them', () => {
+    const names = new Set(
+      makeGenericCommands(
+        'disk',
+        makeOps({
+          write: () => Promise.resolve(),
+          rmdir: () => Promise.resolve(),
+          truncate: () => Promise.resolve(),
+        }),
+      ).map((c) => c.name),
+    )
+    expect(names.has('rmdir')).toBe(true)
+    expect(names.has('truncate')).toBe(true)
+  })
+
+  it('registers shuf on a read-only backend', () => {
+    // Only `shuf -o` writes, so a backend with no write op still serves it.
+    const shuf = makeGenericCommands('chroma', makeOps()).find((c) => c.name === 'shuf')
+    expect(shuf).toBeDefined()
+    expect(shuf?.write).toBe(false)
+  })
 })

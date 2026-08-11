@@ -22,7 +22,7 @@ const DEC = new TextDecoder()
 
 async function runBc(
   stdin: string,
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const resource = new RAMResource()
   const cmd = GENERAL_BC[0]
@@ -84,13 +84,13 @@ describe('bc', () => {
   })
 
   it('-l enables math functions', async () => {
-    const r = await runBc('sqrt(16)\n', { l: true })
+    const r = await runBc('sqrt(16)\n', { args_l: true })
     expect(r.exitCode).toBe(0)
     expect(r.out.trim()).toBe('4')
   })
 
   it('-l enables sin', async () => {
-    const r = await runBc('s(0)\n', { l: true })
+    const r = await runBc('s(0)\n', { args_l: true })
     expect(r.exitCode).toBe(0)
     expect(r.out.trim()).toBe('0')
   })

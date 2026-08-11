@@ -78,7 +78,9 @@ async def test_cat_n_prepends_line_numbers(accessor):
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
             "mirage.commands.builtin.mongodb.cat.resolve_glob",
             new=AsyncMock(return_value=[_path()])):
-        source, _ = await cat(accessor, [_path()], index=NULL_INDEX, n=True)
+        source, _ = await cat(accessor, [_path()],
+                              index=NULL_INDEX,
+                              number=True)
         data = await _drain(source)
     lines = data.decode().splitlines()
     assert lines[0].lstrip().startswith("1\t")

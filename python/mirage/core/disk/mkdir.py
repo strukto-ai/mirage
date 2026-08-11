@@ -18,7 +18,10 @@ import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
+from mirage.core.disk.dest import mkdir_component_error
+from mirage.core.disk.errors import disk_error, disk_errors
 from mirage.types import PathSpec
+from mirage.utils.path import norm
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -32,15 +35,26 @@ async def mkdir(accessor: DiskAccessor,
                 path_spec: PathSpec,
                 parents: bool = False) -> None:
     path = path_spec.mount_path
-    p = _resolve(accessor.root, path)
+    root = accessor.root
+    p = _resolve(root, path)
     if parents:
-        await aiofiles.os.makedirs(p, exist_ok=True)
-    else:
+        # Not `disk_errors`: that restamps every OSError against the
+        # operand, which would undo the component naming below.
         try:
-            await aiofiles.os.mkdir(p)
-        except FileExistsError:
-            # mkdir -p semantics: an existing directory is success
-            pass
-    await invalidate_after_write(path_spec)
-    if parents:
+            await aiofiles.os.makedirs(p, exist_ok=True)
+        except NotADirectoryError as exc:
+            # The kernel names the whole path; GNU names the component it
+            # tripped on, so the chain is walked only now that it is known
+            # to be broken. A failure the walk cannot explain keeps the
+            # operand, like every other disk error.
+            named = await mkdir_component_error(root, path_spec, norm(path))
+            raise (named or disk_error(exc, path_spec.virtual)) from exc
+        except OSError as exc:
+            raise disk_error(exc, path_spec.virtual) from exc
+        await invalidate_after_write(path_spec)
         await invalidate_ancestors(path_spec)
+        return
+    # An existing target is EEXIST, not success: only -p is idempotent.
+    with disk_errors(path_spec.virtual):
+        await aiofiles.os.mkdir(p)
+    await invalidate_after_write(path_spec)

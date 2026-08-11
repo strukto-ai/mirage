@@ -42,7 +42,7 @@ import { appendBytes as appendCore } from '../../core/disk/append.ts'
 import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { copy as copyCore } from '../../core/disk/copy.ts'
 import { create as createCore } from '../../core/disk/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/disk/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/disk/du/index.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { find as findCore, type FindOptions as DiskFindOptions } from '../../core/disk/find.ts'
 import { mkdir as mkdirCore } from '../../core/disk/mkdir.ts'
@@ -87,6 +87,8 @@ async function walkFiles(root: string, current: string, out: string[]): Promise<
 export class DiskResource extends BaseResource implements Resource {
   readonly kind = ResourceName.DISK
   readonly cachesReads: boolean = false
+  // byte store: stat() sizes every file from metadata
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
   readonly prompt = DISK_PROMPT
   readonly root: string
@@ -103,8 +105,8 @@ export class DiskResource extends BaseResource implements Resource {
     mkdir: mkdirCore,
     read_stream: streamCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -118,12 +120,14 @@ export class DiskResource extends BaseResource implements Resource {
     this.accessor = new DiskAccessor(this.root)
   }
 
-  async open(): Promise<void> {
-    await mkdir(this.root, { recursive: true })
+  // The resolved root is the storage: two DiskResources built on the same
+  // directory are one store, however they were spelled.
+  override storageId(): string {
+    return `${this.kind}:${this.root}`
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
+  async open(): Promise<void> {
+    await mkdir(this.root, { recursive: true })
   }
 
   // A real filesystem reports real numbers (QUOTA). GNU df: used counts
@@ -207,7 +211,7 @@ export class DiskResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

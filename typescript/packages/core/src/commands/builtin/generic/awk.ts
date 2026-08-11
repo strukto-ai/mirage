@@ -12,12 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { awkStream } from './awk_helper.ts'
 import { USAGE, type AwkFlags } from './awk_types.ts'
+import { isMissingPath } from '../../../utils/errors.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -26,12 +30,11 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 function parseFlags(opts: CommandOpts): AwkFlags {
-  const rawV = opts.flags.v
-  const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
-  const rawF = opts.flags.f
-  const programFiles = Array.isArray(rawF) ? rawF : typeof rawF === 'string' ? [rawF] : []
+  const fl = new FlagView(opts.flags, specOf('awk'))
+  const assignments = fl.asList('v')
+  const programFiles = fl.asList('f')
   return {
-    fieldSeparator: typeof opts.flags.F === 'string' ? opts.flags.F : null,
+    fieldSeparator: fl.asStr('F') ?? null,
     assignments,
     programFiles,
   }
@@ -54,17 +57,17 @@ export async function awkGeneric(
       ''
     const pieces: string[] = []
     for (const programFile of f.programFiles) {
-      const programSpec = PathSpec.fromStrPath(programFile, mountKey(programFile, mountPrefix))
+      // A relative -f resolves against the cwd, like the shell classifier
+      // resolves python's PathSpec flag values.
+      const virtual = resolvePath(programFile, opts.cwd)
+      const programSpec = PathSpec.fromStrPath(virtual, mountKey(virtual, mountPrefix))
       try {
         pieces.push(DEC.decode(await materialize(stream(programSpec))).trim())
       } catch (err) {
-        const code = (err as { code?: string }).code
-        const msg =
-          code === 'ENOENT'
-            ? `awk: ${programFile}: No such file or directory`
-            : err instanceof Error
-              ? err.message
-              : String(err)
+        // GNU awk exits 2 when a -f program file cannot be opened;
+        // anything that is not absence keeps propagating.
+        if (!isMissingPath(err)) throw err
+        const msg = `awk: ${programFile}: No such file or directory`
         return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
       }
     }

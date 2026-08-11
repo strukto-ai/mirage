@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.constants import USAGE_EXIT, USAGE_HINT_PREFIX
+from mirage.commands.spec.constants import (OLD_OPTION_EXIT, PYTHON_NAMES,
+                                            PYTHON_USAGE, USAGE_EXIT,
+                                            USAGE_HINT_PREFIX)
 from mirage.commands.spec.types import CommandName
 
 
@@ -24,6 +26,18 @@ def usage_exit_code(cmd_name: str) -> int:
         cmd_name (str): command name.
     """
     return USAGE_EXIT.get(cmd_name, 1)
+
+
+def python_option_error(cmd_name: str, line: str) -> tuple[bytes, int]:
+    """CPython's option refusal: one message line, then its usage block.
+
+    Args:
+        cmd_name (str): the interpreter as invoked, which names the
+            usage line ('python' or 'python3').
+        line (str): the message line, newline included.
+    """
+    return (line + PYTHON_USAGE.format(name=cmd_name)).encode(), \
+        usage_exit_code(cmd_name)
 
 
 def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
@@ -44,10 +58,76 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
         return line.encode(), usage_exit_code(cmd_name)
+    if cmd_name in PYTHON_NAMES:
+        # CPython's own two shapes, which do not match each other: the
+        # short form capitalizes and takes a colon, the long form does
+        # neither. Both pinned on 3.12.13.
+        if token.startswith("--"):
+            return python_option_error(cmd_name, f"unknown option {token}\n")
+        dashed = token if token.startswith("-") else f"-{token}"
+        return python_option_error(cmd_name, f"Unknown option: {dashed}\n")
     if token.startswith("--"):
         line = f"{cmd_name}: unrecognized option '{token}'\n"
     else:
         line = f"{cmd_name}: invalid option -- '{token}'\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def ambiguous_option_error(cmd_name: str, token: str,
+                           candidates: tuple[str, ...]) -> tuple[bytes, int]:
+    """getopt_long refusal for an abbreviated long matching several options.
+
+    Shape pinned against real GNU (``grep --c``): the typed spelling,
+    then every possibility quoted in declaration order on one line. The
+    per-tool usage dump GNU appends is deliberately omitted, like
+    unknown_option_error.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        token (str): the typed abbreviated spelling ('--c').
+        candidates (tuple[str, ...]): matching declared spellings in
+            declaration order.
+    """
+    listed = " ".join(f"'{c}'" for c in candidates)
+    line = (f"{cmd_name}: option '{token}' is ambiguous; "
+            f"possibilities: {listed}\n")
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def invalid_int_error(cmd_name: str, option: str,
+                      value: str) -> tuple[bytes, int]:
+    """Refusal for a non-integer value on an int-typed option.
+
+    No GNU tool declares types through getopt (each words its own
+    refusal, e.g. ``head: invalid number of lines``), so this mirrors
+    argparse's ``invalid int value: 'abc'`` with the option attributed
+    the way invalid_argument_error does.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--port').
+        value (str): the rejected value.
+    """
+    line = f"{cmd_name}: invalid int value: '{value}' for '{option}'\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def invalid_float_error(cmd_name: str, option: str,
+                        value: str) -> tuple[bytes, int]:
+    """Refusal for a non-number value on a float-typed option.
+
+    Mirrors argparse's ``invalid float value: '5x'`` the same way
+    invalid_int_error mirrors the int wording.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--timeout').
+        value (str): the rejected value.
+    """
+    line = f"{cmd_name}: invalid float value: '{value}' for '{option}'\n"
     hint = f"Try '{cmd_name} --help' for more information.\n"
     return (line + hint).encode(), usage_exit_code(cmd_name)
 
@@ -59,10 +139,75 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         cmd_name (str): command name for the message and exit code.
         token (str): long token ('--max-depth') or short char ('m').
     """
+    if cmd_name in PYTHON_NAMES:
+        dashed = token if token.startswith("-") else f"-{token}"
+        return python_option_error(
+            cmd_name, f"Argument expected for the {dashed} option\n")
     if token.startswith("--"):
         line = f"{cmd_name}: option '{token}' requires an argument\n"
     else:
         line = f"{cmd_name}: option requires an argument -- '{token}'\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
+    """GNU tar refusal for an old-style cluster letter with no argument.
+
+    First line and exit pinned against GNU tar 1.35 (``tar xzf`` with
+    nothing after it, and ``tar cfC a.tar``, which names C). tar's own
+    wording, capital and full stop included, because it counts the
+    cluster's argument needs before argp sees the line at all.
+
+    The hint line is deliberately mirage's, not GNU's: GNU offers
+    ``Try 'tar --help' or 'tar --usage' for more information.`` because
+    argp gives every argp program a ``--usage``, and mirage's tar serves
+    only ``--help``. Naming a flag that does not exist would be worse
+    than the shorter hint, and every other refusal here words it this
+    way, so tar's two refusals stay consistent with each other.
+
+    Args:
+        cmd_name (str): command name for the message.
+        letter (str): the cluster letter whose argument ran out.
+    """
+    line = f"{cmd_name}: Old option '{letter}' requires an argument.\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), OLD_OPTION_EXIT
+
+
+def invalid_argument_error(cmd_name: str, option: str, value: str,
+                           choices: tuple[str, ...]) -> tuple[bytes, int]:
+    """GNU ARGMATCH refusal for a value outside a declared choices set.
+
+    Shape pinned against real GNU (``tee --output-error=bogus``): the
+    offending value, the option's canonical long spelling, then every
+    valid argument in declaration order, one per line.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--output-error').
+        value (str): the rejected value.
+        choices (tuple[str, ...]): allowed values in declaration order.
+    """
+    valid = "\n".join(f"  - '{c}'" for c in choices)
+    line = (f"{cmd_name}: invalid argument '{value}' for '{option}'\n"
+            f"Valid arguments are:\n{valid}\n")
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:
+    """Refusal for a declared required option absent from the line.
+
+    No GNU tool declares required options through getopt, so there is no
+    GNU shape to pin; this follows the unrecognized-option pattern
+    (click reports the same condition as "Missing option").
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): canonical dashed spelling ('--output').
+    """
+    line = f"{cmd_name}: option '{option}' is required\n"
     hint = f"Try '{cmd_name} --help' for more information.\n"
     return (line + hint).encode(), usage_exit_code(cmd_name)
 

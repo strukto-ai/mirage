@@ -45,11 +45,11 @@ async def test_watch_lazily_attaches_default_runtime():
     # ws.notify is the consumer's injection point.
     ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    assert ws._watch_runtime is None
+    assert ws._watch.runtime is None
     agen = ws.watch("/data")
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
-    assert ws._watch_runtime is not None
+    assert ws._watch.runtime is not None
     await ws.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
     got = await asyncio.wait_for(task, timeout=2)
     assert got.path.virtual == "/data/new.txt"
@@ -60,9 +60,9 @@ async def test_watch_lazily_attaches_default_runtime():
 @pytest.mark.asyncio
 async def test_idle_workspace_has_no_watch_state():
     ws = Workspace({"/data": RAMResource()})
-    assert ws._watch_runtime is None
+    assert ws._watch.runtime is None
     await ws.close()
-    assert ws._watch_runtime is None
+    assert ws._watch.runtime is None
 
 
 @pytest.mark.asyncio
@@ -80,7 +80,7 @@ async def test_attached_custom_runtime_serves_watch():
     ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     watcher = _attach_custom(ws, max_pending=8)
-    assert ws._watch_runtime is watcher
+    assert ws._watch.runtime is watcher
     agen = ws.watch(PathSpec.from_str_path("/data"))
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
@@ -102,7 +102,7 @@ async def test_detach_closes_queues_and_resets_to_idle():
     await asyncio.sleep(0.03)
     await ws.detach_watch_runtime()
     assert watcher._closed
-    assert ws._watch_runtime is None
+    assert ws._watch.runtime is None
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(task, timeout=2)
     await agen.aclose()
@@ -118,8 +118,8 @@ async def test_detach_then_lazy_reattach_delivers_again():
     agen = ws.watch("/data")
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
-    assert ws._watch_runtime is not None
-    assert ws._watch_runtime is not old
+    assert ws._watch.runtime is not None
+    assert ws._watch.runtime is not old
     await ws.notify(_change(FileChangeKind.CREATE, "/data/again.txt"))
     got = await asyncio.wait_for(task, timeout=2)
     assert got.path.virtual == "/data/again.txt"
@@ -131,7 +131,7 @@ async def test_detach_then_lazy_reattach_delivers_again():
 async def test_detach_idle_workspace_is_noop():
     ws = Workspace({"/data": RAMResource()})
     await ws.detach_watch_runtime()
-    assert ws._watch_runtime is None
+    assert ws._watch.runtime is None
     await ws.close()
 
 
@@ -146,7 +146,7 @@ async def test_each_watch_owns_its_queue():
     task_a = asyncio.ensure_future(gen_a.__anext__())
     task_b = asyncio.ensure_future(gen_b.__anext__())
     await asyncio.sleep(0.03)
-    runtime = ws._watch_runtime
+    runtime = ws._watch.runtime
     assert len(runtime._subscribers) == 2
     queues = {id(sub.queue) for sub in runtime._subscribers}
     assert len(queues) == 2
@@ -283,3 +283,16 @@ async def test_close_workspace_stops_watcher():
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(task, timeout=2)
     await agen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_closed_workspace_rejects_watch_operations():
+    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.close()
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.watch(PathSpec.from_str_path("/data"))
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        await ws.notify(_change(FileChangeKind.CREATE, "/data/a.txt"))
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.attach_watch_runtime(Watcher(ws.registry))

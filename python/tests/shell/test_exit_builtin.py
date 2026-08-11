@@ -72,9 +72,7 @@ def test_exit_status_wraps_mod_256(shell):
 
 
 def test_unsupported_construct_is_graceful(shell):
-    code, out, err = shell.mirage_result(
-        "for ((i=0;i<3;i++)); do echo $i; done")
+    code, out, err = shell.mirage_result("case x")
     assert code == 2
     assert out == ""
-    assert err == ("mirage: unsupported shell construct: "
-                   "c_style_for_statement\n")
+    assert err == "mirage: syntax error near 'case x'\n"

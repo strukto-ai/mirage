@@ -18,19 +18,19 @@ import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, FlagView, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--card_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--name', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--desc', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--desc_file', valueKind: OperandKind.PATH }),
-    new Option({ long: '--due', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--closed', valueKind: OperandKind.TEXT }),
+    new Option({ long: '--card_id', type: 'str' }),
+    new Option({ long: '--name', type: 'str' }),
+    new Option({ long: '--desc', type: 'str' }),
+    new Option({ long: '--desc_file', type: 'path' }),
+    new Option({ long: '--due', type: 'str' }),
+    new Option({ long: '--closed', type: 'str' }),
   ],
 })
 
@@ -45,24 +45,27 @@ async function trelloCardUpdateCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const cardId = opts.flags.card_id
-  if (typeof cardId !== 'string' || cardId === '') {
+  const fl = new FlagView(opts.flags, SPEC)
+  const cardId = fl.asStr('card_id')
+  if (cardId === undefined || cardId === '') {
     throw new Error('--card_id is required')
   }
-  const name = typeof opts.flags.name === 'string' ? opts.flags.name : null
-  const inlineDesc = typeof opts.flags.desc === 'string' ? opts.flags.desc : null
-  const descFile = typeof opts.flags.desc_file === 'string' ? opts.flags.desc_file : null
+  const name = fl.asStr('name') ?? null
+  const inlineDesc = fl.asStr('desc') ?? null
+  const descFile = fl.asStr('desc_file') ?? null
   let desc: string | undefined
   if (inlineDesc !== null || descFile !== null || opts.stdin !== null) {
     desc = await resolveTextInput(accessor.transport, {
       inlineText: inlineDesc,
       filePath: descFile,
+      mountPrefix: opts.mountPrefix ?? '',
       stdin: opts.stdin,
       errorMessage: 'desc is required',
     })
   }
-  const closed = typeof opts.flags.closed === 'string' ? parseBool(opts.flags.closed) : null
-  const due = typeof opts.flags.due === 'string' ? opts.flags.due : null
+  const closedFlag = fl.asStr('closed')
+  const closed = closedFlag === undefined ? null : parseBool(closedFlag)
+  const due = fl.asStr('due') ?? null
   const card = await cardUpdate(accessor.transport, {
     cardId,
     ...(name !== null ? { name } : {}),

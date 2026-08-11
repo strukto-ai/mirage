@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.onedrive.copy import copy as _copy
 from mirage.core.onedrive.create import create as _create
-from mirage.core.onedrive.du import du as _du
-from mirage.core.onedrive.du import du_all as _du_all
+from mirage.core.onedrive.du import entries as _du_entries
+from mirage.core.onedrive.du import size as _du_size
 from mirage.core.onedrive.exists import exists as _exists
 from mirage.core.onedrive.find import find as _find
 from mirage.core.onedrive.mkdir import mkdir as _mkdir
@@ -34,6 +34,7 @@ from mirage.core.onedrive.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: True,
@@ -50,8 +51,7 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du=DuOps(size=_du_size, entries=_du_entries),
 )
 
 resolve_glob = IO.resolve_glob

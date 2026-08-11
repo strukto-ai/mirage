@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { gunzip } from '../../../utils/compress.ts'
@@ -92,6 +94,7 @@ export async function zgrepGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('zgrep'))
   const resolution = await resolvePatternFromFlags(
     'zgrep',
     texts,
@@ -114,21 +117,22 @@ export async function zgrepGeneric(
     ]
   }
   const rawPattern = resolution.pattern
-  const extendedRegex = opts.flags.E === true
-  const fixedString = opts.flags.F === true && !neverMatch
-  const wholeWord = opts.flags.w === true
-  const ignoreCase = opts.flags.i === true
-  const invert = opts.flags.v === true
-  const countOnly = opts.flags.c === true
-  const lineNumbers = opts.flags.n === true
-  const onlyMatching = opts.flags.o === true
-  const quiet = opts.flags.q === true
-  const filesOnly = opts.flags.args_l === true
-  const forceH = opts.flags.H === true
-  const hideH = opts.flags.h === true
-  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
-  void extendedRegex
-  const pattern = compilePattern(rawPattern, ignoreCase, fixedString, wholeWord)
+  // zgrep is grep over decompressed bytes, so it reads a basic expression
+  // unless -E says otherwise; -G asks for the default explicitly.
+  const basicRegexp = !fl.asBool('E')
+  const fixedString = fl.asBool('F') && !neverMatch
+  const wholeWord = fl.asBool('w')
+  const ignoreCase = fl.asBool('i')
+  const invert = fl.asBool('v')
+  const countOnly = fl.asBool('c')
+  const lineNumbers = fl.asBool('n')
+  const onlyMatching = fl.asBool('o')
+  const quiet = fl.asBool('q')
+  const filesOnly = fl.asBool('args_l')
+  const forceH = fl.asBool('H')
+  const hideH = fl.asBool('h')
+  const maxCount = fl.asInt('m') ?? null
+  const pattern = compilePattern(rawPattern, ignoreCase, fixedString, wholeWord, basicRegexp)
 
   const multi = paths.length > 1
   const showFilename = forceH || (multi && !hideH)

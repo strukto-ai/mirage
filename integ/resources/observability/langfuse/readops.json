@@ -1,0 +1,342 @@
+{
+  "cases": [
+    {
+      "id": "lf_read_00",
+      "seq": 601000,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "wc -l /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "32 /lf/traces/trace-beta.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_01",
+      "seq": 601001,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "head -n 2 /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"id\": \"trace-beta\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_02",
+      "seq": 601002,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "tail -n 1 /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_03",
+      "seq": 601003,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "sed -n 2p /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"id\": \"trace-beta\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_04",
+      "seq": 601004,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "nl /lf/traces/trace-beta.json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t{\n     2\t  \"id\": \"trace-beta\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_05",
+      "seq": 601005,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "grep -c '\"id\"' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_06",
+      "seq": 601006,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "grep -n item-one /lf/datasets/eval-basic/items.jsonl | cut -d: -f1",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_07",
+      "seq": 601007,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "grep -o search-query /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "search-query\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_08",
+      "seq": 601008,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "rg -c userId /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_09",
+      "seq": 601009,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "cut -c1-6 /lf/traces/trace-beta.json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"id\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_10",
+      "seq": 601010,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "awk 'NR==1' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_11",
+      "seq": 601011,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "file /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/traces/trace-beta.json: json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_12",
+      "seq": 601012,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "strings /lf/traces/trace-beta.json | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"id\": \"trace-beta\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_13",
+      "seq": 601013,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "stat -c %F /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "regular file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_14",
+      "seq": 601014,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "realpath /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/traces/trace-beta.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_15",
+      "seq": 601015,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "test -f /lf/traces/trace-beta.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_16",
+      "seq": 601016,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "test -s /lf/traces/trace-beta.json; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_17",
+      "seq": 601017,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "wc -c /lf/datasets/eval-empty/items.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 /lf/datasets/eval-empty/items.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_18",
+      "seq": 601018,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "md5sum /lf/datasets/eval-empty/items.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "d41d8cd98f00b204e9800998ecf8427e  /lf/datasets/eval-empty/items.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_19",
+      "seq": 601019,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "base64 /lf/datasets/eval-empty/items.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_20",
+      "seq": 601020,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "cat /lf/datasets/eval-empty/items.jsonl | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_21",
+      "seq": 601021,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "du -sh /lf/traces",
+      "expect": {
+        "exit": 0,
+        "stdout": "0B\t/lf/traces\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_22",
+      "seq": 601022,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "tree /lf/datasets/eval-empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "/lf/datasets/eval-empty\n|-- items.jsonl\n`-- runs\n\n2 directories, 1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_23",
+      "seq": 601023,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.tags | sort | join(\",\")' /lf/traces/trace-beta.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_24",
+      "seq": 601024,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.name' /lf/traces/trace-beta.json | rev",
+      "expect": {
+        "exit": 0,
+        "stdout": "yreuq-hcraes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lf_read_25",
+      "seq": 601025,
+      "targets": [
+        "langfuse"
+      ],
+      "command": "jq -r '.name' /lf/traces/trace-alpha.json /lf/traces/trace-gamma.json | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "checkout-flow\nsummarize-doc\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

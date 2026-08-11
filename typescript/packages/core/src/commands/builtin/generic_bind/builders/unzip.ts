@@ -18,7 +18,8 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const UNZIP_BUILDER: Builder = {
   name: 'unzip',
   write: true,
-  fn: async (ops, accessor, paths, _texts, opts) => {
+  requirements: ['write', 'mkdir'],
+  fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const { write, mkdir } = ops
     if (write === undefined || mkdir === undefined) {
@@ -27,6 +28,7 @@ export const UNZIP_BUILDER: Builder = {
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return unzipGeneric(
       resolved,
+      texts,
       opts,
       (p) => ops.readStream(accessor, p, idx),
       (p, d) => write(accessor, p, d),

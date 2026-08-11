@@ -32,6 +32,7 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
 
     return {
         "from": _parse_address(msg.get("From", "")),
+        "reply_to": _parse_address_list(msg.get("Reply-To", "")),
         "to": _parse_address_list(msg.get("To", "")),
         "cc": _parse_address_list(msg.get("Cc", "")),
         "subject": msg.get("Subject", ""),

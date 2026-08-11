@@ -9,6 +9,7 @@ from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.executor.fanout import (_adjust_depth_texts,
                                               _fan_out_traversal,
+                                              _filter_under_prefixes,
                                               _synthesize_find_mount_entries)
 
 
@@ -23,9 +24,11 @@ class TraversalMount:
         self.output = output
         self.exit_code = exit_code
         self.error = error
-        self.command_safeguards = {}
+        self.command_limits = {}
+        self.calls: list[dict] = []
 
     async def execute_cmd(self, *args, **kwargs):
+        self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         stderr = b"backend failed\n" if self.exit_code else None
@@ -47,43 +50,58 @@ def _mounts(*prefixes):
 
 def test_synthesize_no_expression_emits_all():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, []) == "/ram\n/disk"
+    assert _synthesize_find_mount_entries("/", desc, [], "/") == "/ram\n/disk"
 
 
 def test_synthesize_positive_name():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc,
-                                          ["-name", "ram"]) == "/ram"
+    assert _synthesize_find_mount_entries("/", desc, ["-name", "ram"],
+                                          "/") == "/ram"
 
 
 def test_synthesize_honors_not():
     desc = _mounts("/ram/", "/disk/", "/notes/")
-    out = _synthesize_find_mount_entries("/", desc, ["-not", "-name", "ram"])
+    out = _synthesize_find_mount_entries("/", desc, ["-not", "-name", "ram"],
+                                         "/")
     assert out == "/disk\n/notes"
 
 
 def test_synthesize_honors_or():
     desc = _mounts("/ram/", "/disk/", "/notes/")
     out = _synthesize_find_mount_entries(
-        "/", desc, ["-name", "ram", "-o", "-name", "disk"])
+        "/", desc, ["-name", "ram", "-o", "-name", "disk"], "/")
     assert out == "/ram\n/disk"
 
 
 def test_synthesize_type_file_excludes_mount_dirs():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, ["-type", "f"]) == ""
+    assert _synthesize_find_mount_entries("/", desc, ["-type", "f"], "/") == ""
 
 
 def test_synthesize_type_dir_includes_mount_dirs():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc,
-                                          ["-type", "d"]) == "/ram\n/disk"
+    assert _synthesize_find_mount_entries("/", desc, ["-type", "d"],
+                                          "/") == "/ram\n/disk"
 
 
 def test_synthesize_maxdepth_window():
     desc = _mounts("/ram/", "/a/b/")
-    assert _synthesize_find_mount_entries("/", desc,
-                                          ["-maxdepth", "1"]) == "/ram"
+    assert _synthesize_find_mount_entries("/", desc, ["-maxdepth", "1"],
+                                          "/") == "/ram\n/a"
+
+
+def test_synthesize_namespace_ancestors():
+    desc = _mounts("/ghost/very/deep/")
+    assert _synthesize_find_mount_entries(
+        "/", desc, [], "/") == "/ghost\n/ghost/very\n/ghost/very/deep"
+    assert _synthesize_find_mount_entries(
+        "/ghost", desc, [], "/ghost") == "/ghost/very\n/ghost/very/deep"
+
+
+def test_synthesize_shared_ancestor_once():
+    desc = _mounts("/a/b/", "/a/c/")
+    assert _synthesize_find_mount_entries("/", desc, [],
+                                          "/") == "/a\n/a/b\n/a/c"
 
 
 def test_adjust_depth_texts_reduces_maxdepth_by_delta():
@@ -122,6 +140,49 @@ def test_maxdepth_applies_to_child_mount_depth_end_to_end():
     assert "/data/a/b.txt" not in out
 
 
+def _nested_ghost_workspace() -> Workspace:
+    parent = RAMResource()
+    parent._store.files["/top.txt"] = b"hello\n"
+    deep = RAMResource()
+    deep._store.files["/leaf.txt"] = b"deep\n"
+    return Workspace(
+        resources={
+            "/": (parent, MountMode.EXEC),
+            "/ghost/very/deep/": (deep, MountMode.EXEC),
+        })
+
+
+def test_find_ls_renders_namespace_ancestor_rows():
+    ws = _nested_ghost_workspace()
+    io = asyncio.run(ws.execute("find / -ls"))
+    assert io.exit_code == 0
+    out = (io.stdout if isinstance(io.stdout, bytes) else b"").decode()
+    rows = [
+        line.rsplit("\t", 1)[-1].rsplit(" ", 1)[-1]
+        for line in out.splitlines()
+    ]
+    assert "/ghost" in rows
+    assert "/ghost/very" in rows
+    assert "/ghost/very/deep" in rows
+
+
+def test_find_delete_skips_namespace_ancestors():
+    ws = _nested_ghost_workspace()
+
+    async def scenario():
+        io = await ws.execute("find / -delete")
+        after = await ws.execute("find /")
+        return io, after
+
+    io, after = asyncio.run(scenario())
+    assert io.exit_code == 0
+    assert (io.stderr if isinstance(io.stderr, bytes) else b"") == b""
+    out = (after.stdout if isinstance(after.stdout, bytes) else b"").decode()
+    assert "/ghost/very/deep" in out
+    assert "/top.txt" not in out
+    assert "leaf.txt" not in out
+
+
 def test_fanout_preserves_partial_failure_exit_code():
     primary = TraversalMount("/", output=b"root\n")
     child = TraversalMount("/data/", exit_code=1)
@@ -142,3 +203,246 @@ def test_fanout_propagates_unexpected_backend_error():
             _fan_out_traversal("tree", [path], [], {},
                                TraversalRegistry([child]), primary, "/",
                                "tree /", None))
+
+
+def test_filter_reads_du_paths_after_the_size_column():
+    """du renders SIZE\\tPATH, so the path is the second field; reading
+    the first kept every shadowed du row in the parent's output."""
+    out = asyncio.run(
+        _filter_under_prefixes(b"1000\t/base/inner\n1010\t/base\n",
+                               ["/base/inner"], "du"))
+    assert out == b"1010\t/base\n"
+
+
+def test_filter_still_reads_find_and_grep_paths_from_the_front():
+    out = asyncio.run(
+        _filter_under_prefixes(b"/base/inner/x\n/base/y\n", ["/base/inner"],
+                               "find"))
+    assert out == b"/base/y\n"
+    out = asyncio.run(
+        _filter_under_prefixes(b"/base/inner/x:hit\n/base/y:hit\n",
+                               ["/base/inner"], "grep"))
+    assert out == b"/base/y:hit\n"
+
+
+def _shadowed_workspace(top: int = 10, real: int = 7) -> Workspace:
+    parent = RAMResource()
+    parent._store.files["/top.txt"] = b"T" * top
+    parent._store.dirs.add("/inner")
+    parent._store.files["/inner/leftover.txt"] = b"S" * 1000
+    child = RAMResource()
+    child._store.files["/real.txt"] = b"R" * real
+    return Workspace(
+        resources={
+            "/base/": (parent, MountMode.EXEC),
+            "/base/inner/": (child, MountMode.EXEC),
+        })
+
+
+def _stdout(io) -> str:
+    return (io.stdout if isinstance(io.stdout, bytes) else b"").decode()
+
+
+def test_du_fanout_folds_the_child_mount_into_its_ancestors():
+    """A nested mount's bytes belong to every directory above it.
+
+    Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
+    ``du --apparent-size -B1 base`` prints ``7 base/inner`` then
+    ``17 base``, children before parents. Only ``-x``, which mirage does
+    not implement, reports the parent's own 10. The 1000 shadowed bytes
+    under the mount point count nowhere, in GNU or here.
+    """
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du /base"))
+    assert _stdout(io) == "7\t/base/inner\n17\t/base\n"
+
+
+def test_du_a_fanout_hides_shadowed_leaves():
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du -a /base"))
+    assert _stdout(io) == ("7\t/base/inner/real.txt\n"
+                           "7\t/base/inner\n"
+                           "10\t/base/top.txt\n"
+                           "17\t/base\n")
+
+
+def test_du_s_fanout_is_one_row_per_operand():
+    """``-s`` is one total per argument, mount boundary or not (GNU 9.7
+    prints the single row ``17 base``)."""
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du -s /base"))
+    assert _stdout(io) == "17\t/base\n"
+
+
+def test_du_c_fanout_prints_one_total_across_the_mounts():
+    """GNU ``du -c`` prints exactly one grand total covering everything it
+    walked. Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
+    ``du -c --apparent-size -B1 base`` reports ``7 base/inner``,
+    ``17 base``, ``17 total``."""
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du -c /base"))
+    assert _stdout(io) == "7\t/base/inner\n17\t/base\n17\ttotal\n"
+
+
+def test_du_sc_fanout_prints_one_total():
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du -sc /base"))
+    assert _stdout(io) == "17\t/base\n17\ttotal\n"
+
+
+def test_du_ch_fanout_humanizes_the_total_once():
+    # Summing each mount's already-humanized total would round twice and
+    # report 3.0K; the sub-runs render exact bytes and only the merge
+    # humanizes.
+    ws = _shadowed_workspace(top=1500, real=1500)
+    io = asyncio.run(ws.execute("du -ch /base"))
+    assert _stdout(io) == "1.5K\t/base/inner\n2.9K\t/base\n2.9K\ttotal\n"
+
+
+def test_du_max_depth_prunes_printing_not_accounting():
+    """``--max-depth`` prunes only what is printed: the mount's bytes
+    still reach the operand row (GNU 9.7 prints ``10 base/sub`` and
+    ``20 base`` for a mount two levels down)."""
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("du --max-depth=0 /base"))
+    assert _stdout(io) == "17\t/base\n"
+
+
+def test_fanout_offers_links_and_mounts_to_every_sub_run():
+    primary = TraversalMount("/", output=b"root\n")
+    child = TraversalMount("/data/")
+    path = PathSpec.from_str_path("/")
+    view = SimpleNamespace()
+    asyncio.run(
+        _fan_out_traversal("find", [path], [], {},
+                           TraversalRegistry([child]),
+                           primary,
+                           "/",
+                           "find /",
+                           None,
+                           mounts=view,
+                           links=view))
+    for mount in (primary, child):
+        assert mount.calls[0]["links"] is view
+        assert mount.calls[0]["mounts"] is view
+
+
+def _linked_workspace(nested: bool) -> Workspace:
+    parent = RAMResource()
+    parent._store.files["/top.txt"] = b"T" * 10
+    parent._store.dirs.add("/inner")
+    resources = {"/base/": (parent, MountMode.EXEC)}
+    if nested:
+        child = RAMResource()
+        child._store.files["/real.txt"] = b"R" * 7
+        resources["/base/inner/"] = (child, MountMode.EXEC)
+    ws = Workspace(resources=resources)
+    asyncio.run(ws.execute("ln -s /base/top.txt /base/link.txt"))
+    return ws
+
+
+def test_fanout_sub_runs_still_see_symlinks():
+    """A nested mount is not a reason for a link to disappear. GNU lists
+    ``/base/link.txt`` and sizes it at 13 (its target string) whether or
+    not something is mounted at ``/base/inner``; the fan-out used to run
+    every sub-command link-blind, so both rows vanished."""
+    ws = _linked_workspace(nested=True)
+    found = _stdout(asyncio.run(ws.execute("find /base")))
+    assert "/base/link.txt" in found
+    sized = _stdout(asyncio.run(ws.execute("du -a /base")))
+    assert "13\t/base/link.txt\n" in sized
+    # Post-order, siblings sorted: inner, link.txt, top.txt, then the
+    # operand carrying all three (7 + 13 + 10).
+    assert sized == ("7\t/base/inner/real.txt\n"
+                     "7\t/base/inner\n"
+                     "13\t/base/link.txt\n"
+                     "10\t/base/top.txt\n"
+                     "30\t/base\n")
+
+
+def test_fanout_link_rows_match_the_unmounted_tree():
+    plain = _stdout(
+        asyncio.run(_linked_workspace(nested=False).execute("du -a /base")))
+    assert "13\t/base/link.txt\n" in plain
+
+
+def _spanning_workspace() -> Workspace:
+    parent = RAMResource()
+    parent._store.files["/top.txt"] = b"T" * 10
+    parent._store.dirs.add("/inner")
+    parent._store.files["/inner/leftover.txt"] = b"S" * 1000
+    child = RAMResource()
+    child._store.files["/real.txt"] = b"hit here\n"
+    other = RAMResource()
+    other._store.files["/o.txt"] = b"hit there\n"
+    return Workspace(
+        resources={
+            "/base/": (parent, MountMode.EXEC),
+            "/base/inner/": (child, MountMode.EXEC),
+            "/other/": (other, MountMode.EXEC),
+        })
+
+
+def test_operands_spanning_mounts_still_fan_out_inside_each_operand():
+    """A per-operand native run is single-mount, so an operand holding a
+    nested mount used to report the parent's shadowed keys and none of the
+    mount's own: `du /base` and `du /base /other` disagreed about the same
+    tree. GNU counts a mounted filesystem in the same run either way."""
+    ws = _spanning_workspace()
+    io = asyncio.run(ws.execute("du -c /base /other"))
+    assert _stdout(io) == ("9\t/base/inner\n"
+                           "19\t/base\n"
+                           "10\t/other\n"
+                           "29\ttotal\n")
+
+
+def test_operands_spanning_mounts_fan_out_for_find_and_grep():
+    ws = _spanning_workspace()
+    found = _stdout(asyncio.run(ws.execute("find /base /other")))
+    assert "/base/inner/real.txt" in found
+    assert "/base/inner/leftover.txt" not in found
+    hits = _stdout(asyncio.run(ws.execute("grep -r hit /base /other")))
+    assert hits == ("/base/inner/real.txt:hit here\n"
+                    "/other/o.txt:hit there\n")
+
+
+def test_ls_r_drops_the_shadowed_group_whole():
+    """`ls -R` renders `PATH:` then bare names, so a line filter that reads
+    a path off every line drops the header and keeps the entries, landing
+    the shadowed `leftover.txt` in `/base`'s own group. GNU (coreutils 9.7
+    over a tmpfs at the same spot) prints the mounted directory's entries
+    under its own header, one blank line between groups."""
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("ls -R /base"))
+    assert _stdout(io) == ("/base:\ninner\ntop.txt\n\n"
+                           "/base/inner:\nreal.txt\n")
+
+
+def test_tree_renders_one_document_across_a_nested_mount():
+    """`tree` is not fanned out at all: one root line, one drawing, one
+    summary, with the nested mount crossed inside the generic. Pinned on
+    tree 2.2.1, which draws the mounted entries under the mount point and
+    none of the ones it covers."""
+    ws = _shadowed_workspace()
+    io = asyncio.run(ws.execute("tree /base"))
+    assert _stdout(io) == ("/base\n"
+                           "|-- inner\n"
+                           "|   `-- real.txt\n"
+                           "`-- top.txt\n"
+                           "\n"
+                           "2 directories, 2 files\n")
+
+
+def test_ls_r_spanning_mounts_separates_every_group():
+    ws = _spanning_workspace()
+    io = asyncio.run(ws.execute("ls -R /base /other"))
+    assert _stdout(io) == ("/base:\ninner\ntop.txt\n\n"
+                           "/base/inner:\nreal.txt\n\n"
+                           "/other:\no.txt\n")
+
+
+def test_synthesize_respells_entries_with_the_typed_base():
+    desc = _mounts("/ram/", "/disk/")
+    assert _synthesize_find_mount_entries("/", desc, [],
+                                          ".") == "./ram\n./disk"
+    assert _synthesize_find_mount_entries("/", desc, [], "") == "ram\ndisk"

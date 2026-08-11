@@ -44,3 +44,45 @@ def test_dev_zero_head(shell):
 def test_dev_null_stat(shell):
     cmd = "if [ -f /dev/null ]; then echo exists; fi"
     assert shell.mirage(cmd) == "exists\n"
+
+
+def test_rm_dev_null_exits_zero_and_removes(shell):
+    exit_code, stdout, stderr = shell.mirage_result("rm /dev/null")
+    assert exit_code == 0
+    assert stdout == ""
+    assert stderr == ""
+    listing = shell.mirage("ls /dev").splitlines()
+    assert "zero" in listing
+    assert "null" not in listing
+    exit_code, _, stderr = shell.mirage_result("cat /dev/null")
+    assert exit_code != 0
+    assert "No such file or directory" in stderr
+
+
+def test_rm_v_dev_null_prints_true_claim(shell):
+    exit_code, stdout, _ = shell.mirage_result("rm -v /dev/null")
+    assert exit_code == 0
+    assert stdout == "removed '/dev/null'\n"
+    assert "null" not in shell.mirage("ls /dev").splitlines()
+
+
+def test_rm_rf_dev_null_removes(shell):
+    assert shell.mirage_exit("rm -rf /dev/null") == 0
+    assert "null" not in shell.mirage("ls /dev").splitlines()
+
+
+def test_redirect_recreates_removed_dev_null_as_regular_file(shell):
+    shell.mirage("rm /dev/null")
+    assert shell.mirage_exit("echo recreated > /dev/null") == 0
+    assert shell.mirage("cat /dev/null") == "recreated\n"
+    cmd = "if [ -f /dev/null ]; then echo regular; fi"
+    assert shell.mirage(cmd) == "regular\n"
+
+
+def test_rm_dev_zero_is_symmetric(shell):
+    assert shell.mirage_exit("rm /dev/zero") == 0
+    listing = shell.mirage("ls /dev").splitlines()
+    assert "null" in listing
+    assert "zero" not in listing
+    assert shell.mirage_exit("echo z > /dev/zero") == 0
+    assert shell.mirage("cat /dev/zero") == "z\n"

@@ -27,7 +27,7 @@ const DEC = new TextDecoder()
 async function runJq(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = DISCORD_JQ[0]
@@ -82,7 +82,7 @@ describe('discord jq', () => {
         }),
       ],
       ['.[].content'],
-      { r: true },
+      { raw_output: true },
       { index: idx, transport },
     )
     const lines = out.stdout.split('\n').filter((s) => s !== '')

@@ -14,31 +14,27 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 format_stdin, parse_flags)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
-from mirage.commands.builtin.generic_bind.provision import \
-    make_file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
-from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("wc",
-         resource="history",
-         spec=SPECS["wc"],
-         provision=make_file_read_provision(history_stat))
+@command("wc", resource="history", spec=SPECS["wc"], aggregate=wc_aggregate)
 async def wc(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

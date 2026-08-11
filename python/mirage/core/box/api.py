@@ -65,8 +65,20 @@ async def get_folder_info(tm: BoxTokenManager,
     return await box_get(tm, f"{tm.api_base}/folders/{folder_id}")
 
 
-async def download_file(tm: BoxTokenManager, file_id: str) -> bytes:
-    return await box_get_bytes(tm, f"{tm.api_base}/files/{file_id}/content")
+async def download_file(tm: BoxTokenManager,
+                        file_id: str,
+                        range_header: str | None = None) -> bytes:
+    """Download a file's content, optionally only a byte range of it.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        file_id (str): Box file id.
+        range_header (str | None): an HTTP ``Range`` value, or None for
+            the whole file.
+    """
+    return await box_get_bytes(tm,
+                               f"{tm.api_base}/files/{file_id}/content",
+                               range_header=range_header)
 
 
 def download_file_stream(tm: BoxTokenManager,

@@ -14,9 +14,9 @@
 
 import { mountPrefixOf } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
-import { enotdir } from '@struktoai/mirage-core'
+import { enoent, enotdir } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, iterEntries, norm, resolveDirHandle } from './utils.ts'
+import { isNotFound, isTypeMismatch, iterEntries, norm, resolveDirHandle } from './utils.ts'
 
 export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<string[]> {
   const root = accessor.rootHandle
@@ -25,10 +25,12 @@ export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<s
   try {
     dir = await resolveDirHandle(root, virtual, { create: false })
   } catch (err) {
-    if (isNotFound(err)) throw enotdir(path)
-    if (err instanceof DOMException && err.name === 'TypeMismatchError') {
-      throw enotdir(path)
-    }
+    // OPFS already separates the two cases the way the kernel does: a missing
+    // component is NotFoundError (ENOENT), a component that exists but is a
+    // file is TypeMismatchError (ENOTDIR). Keep the split instead of
+    // collapsing both into one errno.
+    if (isNotFound(err)) throw enoent(path)
+    if (isTypeMismatch(err)) throw enotdir(path)
     throw err
   }
   const names: string[] = []

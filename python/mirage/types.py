@@ -16,24 +16,25 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated, Any, ClassVar, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
 
 class Aggr:
-    """Declares how one CommandSafeguard field aggregates across guards.
+    """Declares how one Limit field aggregates across stacked limits.
 
     Attach to a field via Annotated[..., Aggr(rule)]; ``rule`` takes the
-    list of that field's values across the stacked safeguards and returns
-    the aggregated value. CommandSafeguard.aggr reads these rules so each
+    list of that field's values across the stacked limits and returns
+    the aggregated value. Limit.aggr reads these rules so each
     field's aggregation behavior lives next to the field.
 
     Args:
-        reduce (Callable[[list[Any]], object]): the per-field aggregation rule.
+        reduce (Callable[[list[Any]], Any]): the per-field
+            aggregation rule.
     """
 
-    def __init__(self, reduce: Callable[[list[Any]], object]) -> None:
+    def __init__(self, reduce: Callable[[list[Any]], Any]) -> None:
         self.reduce = reduce
 
 
@@ -57,6 +58,7 @@ class LsSortBy(str, Enum):
 
 class FileType(str, Enum):
     DIRECTORY = "directory"
+    SYMLINK = "symlink"
     TEXT = "text"
     BINARY = "binary"
     JSON = "json"
@@ -67,10 +69,12 @@ class FileType(str, Enum):
     ZIP = "application/zip"
     GZIP = "application/gzip"
     PDF = "application/pdf"
-    PARQUET = "parquet"
-    ORC = "orc"
-    FEATHER = "feather"
-    HDF5 = "hdf5"
+
+
+# FileStat.extra key holding a symlink's target, verbatim as it was
+# typed. A link has no backend inode, so this is the only place the
+# target travels with the stat row.
+LINK_TARGET_KEY = "link_target"
 
 
 class FileStat(BaseModel):
@@ -88,6 +92,16 @@ class FileStat(BaseModel):
     atime: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
+
+# Any value that survives a JSON round trip: what a decoded payload
+# holds, what jq evaluates over, what an API field hands back. Recursive
+# on purpose -- the alternative, `object`, also admits bytes and every
+# other non-JSON value, so each use site has to isinstance its way back
+# to the same set. Spelled as a string because a recursive alias needs
+# a forward reference until the floor is 3.12 (PEP 695 `type`), so a
+# union with it has to be quoted too: `Awaitable["JsonValue | X"]`.
+JsonValue: TypeAlias = ("None | bool | int | float | str | list[JsonValue]"
+                        " | dict[str, JsonValue]")
 
 ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
 ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
@@ -149,6 +163,9 @@ class NativeCopy:
     copy: CopyFn
     find: FindFn
     dir_copy: CopyFn | None = None
+    # Lets the per-entry policy path (--update/--backup, which cannot use a
+    # whole-tree dir_copy) still materialize directories that hold no files.
+    mkdir: CopyFn | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +202,34 @@ class MountMode(str, Enum):
     WRITE = "write"
     EXEC = "exec"
 
+
+class MountBackend(StrEnum):
+    """How a mount is exposed to the outside world.
+
+    VFS is the default: the mount lives only inside mirage's own filesystem
+    and is reached through the command surface, with nothing registered with
+    the kernel. FUSE and FSKIT additionally expose it as a real mountpoint.
+
+    FSKIT is macOS 15.4+ only and needs no kernel extension. It has no
+    ``direct_io`` equivalent, so it serves correct reads only for resources
+    that set ``SIZES_ALWAYS_KNOWN``; ``mirage.fuse.backend`` warns at mount
+    time about resources whose size-unknown files will read as empty. Writes
+    are also limited: appends and metadata ops persist, but the macFUSE
+    FSKit shim flushes pages a file did not already have (a new file, or
+    truncate-then-write) as NUL bytes, a limit pinned in
+    ``integ/fuse/truth_fskit.json``.
+    There is deliberately no ``auto``: auto-selecting FSKIT would silently
+    degrade every API-backed mount.
+    """
+
+    VFS = "vfs"
+    FUSE = "fuse"
+    FSKIT = "fskit"
+
+
+# Backends that register a real mountpoint with the kernel.
+KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
+    {MountBackend.FUSE, MountBackend.FSKIT})
 
 MOUNT_MODE_RANK: dict[MountMode, int] = {
     MountMode.READ: 1,
@@ -242,7 +287,17 @@ def _prefer_error(values: Iterable["OnExceed"]) -> "OnExceed":
                                   for v in values) else OnExceed.TRUNCATE)
 
 
-class CommandSafeguard(BaseModel):
+class Limit(BaseModel):
+    """A bound on a result: the policy layer's limit arm and the shape
+    every cap config parses into.
+
+    Carries its fields inline (the Deny precedent: an action is its
+    payload). ``kind`` is the wire discriminant; ``aggr`` is the
+    composition law (AND to the tightest per bound, ANY on error mode).
+    """
+
+    kind: ClassVar[str] = "limit"
+
     max_bytes: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
     max_lines: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
     timeout_seconds: Annotated[float | None, Aggr(_min_positive)] = None
@@ -251,19 +306,19 @@ class CommandSafeguard(BaseModel):
     @classmethod
     def aggr(
         cls,
-        safeguards: "Iterable[CommandSafeguard | None]",
-    ) -> "CommandSafeguard | None":
-        """Aggregate several safeguards using each field's declared rule.
+        limits: "Iterable[Limit | None]",
+    ) -> "Limit | None":
+        """Aggregate several limits using each field's declared rule.
 
         Every field carries an Aggr(rule) in its annotation; this applies
-        that rule to the field's values across the present guards. Returns
-        None when nothing is configured. Used wherever guards stack
-        (cross-mount fan-out, layered configs).
+        that rule to the field's values across the present limits. Returns
+        None when nothing is configured. Used wherever bounds stack
+        (policy composition, cross-mount fan-out, layered configs).
 
         Args:
-            safeguards (Iterable[CommandSafeguard | None]): guards to merge.
+            limits (Iterable[Limit | None]): limits to merge.
         """
-        present = [s for s in safeguards if s is not None]
+        present = [s for s in limits if s is not None]
         if not present:
             return None
         kwargs: dict[str, Any] = {}
@@ -274,6 +329,30 @@ class CommandSafeguard(BaseModel):
             kwargs[name] = rule.reduce(
                 values) if rule is not None else values[0]
         return cls(**kwargs)
+
+
+@dataclass(frozen=True, slots=True)
+class Producer:
+    """Provenance of a result: who produced it, and where.
+
+    Rides the IO envelope from the dispatch site to the workspace
+    boundary; merge keeps the rightmost producer, so this names the
+    command whose stream the caller actually sees. Post-layer policies
+    (output caps today; budgets and attribution later) read it as
+    context. Facts only: policy decisions never travel on the
+    envelope.
+
+    Args:
+        command (str): the producing command's name.
+        prefixes (tuple[str, ...]): mount prefixes the command spanned.
+        declared (Limit | None): the bound the command's own
+            registration declared, when the dispatch site knows it
+            (e.g. a CLI leaf); None for commands with no declaration.
+    """
+
+    command: str
+    prefixes: tuple[str, ...] = ()
+    declared: Limit | None = None
 
 
 class VFSWriteOp(str, Enum):
@@ -296,6 +375,7 @@ class ResourceName(str, Enum):
     RAM = "ram"
     GITHUB = "github"
     LINEAR = "linear"
+    GCAL = "gcal"
     GDOCS = "gdocs"
     GSHEETS = "gsheets"
     GSLIDES = "gslides"
@@ -309,6 +389,7 @@ class ResourceName(str, Enum):
     POSTGRES = "postgres"
     NOTION = "notion"
     LANGFUSE = "langfuse"
+    JAEGER = "jaeger"
     SSH = "ssh"
     REDIS = "redis"
     GITHUB_CI = "github_ci"
@@ -454,6 +535,7 @@ class StateKey(StrEnum):
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
     NODES = "nodes"
+    CLIS = "clis"
 
 
 class FileChangeKind(StrEnum):
@@ -610,6 +692,20 @@ class MountKey(StrEnum):
     RESOURCE_STATE = "resource_state"
 
 
+class CLIKey(StrEnum):
+    NAME = "name"
+    SPEC = "spec"
+    CONFIG = "config"
+    SCRIPT = "script"
+    RUNTIME = "runtime"
+
+
+class ScriptKey(StrEnum):
+    SOURCE = "source"
+    LANGUAGE = "language"
+    MODULE = "module"
+
+
 class CacheKey(StrEnum):
     LIMIT = "limit"
     MAX_DRAIN_BYTES = "max_drain_bytes"
@@ -642,6 +738,7 @@ class NodeMetaKey(StrEnum):
     UID = "uid"
     GID = "gid"
     ATIME = "atime"
+    OBSERVED_MTIME = "observed_mtime"
 
 
 class SessionKey(StrEnum):

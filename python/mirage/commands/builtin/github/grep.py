@@ -14,14 +14,14 @@
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.github.narrow import (files_only_shortcircuit,
-                                                   narrow_scope)
+from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as github_readdir
@@ -53,7 +53,7 @@ async def grep_provision(
     r: bool = False,
     R: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     if not paths:
         return ProvisionResult(command="grep " + " ".join(texts))
@@ -88,14 +88,15 @@ async def grep_provision(
 @command("grep",
          resource="github",
          spec=SPECS["grep"],
-         provision=grep_provision)
+         provision=grep_provision,
+         aggregate=prefix_aggregate)
 async def grep(
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
@@ -110,14 +111,15 @@ async def grep(
             pattern,
             fixed_string=fl.as_bool("F"),
             recursive=recursive,
+            whole_word=fl.as_bool("w"),
         )
         if file_count > SCOPE_ERROR:
-            msg = f"grep: {file_count} files in scope, narrow the path\n"
+            # Push-down needs -w (see narrow_scope); without it a scope
+            # this large has no complete narrowing strategy, so say so
+            # rather than scanning thousands of blobs.
+            msg = (f"grep: {file_count} files in scope, "
+                   "narrow the path, or use -w to enable code search\n")
             return b"", IOResult(exit_code=1, stderr=msg.encode())
-        if used_search:
-            short = files_only_shortcircuit(fl, pattern, resolved, paths[0])
-            if short is not None:
-                return short
 
     return await generic_grep(
         resolved,

@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CLISpec } from '../commands/cli/types.ts'
+import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -54,6 +56,25 @@ async function makeMultiWs(): Promise<Workspace> {
     },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
   )
+}
+
+async function cliWs(): Promise<Workspace> {
+  const ws = await makeWs()
+  ws.registerCli(
+    'linear',
+    new CLISpec({
+      name: 'linear',
+      description: 'Linear API client',
+      subcommands: [
+        new CLISpec({
+          name: 'issue',
+          description: 'Manage issues',
+          fn: () => [null, new IOResult()],
+        }),
+      ],
+    }),
+  )
+  return ws
 }
 
 describe('--help and man through the executor', () => {
@@ -139,6 +160,28 @@ describe('--help and man through the executor', () => {
     const io = await ws.execute('man definitely-not-a-real-command')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('no entry for')
+  })
+
+  it('an installed CLI is discoverable from the shell', async () => {
+    const ws = await cliWs()
+    expect(stdoutStr(await ws.execute('type linear'))).toBe('linear is a mirage CLI\n')
+    expect(stdoutStr(await ws.execute('type -t linear'))).toBe('cli\n')
+    expect(stdoutStr(await ws.execute('which linear'))).toBe('linear\n')
+    expect(stdoutStr(await ws.execute('man linear'))).toContain('Usage: linear')
+    expect(stdoutStr(await ws.execute('man'))).toContain('# clis')
+  })
+
+  it('which reports a missing name through the status only', async () => {
+    const io = await (await cliWs()).execute('which nope-xyz')
+    expect(io.exitCode).toBe(1)
+    expect(stdoutStr(io)).toBe('')
+    expect(stderrStr(io)).toBe('')
+  })
+
+  it('a shell function shadows a CLI and type -a shows both', async () => {
+    const ws = await cliWs()
+    const io = await ws.execute('linear() { echo shadowed; }; type -a linear')
+    expect(stdoutStr(io)).toBe('linear is a function\nlinear is a mirage CLI\n')
   })
 
   it('workspace filePrompt mentions --help and man (with and without args)', async () => {

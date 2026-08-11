@@ -15,6 +15,7 @@
 import re
 
 from mirage.shell.arith import ArithError, evaluate_arith
+from mirage.shell.array import make_array
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS)
@@ -56,13 +57,12 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         ctx (CondContext): evaluation context.
         node (CondBinary): binary condition.
     """
+    # == and != always fnmatch: the builder already rendered the right
+    # side into the glob dialect, quoted segments escaped, so a
+    # wholly-literal pattern matches exactly itself.
     if node.op in ("=", "=="):
-        if node.right_literal:
-            return node.left == node.right
         return fnmatch(node.left, node.right)
     if node.op == "!=":
-        if node.right_literal:
-            return node.left != node.right
         return not fnmatch(node.left, node.right)
     if node.op == "=~":
         pattern = re.escape(node.right) if node.right_literal else node.right
@@ -73,7 +73,8 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         if match is None:
             return False
         groups = [g if g is not None else "" for g in match.groups()]
-        ctx.session.arrays["BASH_REMATCH"] = [match.group(0), *groups]
+        ctx.session.arrays["BASH_REMATCH"] = make_array(
+            [match.group(0), *groups])
         return True
     if node.op == "<":
         return node.left < node.right

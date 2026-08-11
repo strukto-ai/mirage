@@ -21,12 +21,12 @@ from mirage.workspace.executor.builtins.condition import (CondAnd, CondBinary,
                                                           CondOr, CondUnary,
                                                           CondWord)
 from mirage.workspace.expand import expand_node
+from mirage.workspace.expand.pattern import expand_pattern
 
 _CONTAINER_TYPES = (NT.BINARY_EXPRESSION, NT.UNARY_EXPRESSION,
                     NT.NEGATION_EXPRESSION, NT.PARENTHESIZED_EXPRESSION)
 _FLAT_OP_TOKENS = frozenset({"=", "==", "!=", "<", ">", "!", "(", ")"})
 _COND_OP_TOKENS = frozenset({"=", "==", "!=", "=~", "<", ">", "&&", "||"})
-_LITERAL_RIGHT_TYPES = (NT.STRING, NT.RAW_STRING)
 _SPLIT_TYPES = (NT.SIMPLE_EXPANSION, NT.EXPANSION)
 
 
@@ -235,9 +235,20 @@ async def _build_binary(node, session, execute_fn, cs) -> CondNode:
                           op=op,
                           right=raw,
                           right_literal=False)
-    right_literal = right_node.type in _LITERAL_RIGHT_TYPES
+    if op in ("=", "==", "!="):
+        # The right side of a glob comparison is a pattern word; the
+        # shared expander renders its quoting into the matcher's
+        # dialect per segment (quoted literal, unquoted globs live), so
+        # the evaluator fnmatches unconditionally. A wholly-literal
+        # pattern matches exactly itself, which is what the equality
+        # the old whole-node boolean spelled out reduced to.
+        pattern = await expand_pattern(right_node, session, execute_fn, cs)
+        return CondBinary(left=left_text,
+                          op=op,
+                          right=pattern,
+                          right_literal=False)
     right_text = await expand_node(right_node, session, execute_fn, cs)
     return CondBinary(left=left_text,
                       op=op,
                       right=right_text,
-                      right_literal=right_literal)
+                      right_literal=False)

@@ -18,11 +18,12 @@ import type { S3Config } from '../s3/config.ts'
 export interface SupabaseConfig {
   bucket: string
   region: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
   projectRef?: string
   endpoint?: string
   sessionToken?: string
+  profile?: string
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
@@ -33,9 +34,10 @@ export interface SupabaseConfigRedacted {
   region: string
   projectRef?: string
   endpoint: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
   sessionToken?: string
+  profile?: string
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
@@ -46,9 +48,10 @@ const SupabaseConfigSchema = z.object({
   region: z.string(),
   projectRef: z.string().optional(),
   endpoint: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
+  accessKeyId: secretStr().optional(),
+  secretAccessKey: secretStr().optional(),
   sessionToken: secretStr().optional(),
+  profile: z.string().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
@@ -67,10 +70,11 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     bucket: config.bucket,
     region: config.region,
     endpoint: resolvedSupabaseEndpoint(config),
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
-    forcePathStyle: true,
+    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
+    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
     ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
+    ...(config.profile !== undefined ? { profile: config.profile } : {}),
+    forcePathStyle: true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
@@ -91,6 +95,7 @@ export function normalizeSupabaseConfig(input: Record<string, unknown>): Supabas
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
       session_token: 'sessionToken',
+      aws_profile: 'profile',
       endpoint_url: 'endpoint',
       key_prefix: 'keyPrefix',
       timeout: 'timeoutMs',

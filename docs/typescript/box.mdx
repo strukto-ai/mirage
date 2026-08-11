@@ -141,7 +141,7 @@ Only `fs.promises.*` is patched, sync forms aren't supported.
 ```ts
 import { BoxResource, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/box': new Mount(box, { mode: MountMode.READ, fuse: true }) })
+const ws = new Workspace({ '/box': new Mount(box, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
 await ws.fuseReady()
 const mp = ws.fuseMountpoint
 // The box subtree is exposed at the mountpoint root, so ${mp}/ is a real path:

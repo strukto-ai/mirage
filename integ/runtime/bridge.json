@@ -1,0 +1,297 @@
+{
+  "suite": "bridge",
+  "requires": {
+    "python": [
+      "env:REDIS_URL",
+      "env:MONGODB_URI"
+    ],
+    "typescript": [
+      "env:REDIS_URL",
+      "env:MONGODB_URI",
+      "env:S3_ENDPOINT"
+    ]
+  },
+  "cases": [
+    {
+      "id": "redis_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/redis": {
+            "resource": "redis"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo redis says hi > /redis/notes.txt"
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/redis/notes.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "redis says hi\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/s3/greeting.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello from s3\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mongodb_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/mongodb": {
+            "resource": "mongodb"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import json; from pathlib import Path; meta = json.loads(Path('/mongodb/mirage_integ_runtime/database.json').read_text()); print(meta['database'], len(meta['collections']))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage_integ_runtime 2\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import json; from pathlib import Path; s = json.loads(Path('/mongodb/mirage_integ_runtime/collections/books/schema.json').read_text()); print(s['name'], s['kind'], s['document_count'], [f['path'] for f in s['fields']])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "books collection 2 ['title']\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; lines = Path('/mongodb/mirage_integ_runtime/collections/books/documents.jsonl').read_text().splitlines(); print('books:', len(lines))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "books: 2\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "multi_mount_script",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n",
+              "analyze.py": "from pathlib import Path\nram = Path('/ram/data.txt').read_text().strip()\ns3 = Path('/s3/greeting.txt').read_text().strip()\nprint('ram:', ram)\nprint('s3:', s3)\nprint('argv sum:', int(argv[1]) + int(argv[2]))\n"
+            }
+          },
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/analyze.py 40 2",
+          "expect": {
+            "exit": 0,
+            "stdout": "ram: hello from ram\ns3: hello from s3\nargv sum: 42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_cache_invalidate",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "s3_put": {
+            "key": "cache_inval.txt",
+            "body": "seeded-cold\n"
+          }
+        },
+        {
+          "command": "cat /s3/cache_inval.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "seeded-cold\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; Path('/s3/cache_inval.txt').write_text('updated-by-sandbox')\" && cat /s3/cache_inval.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "updated-by-sandbox"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_warm_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "s3_put": {
+            "key": "warm.txt",
+            "body": "cold-bytes\n"
+          }
+        },
+        {
+          "command": "cat /s3/warm.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "cold-bytes\n"
+          }
+        },
+        {
+          "s3_put": {
+            "key": "warm.txt",
+            "body": "hot-bytes\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/s3/warm.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "cold-bytes\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "link_op_limit",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "limits": {
+              "read": {
+                "max_bytes": 8
+              }
+            }
+          },
+          "/r": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo 0123456789abcdef > /data/big.txt"
+        },
+        {
+          "command": "ln -s /data/big.txt /r/link"
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/r/link').read_text())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "01234567\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "xmount_rename_refused",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/a": {
+            "resource": "ram"
+          },
+          "/b": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo moved-bytes > /a/x.txt"
+        },
+        {
+          "rename": {
+            "src": "/a/x.txt",
+            "dst": "/b/y.txt"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "command": "cat /a/x.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "moved-bytes\n"
+          }
+        },
+        {
+          "command": "cat /a/b/y.txt",
+          "expect": {
+            "exit": 1
+          }
+        },
+        {
+          "command": "cat /b/y.txt",
+          "expect": {
+            "exit": 1
+          }
+        }
+      ]
+    }
+  ]
+}

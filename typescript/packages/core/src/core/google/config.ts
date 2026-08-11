@@ -33,6 +33,18 @@ export interface GoogleConfig {
   // Drive-only: scope the mount to this folder ID instead of the Drive
   // root, the s3 key_prefix analog. Other Google backends ignore it.
   folderId?: string
+  // Calendar-only. One zone for the whole mount, not one per calendar: the
+  // Calendar UI draws its whole grid in the primary zone, and per-calendar
+  // bucketing would make the same day directory name mean different
+  // 24-hour windows on different calendars. Defaults to the primary
+  // calendar's zone.
+  timeZone?: string
+  // Calendar-only: keep only calendars at or above this accessRole, e.g.
+  // "writer" for ones the agent can actually schedule into.
+  minAccessRole?: string
+  // Calendar-only: pin the day the rolling window centres on; test and
+  // snapshot use.
+  today?: string
 }
 
 export interface GoogleConfigRedacted {
@@ -41,6 +53,9 @@ export interface GoogleConfigRedacted {
   refreshToken: '<REDACTED>'
   apiBase?: string
   folderId?: string
+  timeZone?: string
+  minAccessRole?: string
+  today?: string
 }
 
 export const GoogleConfigSchema = z.object({
@@ -49,6 +64,9 @@ export const GoogleConfigSchema = z.object({
   refreshToken: secretStr(),
   apiBase: z.string().optional(),
   folderId: z.string().optional(),
+  timeZone: z.string().optional(),
+  minAccessRole: z.string().optional(),
+  today: z.string().optional(),
 })
 
 export function redactGoogleConfig(config: GoogleConfig): GoogleConfigRedacted {
@@ -63,6 +81,8 @@ export function normalizeGoogleConfig(input: Record<string, unknown>): GoogleCon
       refresh_token: 'refreshToken',
       api_base: 'apiBase',
       folder_id: 'folderId',
+      time_zone: 'timeZone',
+      min_access_role: 'minAccessRole',
     },
   }) as unknown as GoogleConfig
 }

@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
+
+import pytest
 
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.observer import Observer
@@ -66,3 +69,24 @@ def test_clear_empties_store(tmp_path):
     asyncio.run(store.append("/d/s.jsonl", b"a\n"))
     asyncio.run(store.clear())
     assert asyncio.run(store.read_all()) == {}
+
+
+def test_missing_root_reads_as_no_history(tmp_path):
+    store = DiskObserverStore(str(tmp_path / "never-written"))
+    assert asyncio.run(store.read_all()) == {}
+
+
+@pytest.mark.skipif(os.geteuid() == 0,
+                    reason="root ignores the permission bits under test")
+def test_an_unreadable_root_raises_instead_of_reading_empty(tmp_path):
+    # A partial recording that reports success is worse than a failure:
+    # /.bash_history and the history builtin would show a truncated
+    # history with nothing to say it was truncated.
+    root = tmp_path / "obs"
+    asyncio.run(DiskObserverStore(str(root)).append("/d/s.jsonl", b"a\n"))
+    root.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            asyncio.run(DiskObserverStore(str(root)).read_all())
+    finally:
+        root.chmod(0o755)

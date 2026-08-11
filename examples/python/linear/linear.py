@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.linear import LINEAR
 from mirage.resource.linear import LinearConfig, LinearResource
 from mirage.types import PathSpec
 
@@ -30,6 +31,7 @@ resource = LinearResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/linear": resource}, mode=MountMode.READ)
+    ws.register_cli("linear", LINEAR, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /linear/__nf_missing__.txt",

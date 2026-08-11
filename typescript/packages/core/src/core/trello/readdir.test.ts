@@ -18,6 +18,7 @@ import { TrelloAccessor } from '../../accessor/trello.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { TrelloTransport } from './_client.ts'
+import { normalizeWorkspace, toJsonBytes } from './normalize.ts'
 import { readdir } from './readdir.ts'
 
 interface Call {
@@ -69,6 +70,20 @@ describe('trello readdir /workspaces', () => {
     const lookup = await idx.get('/mnt/trello/workspaces/Acme__w1')
     expect(lookup.entry?.id).toBe('w1')
     expect(lookup.entry?.resourceType).toBe('trello/workspace')
+  })
+
+  it('seeds each workspace dir with a sized workspace.json', async () => {
+    const ws = { id: 'w1', displayName: 'Acme' }
+    const t = new FakeTransport(() => [ws])
+    const idx = new RAMIndexCacheStore()
+    await readdir(new TrelloAccessor(t), spec('/mnt/trello/workspaces', '/mnt/trello'), idx)
+    const listing = await idx.listDir('/mnt/trello/workspaces/Acme__w1')
+    expect(listing.entries).toEqual([
+      '/mnt/trello/workspaces/Acme__w1/workspace.json',
+      '/mnt/trello/workspaces/Acme__w1/boards',
+    ])
+    const lookup = await idx.get('/mnt/trello/workspaces/Acme__w1/workspace.json')
+    expect(lookup.entry?.size).toBe(toJsonBytes(normalizeWorkspace(ws)).byteLength)
   })
 
   it('filters by workspaceId', async () => {
@@ -257,6 +272,24 @@ describe('trello readdir errors', () => {
     const t = new FakeTransport(() => [])
     await expect(
       readdir(new TrelloAccessor(t), spec('/mnt/trello/workspaces/Acme__w1/boards', '/mnt/trello')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe('trello readdir unrecognized paths', () => {
+  it('throws ENOENT rather than reporting an empty directory', async () => {
+    // Returning [] made `ls` and `tree` report a bogus path as real-but-empty,
+    // and left `rg` without a message.
+    const t = new FakeTransport(() => [])
+    await expect(
+      readdir(new TrelloAccessor(t), spec('/__nf_missing__'), new RAMIndexCacheStore()),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('throws ENOENT for an unrecognized nested path', async () => {
+    const t = new FakeTransport(() => [])
+    await expect(
+      readdir(new TrelloAccessor(t), spec('/workspaces/w/nope/deeper'), new RAMIndexCacheStore()),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

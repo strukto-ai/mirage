@@ -19,7 +19,7 @@ from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -35,7 +35,7 @@ async def date(
     d: str | None = None,
     args_I: bool = False,
     R: bool = False,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(texts) > 1:
         raise extra_operand_error(CommandName.DATE, texts[1])

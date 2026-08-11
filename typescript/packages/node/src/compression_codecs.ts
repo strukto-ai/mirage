@@ -15,9 +15,8 @@
 import { createRequire } from 'node:module'
 import { registerCompressionCodec } from '@struktoai/mirage-core'
 
-interface Bzip2Module {
-  compressFile(input: Uint8Array): Uint8Array
-  decompressFile(input: Uint8Array): Uint8Array
+interface BunzipModule {
+  decode(input: Uint8Array): Uint8Array
 }
 
 interface XzModule {
@@ -25,16 +24,20 @@ interface XzModule {
   decompress(input: Uint8Array): Promise<Uint8Array>
 }
 
-// compressjs and @napi-rs/lzma are CommonJS; load them via createRequire so
+// seek-bzip and @napi-rs/lzma are CommonJS; load them via createRequire so
 // the built ESM output resolves their exports without named-import interop
 // pitfalls (mirrors the createRequire usage in workspace.ts).
 const requireCjs = createRequire(import.meta.url)
-const { Bzip2 } = requireCjs('compressjs') as { Bzip2: Bzip2Module }
+const bunzip = requireCjs('seek-bzip') as BunzipModule
 const { xz } = requireCjs('@napi-rs/lzma') as { xz: XzModule }
 
+// bzip2 is decompress-only on purpose: seek-bzip is the maintained
+// permissively licensed implementation and it only decodes, so `tar -cj`
+// reports unsupported while `-xj` / `-tj` work. The pure-JS compressor that
+// used to sit here (compressjs) is GPL, which an Apache-2.0 package cannot
+// ship.
 registerCompressionCodec('bzip2', {
-  compress: (bytes) => Promise.resolve(Uint8Array.from(Bzip2.compressFile(bytes))),
-  decompress: (bytes) => Promise.resolve(Uint8Array.from(Bzip2.decompressFile(bytes))),
+  decompress: (bytes) => Promise.resolve(Uint8Array.from(bunzip.decode(bytes))),
 })
 
 registerCompressionCodec('xz', {

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -24,6 +23,11 @@ from mirage.types import FileStat, MountMode
 # no stat surface (dispatch, the ops facade, FUSE) may rewrite their
 # operand through the symlink table.
 NO_FOLLOW_OPS = frozenset({"unlink", "rename", "rmdir"})
+
+# Content-writing ops whose completion stamps an observed mtime on the
+# namespace node (removals invalidate but must not stamp).
+STAMP_WRITE_OPS = frozenset(
+    {"write", "write_bytes", "append", "create", "truncate", "mkdir"})
 
 
 @runtime_checkable
@@ -59,11 +63,15 @@ class NamespaceLinks(Protocol):
         """
         ...
 
-    def links_under(self, directory: str) -> dict[str, str]:
-        """Link basename to target for entries directly under a directory.
+    def symlink_targets(self) -> dict[str, str]:
+        """Every link path to its stored target, the whole table."""
+        ...
+
+    def link_stat_at(self, path: str) -> FileStat | None:
+        """The link's own stat (lstat), None when ``path`` is not a link.
 
         Args:
-            directory (str): absolute virtual directory path.
+            path (str): absolute virtual path.
         """
         ...
 
@@ -86,9 +94,6 @@ class NamespaceLinks(Protocol):
         ...
 
 
-StatOverlay = Callable[[str, FileStat], FileStat]
-
-
 @dataclass
 class OpsMount:
     prefix: str
@@ -97,3 +102,6 @@ class OpsMount:
     index: IndexCacheStore
     mode: MountMode
     ops: list[Any] = field(default_factory=list[Any])
+    # Mirrors BaseResource.SIZES_ALWAYS_KNOWN. Read by the fskit mount
+    # guard, which cannot serve a resource that sizes files only on read.
+    sizes_always_known: bool = False

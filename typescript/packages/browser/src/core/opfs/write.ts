@@ -14,7 +14,7 @@
 
 import { type PathSpec, record, ResourceName } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { resolveFileHandle, toWritableChunk } from './utils.ts'
+import { destError, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function writeBytes(
   accessor: OPFSAccessor,
@@ -24,7 +24,12 @@ export async function writeBytes(
   const root = accessor.rootHandle
   const start = performance.now()
   const virtual = p.mountPath
-  const handle = await resolveFileHandle(root, virtual, { create: true })
+  let handle: FileSystemFileHandle
+  try {
+    handle = await resolveFileHandle(root, virtual, { create: true })
+  } catch (err) {
+    throw destError(err, p)
+  }
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(data))
   await writable.close()

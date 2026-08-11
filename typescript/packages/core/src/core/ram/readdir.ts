@@ -18,7 +18,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
 import { ResourceType } from '../../cache/index/config.ts'
 import type { PathSpec } from '../../types.ts'
-import { enotdir } from '../../utils/errors.ts'
+import { readdirError } from '../../utils/errors.ts'
 import { norm } from './utils.ts'
 
 export async function readdir(
@@ -39,7 +39,12 @@ export async function readdir(
   }
   const p = norm(virtual)
   if (!accessor.store.dirs.has(p)) {
-    throw enotdir(path)
+    throw await readdirError(
+      path,
+      p,
+      (k) => accessor.store.files.has(k),
+      (k) => accessor.store.dirs.has(k),
+    )
   }
   const dirPrefix = p === '/' ? '/' : `${p}/`
   const seen = new Set<string>()

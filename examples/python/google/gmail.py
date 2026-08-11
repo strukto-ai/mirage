@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gmail import GmailConfig, GmailResource
 
 load_dotenv(".env.development")
@@ -32,6 +33,8 @@ resource = GmailResource(config=config)
 
 async def main():
     ws = Workspace({"/gmail": resource}, mode=MountMode.WRITE)
+    # The gws verbs are a CLI install, separate from the mounts.
+    ws.register_cli("gws", GWS, config.model_dump())
 
     r = await ws.execute("ls /gmail/")
     print("=== labels ===")
@@ -55,13 +58,13 @@ async def main():
     r = await ws.execute(f'jq ".subject" /gmail/INBOX/{first}')
     print(await r.stdout_str())
 
-    print("=== gws gmail +triage ===")
-    r = await ws.execute('gws gmail +triage --query "is:unread" --max 5')
+    print("=== gws gmail triage ===")
+    r = await ws.execute('gws gmail triage --query "is:unread" --max 5')
     print((await r.stdout_str())[:500])
 
-    print("=== gws gmail +send ===")
+    print("=== gws gmail send ===")
     r = await ws.execute(
-        'gws gmail +send --to "zechengzhang97@gmail.com"'
+        'gws gmail send --to "zechengzhang97@gmail.com"'
         ' --subject "Hello from MIRAGE"'
         ' --body "This email was sent via the MIRAGE Gmail resource."')
     print((await r.stdout_str())[:200])

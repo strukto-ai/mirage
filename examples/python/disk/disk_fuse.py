@@ -17,7 +17,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.disk import DiskResource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -28,8 +28,10 @@ shutil.copytree(DATA_DIR, Path(tmp) / "files", dirs_exist_ok=True)
 
 resource = DiskResource(root=tmp + "/files")
 
-with Workspace({"/data/": Mount(resource, mode=MountMode.READ,
-                                fuse=True)}) as ws:
+with Workspace({
+        "/data/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

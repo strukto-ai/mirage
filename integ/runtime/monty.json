@@ -1,0 +1,461 @@
+{
+  "suite": "monty",
+  "cases": [
+    {
+      "id": "default_world_python3",
+      "world": {},
+      "steps": [
+        {
+          "command": "python3 -c \"print(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "python_alias",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python -c 'print(6 * 7)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "argv_global",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(argv[1:])\" alpha beta",
+          "expect": {
+            "exit": 0,
+            "stdout": "['alpha', 'beta']\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ram_read",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/ram/data.txt').read_text().strip().upper())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "HELLO FROM RAM\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "write_back",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; Path('/ram/out.txt').write_text('written-by-python3')\" && cat /ram/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "written-by-python3"
+          }
+        }
+      ]
+    },
+    {
+      "id": "script_argv",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n",
+              "analyze.py": "from pathlib import Path\nprint('ram:', Path('/ram/data.txt').read_text().strip())\nprint('argv sum:', int(argv[1]) + int(argv[2]))\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/analyze.py 40 2",
+          "expect": {
+            "exit": 0,
+            "stdout": "ram: hello from ram\nargv sum: 42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_pipe",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "pipe.py": "print('came-through-pipe')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cat /ram/pipe.py | python3",
+          "expect": {
+            "exit": 0,
+            "stdout": "came-through-pipe\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pipe_to_grep",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print('alpha'); print('beta')\" | grep beta",
+          "expect": {
+            "exit": 0,
+            "stdout": "beta\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "env",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "export GREETING=hello-runtime && python3 -c \"import os; print(os.getenv('GREETING'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello-runtime\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "iterdir",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n",
+              "pipe.py": "print('x')\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(sorted(str(p).split('/')[-1] for p in Path('/ram').iterdir()))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['data.txt', 'pipe.py']\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "missing_file",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/ram/nope.txt').read_text())\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "FileNotFoundError: [Errno 2] No such file or directory: '/ram/nope.txt'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "host_fs_invisible",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/etc/passwd').read_text())\"",
+          "expect": {
+            "exit": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "builtin_open",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(open('/ram/data.txt').read().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello from ram\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "builtin_open_write",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"f = open('/ram/open_out.txt', 'w'); f.write('written-by-open'); f.close()\" && cat /ram/open_out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "written-by-open"
+          }
+        }
+      ]
+    },
+    {
+      "id": "limit_timeout",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "slow.py": "n = 0\nfor i in range(300000000):\n    n = n + 1\n"
+            },
+            "limits": {
+              "python3": {
+                "timeout_seconds": 1
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /ram/slow.py",
+          "expect": {
+            "exit": 124,
+            "stderr_contains": "timed out after"
+          }
+        }
+      ]
+    },
+    {
+      "id": "missing_file_catchable",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf 'from pathlib import Path\\ntry:\\n    Path(\"/ram/nope.txt\").read_text()\\nexcept FileNotFoundError:\\n    print(\"caught-typed\")\\n' > /ram/t.py",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 /ram/t.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "caught-typed\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_mounts_listing",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "resource": "ram",
+            "files": {
+              "leaf.txt": "deep\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(sorted(str(p).split('/')[-1] for p in Path('/data').iterdir()))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['inner', 'top.txt']\n"
+          }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/data/inner/leaf.txt').read_text().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "deep\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_rename_exdev",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf 'from pathlib import Path\\ntry:\\n    Path(\"/data/top.txt\").rename(\"/data/inner/moved.txt\")\\n    print(\"renamed\")\\nexcept OSError as e:\\n    print(\"exdev\" if \"Invalid cross-device link\" in str(e) else e)\\n' > /data/x.py",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 /data/x.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "exdev\n"
+          }
+        },
+        {
+          "command": "cat /data/top.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "top\n"
+          }
+        }
+      ]
+    }
+  ]
+}

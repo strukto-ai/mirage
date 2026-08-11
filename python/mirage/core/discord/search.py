@@ -15,8 +15,8 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import offset_pages
-from mirage.resource.discord.config import DiscordConfig
 
 PAGE_SIZE = 25
 

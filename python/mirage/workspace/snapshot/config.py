@@ -15,6 +15,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.commands.cli.types import CLISpec
 from mirage.types import ConsistencyPolicy
 
 
@@ -29,3 +30,4 @@ class MountArgs:
     consistency: ConsistencyPolicy
     default_session_id: str
     default_agent_id: str | None
+    clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] | None = None

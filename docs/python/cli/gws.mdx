@@ -1,0 +1,126 @@
+---
+title: gws
+description: Google Workspace API client: Discovery passthroughs plus ergonomic helpers.
+icon: terminal
+---
+
+Google Workspace API client: Discovery passthroughs plus ergonomic helpers. Install it on the workspace and the whole tree is
+discoverable with `gws --help`.
+
+## Install
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.gws import GWS
+from mirage.core.google.config import GoogleConfig
+from mirage.resource.gmail import GmailResource
+
+config = GoogleConfig(client_id="...", client_secret="...", refresh_token="...")
+ws = Workspace({"/mail": GmailResource(config)})
+ws.register_cli("gws", GWS, config.model_dump())
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+
+## Verbs
+
+The syntax mirrors the official
+[Google Workspace CLI](https://github.com/googleworkspace/cli): one
+passthrough leaf per Discovery method, plus hand-written helpers under
+each service.
+
+```bash
+gws <service> <resource> <method> [--params JSON] [--json JSON]   # API passthrough
+gws <service> <helper> [flags]                                    # ergonomic helper
+```
+
+Services: `drive`, `sheets`, `docs`, `slides`, `gmail`. The whole
+surface is discoverable from the shell:
+
+```bash
+gws --help                # services
+gws drive files --help    # methods on a Discovery resource
+gws gmail send --help     # helper flags
+```
+
+### API passthrough
+
+Passthrough commands call the corresponding API method directly:
+`--params` fills URL path and query parameters, `--json` is the request
+body, and the output is the compact API response JSON. List methods
+follow `nextPageToken` to the end by default (pages print as NDJSON);
+`--page-limit N` stops early.
+
+```bash
+# List Drive files
+gws drive files list --params '{"q": "name contains \'report\'"}'
+
+# Read a Gmail message raw
+gws gmail users messages get --params '{"userId": "me", "id": "msg123"}'
+
+# Batch-update a spreadsheet
+gws sheets spreadsheets batchUpdate \
+  --params '{"spreadsheetId": "SHEET_ID"}' \
+  --json '{"requests": [...]}'
+
+# Share a Drive file
+gws drive permissions create \
+  --params '{"fileId": "FILE_ID"}' \
+  --json '{"role": "reader", "type": "anyone"}'
+```
+
+### Folder scope
+
+A config carrying `folder_id` scopes what the CLI **creates**, so a file
+it makes lands in the same folder a `GDriveResource` sharing that config
+mounts, and the agent's own `ls` shows what it just made:
+
+```python
+config = GoogleConfig(client_id="...", refresh_token="...", folder_id="FOLDER_ID")
+ws = Workspace({"/data": GDriveResource(config)})
+ws.register_cli("gws", GWS, config.model_dump())
+```
+
+```bash
+gws sheets spreadsheets create --json '{"properties": {"title": "Q3"}}'
+ls /data                                   # Q3.gsheet.json
+```
+
+Three things worth knowing:
+
+- **Two divergences from the official CLI's passthrough.** `drive files
+  create` and `copy` get `parents` defaulted into the request body, and
+  the Docs/Sheets/Slides `create` methods have no `parents` field at all,
+  so mirage issues a second Drive call to move the new file. Both also
+  send `supportsAllDrives`, which is what lets a scope name a Shared
+  Drive folder.
+- **An explicit `parents` array always wins**, and then nothing is
+  injected into the query either: you typed the call, you own it. The key
+  being present is what counts, so `"parents": []` is honored too rather
+  than read as absent.
+- **Reads are not scoped.** `gws drive files list` still sees the whole
+  account. The scope is about where new files go, not a fence.
+
+### Helpers
+
+| Helper                    | Description                                    |
+| ------------------------- | ---------------------------------------------- |
+| `gws gmail send`          | Send a new email (`--to --subject --body`)     |
+| `gws gmail reply`         | Reply to the sender (`--message-id --body`)    |
+| `gws gmail reply-all`     | Reply to all recipients (To + CC)              |
+| `gws gmail forward`       | Forward a message (`--message-id --to`)        |
+| `gws gmail read`          | One message as processed JSON (`--id`)         |
+| `gws gmail triage`        | Summaries for a search query (`--query --max`) |
+| `gws sheets read`         | Read a cell range (`--spreadsheet --range`)    |
+| `gws sheets write`        | Overwrite a range (`--values` / `--json-values`) |
+| `gws sheets append`       | Append rows after a range                      |
+| `gws docs write`          | Append text to a document (`--document --text`) |
+
+```bash
+gws gmail send --to "user@example.com" --subject "Hello" --body "Hi there"
+gws gmail triage --query "is:unread" --max 10
+gws sheets read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
+gws sheets append --spreadsheet SHEET_ID --values "alice,42"
+gws docs write --document DOC_ID --text "New paragraph"
+```

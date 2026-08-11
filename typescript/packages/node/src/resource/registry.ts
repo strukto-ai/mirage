@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, type Resource } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  type ChromaConfig,
+  type DifyConfig,
+  type LanceDBConfig,
+  type QdrantConfig,
+  type Resource,
+} from '@struktoai/mirage-core'
 
 /**
  * Construct a resource by registry name. Mirrors Python's
@@ -159,9 +166,25 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeMongoDBConfig } = await import('@struktoai/mirage-core')
     return new MongoDBResource(normalizeMongoDBConfig(config))
   },
+  chroma: async (config) => {
+    const { ChromaResource } = await import('@struktoai/mirage-core')
+    return new ChromaResource(normalizeFields(config) as unknown as ChromaConfig)
+  },
+  dify: async (config) => {
+    const { DifyResource } = await import('@struktoai/mirage-core')
+    return new DifyResource(normalizeFields(config) as unknown as DifyConfig)
+  },
+  qdrant: async (config) => {
+    const { QdrantResource } = await import('@struktoai/mirage-core')
+    return new QdrantResource(normalizeFields(config) as unknown as QdrantConfig)
+  },
+  lancedb: async (config) => {
+    const { LanceDBResource } = await import('./lancedb/lancedb.ts')
+    return new LanceDBResource(normalizeFields(config) as unknown as LanceDBConfig)
+  },
   slack: async (config) => {
     const { SlackResource } = await import('./slack/slack.ts')
-    const { normalizeSlackConfig } = await import('./slack/config.ts')
+    const { normalizeSlackConfig } = await import('@struktoai/mirage-core')
     return new SlackResource(normalizeSlackConfig(config))
   },
   ssh: async (config) => {
@@ -176,7 +199,7 @@ const REGISTRY: Record<string, ResourceFactory> = {
   },
   discord: async (config) => {
     const { DiscordResource } = await import('./discord/discord.ts')
-    const { normalizeDiscordConfig } = await import('./discord/config.ts')
+    const { normalizeDiscordConfig } = await import('@struktoai/mirage-core')
     return new DiscordResource(normalizeDiscordConfig(config))
   },
   trello: async (config) => {
@@ -186,18 +209,23 @@ const REGISTRY: Record<string, ResourceFactory> = {
   },
   linear: async (config) => {
     const { LinearResource } = await import('./linear/linear.ts')
-    const { normalizeLinearConfig } = await import('./linear/config.ts')
+    const { normalizeLinearConfig } = await import('@struktoai/mirage-core')
     return new LinearResource(normalizeLinearConfig(config))
   },
   notion: async (config) => {
     const { NotionResource } = await import('./notion/notion.ts')
-    const { normalizeNotionConfig } = await import('./notion/config.ts')
+    const { normalizeNotionConfig } = await import('@struktoai/mirage-core')
     return new NotionResource(normalizeNotionConfig(config))
   },
   langfuse: async (config) => {
     const { LangfuseResource } = await import('./langfuse/langfuse.ts')
     const { normalizeLangfuseConfig } = await import('./langfuse/config.ts')
     return new LangfuseResource(normalizeLangfuseConfig(config))
+  },
+  jaeger: async (config) => {
+    const { JaegerResource } = await import('./jaeger/jaeger.ts')
+    const { normalizeJaegerConfig } = await import('./jaeger/config.ts')
+    return new JaegerResource(normalizeJaegerConfig(config))
   },
   github: async (config) => {
     const { GitHubResource } = await import('./github/github.ts')
@@ -208,6 +236,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { GitHubCIResource } = await import('./github_ci/github_ci.ts')
     const { normalizeGitHubCIConfig } = await import('./github_ci/config.ts')
     return new GitHubCIResource(normalizeGitHubCIConfig(config))
+  },
+  gcal: async (config) => {
+    const { GCalResource } = await import('./gcal/gcal.ts')
+    const { normalizeGCalConfig } = await import('./gcal/config.ts')
+    return new GCalResource(normalizeGCalConfig(config))
   },
   gdocs: async (config) => {
     const { GDocsResource } = await import('./gdocs/gdocs.ts')
@@ -229,6 +262,18 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeGDriveConfig } = await import('./gdrive/config.ts')
     return new GDriveResource(normalizeGDriveConfig(config))
   },
+  onedrive: async (config) => {
+    const { OneDriveResource, normalizeOneDriveConfig } = await import('@struktoai/mirage-core')
+    return new OneDriveResource(normalizeOneDriveConfig(config))
+  },
+  sharepoint: async (config) => {
+    const { SharePointResource, normalizeSharePointConfig } = await import('@struktoai/mirage-core')
+    return new SharePointResource(normalizeSharePointConfig(config))
+  },
+  mem0: async (config) => {
+    const { Mem0Resource, normalizeMem0Config } = await import('@struktoai/mirage-core')
+    return new Mem0Resource(normalizeMem0Config(config))
+  },
   dropbox: async (config) => {
     const { DropboxResource } = await import('./dropbox/dropbox.ts')
     const { normalizeDropboxConfig } = await import('./dropbox/config.ts')
@@ -246,36 +291,42 @@ const REGISTRY: Record<string, ResourceFactory> = {
   },
   email: async (config) => {
     const { EmailResource } = await import('./email/email.ts')
-    const { normalizeEmailConfig } = await import('./email/config.ts')
+    const { normalizeEmailConfig } = await import('../core/email/config.ts')
     return new EmailResource(normalizeEmailConfig(config))
   },
 }
 
+const CUSTOM: Record<string, ResourceFactory> = {}
+
 /**
- * Look up the registered names. Lazily-mutated by `register()` so users
- * can extend the registry with custom resources.
+ * Look up every constructible name: builtins plus whatever `register()`
+ * has added.
  */
 export function knownResources(): string[] {
-  return Object.keys(REGISTRY).sort()
+  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort()
 }
 
 /**
- * Register a custom resource factory under `name`. Existing entries
- * are overwritten, mirroring Python's mutable REGISTRY dict.
+ * Register a custom resource factory under `name`. Builtin names cannot
+ * be shadowed; re-registering a custom name replaces it. Mirrors
+ * Python's `mirage.resource.registry.register_resource`, which keeps
+ * builtins in REGISTRY and custom entries in a separate _CUSTOM dict so
+ * a plugin cannot replace the builtin `s3` factory.
  */
 export function register(name: string, factory: ResourceFactory): void {
-  REGISTRY[name] = factory
+  if (name in REGISTRY) throw new Error(`cannot register '${name}': shadows a builtin`)
+  CUSTOM[name] = factory
 }
 
 /**
- * Build a resource instance by registry name. Throws if the name is
- * unknown.
+ * Build a resource instance by registry name. Builtins win over custom
+ * registrations. Throws if the name is unknown.
  */
 export async function buildResource(
   name: string,
   config: Record<string, unknown> = {},
 ): Promise<Resource> {
-  const factory = REGISTRY[name]
+  const factory = REGISTRY[name] ?? CUSTOM[name]
   if (factory === undefined) {
     throw new Error(
       `unknown resource ${JSON.stringify(name)}; known: ${knownResources().join(', ')}`,

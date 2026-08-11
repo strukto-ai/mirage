@@ -14,7 +14,8 @@
 
 import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm, nowIso, parent } from './utils.ts'
+import { checkDestParents } from './dest.ts'
+import { norm, nowIso } from './utils.ts'
 
 export async function writeBytes(
   accessor: RedisAccessor,
@@ -23,11 +24,8 @@ export async function writeBytes(
 ): Promise<void> {
   const start = performance.now()
   const p = norm(path.mountPath)
-  const par = parent(p)
   const store = accessor.store
-  if (par !== '/' && !(await store.hasDir(par))) {
-    throw new Error(`parent directory does not exist: ${par}`)
-  }
+  await checkDestParents(store, path, p)
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
   record('write', p, ResourceName.REDIS, data.byteLength, start)

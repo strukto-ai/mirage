@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { runWithSession } from '../context/session_context.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { FileType, MountMode, type FileStat } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
@@ -89,9 +90,27 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.execute('echo leaked > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('read-only')
+    expect(stderrStr(denied)).toBe('/a/y.txt: Permission denied\n')
     expect(a.store.files.has('/y.txt')).toBe(false)
   })
+
+  // A mount with no grant at all takes the same shell-attributed line as a
+  // READ-granted one, on `>` and `>>` alike, and the rest of the line keeps
+  // running — matching python, whose guard raises a PermissionError that is
+  // already a member of FS_ERRORS.
+  it.each(['echo leaked > /b/y.txt; echo next', 'echo leaked >> /b/y.txt; echo next'])(
+    'shell-attributes %s for an ungranted mount',
+    async (line) => {
+      const { ws, b } = await makeGrantsWorkspace()
+      ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+
+      const denied = await ws.execute(line, { sessionId: 'agent' })
+      expect(denied.exitCode).toBe(0)
+      expect(stdoutStr(denied)).toBe('next\n')
+      expect(stderrStr(denied)).toBe('/b/y.txt: Permission denied\n')
+      expect(b.store.files.has('/y.txt')).toBe(false)
+    },
+  )
 
   it('write grant allows writes', async () => {
     const { ws, a } = await makeGrantsWorkspace()
@@ -108,7 +127,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.execute('echo up > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('read-only')
+    expect(stderrStr(denied)).toBe('/a/y.txt: Permission denied\n')
   })
 
   it('list form inherits the mount mode', async () => {
@@ -145,7 +164,7 @@ describe('per-session mount grants', () => {
 
     const writeDenied = await ws.execute('echo x > /root.txt', { sessionId: 'root_ro' })
     expect(writeDenied.exitCode).not.toBe(0)
-    expect(stderrStr(writeDenied)).toContain('read-only')
+    expect(stderrStr(writeDenied)).toBe('/root.txt: Permission denied\n')
   })
 
   it('the implicit scratch root keeps pathless commands working', async () => {
@@ -172,6 +191,54 @@ describe('per-session mount grants', () => {
   })
 })
 
+describe('structure below an ungranted mount', () => {
+  async function makeNestedWorkspace(): Promise<Workspace> {
+    const parser = await getTestParser()
+    const base = new RAMResource()
+    base.store.files.set('/top.txt', ENC.encode('TOP\n'))
+    const inner = new RAMResource()
+    inner.store.files.set('/deep.txt', ENC.encode('needle\n'))
+    const registry = new OpsRegistry()
+    registry.registerResource(base)
+    registry.registerResource(inner)
+    const ws = new Workspace(
+      { '/base': base, '/base/inner': inner },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    open.push(ws)
+    return ws
+  }
+
+  it('a session granted only a nested mount can walk down to it', async () => {
+    // The root listing deliberately shows `base` as the traversal path
+    // to the grant, so readdir and stat on /base must answer with the
+    // granted structure; the ungranted backend's own content never
+    // appears, and a path the structure does not owe still denies.
+    const ws = await makeNestedWorkspace()
+    const sess = ws.createSession('agent', { mounts: ['/base/inner'] })
+    await runWithSession(sess, async () => {
+      expect(await ws.dispatch('readdir', '/base')).toEqual(['/base/inner'])
+      const st = (await ws.dispatch('stat', '/base')) as FileStat
+      expect(st.type).toBe(FileType.DIRECTORY)
+      expect(await ws.dispatch('readdir', '/base/inner')).toEqual(['/base/inner/deep.txt'])
+      await expect(ws.dispatch('readdir', '/base/other')).rejects.toThrow('not allowed')
+    })
+  })
+
+  it('a link below an ungranted mount stays out of a scoped listing', async () => {
+    const { ws } = await makeGrantsWorkspace()
+    const ln = await ws.execute('ln -s /b/secret.txt /b/leak')
+    expect(ln.exitCode).toBe(0)
+    const sess = ws.createSession('agent', { mounts: ['/a'] })
+    await runWithSession(sess, async () => {
+      const names = (await ws.dispatch('readdir', '/')) as string[]
+      expect(names).not.toContain('/b')
+      expect(names).toContain('/a')
+    })
+    expect((await ws.dispatch('readdir', '/')) as string[]).toContain('/b')
+  })
+})
+
 describe('sessions on a shared SessionStore', () => {
   it('a session created by one workspace narrows a sibling on the same store', async () => {
     const parser = await getTestParser()
@@ -192,5 +259,51 @@ describe('sessions on a shared SessionStore', () => {
     open.push(wsB)
     const denied = await wsB.execute('echo blocked > /data/x.txt', { sessionId: 'narrow' })
     expect(denied.exitCode).not.toBe(0)
+  })
+})
+
+describe('nested mount disclosure', () => {
+  // `tree` crosses a boundary from the mount table alone: a crossing
+  // entry's row is synthesized as a directory without asking any
+  // backend, so the dispatcher never sees it and cannot refuse it.
+  // Before the session filter, `tree /base` drew `private` and counted
+  // it, while `ls`, `find` and `du` on the same tree all hid it.
+  async function makeNested(): Promise<Workspace> {
+    const parser = await getTestParser()
+    const base = new RAMResource()
+    const priv = new RAMResource()
+    base.store.files.set('/top.txt', ENC.encode('public\n'))
+    priv.store.files.set('/secret.txt', ENC.encode('SECRET\n'))
+    const registry = new OpsRegistry()
+    for (const r of [base, priv]) registry.registerResource(r)
+    const ws = new Workspace(
+      { '/base': base, '/base/private': priv },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    open.push(ws)
+    return ws
+  }
+
+  it('tree does not disclose an ungranted nested mount', async () => {
+    const ws = await makeNested()
+    ws.createSession('agent', { mounts: { '/base': MountMode.READ } })
+
+    const io = await ws.execute('tree /base', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).not.toContain('private')
+    expect(stdoutStr(io)).toBe('/base\n`-- top.txt\n\n1 directory, 1 file\n')
+  })
+
+  it('tree still crosses a granted nested mount', async () => {
+    const ws = await makeNested()
+    ws.createSession('agent', {
+      mounts: { '/base': MountMode.READ, '/base/private': MountMode.READ },
+    })
+
+    const io = await ws.execute('tree /base', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe(
+      '/base\n|-- private\n|   `-- secret.txt\n`-- top.txt\n\n2 directories, 2 files\n',
+    )
   })
 })

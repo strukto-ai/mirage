@@ -12,23 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
 import { statGeneric } from '../../generic/stat.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, overlaidStat, resolveGlobOf } from '../adapter.ts'
 
 export const STAT_BUILDER: Builder = {
   name: 'stat',
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    const overlay = opts.statOverlay
-    // stat, like ls -l, renders backend stat rows that never see the
-    // namespace attr overlay (chmod/chown/touch) or the default owner;
-    // merge it in so stat -c and ls -l agree.
-    const stat =
-      overlay !== undefined
-        ? async (p: PathSpec) => overlay(p.virtual, await ops.stat(accessor, p, idx))
-        : (p: PathSpec) => ops.stat(accessor, p, idx)
-    return statGeneric(resolved, opts, stat)
+    return statGeneric(
+      resolved,
+      opts,
+      overlaidStat((p) => ops.stat(accessor, p, idx), opts.statOverlay),
+    )
   },
 }

@@ -14,13 +14,12 @@
 
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.core.mongodb.read import read as _read
-from mirage.core.mongodb.readdir import is_dir_name as _is_dir_name
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.stat import stat as _stat
 from mirage.core.mongodb.stream import read_stream as _read_stream
 
-# Mongo documents are read through the generic factory (find walks readdir
-# with the is_dir_name hint). grep and rg push down to MongoDB queries,
+# Mongo documents are read through the generic factory (find walks readdir,
+# classifying via stat). grep and rg push down to MongoDB queries,
 # tail follows via change streams (tail -f), wc -l
 # counts via server-side count_documents instead of reading every document, and
 # cat dispatches by path (native document streaming vs rendered .json metadata,
@@ -33,7 +32,6 @@ IO = CommandIO(
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: True,
-    is_dir_name=lambda a, name: _is_dir_name(name),
     local=False,
 )
 

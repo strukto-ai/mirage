@@ -14,31 +14,11 @@
 
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchMessage, listMessageUids, type FetchedMessage } from './_client.ts'
+import { dateBucket, sanitize } from './readdir.ts'
+import { messageJsonText } from './render.ts'
 import type { EmailScope } from './scope.ts'
 
-const TITLE_MAX = 80
-const UNSAFE = /[^\w\s\-.]/g
-const MULTI_UNDERSCORE = /_+/g
-
-function sanitize(text: string): string {
-  if (text.trim() === '') return 'No_Subject'
-  let cleaned = text.replace(UNSAFE, '_').replace(/ /g, '_')
-  cleaned = cleaned.replace(MULTI_UNDERSCORE, '_').replace(/^_+|_+$/g, '')
-  if (cleaned.length > TITLE_MAX) cleaned = `${cleaned.slice(0, TITLE_MAX - 3)}...`
-  return cleaned
-}
-
-function dateFromHeader(dateStr: string): string {
-  if (dateStr === '') return '1970-01-01'
-  const d = new Date(dateStr)
-  if (Number.isNaN(d.getTime())) return '1970-01-01'
-  const yyyy = d.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (d.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = d.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-export interface SearchOptions {
+interface SearchOptions {
   text?: string | null
   subject?: string | null
   fromAddr?: string | null
@@ -72,7 +52,7 @@ function buildSearchCriteria(opts: SearchOptions): string {
   return parts.length > 0 ? parts.join(' ') : 'ALL'
 }
 
-export async function searchMessages(
+async function searchMessages(
   accessor: EmailAccessor,
   folder: string,
   opts: SearchOptions = {},
@@ -83,7 +63,7 @@ export async function searchMessages(
 }
 
 function buildVfsPath(prefix: string, folder: string, msg: FetchedMessage): string {
-  const dateStr = dateFromHeader(msg.date)
+  const dateStr = dateBucket(msg)
   const subject = sanitize(msg.subject !== '' ? msg.subject : 'No Subject')
   const filename = `${subject}__${msg.uid}.email.json`
   return [prefix, folder, dateStr, filename].filter((p) => p !== '').join('/')
@@ -102,7 +82,7 @@ export async function searchAndFormat(
   const pairs: [string, string][] = []
   for (const uid of uids) {
     const msg = await fetchMessage(accessor, folder, uid)
-    const msgText = JSON.stringify(msg)
+    const msgText = messageJsonText(msg)
     const vfsPath = buildVfsPath(prefix, folder, msg)
     pairs.push([vfsPath, msgText])
   }

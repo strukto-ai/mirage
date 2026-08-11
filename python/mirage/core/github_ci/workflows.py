@@ -23,6 +23,7 @@ async def list_workflows(config: GitHubCIConfig) -> list[dict[str, Any]]:
         config.token,
         "/repos/{owner}/{repo}/actions/workflows",
         list_key="workflows",
+        base_url=config.base_url,
         owner=config.owner,
         repo=config.repo,
     )
@@ -33,6 +34,7 @@ async def get_workflow(config: GitHubCIConfig,
     return await ci_get(
         config.token,
         "/repos/{owner}/{repo}/actions/workflows/{workflow_id}",
+        base_url=config.base_url,
         owner=config.owner,
         repo=config.repo,
         workflow_id=workflow_id,

@@ -1,0 +1,81 @@
+---
+title: linear
+description: Linear GraphQL API client with the noun/verb grammar of the mount commands.
+icon: terminal
+---
+
+Linear GraphQL API client with the noun/verb grammar of the mount commands. Install it on the workspace and the whole tree is
+discoverable with `linear --help`.
+
+## Install
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.linear import LINEAR
+from mirage.core.linear.config import LinearConfig
+from mirage.resource.linear import LinearResource
+
+config = LinearConfig(api_key="lin_api_...")
+ws = Workspace({"/issues": LinearResource(config)})
+ws.register_cli("linear", LINEAR, config.model_dump())
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+
+## Verbs
+
+The grammar keeps the noun/verb structure the mount commands spoke
+(`linear issue create`, `linear team list`). Issues are addressed by a
+positional key or ID (`linear issue get ENG-42`); every command emits
+normalized JSON, so output pipes straight into `jq`.
+
+### Reads
+
+```bash
+linear team list
+linear team get ENG
+linear team members ENG
+linear issue list --team ENG
+linear issue get ENG-42
+linear project list --team ENG
+linear project get <project-id> --team ENG
+linear cycle list --team ENG
+linear cycle current --team ENG
+linear label list --team ENG
+linear comment list ENG-42
+linear user list
+linear user get sam@example.com
+linear document list --team ENG
+linear document get <document-id> --team ENG
+linear search "login bug"
+```
+
+`--team` accepts a team key, name, or ID.
+
+### Writes
+
+```bash
+linear issue create --team ENG --title "Title" --description "Body"
+linear issue update ENG-42 --title "New title"
+linear issue assign ENG-42 --assignee-email user@example.com
+linear issue transition ENG-42 --state-name "In Review"
+linear issue set-priority ENG-42 --priority 2
+linear issue set-project ENG-42 --project-name "Search"
+linear issue add-label ENG-42 --label-name "bug"
+linear comment add ENG-42 --body "comment"
+linear comment update --comment <comment-id> --body "edited"
+```
+
+| Verb                   | Notes                                          |
+| ---------------------- | ---------------------------------------------- |
+| `issue create`         | `--team` and `--title` required                |
+| `issue update`         | `--title` and/or `--description`               |
+| `issue assign`         | `--assignee-email` or `--assignee-id`          |
+| `issue transition`     | `--state-name` or `--state-id`                 |
+| `issue set-priority`   | `--priority 0..4` (0=none, 1=urgent, ... 4=low) |
+| `issue set-project`    | `--project-name` or `--project` (ID)           |
+| `issue add-label`      | `--label-name` or `--label` (ID); appends to the issue's existing labels |
+
+Descriptions and comment bodies also read from stdin:
+`echo "body" | linear comment add ENG-42`.

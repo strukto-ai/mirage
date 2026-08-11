@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mirage.core.discord._client import discord_get, discord_post
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 
 
 @pytest.fixture

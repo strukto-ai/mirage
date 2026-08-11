@@ -15,23 +15,13 @@
 from typing import Any
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.lancedb.query import (distinct_values, list_tables,
-                                       rows_matching)
+                                       rows_matching, table_columns)
+from mirage.core.lancedb.render import render_card
 from mirage.core.lancedb.scope import (LanceDBGroupScope, ScopeLevel,
                                        detect_scope)
 from mirage.types import PathSpec
-
-
-def is_dir_name(child: str, config) -> bool:
-    # Row files are recognized by extension, so classification never needs
-    # the stat fallback.
-    name = child.rsplit("/", 1)[-1]
-    if name.endswith(".md"):
-        return False
-    if config.blob_column and name.endswith("." + config.blob_ext):
-        return False
-    return True
 
 
 def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
@@ -42,6 +32,34 @@ def _row_files(rows: list[dict[str, Any]], config) -> list[str]:
         if config.blob_column:
             names.append(f"{rid}.{config.blob_ext}")
     return names
+
+
+def _row_entries(rows: list[dict[str, Any]],
+                 config) -> list[tuple[str, IndexEntry]]:
+    # The widened select carries every rendered column, so each card's exact
+    # size is free here; blob values are deliberately not fetched at listing
+    # time, so blob entries stay size-unknown and stat renders them itself.
+    entries: list[tuple[str, IndexEntry]] = []
+    for row in rows:
+        rid = str(row[config.id_column])
+        entries.append((f"{rid}.md",
+                        IndexEntry(
+                            id=rid,
+                            name=f"{rid}.md",
+                            resource_type="lancedb/row_card",
+                            vfs_name=f"{rid}.md",
+                            size=len(render_card(row, config)),
+                        )))
+        if config.blob_column:
+            blob_name = f"{rid}.{config.blob_ext}"
+            entries.append((blob_name,
+                            IndexEntry(
+                                id=rid,
+                                name=blob_name,
+                                resource_type="lancedb/row_blob",
+                                vfs_name=blob_name,
+                            )))
+    return entries
 
 
 async def readdir(
@@ -65,9 +83,20 @@ async def readdir(
                                           config.group_by[depth],
                                           scope.filters, config.max_rows)
         else:
+            # Select every column except the vector and blob ones (schema
+            # order, so the projected rows render byte-identically to the
+            # full rows read() fetches). Still one data query; the schema
+            # lookup is local metadata on the already-opened table.
+            columns = [
+                c for c in await table_columns(accessor, scope.table)
+                if c != config.vector_column and c != config.blob_column
+            ]
             rows = await rows_matching(accessor, scope.table, scope.filters,
-                                       [config.id_column], config.max_rows)
+                                       columns, config.max_rows)
             names = _row_files(rows, config)
+            # find-style callers pass index=None; there is nothing to seed.
+            if index is not None:
+                await index.set_dir(base, _row_entries(rows, config))
         return [f"{base}/{name}" for name in names]
 
     raise FileNotFoundError(path.virtual)

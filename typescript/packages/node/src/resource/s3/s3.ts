@@ -22,8 +22,8 @@ import {
   S3_PROMPT,
   copy as copyCore,
   create as createCore,
-  du as duCore,
-  duAll as duAllCore,
+  s3DuSize as duSizeCore,
+  s3DuEntries as duEntriesCore,
   exists as existsCore,
   find as findCore,
   makeResolveGlob,
@@ -49,6 +49,7 @@ import {
   type Resource,
   unlink as unlinkCore,
   write as writeCore,
+  s3StorageId,
 } from '@struktoai/mirage-core'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
@@ -69,6 +70,8 @@ export class S3Resource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.S3
   readonly cachesReads: boolean = true
   readonly supportsSnapshot: boolean = true
+  // byte store: stat() sizes every file from metadata
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = S3_PROMPT
   readonly config: S3Config
@@ -86,8 +89,8 @@ export class S3Resource extends BaseResource implements Resource {
     read_stream: streamCore,
     range_read: rangeReadCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -113,11 +116,11 @@ export class S3Resource extends BaseResource implements Resource {
     })
   }
 
-  open(): Promise<void> {
-    return Promise.resolve()
+  override storageId(): string {
+    return s3StorageId(this.kind, this.config)
   }
 
-  close(): Promise<void> {
+  open(): Promise<void> {
     return Promise.resolve()
   }
 
@@ -199,7 +202,7 @@ export class S3Resource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

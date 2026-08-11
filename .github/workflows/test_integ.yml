@@ -33,6 +33,7 @@ jobs:
       database: ${{ steps.filter.outputs.database }}
       data: ${{ steps.filter.outputs.data }}
       fuse: ${{ steps.filter.outputs.fuse }}
+      observability: ${{ steps.filter.outputs.observability }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -50,15 +51,11 @@ jobs:
               - '.github/workflows/test_integ.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             database:
-              - 'integ/mongodb.py'
-              - 'integ/mongodb.ts'
-              - 'integ/truth_mongodb.txt'
-              - 'integ/postgres.py'
-              - 'integ/postgres.ts'
-              - 'integ/truth_postgres.txt'
-              - 'integ/chroma.py'
-              - 'integ/chroma.ts'
-              - 'integ/truth_chroma.txt'
+              - 'integ/resources/mongodb/**'
+              - 'integ/resources/postgres/**'
+              - 'integ/targets.json'
+              - 'integ/runners/**'
+              - 'integ/resources/chroma/**'
               - 'integ/check_lines.sh'
               - 'python/mirage/accessor/mongodb.py'
               - 'python/mirage/core/mongodb/**'
@@ -72,9 +69,7 @@ jobs:
               - 'python/mirage/core/chroma/**'
               - 'python/mirage/commands/builtin/chroma/**'
               - 'python/mirage/resource/chroma/**'
-              - 'integ/qdrant.py'
-              - 'integ/qdrant.ts'
-              - 'integ/truth_qdrant.txt'
+              - 'integ/resources/qdrant/**'
               - 'python/mirage/accessor/qdrant.py'
               - 'python/mirage/core/qdrant/**'
               - 'python/mirage/commands/builtin/qdrant/**'
@@ -87,10 +82,31 @@ jobs:
               - 'python/**'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/integ-battery-setup/action.yml'
+            observability:
+              - 'integ/server/langfuse_compose.yml'
+              - 'integ/server/langfuse_seed.py'
+              - 'integ/server/jaeger_seed.py'
+              - 'integ/resources/observability/**'
+              - 'integ/targets.json'
+              - 'integ/runners/**'
+              - 'python/mirage/accessor/langfuse.py'
+              - 'python/mirage/accessor/jaeger.py'
+              - 'python/mirage/core/langfuse/**'
+              - 'python/mirage/core/jaeger/**'
+              - 'python/mirage/commands/builtin/langfuse/**'
+              - 'python/mirage/commands/builtin/jaeger/**'
+              - 'python/mirage/resource/langfuse/**'
+              - 'python/mirage/resource/jaeger/**'
+              - 'typescript/packages/core/src/core/langfuse/**'
+              - 'typescript/packages/core/src/core/jaeger/**'
+              - 'typescript/packages/core/src/accessor/langfuse.ts'
+              - 'typescript/packages/core/src/accessor/jaeger.ts'
+              - 'typescript/packages/node/src/resource/langfuse/**'
+              - 'typescript/packages/node/src/resource/jaeger/**'
+              - '.github/workflows/test_integ.yml'
             fuse:
-              - 'integ/fuse.py'
-              - 'integ/fuse.ts'
-              - 'integ/truth_fuse.txt'
+              - 'integ/fuse/**'
+              - 'integ/check_json.py'
               - 'integ/check_lines.sh'
               - 'integ/package.json'
               - 'python/mirage/fuse/**'
@@ -134,35 +150,23 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Run metadata suite (ram/disk/redis + s3 overlay via moto) and diff against truth
+      # Snapshot roundtrip and out-of-band-delete GC only: the per-command
+      # metadata cases live in integ/unix/meta{,_overlay} now.
+      - name: Run metadata snapshot/GC scenarios and diff against truth
         run: |
           ./python/.venv/bin/python integ/metadata.py > /tmp/metadata.out
           diff integ/truth_metadata.txt /tmp/metadata.out
 
-      - name: Run Safeguard scenarios and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/safeguard.py > /tmp/safeguard.out
-          diff integ/truth_safeguard.txt /tmp/safeguard.out
+      - name: Run lancedb integ (embedded, JSON harness)
+        env:
+          LANCEDB_ENABLED: "1"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb --strict
 
-      - name: Run session mount-mode scenarios and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/session_modes.py > /tmp/session_modes.out
-          diff integ/truth_session_modes.txt /tmp/session_modes.out
+      - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet argerr --strict
 
-      - name: Run History scenarios and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/history.py > /tmp/history.out
-          diff integ/truth_history.txt /tmp/history.out
-
-      - name: Run lancedb integ (embedded) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/lancedb.py > /tmp/lancedb.out
-          diff integ/truth_lancedb.txt /tmp/lancedb.out
-
-      - name: Run find arg-error suite (SaaS backends, dummy creds) and diff
-        run: |
-          ./python/.venv/bin/python integ/find_arg_errors.py > /tmp/fae.out
-          diff integ/truth_find_arg_errors.txt /tmp/fae.out
+      - name: Run curl/wget battery (HTTP fixture started by the adapter)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet http --strict
 
       - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
         run: ./python/.venv/bin/python integ/cross_commands.py
@@ -212,7 +216,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -248,7 +252,7 @@ jobs:
 
       - name: Run declarative battery on Nextcloud
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud
+        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud --strict
 
       - name: Start MinIO
         run: |
@@ -281,45 +285,60 @@ jobs:
           /tmp/mc mb local/mirage-integ-minio || true
 
 
-      - name: Run metadata suite (ram/disk/redis + s3 overlay via MinIO) and diff against truth
+      # Snapshot roundtrip and out-of-band-delete GC only: the per-command
+      # metadata cases live in integ/unix/meta{,_overlay} now.
+      - name: Run metadata snapshot/GC scenarios and diff against truth
         working-directory: integ
         run: |
           pnpm exec tsx metadata.ts > /tmp/ts-metadata.out
           diff truth_metadata.txt /tmp/ts-metadata.out
 
-      - name: Run Safeguard scenarios and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx safeguard.ts > /tmp/ts-safeguard.out
-          diff truth_safeguard.txt /tmp/ts-safeguard.out
-
-      - name: Run session mount-mode scenarios and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx session_modes.ts > /tmp/ts-session-modes.out
-          diff truth_session_modes.txt /tmp/ts-session-modes.out
-
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
 
-      - name: Run notion integ (TS, mock server) and diff against truth
+      - name: Start fake Notion API (Prisma)
         working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
         run: |
-          pnpm exec tsx notion.ts > /tmp/notion_ts.out
-          diff truth_notion.txt /tmp/notion_ts.out
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notionsrv.log && break; sleep 1; done
+          cat /tmp/notionsrv.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
 
-      - name: Run lancedb integ (TS, embedded) and diff against truth
+      - name: Run notion integ (TS, mock server, JSON harness)
         working-directory: integ
-        run: |
-          pnpm exec tsx lancedb.ts > /tmp/ts-lancedb.out
-          diff truth_lancedb.txt /tmp/ts-lancedb.out
+        env:
+          NOTION_ENABLED: "1"
+        run: pnpm exec tsx runners/typescript/main.ts --target notion --strict
 
-      - name: Run find arg-error suite (SaaS backends, dummy creds) and diff
+      - name: Run notion MCP/REST parity check (TS)
+        working-directory: integ
+        run: pnpm exec tsx notion_mcp_parity.ts
+
+      # Runs every cli-ntn case through the REAL Notion CLI against the same
+      # fake, so the goldens the battery asserts are by construction what the
+      # official binary prints. Pinned by version; the script refuses any other.
+      - name: Run ntn CLI conformance against the real binary
         working-directory: integ
         run: |
-          pnpm exec tsx find_arg_errors.ts > /tmp/ts-fae.out
-          diff truth_find_arg_errors.txt /tmp/ts-fae.out
+          # Installed outside the pnpm workspace so it cannot disturb
+          # node_modules the rest of the job depends on.
+          mkdir -p /tmp/ntncli
+          (cd /tmp/ntncli && npm i --no-audit --no-fund ntn@0.21.9)
+          NTN_BIN=/tmp/ntncli/node_modules/.bin/ntn pnpm exec tsx ntn_conformance.ts
+
+      - name: Run lancedb integ (TS, embedded, JSON harness)
+        working-directory: integ
+        env:
+          LANCEDB_ENABLED: "1"
+        run: pnpm exec tsx runners/typescript/main.ts --target lancedb --strict
+
+      - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts --facet argerr --strict
 
   integ-shared-py:
     needs: changes
@@ -366,7 +385,7 @@ jobs:
         with:
           build-packages: "false"
       - name: Run declarative battery (python hosts)
-        run: ./python/.venv/bin/python integ/runners/python/main.py
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
   integ-shared-ts:
     needs: changes
@@ -410,10 +429,67 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/integ-battery-setup
+
+      # Every "verified by integ" claim rests on the runner failing when it
+      # tests nothing, so assert the gates themselves before the battery.
+      # This job hosts them because it is the only one with both halves: the
+      # setup action always installs the python venv, and this job is the
+      # one that builds the mirage packages the typescript runner imports
+      # (integ-shared-py passes build-packages: false). --require-ts turns
+      # an absent tsx into a failure rather than a silent half-run.
+      - name: Assert the integ runner gates (strict exit, services, case ids)
+        run: ./python/.venv/bin/python integ/runners/tools/gate_selftest.py --require-ts
+
       - name: Run declarative battery (typescript hosts)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts
+        run: pnpm exec tsx runners/typescript/main.ts --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
+      # The fixture server is python (started by the adapter through
+      # startPythonServer), so this runs here rather than in integ-ts, which
+      # has no python toolchain.
+      - name: Run curl/wget battery (typescript host)
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts --facet http --strict
+
+  # The two jobs above prove each language passes its own battery. This one
+  # runs both emitters and diffs them case by case, so a change that breaks
+  # the same way in both languages still fails. Shared targets only (ram,
+  # disk, redis) — the credentialed targets stay in their own jobs.
+  integ-shared-parity:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integ-battery-setup
+      # Targets are pinned: with no arguments parity.py adds the Graph and
+      # Mem0 groups unconditionally, and the setup action exports
+      # S3_ENDPOINT/SSH_HOST/GWS_URL, which would pull in the S3, SSH and
+      # Drive groups too. That would gate every core/TypeScript PR on the
+      # whole credentialed battery, which has its own jobs already.
+      - name: Diff python and typescript battery output
+        run: >-
+          ./python/.venv/bin/python integ/runners/parity.py
+          ram disk redis ram-history
+
+  # One job per backend family with both hosts inside it. The postgres, chroma,
+  # qdrant and mongodb fleet is the expensive part and was being started twice,
+  # once for the python battery and once for the typescript one. This mirrors
+  # integ-observability and integ-facets, which already drive both hosts against
+  # a single fleet. The typescript step runs even when the python one fails so a
+  # single-language regression still reports both languages.
   integ-database:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
@@ -443,6 +519,10 @@ jobs:
     env:
       MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
+      CHROMA_HOST: localhost
+      CHROMA_PORT: "8000"
+      QDRANT_HOST: localhost
+      QDRANT_PORT: "6333"
     steps:
       - uses: actions/checkout@v7
 
@@ -460,102 +540,13 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Wait for ChromaDB OSS
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:8000/api/v2/heartbeat && exit 0
-            sleep 1
-          done
-          echo "ChromaDB did not become healthy" >&2
-          exit 1
-
-      - name: Wait for Qdrant
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:6333/readyz && exit 0
-            sleep 1
-          done
-          echo "Qdrant did not become healthy" >&2
-          exit 1
-
-      - name: Start MongoDB replica set
-        run: |
-          docker run -d --name mongo -p 27017:27017 mongo:8 \
-            mongod --replSet rs0 --bind_ip_all
-          for i in $(seq 1 30); do
-            docker exec mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break
-            sleep 1
-          done
-          docker exec mongo mongosh --quiet --eval \
-            "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
-          for i in $(seq 1 30); do
-            [ "$(docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null)" = "true" ] && break
-            sleep 1
-          done
-
-      - name: Run MongoDB backend and check against truth
-        shell: bash
-        run: |
-          set -o pipefail
-          ./python/.venv/bin/python integ/mongodb.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_mongodb.txt
-
-      - name: Run Postgres backend and check against truth
-        shell: bash
-        run: |
-          set -o pipefail
-          ./python/.venv/bin/python integ/postgres.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_postgres.txt
-
-      - name: Run chroma integ (ChromaDB OSS) and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/chroma.py > /tmp/chroma.out
-          diff integ/truth_chroma.txt /tmp/chroma.out
-
-      - name: Run qdrant integ and diff against truth
-        run: |
-          ./python/.venv/bin/python integ/qdrant.py > /tmp/qdrant.out
-          diff integ/truth_qdrant.txt /tmp/qdrant.out
-
-  integ-database-ts:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: mirage
-          POSTGRES_PASSWORD: mirage
-          POSTGRES_DB: mirage_integ
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      chroma:
-        image: chromadb/chroma:latest
-        ports:
-          - 8000:8000
-      qdrant:
-        image: qdrant/qdrant:latest
-        ports:
-          - 6333:6333
-    env:
-      MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
-      POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
-    steps:
-      - uses: actions/checkout@v7
-
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -571,6 +562,12 @@ jobs:
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node build
 
+      # The typescript runner imports mirage-browser statically for the opfs
+      # target, so its dist must exist even when no browser target runs.
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
       - name: Wait for ChromaDB OSS
         run: |
           for i in $(seq 1 30); do
@@ -580,6 +577,17 @@ jobs:
           echo "ChromaDB did not become healthy" >&2
           exit 1
 
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/readyz && exit 0
+            sleep 1
+          done
+          echo "Qdrant did not become healthy" >&2
+          exit 1
+
+      # mongodb needs a replica set for change streams, which a flat services:
+      # block cannot express, so it is started and initiated by hand.
       - name: Start MongoDB replica set
         run: |
           docker run -d --name mongo -p 27017:27017 mongo:8 \
@@ -595,42 +603,19 @@ jobs:
             sleep 1
           done
 
-      - name: Wait for Qdrant
-        run: |
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:6333/readyz && exit 0
-            sleep 1
-          done
-          echo "Qdrant did not become healthy" >&2
-          exit 1
+      - name: Run database battery (python host)
+        run: >-
+          ./python/.venv/bin/python integ/runners/python/main.py
+          --target mongodb --target postgres --target chroma --target qdrant
+          --strict
 
-      - name: Run MongoDB backend (TS) and check against truth
-        shell: bash
+      - name: Run database battery (typescript host)
+        if: ${{ !cancelled() }}
         working-directory: integ
-        run: |
-          set -o pipefail
-          pnpm exec tsx mongodb.ts 2>&1 \
-            | bash check_lines.sh truth_mongodb.txt
-
-      - name: Run Postgres backend (TS) and check against truth
-        shell: bash
-        working-directory: integ
-        run: |
-          set -o pipefail
-          pnpm exec tsx postgres.ts 2>&1 \
-            | bash check_lines.sh truth_postgres.txt
-
-      - name: Run TS chroma integ (ChromaDB OSS) and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx chroma.ts > /tmp/ts-chroma.out
-          diff truth_chroma.txt /tmp/ts-chroma.out
-
-      - name: Run TS qdrant integ and diff against truth
-        working-directory: integ
-        run: |
-          pnpm exec tsx qdrant.ts > /tmp/ts-qdrant.out
-          diff truth_qdrant.txt /tmp/ts-qdrant.out
+        run: >-
+          pnpm exec tsx runners/typescript/main.ts
+          --target mongodb --target postgres --target chroma --target qdrant
+          --strict
 
   integ-data:
     needs: changes
@@ -667,10 +652,38 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Run notion integ (mock server) and diff against truth
+      # The notion fake is a Node server shared by both hosts, so this
+      # otherwise python-only job needs node to start it. No package build is
+      # required: notion_server.ts imports only node, prisma and the MCP sdk.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Start fake Notion API (Prisma)
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
         run: |
-          ./python/.venv/bin/python integ/notion.py > /tmp/notion.out
-          diff integ/truth_notion.txt /tmp/notion.out
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notionsrv.log && break; sleep 1; done
+          cat /tmp/notionsrv.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
+
+      - name: Run notion integ (mock server, JSON harness)
+        env:
+          NOTION_ENABLED: "1"
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target notion --strict
 
       - name: Wait for Nextcloud install
         shell: bash
@@ -687,7 +700,7 @@ jobs:
           exit 1
 
       - name: Run declarative battery on nextcloud
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
 
       - name: Run watch battery on nextcloud
         env:
@@ -725,8 +738,8 @@ jobs:
 
       - name: Run Python FUSE mount and check (real libfuse)
         run: |
-          ./python/.venv/bin/python integ/fuse.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_fuse.txt
+          ./python/.venv/bin/python integ/fuse/fuse.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py integ/fuse/truth_fuse.json
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -734,7 +747,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -753,8 +766,8 @@ jobs:
       - name: Run TypeScript FUSE mount and check (real libfuse)
         working-directory: integ
         run: |
-          pnpm exec tsx fuse.ts 2>&1 \
-            | bash check_lines.sh truth_fuse.txt
+          pnpm exec tsx fuse/fuse.ts 2>&1 \
+            | ../python/.venv/bin/python check_json.py fuse/truth_fuse.json
 
   integ-fuse-windows:
     needs: changes
@@ -771,8 +784,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Retry choco (its community feed 503s), then fall back to the
+      # official GitHub release MSI, and verify the driver landed either
+      # way so a bad install fails here, not as "Unable to find libfuse".
       - name: Install WinFsp
-        run: choco install winfsp -y
+        shell: pwsh
+        run: |
+          $ok = $false
+          foreach ($i in 1..3) {
+            choco install winfsp -y
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Write-Host "choco attempt $i failed; retrying"
+            Start-Sleep -Seconds 10
+          }
+          if (-not $ok) {
+            Write-Host "choco unavailable; installing from the GitHub release MSI"
+            Invoke-WebRequest -Uri "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" -OutFile winfsp.msi
+            Start-Process msiexec.exe -ArgumentList '/i','winfsp.msi','/qn' -Wait
+          }
+          if (-not (Test-Path "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll")) {
+            throw "WinFsp install failed: winfsp-x64.dll not found"
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -793,38 +825,57 @@ jobs:
         # Dump the raw output before checking: on failure the traceback is
         # the whole point of this advisory job.
         run: |
-          ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
+          ./python/.venv/Scripts/python integ/fuse/fuse.py > /tmp/fuse-win.out 2>&1 || true
           cat /tmp/fuse-win.out
-          bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
+          ./python/.venv/Scripts/python integ/check_json.py integ/fuse/truth_fuse.json < /tmp/fuse-win.out
 
-  runtime-py:
+  integ-fskit-macos:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
-    runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      mongodb:
-        image: mongo:8
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      REDIS_URL: redis://localhost:6379/0
-      MONGODB_URI: mongodb://localhost:27017
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
+    runs-on: macos-15
+    # Not in the gate. Everything installs and enables headlessly, but the
+    # mount request never reaches macFUSE's FSKit module on a hosted runner
+    # (engaging the module appears to need the GUI approval in System
+    # Settings), so the known mount timeout is reported as a skip below.
+    # Green = environment-limited or verified; red = something new broke
+    # (a guard regression, a crash, or the runner starts mounting and the
+    # results diverge from integ/fuse/truth_fskit.json). Real verification
+    # runs on a Mac with macFUSE 5.x: integ/fuse/fskit.py | integ/check_json.py.
+    # Python only for now: TypeScript reaches fskit too (fuse.node links
+    # the installed libfuse), but one leg is enough to probe the runner.
     steps:
       - uses: actions/checkout@v7
+
+      - name: Show macOS version (FSKit needs 15.4+)
+        run: sw_vers
+
+      - name: Install macFUSE 5.x
+        run: brew install --cask macfuse
+
+      - name: Enable the macFUSE FSKit modules
+        # The installer auto-registers only the -local module; the non-local
+        # one ships in the same bundle but never appears in pluginkit on a
+        # runner (both are registered on a developer Mac). Add every appex
+        # explicitly, then enable it.
+        run: |
+          exts=/Library/Filesystems/macfuse.fs/Contents/Resources/macfuse.app/Contents/Extensions
+          ls -la "$exts" || true
+          for appex in "$exts"/*.appex; do
+            echo "registering $appex"
+            pluginkit -a "$appex" || true
+          done
+          pluginkit -e use -i io.macfuse.app.fsmodule.macfuse || true
+          pluginkit -e use -i io.macfuse.app.fsmodule.macfuse-local || true
+          echo "--- registered FSKit modules (+ means enabled) ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+
+      - name: Confirm no kext is loaded
+        run: |
+          kextstat | grep -i fuse || echo "no macFUSE kext (expected)"
+          echo "--- /dev/macfuse* (kext devices, absent without the kext) ---"
+          ls -la /dev/macfuse* 2>&1 || true
+          echo "--- systemextensionsctl ---"
+          systemextensionsctl list 2>&1 || true
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -836,18 +887,53 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (base + fuse only)
         working-directory: python
-        run: uv sync --all-extras --no-extra camel
+        run: uv sync --extra fuse
 
-      - name: Run python3 across ram/redis/s3/mongodb mounts and diff against truth
+      - name: Run the fskit mount and check
+        # The known hosted-runner limit surfaces as exactly one signature:
+        # the readiness TimeoutError (the module never engages, libfuse
+        # emits nothing). That case is a skip; any other failure is real.
         run: |
-          ./python/.venv/bin/python integ/runtime.py > /tmp/runtime_py.out
-          diff integ/truth_runtime_py.txt /tmp/runtime_py.out
+          ./python/.venv/bin/python integ/fuse/fskit.py > /tmp/fskit.out 2>&1 || true
+          cat /tmp/fskit.out
+          if grep -q "did not become ready" /tmp/fskit.out; then
+            echo "SKIP: this runner cannot engage the macFUSE FSKit module" \
+                 "(known hosted-runner limit; verified locally instead)"
+            exit 0
+          fi
+          ./python/.venv/bin/python integ/check_json.py \
+            integ/fuse/truth_fskit.json < /tmp/fskit.out
 
-  runtime-ts:
+      - name: Run the CLI fskit battery (workspace YAML with an fskit mount)
+        # Same classification as above: the script itself reports SKIP with
+        # exit 0 when the daemon's mount never engages the FSKit module.
+        run: bash integ/fuse/cli_fskit.sh "python/.venv/bin/mirage"
+
+      - name: Host state after the probe
+        if: always()
+        run: |
+          echo "--- mount ---"
+          mount
+          echo "--- /Volumes ---"
+          ls -la /Volumes
+          echo "--- FSKit modules ---"
+          pluginkit -m -v -p com.apple.fskit.fsmodule || true
+          echo "--- macFUSE bundle ---"
+          ls -la /Library/Filesystems/ || true
+          echo "--- macfuse-only log (what the mount attempt did) ---"
+          log show --last 3m --style compact \
+            --predicate 'eventMessage CONTAINS[c] "macfuse" OR senderImagePath CONTAINS[c] "macfuse"' \
+            2>/dev/null | tail -80 || true
+          echo "--- fskitd/fskit_agent errors ---"
+          log show --last 3m --style compact \
+            --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
+            2>/dev/null | tail -40 || true
+
+  integ-runtime:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
     services:
       redis:
@@ -874,8 +960,31 @@ jobs:
       S3_ENDPOINT: http://localhost:9000
       AWS_ACCESS_KEY_ID: minio
       AWS_SECRET_ACCESS_KEY: minio123
+      QUICKJS_BUILD: v0.15.1
+      WASI_BUILD: python-3.14.6-wasi_sdk-24
+      MIRAGE_QUICKJS_HOME: /tmp/quickjs
+      MIRAGE_WASI_HOME: /tmp/cpython-wasi
+      MIRAGE_INTEG_DOCKER_CONTAINER: mirage-integ-runtime-box
+      # Suites with unmet requirements fail instead of skipping, so a
+      # broken build download cannot silently drop wasi/quickjs/docker
+      # coverage.
+      INTEG_RUNTIME_STRICT: "1"
     steps:
       - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -883,21 +992,50 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
-      - name: Install dependencies
+      - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 
-      - name: Build mirage-core
+      - name: Build TypeScript packages
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core build
+        run: pnpm -r build
 
-      - name: Build mirage-node
-        working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-node build
+      - name: Cache the quickjs WASI build
+        id: quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+
+      - name: Download the quickjs WASI build
+        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Cache the CPython WASI build
+        id: wasi-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/cpython-wasi
+          key: cpython-wasi-${{ env.WASI_BUILD }}
+
+      - name: Download the CPython WASI build
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/cpython-wasi
+          gh release download v3.14.6 -R brettcannon/cpython-wasi-build \
+            -p "$WASI_BUILD.zip" -O /tmp/wasi-build.zip
+          unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
 
       - name: Start MinIO
         run: |
@@ -913,18 +1051,274 @@ jobs:
             sleep 1
           done
 
-      - name: Run python3 across ram/redis/s3/mongodb mounts and check against truth
-        shell: bash
+      - name: Start the docker sandbox container (user-provisioned)
+        run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:stable-slim sleep infinity
+
+      - name: Run every runtime through the JSON suites (python)
+        run: ./python/.venv/bin/python integ/runtime/run.py
+
+      - name: Run every runtime through the JSON suites (typescript)
         working-directory: integ
+        run: pnpm exec tsx runtime/run.ts
+
+      - name: Run every runtime through the CLI and both daemons
         run: |
-          set -o pipefail
-          pnpm exec tsx runtime.ts 2>&1 \
-            | bash check_lines.sh truth_runtime.txt
+          bash integ/runtime/cli.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+  integ-observability:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.observability == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
+      - name: Build mirage-node
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-node build
+
+      # The typescript runner imports mirage-browser statically for the opfs
+      # target, so its dist must exist even when no browser target runs.
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
+      # Self-hosted Langfuse needs six containers with real startup ordering
+      # (web runs migrations against postgres and clickhouse), so this uses
+      # compose health gates rather than a flat `services:` block.
+      - name: Start Langfuse stack
+        working-directory: integ/server
+        run: docker compose -f langfuse_compose.yml up -d --wait --wait-timeout 600
+
+      - name: Seed Langfuse
+        run: ./python/.venv/bin/python integ/server/langfuse_seed.py --host http://localhost:3000
+
+      # Jaeger is a single container with a built-in OTLP receiver, so it is
+      # seeded by pushing spans rather than through a fake server.
+      - name: Start jaeger and seed traces over OTLP
+        run: |
+          docker run -d --name mirage-jaeger \
+            -p 16686:16686 -p 4317:4317 -p 4318:4318 \
+            jaegertracing/jaeger:latest
+          ./python/.venv/bin/python integ/server/jaeger_seed.py \
+            --host http://localhost:16686 --otlp http://localhost:4318
+
+      - name: Run observability battery (python host)
+        env:
+          LANGFUSE_URL: http://localhost:3000
+          JAEGER_URL: http://localhost:16686
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet observability --strict
+
+      - name: Run observability battery (typescript host)
+        working-directory: integ
+        env:
+          LANGFUSE_URL: http://localhost:3000
+          JAEGER_URL: http://localhost:16686
+        run: pnpm exec tsx runners/typescript/main.ts --facet observability --strict
+
+      - name: Jaeger logs on failure
+        if: failure()
+        run: docker logs mirage-jaeger --tail 100 || true
+
+      - name: Langfuse container logs on failure
+        if: failure()
+        working-directory: integ/server
+        run: docker compose -f langfuse_compose.yml logs --tail 200
+
+      - name: Stop jaeger
+        if: always()
+        run: docker rm -f mirage-jaeger || true
+
+      - name: Stop Langfuse stack
+        if: always()
+        working-directory: integ/server
+        run: docker compose -f langfuse_compose.yml down -v
+
+  # One job per backend family. A failure names the family, and each variant
+  # starts only the fake servers that family needs rather than the whole fleet.
+  integ-facets:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        facet: [project, email, chat, dify, mem0, cli]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
+      - name: Build mirage-node
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-node build
+
+      # The typescript runner imports mirage-browser statically for the opfs
+      # target, so its dist must exist even when no browser target runs.
+      - name: Build mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-browser build
+
+      - name: Start fake Trello and Linear APIs
+        if: matrix.facet == 'project'
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-trello-ci.db
+        run: |
+          (cd integ && ./node_modules/.bin/prisma generate --schema prisma/schema.prisma)
+          (cd integ && nohup ./node_modules/.bin/tsx server/trello.ts --port 5095 > /tmp/trello.log 2>&1 &)
+          nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
+          for f in trello linear; do
+            for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/$f.log && break; sleep 1; done
+            cat /tmp/$f.log
+          done
+          echo "TRELLO_ENDPOINT=http://127.0.0.1:5095" >> "$GITHUB_ENV"
+          echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+
+      # The cli facet drives the builtin CLIs (himalaya, gws, slack, discord,
+      # ntn, linear) end to end against the same mocks the email, chat and
+      # project facets use.
+      - name: Start GreenMail and the fake Google Workspace server
+        if: matrix.facet == 'email' || matrix.facet == 'cli'
+        run: |
+          docker run -d --name mirage-greenmail \
+            -p 3025:3025 -p 3143:3143 -p 8080:8080 \
+            -e GREENMAIL_OPTS="-Dgreenmail.setup.test.all -Dgreenmail.users=integ:secret@example.com -Dgreenmail.users.login=email -Dgreenmail.hostname=0.0.0.0" \
+            greenmail/standalone:2.1.3
+          cd integ && nohup pnpm exec tsx server/gws_server.ts --port 19999 > /tmp/gws.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "GWS_URL=" /tmp/gws.log && break; sleep 1; done
+          cat /tmp/gws.log
+          for i in $(seq 1 30); do
+            curl -sf -X POST http://localhost:8080/api/service/reset && break
+            sleep 2
+          done
+          echo "EMAIL_HOST=localhost" >> "$GITHUB_ENV"
+          echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
+
+      - name: Start fake Slack Web API
+        if: matrix.facet == 'chat' || matrix.facet == 'cli'
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-slack-ci.db
+        run: |
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slack.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "SLACK_URL=" /tmp/slack.log && break; sleep 1; done
+          cat /tmp/slack.log
+          echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
+
+      - name: Start fake Discord API
+        if: matrix.facet == 'chat' || matrix.facet == 'cli'
+        run: |
+          nohup ./python/.venv/bin/python integ/server/discord_server.py --port 5099 > /tmp/discord.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "DISCORD_ENDPOINT=" /tmp/discord.log && break; sleep 1; done
+          cat /tmp/discord.log
+          echo "DISCORD_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
+
+      # The ntn and linear CLIs ride the notion mock (self-started by each
+      # runner under NOTION_ENABLED) and the fake Linear GraphQL server.
+      - name: Start fake Linear API and the Notion mock
+        if: matrix.facet == 'cli'
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
+        run: |
+          nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/linear.log && break; sleep 1; done
+          cat /tmp/linear.log
+          echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+          cd integ
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notion.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notion.log && break; sleep 1; done
+          cat /tmp/notion.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
+          echo "NOTION_ENABLED=1" >> "$GITHUB_ENV"
+
+      - name: Start fake Dify API
+        if: matrix.facet == 'dify'
+        run: |
+          nohup ./python/.venv/bin/python integ/server/dify_server.py --port 5093 > /tmp/dify.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "DIFY_ENDPOINT=" /tmp/dify.log && break; sleep 1; done
+          cat /tmp/dify.log
+          echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
+
+      - name: Run ${{ matrix.facet }} battery (python host)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet ${{ matrix.facet }} --strict
+
+      - name: Run ${{ matrix.facet }} battery (typescript host)
+        working-directory: integ
+        run: pnpm exec tsx runners/typescript/main.ts --facet ${{ matrix.facet }} --strict
+
+      - name: Stop GreenMail
+        if: always() && (matrix.facet == 'email' || matrix.facet == 'cli')
+        run: docker rm -f mirage-greenmail || true
 
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-database, integ-database-ts, integ-data, integ-fuse, runtime-py, runtime-ts]
+    needs: [changes, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, integ-runtime]
     if: always()
     steps:
       - name: Check required jobs

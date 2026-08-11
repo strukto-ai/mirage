@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { UsageError } from '../errors.ts'
-import { USAGE_EXIT, USAGE_HINT_PREFIX } from './constants'
+import {
+  OLD_OPTION_EXIT,
+  PYTHON_NAMES,
+  pythonUsage,
+  USAGE_EXIT,
+  USAGE_HINT_PREFIX,
+} from './constants'
 import { CommandName } from './types.ts'
 
 /** GNU usage-error exit code for a command. */
@@ -31,6 +37,10 @@ export function usageExitCode(cmdName: string): number {
  * are deliberately omitted; the `--help` hint line is kept because every
  * registered command serves `--help`.
  */
+function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] {
+  return [new TextEncoder().encode(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
+}
+
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
   if (cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
@@ -39,6 +49,16 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
       usageExitCode(cmdName),
     ]
   }
+  if (PYTHON_NAMES.has(cmdName)) {
+    // CPython's own two shapes, which do not match each other: the short
+    // form capitalizes and takes a colon, the long form does neither.
+    // Both pinned on 3.12.13.
+    if (token.startsWith('--')) {
+      return pythonOptionError(cmdName, `unknown option ${token}\n`)
+    }
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return pythonOptionError(cmdName, `Unknown option: ${dashed}\n`)
+  }
   const line = token.startsWith('--')
     ? `${cmdName}: unrecognized option '${token}'\n`
     : `${cmdName}: invalid option -- '${token}'\n`
@@ -46,11 +66,121 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
 }
 
+/**
+ * getopt_long refusal for an abbreviated long matching several options.
+ *
+ * Shape pinned against real GNU (`grep --c`): the typed spelling, then
+ * every possibility quoted in declaration order on one line. The
+ * per-tool usage dump GNU appends is deliberately omitted, like
+ * unknownOptionError.
+ */
+export function ambiguousOptionError(
+  cmdName: string,
+  token: string,
+  candidates: readonly string[],
+): [Uint8Array, number] {
+  const listed = candidates.map((c) => `'${c}'`).join(' ')
+  const line = `${cmdName}: option '${token}' is ambiguous; possibilities: ${listed}\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * Refusal for a non-integer value on an int-typed option.
+ *
+ * No GNU tool declares types through getopt (each words its own refusal,
+ * e.g. `head: invalid number of lines`), so this mirrors argparse's
+ * `invalid int value: 'abc'` with the option attributed the way
+ * invalidArgumentError does.
+ */
+export function invalidIntError(
+  cmdName: string,
+  option: string,
+  value: string,
+): [Uint8Array, number] {
+  const line = `${cmdName}: invalid int value: '${value}' for '${option}'\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * Refusal for a non-number value on a float-typed option. Mirrors
+ * argparse's `invalid float value: '5x'` the same way invalidIntError
+ * mirrors the int wording.
+ */
+export function invalidFloatError(
+  cmdName: string,
+  option: string,
+  value: string,
+): [Uint8Array, number] {
+  const line = `${cmdName}: invalid float value: '${value}' for '${option}'\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
 /** GNU-shaped error for a declared value flag with no argument left. */
 export function missingValueError(cmdName: string, token: string): [Uint8Array, number] {
+  if (PYTHON_NAMES.has(cmdName)) {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return pythonOptionError(cmdName, `Argument expected for the ${dashed} option\n`)
+  }
   const line = token.startsWith('--')
     ? `${cmdName}: option '${token}' requires an argument\n`
     : `${cmdName}: option requires an argument -- '${token}'\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * GNU tar refusal for an old-style cluster letter with no argument.
+ *
+ * First line and exit pinned against GNU tar 1.35 (`tar xzf` with
+ * nothing after it, and `tar cfC a.tar`, which names C). tar's own
+ * wording, capital and full stop included, because it counts the
+ * cluster's argument needs before argp sees the line at all.
+ *
+ * The hint line is deliberately mirage's, not GNU's: GNU offers
+ * `Try 'tar --help' or 'tar --usage' for more information.` because argp
+ * gives every argp program a `--usage`, and mirage's tar serves only
+ * `--help`. Naming a flag that does not exist would be worse than the
+ * shorter hint, and every other refusal here words it this way, so tar's
+ * two refusals stay consistent with each other.
+ */
+export function oldOptionError(cmdName: string, letter: string): [Uint8Array, number] {
+  const line = `${cmdName}: Old option '${letter}' requires an argument.\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), OLD_OPTION_EXIT]
+}
+
+/**
+ * GNU ARGMATCH refusal for a value outside a declared choices set.
+ *
+ * Shape pinned against real GNU (`tee --output-error=bogus`): the
+ * offending value, the option's canonical long spelling, then every valid
+ * argument in declaration order, one per line.
+ */
+export function invalidArgumentError(
+  cmdName: string,
+  option: string,
+  value: string,
+  choices: readonly string[],
+): [Uint8Array, number] {
+  const valid = choices.map((c) => `  - '${c}'`).join('\n')
+  const line =
+    `${cmdName}: invalid argument '${value}' for '${option}'\n` + `Valid arguments are:\n${valid}\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * Refusal for a declared required option absent from the line.
+ *
+ * No GNU tool declares required options through getopt, so there is no
+ * GNU shape to pin; this follows the unrecognized-option pattern (click
+ * reports the same condition as "Missing option").
+ */
+export function missingRequiredError(cmdName: string, option: string): [Uint8Array, number] {
+  const line = `${cmdName}: option '${option}' is required\n`
   const hint = `Try '${cmdName} --help' for more information.\n`
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
 }

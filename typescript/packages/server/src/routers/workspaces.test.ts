@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -43,6 +43,42 @@ describe('workspaces router', () => {
     expect(body.id).toMatch(UUID7_RE)
     await app.close()
   })
+
+  it('POST /v1/workspaces installs the config clis section', async () => {
+    // The route used to enumerate Workspace options by hand and omit
+    // `clis`, so a yaml clis block parsed, validated, and installed
+    // nothing: the head word answered "command not found".
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-ws-'))
+    const script = join(dir, 'pager.py')
+    writeFileSync(script, 'print("prog", argv[0])\n')
+    const app = buildApp()
+    try {
+      const create = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          id: 'cli-ws',
+          config: {
+            mounts: { '/': { resource: 'ram', mode: 'write' } },
+            runtimes: ['monty', 'vfs'],
+            clis: { pager: { script } },
+          },
+        },
+      })
+      expect(create.statusCode).toBe(201)
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/cli-ws/execute',
+        payload: { command: 'pager' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json<{ exitCode: number; stdout: string }>()
+      expect([body.exitCode, body.stdout]).toEqual([0, 'prog pager\n'])
+    } finally {
+      await app.close().catch(() => undefined)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   it('GET /v1/workspaces lists active workspaces', async () => {
     const app = buildApp()

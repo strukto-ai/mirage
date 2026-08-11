@@ -71,7 +71,7 @@ export async function readdir(
       resourceType: resourceTypeFor(f),
       remoteTime: modified,
       vfsName: filename,
-      size: !isDir && size !== null && size > 0 ? size : null,
+      size: !isDir ? size : null,
     })
     entries.push({ name: filename, entry, isDir })
   }
@@ -89,9 +89,4 @@ export async function readdir(
     else out.push(`${prefix}${pathPrefix}${e.name}`)
   }
   return out
-}
-export function isDirName(child: string): boolean | null {
-  // Cold reads mark folders with a trailing slash; warm index-cache hits
-  // return slash-less keys, so fall back to stat for classification.
-  return child.endsWith('/') ? true : null
 }

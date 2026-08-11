@@ -12,17 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../executor/runtime.ts'
-import type { RoutingDecision } from '../executor/route/index.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { PolicyDecision } from '../../runtime/policy/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { makeAbortError } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { assignmentStatus, finishStatement } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
   getDeclarationKeyword,
+  getCforParts,
   getForParts,
   getFunctionBody,
   getFunctionName,
@@ -32,7 +35,7 @@ import {
   getPipelineCommands,
   getRedirects,
   getText,
-  getUnsetNames,
+  getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
 import { JobTable } from '../../shell/job_table.ts'
@@ -40,13 +43,25 @@ import { ERREXIT_EXEMPT_TYPES, NodeType as NT, Redirect, RedirectKind } from '..
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
+import { expandPattern } from '../expand/pattern.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { ArithError, ExitSignal } from '../../shell/errors.ts'
+import {
+  type ShellArray,
+  arrayAppend,
+  arrayExtent,
+  arrayGet,
+  arraySet,
+  makeArray,
+} from '../../shell/array.ts'
+import { ArithError, ExitSignal, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { arrayIndex, type TSNodeLike } from '../expand/variable.ts'
+import { arrayIndex } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { wordText } from '../../types.ts'
 import {
+  type CforEval,
   handleCase,
+  handleCfor,
   handleFor,
   handleIf,
   handleSelect,
@@ -60,6 +75,7 @@ import {
   handleReadonly,
   handleTest,
   handleUnset,
+  noteLocalArray,
 } from '../executor/builtins/index.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
@@ -82,6 +98,7 @@ const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.SUBSHELL,
   NodeKind.IF,
   NodeKind.FOR,
+  NodeKind.CFOR,
   NodeKind.SELECT,
   NodeKind.WHILE,
   NodeKind.UNTIL,
@@ -115,6 +132,38 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
 // Array-literal elements behave like any other shell word list: command
 // substitutions word-split and globs resolve to matches
 // (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
+/**
+ * Evaluate one C-style for expression slot: the slot's integer value,
+ * or the default for an empty slot (1 for the condition so `for
+ * ((;;))` loops, 0 for init/update). Re-raises ArithError with the
+ * expression text prepended so the loop can print bash's
+ * `((: expr: reason` diagnostic, and throws ReadonlyError when the
+ * expression assigns to a readonly variable.
+ */
+async function evalCforExpr(
+  expr: TSNodeLike | null,
+  dflt: number,
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null,
+): Promise<number> {
+  if (expr === null) return dflt
+  const text = await expandArith(expr, session, executeFn, callStack)
+  let value: bigint
+  let updates: Record<string, string>
+  try {
+    ;({ value, updates } = evaluateArith(text, session.env))
+  } catch (err) {
+    if (!(err instanceof ArithError)) throw err
+    throw new ArithError(`${text}: ${err.message}`)
+  }
+  for (const name of Object.keys(updates)) {
+    if (session.readonlyVars.has(name)) throw new ReadonlyError(name)
+  }
+  Object.assign(session.env, updates)
+  return Number(value)
+}
+
 async function expandArrayItems(
   arrayNode: TSNodeLike,
   session: Session,
@@ -223,9 +272,8 @@ export interface ExecuteNodeDeps {
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
   ensureOpen?: (resource: Resource) => Promise<void>
-  unmount?: (prefix: string) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
-  routingDecision?: RoutingDecision
+  routingDecision?: PolicyDecision
   signal?: AbortSignal
   /**
    * Console this node writes its output to as it is produced.
@@ -265,7 +313,7 @@ export async function executeNode(
   const { dispatch, registry, jobTable, executeFn, agentId } = deps
   const kind = nodeKind(node)
 
-  if (deps.signal?.aborted === true) {
+  if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
     throw makeAbortError()
   }
   session.errexitImmune = false
@@ -308,7 +356,6 @@ export async function executeNode(
       callStack,
       jobTable,
       deps.ensureOpen,
-      deps.unmount,
       deps.runtimeBindings,
       deps.routingDecision,
       deps.signal,
@@ -423,12 +470,19 @@ export async function executeNode(
     // the parent's table never does), mirroring bash's forked process.
     const subTable = new JobTable()
     const subDeps: ExecuteNodeDeps = { ...deps, jobTable: subTable }
+    // The opts parameter is load-bearing, not decoration: a job started
+    // inside the subshell body hands `handleBackground` its own console
+    // and abort signal through it. Dropping it (a 4-parameter closure
+    // still satisfies ExecuteNodeFn, since function parameters are
+    // bivariant) would run the nested job against the enclosing job's
+    // sink and signal instead.
     const subRecurse = (
       n: TSNodeLike,
       s: Session,
       inp: ByteSource | null,
       cs: CallStack | null,
-    ): Promise<Result> => executeNode(subDeps, n, s, inp, cs)
+      opts?: ExecuteNodeOpts,
+    ): Promise<Result> => executeNode(withOpts(subDeps, opts), n, s, inp, cs)
     return handleSubshell(subRecurse, node.children, session, stdin, callStack, subTable, agentId)
   }
 
@@ -473,8 +527,9 @@ export async function executeNode(
     let lastExec = new ExecutionNode({ command: '{}', exitCode: 0 })
     for (const child of node.namedChildren) {
       if (child.type === NT.COMMENT) continue
-      const [stdout, io, execNode] = await stream(child, session, stdin, callStack)
+      const [rawStdout, io, execNode] = await stream(child, session, stdin, callStack)
       lastExec = execNode
+      const stdout = await finishStatement(rawStdout, io, session)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       if (
@@ -498,6 +553,12 @@ export async function executeNode(
   if (kind === NodeKind.IF) {
     const [branches, elseBody] = getIfBranches(node)
     return handleIf(stream, branches, elseBody, session, stdin, callStack)
+  }
+
+  if (kind === NodeKind.CFOR) {
+    const [exprs, body] = getCforParts(node)
+    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, session, executeFn, callStack)
+    return handleCfor(stream, exprs, body, evalExpr, session, stdin, callStack)
   }
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
@@ -530,7 +591,14 @@ export async function executeNode(
   if (kind === NodeKind.CASE) {
     const wordNode = getCaseWord(node)
     const word = await expandNode(wordNode, session, executeFn, callStack)
-    const items = getCaseItems(node)
+    const items: [string[], TSNodeLike[], string][] = []
+    for (const [patternNodes, body, terminator] of getCaseItems(node)) {
+      const patterns: string[] = []
+      for (const patternNode of patternNodes) {
+        patterns.push(await expandPattern(patternNode, session, executeFn, callStack))
+      }
+      items.push([patterns, body, terminator])
+    }
     return handleCase(stream, word, items, session, stdin, callStack)
   }
 
@@ -544,7 +612,15 @@ export async function executeNode(
   if (kind === NodeKind.DECLARATION) {
     const keyword = getDeclarationKeyword(node)
     const assignments: string[] = []
+    // Array literals are staged, not stored: `readonly -a a=(y)` on an
+    // already-readonly name has to fail with the old value intact.
+    const staged: { name: string; append: boolean; items: string[] }[] = []
+    // Option words are kept verbatim, in order, so `--` survives as an
+    // end-of-options marker and the handlers can name the *first* bad option
+    // letter the way bash does.
+    const flagWords: string[] = []
     const flagChars = new Set<string>()
+    let optsDone = false
     for (const child of node.namedChildren) {
       if (child.type === NT.VARIABLE_ASSIGNMENT) {
         const valNodes = child.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
@@ -553,13 +629,12 @@ export async function executeNode(
           const text = getText(child)
           const eq = text.indexOf('=')
           const key = eq >= 0 ? text.slice(0, eq) : text
-          session.arrays[key] = await expandArrayItems(
-            firstVal,
-            session,
-            executeFn,
-            registry,
-            callStack,
-          )
+          const append = key.endsWith('+')
+          staged.push({
+            name: append ? key.slice(0, -1) : key,
+            append,
+            items: await expandArrayItems(firstVal, session, executeFn, registry, callStack),
+          })
           continue
         }
         assignments.push(await expandNode(child, session, executeFn, callStack))
@@ -567,19 +642,84 @@ export async function executeNode(
         child.type === NT.SIMPLE_EXPANSION ||
         child.type === NT.EXPANSION ||
         child.type === NT.CONCATENATION ||
-        child.type === NT.WORD
+        child.type === NT.WORD ||
+        // A bare `readonly NAME` / `export NAME` operand parses as a
+        // variable_name, not a word, and a quoted assignment
+        // (`export 'FOO=bar'`) as a plain string operand.
+        child.type === NT.VARIABLE_NAME ||
+        child.type === NT.STRING ||
+        child.type === NT.RAW_STRING ||
+        child.type === NT.ANSI_C_STRING ||
+        child.type === NT.TRANSLATED_STRING
       ) {
         const expanded = await expandNode(child, session, executeFn, callStack)
         if (expanded === '') continue
-        if (expanded.startsWith('-') && expanded.length > 1) {
-          for (const ch of expanded.slice(1)) flagChars.add(ch)
+        if (!optsDone && expanded.startsWith('-') && expanded.length > 1) {
+          flagWords.push(expanded)
+          if (expanded === '--') optsDone = true
+          else for (const ch of expanded.slice(1)) flagChars.add(ch)
         } else {
           assignments.push(expanded)
         }
       }
     }
-    if (keyword === 'readonly' || flagChars.has('r')) {
-      return handleReadonly(assignments, session)
+    const arrayNames = staged.map((entry) => entry.name)
+    const isReadonly = keyword === 'readonly' || flagChars.has('r')
+    for (const name of arrayNames) {
+      if (isReadonly && session.readonlyVars.has(name)) {
+        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: err }),
+          new ExecutionNode({ command: keyword, exitCode: 1, stderr: err }),
+        ]
+      }
+    }
+    for (const { name, append, items } of staged) {
+      noteLocalArray(session, name)
+      let base: ShellArray
+      if (append) {
+        const existing = session.arrays[name]
+        if (existing === undefined) {
+          const scalar = session.env[name]
+          base = scalar === undefined ? [] : [scalar]
+        } else {
+          base = existing
+        }
+        arrayAppend(base, items)
+      } else {
+        base = makeArray(items)
+      }
+      session.arrays[name] = base
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete session.env[name]
+    }
+    if (flagChars.has('a')) {
+      // `declare -a NAME` with no value declares an empty array, so
+      // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
+      for (const bare of assignments) {
+        if (bare.includes('=')) continue
+        if (noteLocalArray(session, bare)) {
+          // Inside a function this shadows whatever the caller had with a
+          // fresh empty array.
+          session.arrays[bare] = []
+        } else if (!Object.hasOwn(session.arrays, bare)) {
+          // At top level an existing scalar becomes element 0.
+          const scalar = session.env[bare]
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete session.env[bare]
+          session.arrays[bare] = scalar === undefined ? [] : [scalar]
+        }
+      }
+    }
+    if (isReadonly) {
+      // An array assignment stores itself above, but the name still has
+      // to be marked readonly. Only the `readonly` keyword owns -p /
+      // illegal-option handling; `declare -r` keeps names only.
+      if (keyword === 'readonly') {
+        return handleReadonly([...flagWords, ...assignments, ...arrayNames], session)
+      }
+      return handleReadonly([...assignments, ...arrayNames], session)
     }
     // declare/typeset scope like `local` inside a function (bash
     // semantics) and assign globally at top level, which is exactly
@@ -587,11 +727,12 @@ export async function executeNode(
     if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
       return handleLocal(assignments, session)
     }
-    return handleExport(assignments, session)
+    // Pass export flags through so -p / bare print and illegal options work.
+    return handleExport([...flagWords, ...assignments], session)
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(getUnsetNames(node), session)
+    return handleUnset(getUnsetArgs(node), session)
   }
 
   if (kind === NodeKind.TEST) {
@@ -606,7 +747,10 @@ export async function executeNode(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
-    const [stdout, io, execNode] = await stream(inner, session, stdin, callStack)
+    const [rawStdout, io, execNode] = await stream(inner, session, stdin, callStack)
+    // Lazy exit codes (exitOnEmpty in grep) must be final before
+    // inverting, or `! grep miss f` negates the provisional 0.
+    const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
     const flipped = new IOResult({
       exitCode: io.exitCode !== 0 ? 0 : 1,
       stderr: io.stderr,
@@ -624,6 +768,7 @@ export async function executeNode(
     if (!text.includes('=')) {
       return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
     }
+    const subSeq = session.cmdsubSeq
     const subscriptNode = node.namedChildren.find((c) => c.type === 'subscript') ?? null
     const nameSource = subscriptNode ?? node
     const nameNode = nameSource.namedChildren.find((c) => c.type === NT.VARIABLE_NAME)
@@ -650,15 +795,23 @@ export async function executeNode(
           const scalar = session.env[key]
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete session.env[key]
-          base = scalar !== undefined && scalar !== '' ? [scalar] : []
+          base = scalar === undefined ? [] : [scalar]
         }
-        session.arrays[key] = [...base, ...items]
+        // `arr+=(...)` starts at the extent, so it fills the hole a
+        // trailing `unset arr[last]` left but skips interior ones.
+        arrayAppend(base, items)
+        session.arrays[key] = base
       } else {
-        session.arrays[key] = items
+        session.arrays[key] = makeArray(items)
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
       }
-      return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
+      const arrCode = assignmentStatus(session, subSeq)
+      return [
+        null,
+        new IOResult({ exitCode: arrCode }),
+        new ExecutionNode({ command: text, exitCode: arrCode }),
+      ]
     }
     let val = text.slice(eq + 1)
     if (firstVal !== undefined) {
@@ -677,10 +830,10 @@ export async function executeNode(
         const scalar = session.env[key]
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete session.env[key]
-        arr = scalar !== undefined && scalar !== '' ? [scalar] : []
+        arr = scalar === undefined ? [] : [scalar]
       }
       let idx = arrayIndex(idxText, session.env)
-      if (idx < 0) idx += arr.length
+      if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) {
         // bash aborts the whole line on a bad assignment subscript
         // (status 1); containment mirrors ${var:?}.
@@ -692,17 +845,19 @@ export async function executeNode(
           1,
         )
       }
-      while (arr.length <= idx) arr.push('')
-      arr.splice(idx, 1, append ? (arr[idx] ?? '') + val : val)
+      arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
       session.arrays[key] = arr
-      return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
+      const subCode = assignmentStatus(session, subSeq)
+      return [
+        null,
+        new IOResult({ exitCode: subCode }),
+        new ExecutionNode({ command: text, exitCode: subCode }),
+      ]
     }
     if (append) {
       const arr = session.arrays[key]
-      if (arr !== undefined && arr.length > 0) {
-        arr[0] = (arr[0] ?? '') + val
-      } else if (arr !== undefined) {
-        arr.push(val)
+      if (arr !== undefined) {
+        arraySet(arr, 0, arrayGet(arr, 0) + val)
       } else {
         session.env[key] = (session.env[key] ?? '') + val
       }
@@ -714,11 +869,28 @@ export async function executeNode(
     // Reassigning OPTIND (even to its current value) restarts the getopts
     // scan, matching bash's internal char pointer.
     if (key === 'OPTIND') session.getoptsOptind = null
-    const assignIo = new IOResult()
+    const code = assignmentStatus(session, subSeq)
+    const assignIo = new IOResult({ exitCode: code })
     if (session.shellOptions.xtrace === true) {
       assignIo.stderr = traceAssignment(key, val, append)
     }
-    return [null, assignIo, new ExecutionNode({ command: text, exitCode: 0 })]
+    return [null, assignIo, new ExecutionNode({ command: text, exitCode: code })]
+  }
+
+  // Assignment-only statement (a=1 b=2).
+  if (kind === NodeKind.VAR_ASSIGNS) {
+    const subSeq = session.cmdsubSeq
+    let mergedIo = new IOResult()
+    for (const child of node.namedChildren) {
+      if (child.type !== NT.VARIABLE_ASSIGNMENT) continue
+      const [, io] = await recurse(child, session, stdin, callStack)
+      mergedIo = await mergedIo.merge(io)
+    }
+    // The statement's status follows the last command substitution
+    // performed across ALL its assignments, not the last child's.
+    const code = assignmentStatus(session, subSeq)
+    mergedIo.exitCode = code
+    return [null, mergedIo, new ExecutionNode({ command: getText(node), exitCode: code })]
   }
 
   // Constructs the parser accepts but the executor cannot honor (e.g.

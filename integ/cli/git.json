@@ -1,0 +1,1138 @@
+{
+  "cases": [
+    {
+      "id": "git_log_oneline",
+      "seq": 568000,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --oneline",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n225f39c add docs\n265ec3a add delta\n98b4ffe first commit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_reverse",
+      "seq": 568001,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --oneline --reverse",
+      "expect": {
+        "exit": 0,
+        "stdout": "98b4ffe first commit\n265ec3a add delta\n225f39c add docs\n8ef2542 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_limit",
+      "seq": 568002,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --oneline -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n225f39c add docs\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_header",
+      "seq": 568003,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -n 1 | head -3",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_pickaxe_finds_the_introducing_commit",
+      "seq": 568004,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -S delta --oneline --reverse",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3a add delta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_pickaxe_misses_an_absent_string",
+      "seq": 568005,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -S nowhere --oneline",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_revision_operand",
+      "seq": 568006,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --oneline HEAD~2",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3a add delta\n98b4ffe first commit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_reads_a_packed_object",
+      "seq": 568007,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show 265ec3a | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 265ec3adb16a0c90ad09a180687677927b9d7b7f\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_patch_body",
+      "seq": 568008,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show 265ec3a | grep -F '+delta'",
+      "expect": {
+        "exit": 0,
+        "stdout": "+delta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_lists_both",
+      "seq": 568009,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch",
+      "expect": {
+        "exit": 0,
+        "stdout": "* main\n  topic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_names_the_branch",
+      "seq": 568010,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status",
+      "expect": {
+        "exit": 0,
+        "stdout": "On branch main\nnothing to commit, working tree clean\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_diff_between_revisions",
+      "seq": 568011,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo diff HEAD~1 HEAD | grep -F '+two'",
+      "expect": {
+        "exit": 0,
+        "stdout": "+two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_reads_through_the_shell_like_any_command",
+      "seq": 568012,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --oneline | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_clean_prints_nothing_in_porcelain",
+      "seq": 568013,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_finds_an_edit",
+      "seq": 568014,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'edited\\n' > /repo/letters.txt && git -C /repo status --porcelain && printf 'alpha\\nbeta\\ngamma\\ndelta\\n' > /repo/letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " M letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_finds_an_edit_of_the_same_length",
+      "seq": 568015,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'alpha\\nbeta\\nGAMMA\\ndelta\\n' > /repo/letters.txt && git -C /repo status --porcelain && printf 'alpha\\nbeta\\ngamma\\ndelta\\n' > /repo/letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " M letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_finds_a_deletion",
+      "seq": 568016,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/numbers.txt && git -C /repo status --porcelain && printf 'one\\ntwo\\n' > /repo/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " D numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_names_an_untracked_file",
+      "seq": 568017,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' > /repo/fresh.txt && git -C /repo status --porcelain && rm /repo/fresh.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? fresh.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_collapses_an_untracked_directory",
+      "seq": 568018,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir -p /repo/sub && printf 'x\\n' > /repo/sub/deep.txt && git -C /repo status --porcelain && rm -r /repo/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? sub/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_untracked_all_descends",
+      "seq": 568019,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "mkdir -p /repo/sub && printf 'x\\n' > /repo/sub/deep.txt && git -C /repo status --porcelain -uall && rm -r /repo/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? sub/deep.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_untracked_no_hides_them",
+      "seq": 568020,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' > /repo/fresh.txt && git -C /repo status --porcelain -uno && rm /repo/fresh.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_honors_gitignore",
+      "seq": 568021,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf '*.log\\n' > /repo/.gitignore && printf 'x\\n' > /repo/noisy.log && git -C /repo status --porcelain && rm /repo/.gitignore /repo/noisy.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? .gitignore\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_branch_line_is_opt_in",
+      "seq": 568022,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status --porcelain -b",
+      "expect": {
+        "exit": 0,
+        "stdout": "## main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_long_format_sections",
+      "seq": 568023,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/numbers.txt && printf 'x\\n' > /repo/fresh.txt && git -C /repo status && printf 'one\\ntwo\\n' > /repo/numbers.txt && rm /repo/fresh.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "On branch main\nChanges not staged for commit:\n  (use \"git add/rm <file>...\" to update what will be committed)\n  (use \"git restore <file>...\" to discard changes in working directory)\n\tdeleted:    numbers.txt\n\nUntracked files:\n  (use \"git add <file>...\" to include in what will be committed)\n\tfresh.txt\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_short_reads_like_porcelain",
+      "seq": 568024,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'edited\\n' > /repo/letters.txt && git -C /repo status -s && printf 'alpha\\nbeta\\ngamma\\ndelta\\n' > /repo/letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " M letters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_empty_entries_keep_separators",
+      "seq": 568040,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=format:",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_tformat_terminates_empty_entries",
+      "seq": 568041,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format=%b",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\n\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_x_placeholder_is_a_raw_byte",
+      "seq": 568042,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -1 --format=a%x80b | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_bare_format_is_fatal",
+      "seq": 568043,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: unrecognized argument: --format\n"
+      }
+    },
+    {
+      "id": "git_show_format_header_no_trailing_newline",
+      "seq": 568044,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --pretty=format:%h",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_stages_an_edit",
+      "seq": 568100,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'edited\\n' > /repo/letters.txt && git -C /repo add -A && git -C /repo status --porcelain && git -C /repo reset && printf 'alpha\\nbeta\\ngamma\\ndelta\\n' > /repo/letters.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "M  letters.txt\nUnstaged changes after reset:\nM\tletters.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_then_commit_lands_on_the_branch",
+      "seq": 568101,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'edited\\n' > /repo/letters.txt && git -C /repo add -A && git -C /repo commit -m 'integ change' > /dev/null && git -C /repo log --oneline -n 1 | cut -d' ' -f2- && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ change\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_with_nothing_staged_prints_the_status",
+      "seq": 568102,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo status --porcelain && git -C /repo commit -m nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "On branch main\nnothing to commit, working tree clean\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_refuses_an_unknown_pathspec",
+      "seq": 568103,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo add nosuchfile.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: pathspec 'nosuchfile.txt' did not match any files\n"
+      }
+    },
+    {
+      "id": "git_add_honors_gitignore",
+      "seq": 568104,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf '*.log\\n' > /repo/.gitignore && printf 'x\\n' > /repo/a.log && git -C /repo add a.log",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "The following paths are ignored by one of your .gitignore files:\na.log\nhint: Use -f if you really want to add them.\nhint: Disable this message with \"git config set advice.addIgnoredFile false\"\n"
+      }
+    },
+    {
+      "id": "git_add_gitignore_cleanup",
+      "seq": 568105,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/.gitignore /repo/a.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_creates_and_deletes",
+      "seq": 568106,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch integ-feature && git -C /repo branch && git -C /repo branch -d integ-feature > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "  integ-feature\n* main\n  topic\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_branch_refuses_a_name_that_exists",
+      "seq": 568107,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch topic",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: a branch named 'topic' already exists\n"
+      }
+    },
+    {
+      "id": "git_checkout_switches_the_working_tree",
+      "seq": 568108,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout topic 2>/dev/null && cat /repo/numbers.txt && git -C /repo checkout main 2>/dev/null && cat /repo/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\none\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_refuses_to_lose_an_edit",
+      "seq": 568109,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'precious\\n' > /repo/numbers.txt && git -C /repo checkout topic",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: Your local changes to the following files would be overwritten by checkout:\n\tnumbers.txt\nPlease commit your changes or stash them before you switch branches.\nAborting\n"
+      }
+    },
+    {
+      "id": "git_checkout_conflict_cleanup",
+      "seq": 568110,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'one\\ntwo\\n' > /repo/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_refuses_an_unknown_target",
+      "seq": 568111,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout nosuchbranch",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: pathspec 'nosuchbranch' did not match any file(s) known to git\n"
+      }
+    },
+    {
+      "id": "git_mutation_verbs_refuse_an_unknown_switch",
+      "seq": 568112,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo add -Z",
+      "expect": {
+        "exit": 129,
+        "stdout": "",
+        "stderr": "error: unknown switch `Z'\n"
+      }
+    },
+    {
+      "id": "git_a_directory_holding_no_repository_is_fatal",
+      "seq": 568200,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C / status",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: not a git repository (or any of the parent directories): .git\n"
+      }
+    },
+    {
+      "id": "git_a_directory_that_is_not_there_is_a_different_fatal",
+      "seq": 568201,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /tmp log --oneline",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/tmp': No such file or directory\n"
+      }
+    },
+    {
+      "id": "git_finds_the_repository_from_a_subdirectory",
+      "seq": 568202,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/docs log --oneline -n 1 | cut -d' ' -f2-",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ change\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_rejects_an_unknown_revision",
+      "seq": 568203,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --oneline nosuchrev",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: ambiguous argument 'nosuchrev': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_branch_refuses_to_delete_the_current_branch",
+      "seq": 568204,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch -d main",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: cannot delete branch 'main' used by worktree at '/repo'\n"
+      }
+    },
+    {
+      "id": "git_add_stages_only_the_named_pathspec",
+      "seq": 568205,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'x\\n' > /repo/note.txt && printf 'y\\n' > /repo/other.txt && git -C /repo add note.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "A  note.txt\n?? other.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_reset_unstages_only_the_named_pathspec",
+      "seq": 568206,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo reset note.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? note.txt\n?? other.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_pathspec_cleanup",
+      "seq": 568207,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/note.txt /repo/other.txt && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_reports_a_directory_it_could_not_enter",
+      "seq": 568208,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/nowhere log --oneline",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/repo/nowhere': No such file or directory\n"
+      }
+    },
+    {
+      "id": "git_branch_d_refuses_an_unmerged_branch",
+      "seq": 568209,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b side > /dev/null 2>&1 && printf 'sideways\\n' > /repo/letters.txt && git -C /repo add -A && git -C /repo commit -m sideways > /dev/null && git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -d side",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: the branch 'side' is not fully merged\nhint: If you are sure you want to delete it, run 'git branch -D side'\n"
+      }
+    },
+    {
+      "id": "git_branch_force_delete_removes_an_unmerged_branch",
+      "seq": 568210,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo branch -D side | cut -d' ' -f1-3",
+      "expect": {
+        "exit": 0,
+        "stdout": "Deleted branch side\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_refuses_to_overwrite_an_untracked_file",
+      "seq": 568211,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b holder > /dev/null 2>&1 && printf 'branch\\n' > /repo/fresh.txt && git -C /repo add -A && git -C /repo commit -m fresh > /dev/null && git -C /repo checkout main > /dev/null 2>&1 && printf 'mine\\n' > /repo/fresh.txt && git -C /repo checkout holder",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: The following untracked working tree files would be overwritten by checkout:\n\tfresh.txt\nPlease move or remove them before you switch branches.\nAborting\n"
+      }
+    },
+    {
+      "id": "git_checkout_untracked_conflict_cleanup",
+      "seq": 568212,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/fresh.txt && git -C /repo branch -D holder > /dev/null && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_update_stages_only_the_named_pathspec",
+      "seq": 568213,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'edited\\n' > /repo/numbers.txt && printf 'edited\\n' > /repo/docs/readme.md && git -C /repo add -u docs && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "M  docs/readme.md\n M numbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_add_update_refuses_an_untracked_pathspec",
+      "seq": 568214,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'z\\n' > /repo/loose.txt && git -C /repo add -u loose.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "error: pathspec 'loose.txt' did not match any file(s) known to git\n"
+      }
+    },
+    {
+      "id": "git_add_update_cleanup",
+      "seq": 568215,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "rm /repo/loose.txt && git -C /repo reset > /dev/null && printf 'one\\ntwo\\n' > /repo/numbers.txt && printf 'notes\\n' > /repo/docs/readme.md && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_a_file_start_point_is_a_chdir_failure",
+      "seq": 568216,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/letters.txt log --oneline",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot change to '/repo/letters.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "git_checkout_creates_at_the_start_point",
+      "seq": 568217,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b older HEAD~1 > /dev/null 2>&1 && git -C /repo log --oneline -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_start_point_cleanup",
+      "seq": 568218,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -d older",
+      "expect": {
+        "exit": 0,
+        "stdout": "Deleted branch older (was 8ef2542).\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_refuses_a_start_point_that_is_not_a_commit",
+      "seq": 568219,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b shiny nosuchrev",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: 'nosuchrev' is not a commit and a branch 'shiny' cannot be created from it\n"
+      }
+    },
+    {
+      "id": "git_reset_refuses_a_pathspec_that_matches_nothing",
+      "seq": 568220,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo reset nosuch.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: ambiguous argument 'nosuch.txt': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_reset_says_which_feature_a_revision_operand_needs",
+      "seq": 568221,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo reset HEAD~1",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: cannot reset to 'HEAD~1': this build resets the index from HEAD only\n"
+      }
+    },
+    {
+      "id": "git_log_all_walks_every_ref",
+      "seq": 568025,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --all --oneline",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 add two\n225f39c add docs\n265ec3a add delta\n98b4ffe first commit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_placeholders",
+      "seq": 568026,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format='%h|%an|%s'",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542|Integ Author|add two\n225f39c|Integ Author|add docs\n265ec3a|Integ Author|add delta\n98b4ffe|Integ Author|first commit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_separator_has_no_trailing_newline",
+      "seq": 568027,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty='format:%h' | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "31\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_pretty_oneline_prints_full_ids",
+      "seq": 568028,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=oneline -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_pretty_fuller_block",
+      "seq": 568029,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=fuller -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor:     Integ Author <integ@example.com>\nAuthorDate: Thu Jan 8 14:45:00 2026 +0000\nCommit:     Integ Author <integ@example.com>\nCommitDate: Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_format_decorations",
+      "seq": 568030,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --format='%h%d'",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef2542 (HEAD -> main)\n225f39c (topic)\n265ec3a\n98b4ffe\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_invalid_pretty_is_refused_like_git",
+      "seq": 568031,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=bogus",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: invalid --pretty format: bogus\n"
+      }
+    },
+    {
+      "id": "git_log_unsupported_pretty_says_so",
+      "seq": 568032,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --pretty=raw",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: unsupported --pretty format: raw (this build implements oneline, short, medium, full, fuller and format:/tformat: strings)\n"
+      }
+    },
+    {
+      "id": "git_show_stat_table",
+      "seq": 568033,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --stat HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n\n numbers.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_name_only",
+      "seq": 568034,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --name-only HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n\nnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_no_patch_suppresses_the_diff",
+      "seq": 568035,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --no-patch HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_s_short_spelling",
+      "seq": 568036,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_stat_loses_to_no_patch",
+      "seq": 568037,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --stat --no-patch HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_s_with_format",
+      "seq": 568038,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show -s --format='%H %s' HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "8ef25423772bbfe671c8e285ae1d63991d59db19 add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_no_ext_diff_is_accepted",
+      "seq": 568039,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo show --no-ext-diff -s HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 8ef25423772bbfe671c8e285ae1d63991d59db19\nAuthor: Integ Author <integ@example.com>\nDate:   Thu Jan 8 14:45:00 2026 +0000\n\n    add two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_counts_binary_files_but_no_lines",
+      "seq": 568230,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'A\\0B\\0C' > /repo/blob.bin && git -C /repo add -A && git -C /repo commit -m 'binary blob' | grep -E 'file changed|create mode'",
+      "expect": {
+        "exit": 0,
+        "stdout": " 1 file changed, 0 insertions(+), 0 deletions(-)\n create mode 100644 blob.bin\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

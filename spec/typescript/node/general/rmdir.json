@@ -1,5 +1,85 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "disk": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "nextcloud": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
@@ -10,33 +90,23 @@
       "disk",
       "dropbox",
       "gdrive",
-      "hf_buckets",
-      "hf_datasets",
-      "hf_models",
-      "hf_spaces",
+      "gridfs",
       "nextcloud",
+      "onedrive",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "ssh"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-v",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "kind": "path",
-    "provided_by": []
+    "type": "path"
   }
 }

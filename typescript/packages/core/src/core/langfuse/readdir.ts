@@ -18,34 +18,35 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import {
+  fetchDatasetItems,
   fetchDatasetRuns,
   fetchDatasets,
   fetchPrompts,
   fetchSessions,
   fetchTraces,
 } from './_client.ts'
+import { toJsonlBytes } from './render.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 const TOP_LEVEL_DIRS = ['traces', 'sessions', 'prompts', 'datasets'] as const
 
-const DEFAULT_TRACE_LIMIT = 300
-const DEFAULT_TRACE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
-
-function defaultFromTimestamp(): string {
-  return new Date(Date.now() - DEFAULT_TRACE_WINDOW_MS).toISOString()
-}
-
+// Mirrors LangfuseConfig.default_trace_limit in python.
+const DEFAULT_TRACE_LIMIT = 100
 function pickString(record: Record<string, unknown>, key: string): string {
   const value = record[key]
   return typeof value === 'string' ? value : ''
 }
 
-function pickStringOrNumber(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  if (typeof value === 'string') return value
-  if (typeof value === 'number') return String(value)
-  return ''
+function promptVersions(record: Record<string, unknown>): string[] {
+  const value = record.versions
+  if (!Array.isArray(value)) return []
+  const numbers: number[] = []
+  for (const entry of value) {
+    const parsed = typeof entry === 'number' ? entry : Number(entry)
+    if (Number.isFinite(parsed)) numbers.push(parsed)
+  }
+  return numbers.sort((a, b) => a - b).map(String)
 }
 
 function makeVirtualKey(prefix: string, key: string): string {
@@ -64,8 +65,18 @@ async function readdirTraces(
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
   }
   const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
-  const fromTimestamp = accessor.config.defaultFromTimestamp ?? defaultFromTimestamp()
-  const traces = await fetchTraces(accessor.transport, { limit, fromTimestamp })
+  // No implicit time window: an unset defaultFromTimestamp lists whatever the
+  // project holds, up to defaultTraceLimit. A rolling default would hide
+  // traces that read() happily serves, and python applies no window either.
+  const opts: { limit: number; fromTimestamp?: string } = { limit }
+  const from = accessor.config.defaultFromTimestamp
+  if (from !== undefined && from !== '') opts.fromTimestamp = from
+  const traces = await fetchTraces(accessor.transport, opts)
+  // The list endpoint returns trace summaries while a read renders the
+  // full trace with its observations, so a size here would cost one
+  // fetchTrace per entry. Traces and prompts stay size-unknown until a
+  // read hydrates them; the dataset .jsonl files are sized because their
+  // listing already carries every item.
   const entries: [string, IndexEntry][] = []
   const names: string[] = []
   for (const t of traces) {
@@ -128,8 +139,10 @@ async function readdirSessionTraces(
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
   }
   const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
-  const fromTimestamp = accessor.config.defaultFromTimestamp ?? defaultFromTimestamp()
-  const traces = await fetchTraces(accessor.transport, { sessionId, limit, fromTimestamp })
+  const opts: { sessionId: string; limit: number; fromTimestamp?: string } = { sessionId, limit }
+  const from = accessor.config.defaultFromTimestamp
+  if (from !== undefined && from !== '') opts.fromTimestamp = from
+  const traces = await fetchTraces(accessor.transport, opts)
   const entries: [string, IndexEntry][] = []
   const names: string[] = []
   for (const t of traces) {
@@ -199,18 +212,21 @@ async function readdirPromptVersions(
   const names: string[] = []
   for (const p of prompts) {
     if (pickString(p, 'name') !== promptName) continue
-    const version = pickStringOrNumber(p, 'version') || '0'
-    const filename = `${version}.json`
-    entries.push([
-      filename,
-      new IndexEntry({
-        id: `${promptName}/${version}`,
-        name: version,
-        resourceType: 'langfuse/prompt_version',
-        vfsName: filename,
-      }),
-    ])
-    names.push(`${prefix}/prompts/${promptName}/${filename}`)
+    // The list endpoint returns PromptMeta, which carries every version of a
+    // prompt in a `versions` array; there is no scalar `version`.
+    for (const version of promptVersions(p)) {
+      const filename = `${version}.json`
+      entries.push([
+        filename,
+        new IndexEntry({
+          id: `${promptName}/${version}`,
+          name: version,
+          resourceType: 'langfuse/prompt_version',
+          vfsName: filename,
+        }),
+      ])
+      names.push(`${prefix}/prompts/${promptName}/${filename}`)
+    }
   }
   if (index !== undefined) await index.setDir(virtualKey, entries)
   return names
@@ -246,6 +262,46 @@ async function readdirDatasets(
   return names
 }
 
+async function readdirDataset(
+  accessor: LangfuseAccessor,
+  datasetName: string,
+  virtualKey: string,
+  index: IndexCacheStore | undefined,
+  prefix: string,
+): Promise<string[]> {
+  if (index !== undefined) {
+    const listing = await index.listDir(virtualKey)
+    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
+  }
+  // One dataset_items call per dataset directory actually entered: the
+  // dataset listing carries no item payloads, so items.jsonl can only be
+  // sized here, and only for datasets the caller opens.
+  const items = await fetchDatasetItems(accessor.transport, datasetName)
+  const entries: [string, IndexEntry][] = [
+    [
+      'items.jsonl',
+      new IndexEntry({
+        id: `${datasetName}/items`,
+        name: 'items.jsonl',
+        resourceType: 'langfuse/dataset_items',
+        vfsName: 'items.jsonl',
+        size: toJsonlBytes(items).byteLength,
+      }),
+    ],
+    [
+      'runs',
+      new IndexEntry({
+        id: `${datasetName}/runs`,
+        name: 'runs',
+        resourceType: 'langfuse/dataset_runs_dir',
+        vfsName: 'runs',
+      }),
+    ],
+  ]
+  if (index !== undefined) await index.setDir(virtualKey, entries)
+  return entries.map(([name]) => `${prefix}/datasets/${datasetName}/${name}`)
+}
+
 async function readdirDatasetRuns(
   accessor: LangfuseAccessor,
   datasetName: string,
@@ -263,6 +319,8 @@ async function readdirDatasetRuns(
   for (const r of runs) {
     const runName = pickString(r, 'name')
     const filename = `${runName}.jsonl`
+    // The listing already carries the run document read() renders, so each
+    // run file's exact size is free here.
     entries.push([
       filename,
       new IndexEntry({
@@ -270,6 +328,7 @@ async function readdirDatasetRuns(
         name: runName,
         resourceType: 'langfuse/dataset_run',
         vfsName: filename,
+        size: toJsonlBytes([r]).byteLength,
       }),
     ])
     names.push(`${prefix}/datasets/${datasetName}/runs/${filename}`)
@@ -325,10 +384,7 @@ export async function readdir(
   }
 
   if (parts[0] === 'datasets' && parts.length === 2) {
-    return [
-      `${prefix}/datasets/${parts[1] ?? ''}/items.jsonl`,
-      `${prefix}/datasets/${parts[1] ?? ''}/runs`,
-    ]
+    return readdirDataset(accessor, parts[1] ?? '', virtualKey, index, prefix)
   }
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'runs') {
@@ -336,10 +392,4 @@ export async function readdir(
   }
 
   throw enoent(path)
-}
-export function isDirName(child: string): boolean {
-  // Entries are recognized by extension, so classification never needs
-  // the stat fallback.
-  const name = child.split('/').pop() ?? ''
-  return !(name.endsWith('.json') || name.endsWith('.jsonl'))
 }

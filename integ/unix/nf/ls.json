@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "id": "nf_ls",
+      "seq": 603200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/missing",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data/missing': No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_ls_nested",
+      "seq": 603201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/sub/missing",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data/sub/missing': No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_ls_missing_parent",
+      "seq": 603202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/missing/deeper",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data/missing/deeper': No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_ls_notdir",
+      "seq": 603203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/a.txt/x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data/a.txt/x': Not a directory\n"
+      }
+    },
+    {
+      "id": "nf_ls_notdir_deeper",
+      "seq": 603204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/a.txt/x/y",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '/data/a.txt/x/y': Not a directory\n"
+      }
+    },
+    {
+      "id": "nf_ls_beside_good",
+      "seq": 603205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/a.txt /data/missing | cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n",
+        "stderr": "ls: cannot access '/data/missing': No such file or directory\n"
+      }
+    }
+  ]
+}

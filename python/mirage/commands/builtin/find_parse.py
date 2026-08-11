@@ -216,8 +216,19 @@ def _parse_or(state: _State) -> PredNode:
     return terms[0] if len(terms) == 1 else Or(terms)
 
 
+# GNU find's link-policy options are leading options, not predicates:
+# they may only appear before the start points, and never take part in
+# the expression. Without this the tail scan would treat `-L` as the
+# start of the expression and swallow the paths after it.
+_LINK_OPTIONS = frozenset({"-P", "-H", "-L"})
+
+
 def find_expr_tail(raw_argv: list[str]) -> list[str]:
-    for i, tok in enumerate(raw_argv):
+    start = 0
+    while start < len(raw_argv) and raw_argv[start] in _LINK_OPTIONS:
+        start += 1
+    for i in range(start, len(raw_argv)):
+        tok = raw_argv[i]
         if tok in _EXPRESSION_TOKENS or (tok.startswith("-") and len(tok) > 1):
             return raw_argv[i:]
     return []

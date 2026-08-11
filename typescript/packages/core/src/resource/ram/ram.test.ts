@@ -53,9 +53,6 @@ describe('RAMResource.kind / ops()', () => {
       'create',
       'mkdir',
       'read',
-      'read', // filetype variant (.feather)
-      'read', // filetype variant (.h5)
-      'read', // filetype variant (.parquet)
       'readdir',
       'rename',
       'rmdir',
@@ -86,11 +83,14 @@ describe('RAMResource write + read', () => {
   })
 
   it('write under nested missing parent throws', async () => {
+    // The operand is what a GNU stderr line names, so the error carries the
+    // virtual path and an errno, not the internal parent phrasing.
     const { ram, registry } = setup()
     const payload = new TextEncoder().encode('x')
-    await expect(call(registry, 'write', ram, '/missing/x', payload)).rejects.toThrow(
-      /parent directory does not exist/,
-    )
+    await expect(call(registry, 'write', ram, '/missing/x', payload)).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/missing/x',
+    })
   })
 
   it('read missing file throws', async () => {
@@ -126,11 +126,40 @@ describe('RAMResource readdir', () => {
     expect(await call(registry, 'readdir', ram, '/')).toEqual(['/a', '/b'])
   })
 
-  it('throws when path is not a directory', async () => {
+  it('throws ENOENT when the path does not exist', async () => {
     const { ram, registry } = setup()
     await expect(call(registry, 'readdir', ram, '/missing')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(call(registry, 'readdir', ram, '/missing/deeper')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('throws ENOTDIR when a path component is a file', async () => {
+    const { ram, registry } = setup()
+    await call(registry, 'write', ram, '/a.txt', new Uint8Array())
+    await expect(call(registry, 'readdir', ram, '/a.txt')).rejects.toMatchObject({
       code: 'ENOTDIR',
     })
+    await expect(call(registry, 'readdir', ram, '/a.txt/x')).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+  })
+
+  it('throws ENOENT for an orphan whose parent directory is missing', async () => {
+    // The store can hold a file under a key whose ancestors are not in the
+    // dir set: a restored snapshot or another client writing to the same
+    // Redis can seed one, so readdir stays defensive about it. Seeded
+    // directly rather than through rename, which now refuses to create one.
+    // The walk must stop at /missing, the way the kernel would.
+    const { ram, registry } = setup()
+    ram.store.files.set('/missing/a.txt', new Uint8Array())
+    for (const p of ['/missing', '/missing/a.txt/x', '/missing/a.txt/x/y']) {
+      await expect(call(registry, 'readdir', ram, p)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+    }
   })
 })
 
@@ -169,7 +198,7 @@ describe('RAMResource unlink + rmdir', () => {
     const { ram, registry } = setup()
     await call(registry, 'mkdir', ram, '/d')
     await call(registry, 'rmdir', ram, '/d')
-    await expect(call(registry, 'readdir', ram, '/d')).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(call(registry, 'readdir', ram, '/d')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
@@ -249,8 +278,39 @@ describe('RAMResource mkdir -p parents', () => {
   })
 
   it('the mkdir op throws if an intermediate directory is missing', async () => {
+    // A bare Error here would not be classified as a filesystem failure, so
+    // the command layer could not report it with a GNU strerror.
     const { ram, registry } = setup()
-    await expect(call(registry, 'mkdir', ram, '/x/y')).rejects.toThrow(/parent directory/)
+    await expect(call(registry, 'mkdir', ram, '/x/y')).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/x/y',
+    })
+  })
+
+  it('mkdir -p across a plain file names the component and keeps the file', async () => {
+    const { ram } = setup()
+    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('hi'))
+    await expect(
+      ram.mkdir(PathSpec.fromStrPath('/f.txt/y'), { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: '/f.txt' })
+    expect(ram.accessor.store.dirs.has('/f.txt')).toBe(false)
+    expect(ram.accessor.store.files.has('/f.txt')).toBe(true)
+  })
+
+  it('mkdir -p onto a plain file target is EEXIST', async () => {
+    const { ram } = setup()
+    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new Uint8Array())
+    await expect(
+      ram.mkdir(PathSpec.fromStrPath('/f.txt'), { recursive: true }),
+    ).rejects.toMatchObject({ code: 'EEXIST' })
+  })
+
+  it('mkdir refuses an existing target, and -p is the idempotent form (GNU)', async () => {
+    const { ram } = setup()
+    await ram.mkdir(PathSpec.fromStrPath('/d'))
+    await expect(ram.mkdir(PathSpec.fromStrPath('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
+    await ram.mkdir(PathSpec.fromStrPath('/d'), { recursive: true })
+    expect(ram.accessor.store.dirs.has('/d')).toBe(true)
   })
 })
 

@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.himalaya import HIMALAYA
 from mirage.resource.email import EmailConfig, EmailResource
 from mirage.types import PathSpec
 
@@ -35,6 +36,9 @@ resource = EmailResource(config=config)
 
 async def main() -> None:
     ws = Workspace({"/email": resource}, mode=MountMode.READ)
+    # The mail verbs are a CLI install, separate from the mount: the
+    # mount serves files, himalaya acts on the account.
+    ws.register_cli("himalaya", HIMALAYA, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /email/__nf_missing__.txt",
@@ -126,14 +130,19 @@ async def main() -> None:
     print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
-    print("=== himalaya envelope list --unseen --max 5 ===")
+    print("=== himalaya envelope list -m <folder> --page-size 5 ===")
     result = await ws.execute(
-        f'himalaya envelope list --folder "{folder}" --unseen --max 5')
+        f'himalaya envelope list -m "{folder}" --page-size 5')
     print((await result.stdout_str())[:500])
 
-    print(f"=== himalaya message read --uid {uid} ===")
+    print("=== himalaya envelope search not flag seen order by date desc ===")
     result = await ws.execute(
-        f'himalaya message read --folder "{folder}" --uid {uid}')
+        f'himalaya envelope search -m "{folder}" --page-size 5 '
+        f"not flag seen order by date desc")
+    print((await result.stdout_str())[:500])
+
+    print(f"=== himalaya message read {uid} ===")
+    result = await ws.execute(f'himalaya message read -m "{folder}" {uid}')
     print((await result.stdout_str())[:500])
 
     print(f"\n=== tree -L 2 /email/{folder}/ ===")

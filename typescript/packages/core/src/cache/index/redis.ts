@@ -182,7 +182,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     }
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     if (this.providedClient !== null) return
     if (this.clientPromise === null) return
     const c = await this.clientPromise

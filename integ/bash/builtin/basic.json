@@ -647,7 +647,7 @@
       }
     },
     {
-      "id": "blt_chmod_recursive_unsupported",
+      "id": "blt_chmod_recursive",
       "seq": 502319,
       "targets": [
         "ram",
@@ -671,15 +671,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/zbc9 && chmod -R 755 /data/zbc9; echo $?",
+      "command": "mkdir -p /data/zbc9/sub && echo x > /data/zbc9/sub/f.txt && chmod -R 700 /data/zbc9 && stat -c '%A' /data/zbc9/sub/f.txt",
       "expect": {
         "exit": 0,
-        "stdout": "2\n",
-        "stderr": "chmod: -R is not supported\n"
+        "stdout": "-rwx------\n",
+        "stderr": ""
       }
     },
     {
-      "id": "blt_chown_recursive_unsupported",
+      "id": "blt_chown_recursive",
       "seq": 502320,
       "targets": [
         "ram",
@@ -703,11 +703,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/zbo9 && chown -R nobody /data/zbo9; echo $?",
+      "command": "mkdir -p /data/zbo9/sub && echo x > /data/zbo9/sub/f.txt && chown -R nobody /data/zbo9 && stat -c '%U' /data/zbo9/sub/f.txt",
       "expect": {
         "exit": 0,
-        "stdout": "2\n",
-        "stderr": "chown: -R is not supported\n"
+        "stdout": "nobody\n",
+        "stderr": ""
       }
     },
     {

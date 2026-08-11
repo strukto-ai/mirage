@@ -14,7 +14,7 @@
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.msgraph.drive_ops import stat_item
+from mirage.core.msgraph.drive_ops import folder_child_count, stat_item
 from mirage.core.onedrive._client import (GraphError, drive_loc, graph_get,
                                           split_path)
 from mirage.types import FileStat, FileType, PathSpec
@@ -37,10 +37,16 @@ async def stat(accessor: OneDriveAccessor,
             if exc.status == 404:
                 raise enoent(virtual)
             raise
+        # The root's `size` is Graph's aggregate subtree storage number,
+        # not rendered content length: expose it as extra, like every
+        # other folder (see entry_stat).
         return FileStat(name="/",
                         type=FileType.DIRECTORY,
-                        size=item.get("size"),
-                        modified=item.get("lastModifiedDateTime"))
+                        modified=item.get("lastModifiedDateTime"),
+                        extra={
+                            "size_bytes": item.get("size"),
+                            "child_count": folder_child_count(item),
+                        })
     virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
     return await stat_item(accessor.config, drive_loc(accessor.config,
                                                       stripped), virtual,

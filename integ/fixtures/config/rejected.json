@@ -1,0 +1,106 @@
+{
+  "note": "Workspace configs both loaders must refuse. Python forbids extra keys on every config block (config.py's ConfigDict(extra='forbid')); the TypeScript loader mirrors those tables in server/src/config.ts. A config that loads in one language and not the other is the bug this fixture exists to catch, so the spellings here are Python's canonical snake_case ones — a camelCase alias TypeScript would otherwise accept for free is just as unportable as a typo.",
+  "cases": [
+    {
+      "name": "mount block: mount_point for mountpoint",
+      "config": { "mounts": { "/d": { "resource": "ram", "mount_point": "/mnt/x" } } }
+    },
+    {
+      "name": "mount block: resourse for resource",
+      "config": { "mounts": { "/d": { "resourse": "ram" } } }
+    },
+    {
+      "name": "top level: consistancy for consistency",
+      "config": { "mounts": { "/d": { "resource": "ram" } }, "consistancy": "lazy" }
+    },
+    {
+      "name": "cache block: limitt for limit",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "cache": { "type": "ram", "limitt": "1MB" }
+      }
+    },
+    {
+      "name": "index block: camelCase keyPrefix",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "index": { "type": "redis", "keyPrefix": "x:" }
+      }
+    },
+    {
+      "name": "cache block: camelCase maxDrainBytes",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "cache": { "type": "ram", "maxDrainBytes": 8 }
+      }
+    },
+    {
+      "name": "clis entry: a cli takes no mode",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "clis": { "sl": { "cli": "slack", "mode": "write" } }
+      }
+    },
+    {
+      "name": "store block: key_prefixx for key_prefix",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "store": { "type": "ram", "key_prefixx": "m:" }
+      }
+    },
+    {
+      "name": "store group: urlz for url",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "store": { "type": "ram", "observer": { "type": "redis", "urlz": "redis://x" } }
+      }
+    },
+    {
+      "name": "cache block: type is the union discriminator, not optional",
+      "config": { "mounts": { "/d": { "resource": "ram" } }, "cache": { "limit": "1MB" } }
+    },
+    {
+      "name": "index block: type is the union discriminator, not optional",
+      "config": { "mounts": { "/d": { "resource": "ram" } }, "index": { "ttl": 5 } }
+    },
+    {
+      "name": "cache block: no such backend",
+      "config": { "mounts": { "/d": { "resource": "ram" } }, "cache": { "type": "memcached" } }
+    },
+    {
+      "name": "store block: s3 hosts only the workspace group, never the default",
+      "config": { "mounts": { "/d": { "resource": "ram" } }, "store": { "type": "s3" } }
+    },
+    {
+      "name": "guard entry: path for paths",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "guards": [{ "reason": "no", "path": ["/x"] }]
+      }
+    },
+    {
+      "name": "store s3 group: a typo in a backend key is still a load error",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "store": {
+          "type": "ram",
+          "workspace": { "type": "s3", "bucket": "b", "endpoint_urll": "http://x" }
+        }
+      }
+    },
+    {
+      "name": "store s3 group: hosts only sessions+meta, not the namespace plane",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "store": { "type": "ram", "namespace": { "type": "s3", "bucket": "b" } }
+      }
+    },
+    {
+      "name": "store s3 group: hosts only sessions+meta, not the observer plane",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "store": { "type": "ram", "observer": { "type": "s3", "bucket": "b" } }
+      }
+    }
+  ]
+}

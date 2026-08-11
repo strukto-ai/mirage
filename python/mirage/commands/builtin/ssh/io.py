@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
+from mirage.core.ssh.append import append_bytes as _append
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.create import create as _create
-from mirage.core.ssh.du import du as _du
-from mirage.core.ssh.du import du_all as _du_all
+from mirage.core.ssh.du import entries as _du_entries
+from mirage.core.ssh.du import size as _du_size
 from mirage.core.ssh.exists import exists as _exists
 from mirage.core.ssh.find import find as _find
 from mirage.core.ssh.mkdir import mkdir as _mkdir
@@ -26,6 +27,7 @@ from mirage.core.ssh.readdir import readdir as _readdir
 from mirage.core.ssh.rename import rename as _rename
 from mirage.core.ssh.rm import rm_r as _rm_r
 from mirage.core.ssh.rmdir import rmdir as _rmdir
+from mirage.core.ssh.set_attrs import set_attrs as _set_attrs
 from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
@@ -35,12 +37,14 @@ from mirage.core.ssh.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: a.root is not None,
     local=False,
     max_glob_matches=SCOPE_ERROR,
     write=_write,
+    append=_append,
     exists=_exists,
     mkdir=_mkdir,
     unlink=_unlink,
@@ -50,9 +54,9 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du=DuOps(size=_du_size, entries=_du_entries),
     truncate=_truncate,
+    set_attrs=_set_attrs,
 )
 
 resolve_glob = IO.resolve_glob

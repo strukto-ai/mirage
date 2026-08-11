@@ -70,3 +70,32 @@ def test_tar_v(env):
     env.mirage("tar -c -v -z -f /data/out.tar.gz /data/a.txt")
     listing = env.mirage("tar -t -f /data/out.tar.gz")
     assert "a.txt" in listing
+
+
+def test_tar_old_style_cluster_create_list_extract(env):
+    env.create_file("a.txt", b"aaa\n")
+    env.mirage("tar czf /data/out.tar.gz /data/a.txt")
+    listing = env.mirage("tar tzf /data/out.tar.gz")
+    assert "a.txt" in listing
+    env.mirage("tar xzf /data/out.tar.gz -C /data/ex")
+    assert "aaa" in env.mirage("cat /data/ex/data/a.txt")
+
+
+def test_tar_old_style_value_letter_before_bool_letter_compresses(env):
+    # GNU: `tar cfz a.tgz f` gzips, so -f takes the archive and z stays
+    # a flag; listing it back with -z proves the stream is gzip.
+    env.create_file("a.txt", b"aaa\n")
+    env.mirage("tar cfz /data/out.tar.gz /data/a.txt")
+    assert "a.txt" in env.mirage("tar tzf /data/out.tar.gz")
+
+
+def test_tar_old_style_two_value_letters_bind_in_letter_order(env):
+    env.create_file("a.txt", b"aaa\n")
+    env.mirage("tar czf /data/out.tar.gz /data/a.txt")
+    env.mirage("tar xzCf /data/ex /data/out.tar.gz")
+    assert "aaa" in env.mirage("cat /data/ex/data/a.txt")
+
+
+def test_tar_old_style_verbose_lists_members(env):
+    env.create_file("a.txt", b"aaa\n")
+    assert "a.txt" in env.mirage("tar cvzf /data/out.tar.gz /data/a.txt")

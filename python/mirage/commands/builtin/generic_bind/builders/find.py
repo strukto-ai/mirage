@@ -17,12 +17,16 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
-from mirage.commands.builtin.generic.find import parse_find_args, walk_find
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic.find import (is_link, missing_start_line,
+                                                  parse_find_args,
+                                                  resolve_start, walk_find)
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          overlaid_stat)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, StatOverlay, StatPath
 from mirage.types import PathSpec
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 
 async def find(
@@ -41,6 +45,10 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     index: IndexCacheStore = NULL_INDEX,
+    stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
+    stat_path: StatPath | None = None,
+    L: bool = False,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -49,12 +57,22 @@ async def find(
     if ops.find is None:
         return await _find_walk(ops, accessor, paths, texts, name, type, size,
                                 mtime, maxdepth, iname, path, mindepth, empty,
-                                index)
+                                index, stat_overlay, links, stat_path, L)
     stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
+    if stat is not None and stat_overlay is not None:
+        # -mtime must see namespace times (touch results, observed
+        # writes on mtime-less backends), same as ls.
+        stat = partial(overlaid_stat,
+                       partial(ops.stat, accessor),
+                       stat_overlay,
+                       index=index)
     return await generic_find(paths,
                               texts,
                               find_core=partial(ops.find, accessor),
                               stat=stat,
+                              stat_path=stat_path,
+                              dir_empty=partial(_dir_is_empty, ops, accessor,
+                                                index),
                               name=name,
                               type=type,
                               size=size,
@@ -63,11 +81,27 @@ async def find(
                               iname=iname,
                               path=path,
                               mindepth=mindepth,
-                              empty=empty)
+                              empty=empty,
+                              links=links,
+                              follow=L)
 
 
-def _no_dir_hint(_name: str) -> bool | None:
-    return None
+async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
+                        index: IndexCacheStore, search: PathSpec) -> bool:
+    """Whether a directory start point holds nothing, for ``-empty``.
+
+    Only the native-op path needs this: the walk answers the same
+    question with the readdir it already takes (``_is_empty_entry``).
+    Asked once, for the start point, and only when the expression
+    mentions ``-empty``.
+
+    Args:
+        ops (CommandIO): the backend's op table.
+        accessor (Accessor): the mounted backend.
+        index (IndexCacheStore): cache index threaded through reads.
+        search (PathSpec): the directory start point.
+    """
+    return not await ops.readdir(accessor, search, index=index)
 
 
 async def _find_walk(
@@ -85,6 +119,11 @@ async def _find_walk(
     mindepth: str | None,
     empty: bool,
     index: IndexCacheStore,
+    stat_overlay: StatOverlay | None = None,
+    links: LinkView | None = None,
+    stat_path: StatPath | None = None,
+    L: bool = False,
+    H: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
@@ -99,20 +138,42 @@ async def _find_walk(
                            path=path,
                            mindepth=mindepth,
                            empty=empty)
-    hint = (partial(ops.is_dir_name, accessor)
-            if ops.is_dir_name is not None else _no_dir_hint)
+    stat_fn = partial(ops.stat, accessor)
+    if stat_overlay is not None:
+        stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
     # GNU find walks every start point in operand order.
     results: list[str] = []
+    missing: list[str] = []
     for search in searches:
+        # Same start-point rule as the native-op path, so what `find` does
+        # with a file or a missing operand does not depend on whether the
+        # mounted backend ships a find op.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if start.missing:
+            # GNU names each start point it cannot stat, keeps going with
+            # the rest, and exits 1.
+            missing.append(missing_start_line(search))
+            continue
+        if not start.walk:
+            results.extend(start.results)
+            continue
         walked = await walk_find(search,
                                  readdir=partial(ops.readdir, accessor),
-                                 stat=partial(ops.stat, accessor),
-                                 is_dir_name=hint,
+                                 stat=stat_fn,
                                  index=index,
-                                 args=args)
+                                 args=args,
+                                 links=links,
+                                 follow=L)
         # GNU prints each result under the operand as typed; walk_find
         # returns virtual paths, so rebase like generic_find does.
-        results.extend(rebase_raw(walked, search.virtual, search.raw_path))
+        results.extend(respell_raw(walked, search.virtual, search.raw_path))
+    if missing:
+        return format_records(results), IOResult(stderr=("\n".join(missing) +
+                                                         "\n").encode(),
+                                                 exit_code=1)
     return format_records(results), IOResult()
 
 

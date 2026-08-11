@@ -40,6 +40,7 @@ class NodeType(StrEnum):
     COMPOUND_STATEMENT = "compound_statement"
     NEGATED_COMMAND = "negated_command"
     VARIABLE_ASSIGNMENT = "variable_assignment"
+    VARIABLE_ASSIGNMENTS = "variable_assignments"
     FOR = "for"
     SELECT = "select"
     WHILE = "while"
@@ -59,6 +60,8 @@ class NodeType(StrEnum):
     STRING = "string"
     STRING_CONTENT = "string_content"
     RAW_STRING = "raw_string"
+    ANSI_C_STRING = "ansi_c_string"
+    TRANSLATED_STRING = "translated_string"
     PROCESS_SUBSTITUTION = "process_substitution"
     EXTGLOB_PATTERN = "extglob_pattern"
     REGEX = "regex"
@@ -117,6 +120,8 @@ class NodeType(StrEnum):
     TERNARY_EXPRESSION = "ternary_expression"
     POSTFIX_EXPRESSION = "postfix_expression"
     ARITH_OPEN = "(("
+    ARITH_CLOSE = "))"
+    C_STYLE_FOR_STATEMENT = "c_style_for_statement"
     TEST_OPERATOR = "test_operator"
     SPECIAL_VARIABLE_NAME = "special_variable_name"
     COMMENT = "comment"
@@ -137,6 +142,23 @@ SET_FLAG_TO_OPTION = {
     "x": "xtrace",
     "f": "noglob",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class OptionWord:
+    """One word of the shell's option grammar.
+
+    Args:
+        settings (tuple[tuple[str, bool], ...]): shell options the word
+            turns on or off, in the order they were written.
+        other (str): cluster letters that name no shell option. `set`
+            ignores them; shell startup reads its own startup letters
+            out of them and refuses the rest.
+        consumed (int): words the option took, 2 for the `-o NAME` form.
+    """
+    settings: tuple[tuple[str, bool], ...] = ()
+    other: str = ""
+    consumed: int = 1
 
 
 class RedirectKind(StrEnum):
@@ -217,6 +239,7 @@ class ShellBuiltin(StrEnum):
     TIMEOUT = "timeout"
     COMMAND = "command"
     TYPE = "type"
+    WHICH = "which"
     BREAK = "break"
     CONTINUE = "continue"
     RETURN = "return"

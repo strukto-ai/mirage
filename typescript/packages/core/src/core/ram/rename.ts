@@ -17,6 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
+import { checkDestParents } from './dest.ts'
 import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context.ts'
 
 function moveAttrs(accessor: RAMAccessor, src: string, dst: string): void {
@@ -31,6 +32,7 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
   const now = nowIso()
+  checkDestParents(accessor, dst, d)
   const srcFile = accessor.store.files.get(s)
   if (srcFile !== undefined) {
     accessor.store.files.set(d, srcFile)

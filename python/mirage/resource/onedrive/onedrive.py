@@ -19,7 +19,8 @@ from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.commands.builtin.onedrive import COMMANDS as ONEDRIVE_COMMANDS
 from mirage.core.onedrive.copy import copy
 from mirage.core.onedrive.create import create
-from mirage.core.onedrive.du import du, du_all
+from mirage.core.onedrive.du import entries as du_entries
+from mirage.core.onedrive.du import size as du_size
 from mirage.core.onedrive.exists import exists
 from mirage.core.onedrive.find import find
 from mirage.core.onedrive.mkdir import mkdir
@@ -55,8 +56,8 @@ _ONEDRIVE_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,
@@ -69,7 +70,15 @@ class OneDriveResource(BaseResource):
     accessor: OneDriveAccessor
     name: str = ResourceName.ONEDRIVE
     caches_reads: bool = True
+    # Graph driveItems carry an exact byte `size` for every file in both
+    # listings and item gets; folders (including the root) report None
+    # with the aggregate storage number in extra.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops: dict[str, Any] = _ONEDRIVE_OPS
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
 
@@ -79,8 +88,8 @@ class OneDriveResource(BaseResource):
         self.accessor = OneDriveAccessor(self.config)
         for fn in ONEDRIVE_COMMANDS:
             self.register(fn)
-        for fn in ONEDRIVE_OPS:
-            self.register_op(fn)
+        for op in ONEDRIVE_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

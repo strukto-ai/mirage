@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.cut_helper import cut_stream, parse_ranges
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -23,11 +23,11 @@ class CutFlags:
     zero_terminated: bool = False
 
 
-def parse_flags(flags: Mapping[str, object]) -> CutFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
     fl = FlagView(flags, spec=SPECS["cut"])
-    bytes_range = fl.as_str("b") or fl.as_str("bytes")
-    chars_range = fl.as_str("c") or fl.as_str("characters")
-    fields_range = fl.as_str("F") or fl.as_str("f") or fl.as_str("fields")
+    bytes_range = fl.as_str("bytes")
+    chars_range = fl.as_str("characters")
+    fields_range = fl.as_str("F") or fl.as_str("fields")
     modes = [("bytes", bytes_range), ("characters", chars_range),
              ("fields", fields_range)]
     selected = [(mode, value) for mode, value in modes if value is not None]
@@ -51,7 +51,7 @@ def parse_flags(flags: Mapping[str, object]) -> CutFlags:
     output_delimiter = (fl.as_str("args_O") or fl.as_str("output_delimiter"))
     if fl.as_str("F") is not None and output_delimiter is None:
         output_delimiter = " "
-    explicit_delimiter = fl.as_str("d") or fl.as_str("delimiter")
+    explicit_delimiter = fl.as_str("delimiter")
     if explicit_delimiter is not None and len(explicit_delimiter) != 1:
         raise ValueError("cut: the delimiter must be a single character")
     return CutFlags(
@@ -59,11 +59,11 @@ def parse_flags(flags: Mapping[str, object]) -> CutFlags:
         mode=mode,
         delimiter=explicit_delimiter or "\t",
         complement=fl.as_bool("complement"),
-        only_delimited=fl.as_bool("s") or fl.as_bool("only_delimited"),
+        only_delimited=fl.as_bool("only_delimited"),
         whitespace=whitespace,
-        no_partial=fl.as_bool("n") or fl.as_bool("no_partial"),
+        no_partial=fl.as_bool("no_partial"),
         output_delimiter=output_delimiter,
-        zero_terminated=(fl.as_bool("z") or fl.as_bool("zero_terminated")),
+        zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 
@@ -72,11 +72,10 @@ async def cut(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
-    **legacy_flags: object,
+    flags: Mapping[str, FlagValue] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
-        parsed = parse_flags(flags if flags is not None else legacy_flags)
+        parsed = parse_flags(flags or {})
         ranges = parse_ranges(parsed.ranges)
     except (TypeError, ValueError) as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())

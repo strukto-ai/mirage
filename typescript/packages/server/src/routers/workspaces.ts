@@ -15,7 +15,7 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
+import type { Limit, MountSpec } from '@struktoai/mirage-node'
 import { DiskWorkspaceStateStore, Workspace, type Resource } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-node'
 import { type WorkspaceRegistry } from '../registry.ts'
@@ -91,10 +91,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return reply.status(502).send({ detail: `resource build failed: ${(e as Error).message}` })
       }
       const resourceMap: Record<string, MountSpec> = {}
-      const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
-      for (const [prefix, [resource, mode, safeguards]] of Object.entries(args.resources)) {
+      const commandLimits: Record<string, Record<string, Limit>> = {}
+      for (const [prefix, [resource, mode, limits]] of Object.entries(args.resources)) {
         resourceMap[prefix] = [resource, mode]
-        if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
+        if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
       }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
@@ -102,30 +102,30 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       const wid = body.id ?? args.options.workspaceId ?? newWorkspaceId()
       let ws: Workspace
       try {
+        // Every option the config produced rides through: enumerating
+        // them by hand silently dropped `clis` and `guards`, so a yaml
+        // clis block parsed, validated, and then installed nothing.
+        // Only identity and the store default are the daemon's to
+        // decide.
         ws = new Workspace(resourceMap, {
-          mode: args.options.mode,
-          consistency: args.options.consistency,
-          ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
-          ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
+          ...args.options,
           workspaceId: wid,
           // Daemon default is disk (a created workspace survives restart
           // with zero infrastructure, like git init); the library default
           // stays ram. An explicit store always wins.
           store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
-          ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
-          ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-          ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-          ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
-          ...(args.options.route !== undefined ? { route: args.options.route } : {}),
+          // Whichever of the two built it, no sibling workspace shares
+          // it, so this workspace is the one that closes it.
+          ownsStore: true,
+          ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
         })
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
       }
       let entry
       try {
-        for (const [prefix, target] of Object.entries(args.fuseMounts)) {
-          const mountpoint = typeof target === 'string' ? target : undefined
-          await ws.addFuseMount(prefix, mountpoint)
+        for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
+          await ws.addFuseMount(prefix, mountpoint, undefined, backend)
         }
         entry = deps.registry.add(ws, wid)
       } catch (e) {

@@ -18,6 +18,7 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const PATCH_BUILDER: Builder = {
   name: 'patch',
   write: true,
+  requirements: ['write'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const { write } = ops

@@ -17,6 +17,10 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.trello._client import (list_board_labels, list_board_lists,
                                         list_board_members, list_list_cards,
                                         list_workspace_boards, list_workspaces)
+from mirage.core.trello.normalize import (normalize_board, normalize_card,
+                                          normalize_label, normalize_list,
+                                          normalize_member,
+                                          normalize_workspace, to_json_bytes)
 from mirage.core.trello.pathing import (board_dirname, card_dirname,
                                         label_filename, list_dirname,
                                         member_filename, workspace_dirname)
@@ -62,12 +66,34 @@ async def readdir(
                 vfs_name=dirname,
             )
             entries.append((dirname, entry))
+            # workspace.json renders the workspace object this listing
+            # already fetched, so its exact size is free here.
+            await index.set_dir(f"{idx_key}/{dirname}", [
+                ("workspace.json",
+                 IndexEntry(
+                     id=ws["id"],
+                     name="workspace.json",
+                     resource_type="trello/workspace_json",
+                     vfs_name="workspace.json",
+                     size=len(to_json_bytes(normalize_workspace(ws))),
+                 )),
+                ("boards",
+                 IndexEntry(
+                     id=ws["id"],
+                     name="boards",
+                     resource_type="trello/boards_dir",
+                     vfs_name="boards",
+                 )),
+            ])
         await index.set_dir(idx_key, entries)
         return [f"{prefix}/workspaces/{name}" for name, _ in entries]
 
     parts = key.split("/")
 
     if len(parts) == 2 and parts[0] == "workspaces":
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         result = await index.get(idx_key)
         if result.entry is None:
             parent = PathSpec(
@@ -79,6 +105,9 @@ async def readdir(
             result = await index.get(idx_key)
         if result.entry is None:
             raise enoent(virtual)
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         return [
             f"{prefix}/{key}/workspace.json",
             f"{prefix}/{key}/boards",
@@ -119,10 +148,47 @@ async def readdir(
                     vfs_name=dirname,
                 ),
             ))
+            # board.json's normalizer only uses fields this listing already
+            # carries, so its exact size is free here.
+            await index.set_dir(f"{idx_key}/{dirname}", [
+                ("board.json",
+                 IndexEntry(
+                     id=board["id"],
+                     name="board.json",
+                     resource_type="trello/board_json",
+                     vfs_name="board.json",
+                     size=len(to_json_bytes(normalize_board(board))),
+                     remote_time=board.get("dateLastActivity") or "",
+                 )),
+                ("members",
+                 IndexEntry(
+                     id=board["id"],
+                     name="members",
+                     resource_type="trello/members_dir",
+                     vfs_name="members",
+                 )),
+                ("labels",
+                 IndexEntry(
+                     id=board["id"],
+                     name="labels",
+                     resource_type="trello/labels_dir",
+                     vfs_name="labels",
+                 )),
+                ("lists",
+                 IndexEntry(
+                     id=board["id"],
+                     name="lists",
+                     resource_type="trello/lists_dir",
+                     vfs_name="lists",
+                 )),
+            ])
         await index.set_dir(idx_key, entries)
         return [f"{prefix}/{key}/{name}" for name, _ in entries]
 
     if len(parts) == 4 and parts[0] == "workspaces" and parts[2] == "boards":
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         result = await index.get(idx_key)
         if result.entry is None:
             parent = PathSpec(
@@ -135,6 +201,9 @@ async def readdir(
             result = await index.get(idx_key)
         if result.entry is None:
             raise enoent(virtual)
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         return [
             f"{prefix}/{key}/board.json",
             f"{prefix}/{key}/members",
@@ -174,6 +243,7 @@ async def readdir(
                     resource_type="trello/member",
                     remote_time="",
                     vfs_name=filename,
+                    size=len(to_json_bytes(normalize_member(member))),
                 ),
             ))
         await index.set_dir(idx_key, entries)
@@ -211,6 +281,7 @@ async def readdir(
                     resource_type="trello/label",
                     remote_time="",
                     vfs_name=filename,
+                    size=len(to_json_bytes(normalize_label(label))),
                 ),
             ))
         await index.set_dir(idx_key, entries)
@@ -249,11 +320,33 @@ async def readdir(
                     vfs_name=dirname,
                 ),
             ))
+            # list.json's normalizer only uses fields this listing already
+            # carries, so its exact size is free here.
+            await index.set_dir(f"{idx_key}/{dirname}", [
+                ("list.json",
+                 IndexEntry(
+                     id=lst["id"],
+                     name="list.json",
+                     resource_type="trello/list_json",
+                     vfs_name="list.json",
+                     size=len(to_json_bytes(normalize_list(lst))),
+                 )),
+                ("cards",
+                 IndexEntry(
+                     id=lst["id"],
+                     name="cards",
+                     resource_type="trello/cards_dir",
+                     vfs_name="cards",
+                 )),
+            ])
         await index.set_dir(idx_key, entries)
         return [f"{prefix}/{key}/{name}" for name, _ in entries]
 
     if (len(parts) == 6 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "lists"):
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         result = await index.get(idx_key)
         if result.entry is None:
             parent = PathSpec(
@@ -266,6 +359,9 @@ async def readdir(
             result = await index.get(idx_key)
         if result.entry is None:
             raise enoent(virtual)
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         return [
             f"{prefix}/{key}/list.json",
             f"{prefix}/{key}/cards",
@@ -304,11 +400,36 @@ async def readdir(
                     vfs_name=dirname,
                 ),
             ))
+            # card.json's normalizer only uses fields this listing already
+            # carries, so its exact size is free here; comments.jsonl needs
+            # a per-card actions call and stays size-unknown.
+            await index.set_dir(f"{idx_key}/{dirname}", [
+                ("card.json",
+                 IndexEntry(
+                     id=card["id"],
+                     name="card.json",
+                     resource_type="trello/card_json",
+                     vfs_name="card.json",
+                     size=len(to_json_bytes(normalize_card(card))),
+                     remote_time=card.get("dateLastActivity") or "",
+                 )),
+                ("comments.jsonl",
+                 IndexEntry(
+                     id=card["id"],
+                     name="comments.jsonl",
+                     resource_type="trello/comments_jsonl",
+                     vfs_name="comments.jsonl",
+                     remote_time=card.get("dateLastActivity") or "",
+                 )),
+            ])
         await index.set_dir(idx_key, entries)
         return [f"{prefix}/{key}/{name}" for name, _ in entries]
 
     if (len(parts) == 8 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "lists" and parts[6] == "cards"):
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         result = await index.get(idx_key)
         if result.entry is None:
             parent = PathSpec(
@@ -321,6 +442,12 @@ async def readdir(
             result = await index.get(idx_key)
         if result.entry is None:
             raise enoent(virtual)
+        listing = await index.list_dir(idx_key)
+        if listing.entries is not None:
+            return [f"{prefix}{entry}" for entry in listing.entries]
         return [f"{prefix}/{key}/card.json", f"{prefix}/{key}/comments.jsonl"]
 
-    return []
+    # An unrecognized path is not an empty directory: returning [] made `ls`
+    # and `tree` report a bogus path as a real-but-empty one, and left `rg`
+    # without a message.
+    raise enoent(virtual)

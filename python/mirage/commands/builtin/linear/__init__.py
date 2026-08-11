@@ -14,39 +14,10 @@
 
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.linear.io import IO as _IO
-from mirage.commands.builtin.linear.linear_issue_add_label import \
-    linear_issue_add_label
-from mirage.commands.builtin.linear.linear_issue_assign import \
-    linear_issue_assign
-from mirage.commands.builtin.linear.linear_issue_comment_add import \
-    linear_issue_comment_add
-from mirage.commands.builtin.linear.linear_issue_comment_update import \
-    linear_issue_comment_update
-from mirage.commands.builtin.linear.linear_issue_create import \
-    linear_issue_create
-from mirage.commands.builtin.linear.linear_issue_set_priority import \
-    linear_issue_set_priority
-from mirage.commands.builtin.linear.linear_issue_set_project import \
-    linear_issue_set_project
-from mirage.commands.builtin.linear.linear_issue_transition import \
-    linear_issue_transition
-from mirage.commands.builtin.linear.linear_issue_update import \
-    linear_issue_update
-from mirage.commands.builtin.linear.reads import make_linear_read_commands
 
 COMMANDS = [
     *make_generic_commands(
         "linear",
         _IO,
     ),
-    *make_linear_read_commands(),
-    linear_issue_add_label,
-    linear_issue_assign,
-    linear_issue_comment_add,
-    linear_issue_comment_update,
-    linear_issue_create,
-    linear_issue_set_priority,
-    linear_issue_set_project,
-    linear_issue_transition,
-    linear_issue_update,
 ]

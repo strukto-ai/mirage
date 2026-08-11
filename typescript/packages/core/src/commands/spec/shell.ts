@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandSpec, Operand, OperandKind, Option } from './types.ts'
+import { CommandSpec, Operand, Option } from './types.ts'
 
 // GNU echo is not getopt, so its option surface is a word shape, not a
 // CommandSpec: options are LEADING words matching this pattern only.
@@ -25,13 +25,13 @@ export const SHELL_SPECS = Object.freeze({
       new Option({
         short: '-n',
         long: '--max-args',
-        valueKind: OperandKind.TEXT,
+        type: 'str',
         description: 'Use at most N arguments per command line.',
       }),
       new Option({
         short: '-d',
         long: '--delimiter',
-        valueKind: OperandKind.TEXT,
+        type: 'str',
         description: 'Input items are separated by this character.',
       }),
       new Option({
@@ -46,17 +46,17 @@ export const SHELL_SPECS = Object.freeze({
       }),
       new Option({
         short: '-I',
-        valueKind: OperandKind.TEXT,
+        type: 'str',
         description: 'Replace occurrences of the token (not supported).',
       }),
       new Option({
         short: '-P',
         long: '--max-procs',
-        valueKind: OperandKind.TEXT,
+        type: 'str',
         description: 'Run up to N processes (not supported).',
       }),
     ],
-    rest: new Operand({ kind: OperandKind.TEXT }),
+    rest: new Operand({ type: 'str' }),
   }),
   timeout: new CommandSpec({
     description: 'Run a command with a time limit.',
@@ -64,13 +64,13 @@ export const SHELL_SPECS = Object.freeze({
       new Option({
         short: '-s',
         long: '--signal',
-        valueKind: OperandKind.TEXT,
+        type: 'str',
         description: 'Signal to send on timeout (not supported).',
       }),
       new Option({
         short: '-k',
         long: '--kill-after',
-        valueKind: OperandKind.TEXT,
+        type: 'str',
         description: 'Also send KILL after this long (not supported).',
       }),
       new Option({
@@ -78,14 +78,14 @@ export const SHELL_SPECS = Object.freeze({
         description: "Exit with the command's status on timeout (not supported).",
       }),
     ],
-    rest: new Operand({ kind: OperandKind.TEXT }),
+    rest: new Operand({ type: 'str' }),
   }),
   read: new CommandSpec({
     description: 'Read a line from standard input into variables.',
     options: [
       new Option({ short: '-r', description: 'Raw mode: backslash is not an escape character.' }),
     ],
-    rest: new Operand({ kind: OperandKind.TEXT }),
+    rest: new Operand({ type: 'str' }),
   }),
 })
 
@@ -118,11 +118,11 @@ export function parseShellOptions(spec: CommandSpec, argv: readonly string[]): S
     const long = opt.long === null ? null : opt.long.replace(/^-+/, '')
     const name = short ?? long ?? ''
     if (short !== null) {
-      ;(opt.valueKind === OperandKind.NONE ? shortBool : shortValue).add(short)
+      ;(opt.type === 'bool' ? shortBool : shortValue).add(short)
       alias.set(short, name)
     }
     if (long !== null) {
-      ;(opt.valueKind === OperandKind.NONE ? longBool : longValue).add(long)
+      ;(opt.type === 'bool' ? longBool : longValue).add(long)
       alias.set(long, name)
     }
   }

@@ -16,7 +16,9 @@ import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { resolvePath } from './path.ts'
+import { ensureDirSizes } from './sizes.ts'
 import { enoent } from '../../utils/errors.ts'
+import { parent } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export async function stat(
@@ -34,13 +36,22 @@ export async function stat(
     })
   }
   if (resolved.entry === null) throw enoent(spec.virtual)
-  const updatedAt = resolved.entry.extra.updated_at
+  let entry = resolved.entry
+  if (entry.size === null) {
+    // One scan for the whole directory, paid the first time anything in it
+    // is stat'd; later stats of its siblings are already sized.
+    await ensureDirSizes(accessor, parent(resolved.virtualKey), index)
+    const refreshed = await index?.get(resolved.virtualKey)
+    const sized = refreshed?.entry
+    if (sized !== undefined && sized !== null) entry = sized
+  }
+  const updatedAt = entry.extra.updated_at
   return new FileStat({
-    name: resolved.entry.name,
+    name: entry.name,
     type: FileType.TEXT,
-    size: resolved.entry.size,
+    size: entry.size,
     modified: typeof updatedAt === 'string' ? updatedAt : null,
-    extra: { ...resolved.entry.extra },
+    extra: { ...entry.extra },
   })
 }
 

@@ -11,13 +11,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+from mirage.types import JsonValue
 
 
-def score_from_distance(value: object) -> str:
+def score_from_distance(value: JsonValue) -> str:
     """Convert a vector distance into a clamped 0..1 similarity string.
 
     Args:
-        value (object): Distance reported by the vector store; anything
+        value (JsonValue): Distance reported by the vector store; anything
             non-numeric (including bool) collapses to "0.00".
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -25,11 +26,11 @@ def score_from_distance(value: object) -> str:
     return f"{max(0.0, 1.0 - float(value)):.2f}"
 
 
-def format_score(value: object) -> str | None:
+def format_score(value: JsonValue) -> str | None:
     """Format a provider-supplied similarity score to two decimals.
 
     Args:
-        value (object): Score reported by the provider; anything
+        value (JsonValue): Score reported by the provider; anything
             non-numeric (including bool) yields None.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):

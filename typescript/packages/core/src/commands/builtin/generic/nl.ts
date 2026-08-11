@@ -18,6 +18,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -117,10 +118,10 @@ function parseNumbering(raw: string): [string, RegExp | null] {
   return [raw, null]
 }
 
-function parseOptions(flags: Record<string, string | boolean | string[]>): NlConfig {
-  const bodyValue = flags.b ?? flags.body_numbering
-  const footerValue = flags.f ?? flags.footer_numbering
-  const headerValue = flags.h ?? flags.header_numbering
+function parseOptions(flags: Record<string, FlagValue>): NlConfig {
+  const bodyValue = flags.body_numbering
+  const footerValue = flags.footer_numbering
+  const headerValue = flags.header_numbering
   const [bodyNumbering, bodyPattern] = parseNumbering(
     typeof bodyValue === 'string' ? bodyValue : 't',
   )
@@ -130,12 +131,12 @@ function parseOptions(flags: Record<string, string | boolean | string[]>): NlCon
   const [headerNumbering, headerPattern] = parseNumbering(
     typeof headerValue === 'string' ? headerValue : 'n',
   )
-  const startValue = flags.v ?? flags.starting_line_number
-  const incrementValue = flags.i ?? flags.line_increment
-  const widthValue = flags.w ?? flags.number_width
-  const separatorValue = flags.s ?? flags.number_separator
-  const formatValue = flags.n ?? flags.number_format
-  const delimiterValue = flags.d ?? flags.section_delimiter
+  const startValue = flags.starting_line_number
+  const incrementValue = flags.line_increment
+  const widthValue = flags.number_width
+  const separatorValue = flags.number_separator
+  const formatValue = flags.number_format
+  const delimiterValue = flags.section_delimiter
   const blankValue = flags.l ?? flags.join_blank_lines
   return {
     numbering: { body: bodyNumbering, footer: footerNumbering, header: headerNumbering },
@@ -147,7 +148,7 @@ function parseOptions(flags: Record<string, string | boolean | string[]>): NlCon
     numberFormat: typeof formatValue === 'string' ? formatValue : 'rn',
     delimiters: sectionDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\\:'),
     joinBlankLines: typeof blankValue === 'string' ? Number.parseInt(blankValue, 10) : 1,
-    noRenumber: flags.p === true || flags.no_renumber === true,
+    noRenumber: flags.no_renumber === true,
   }
 }
 

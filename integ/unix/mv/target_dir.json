@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "id": "mv_t_moves_into_dir",
+      "seq": 613060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvt1/dir && printf 'A\\n' > /data/mvt1/a.txt && mv -t /data/mvt1/dir /data/mvt1/a.txt && cat /data/mvt1/dir/a.txt && ls /data/mvt1",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\ndir\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "mv_T_refuses_nonempty_dir",
+      "seq": 613061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvt2/d1 /data/mvt2/d2 && printf 'x\\n' > /data/mvt2/d1/x.txt && printf 'y\\n' > /data/mvt2/d2/y.txt && mv -T /data/mvt2/d1 /data/mvt2/d2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot overwrite '/data/mvt2/d2': Directory not empty\n"
+      },
+      "flags": [
+        "T"
+      ]
+    },
+    {
+      "id": "mv_dir_onto_file_refused",
+      "seq": 613062,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvt3/d && printf 'k\\n' > /data/mvt3/d/k.txt && printf 'f\\n' > /data/mvt3/f.txt && mv -T /data/mvt3/d /data/mvt3/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot overwrite non-directory '/data/mvt3/f.txt' with directory '/data/mvt3/d'\n"
+      },
+      "flags": [
+        "T"
+      ]
+    }
+  ]
+}

@@ -21,3 +21,4 @@ class GitHubCIConfig(BaseModel):
     repo: str
     days: int = 30
     max_runs: int = 300
+    base_url: str | None = None

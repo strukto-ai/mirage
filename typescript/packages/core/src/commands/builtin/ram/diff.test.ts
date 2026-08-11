@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runDiff(
   resource: RAMResource,
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_DIFF[0]
   if (cmd === undefined) throw new Error('diff not registered')

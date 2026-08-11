@@ -72,7 +72,10 @@ function decodeJson(bytes: Uint8Array): unknown {
 }
 
 describe('notion read', () => {
-  it('returns JSON bytes containing normalized database metadata and schema, not rows', async () => {
+  // Since 2025-09-03 the database object is a container: it lists its data
+  // sources and carries no schema, so `properties` must be absent here and
+  // present on data_source.json instead.
+  it('returns JSON bytes containing the database container, not a schema or rows', async () => {
     const transport = new FakeTransport()
     const dbIdDashed = 'bbbb1111-2222-3333-4444-555566667777'
     const dbId = 'bbbb1111222233334444555566667777'
@@ -80,7 +83,7 @@ describe('notion read', () => {
       id: dbIdDashed,
       object: 'database',
       title: [{ plain_text: 'Tasks' }],
-      properties: { Name: { type: 'title' } },
+      data_sources: [{ id: 'ds-1', name: 'Tasks' }],
       last_edited_time: '2024-02-03T00:00:00Z',
     })
     const path = `/databases/Tasks__${dbId}/database.json`
@@ -88,13 +91,33 @@ describe('notion read', () => {
     const decoded = decodeJson(bytes) as Record<string, unknown>
     expect(decoded.database_id).toBe(dbIdDashed)
     expect(decoded.title).toBe('Tasks')
-    expect(decoded.properties).toEqual({ Name: { type: 'title' } })
+    expect(decoded.data_sources).toEqual([{ id: 'ds-1', name: 'Tasks' }])
+    expect(decoded.properties).toBeUndefined()
     expect(decoded.is_inline).toBe(false)
     expect(decoded.rows).toBeUndefined()
     expect(decoded.row_count).toBeUndefined()
     expect(transport.invocations).toEqual([
       { name: 'API-retrieve-a-database', args: { database_id: dbId } },
     ])
+  })
+
+  it('returns the schema from data_source.json', async () => {
+    const transport = new FakeTransport()
+    const dbId = 'bbbb1111222233334444555566667777'
+    const dsId = 'cccc1111222233334444555566667777'
+    transport.enqueue('API-retrieve-a-data-source', {
+      id: 'cccc1111-2222-3333-4444-555566667777',
+      object: 'data_source',
+      title: [{ plain_text: 'Tasks' }],
+      parent: { type: 'database_id', database_id: 'bbbb1111-2222-3333-4444-555566667777' },
+      properties: { Name: { type: 'title' } },
+    })
+    const path = `/databases/Tasks__${dbId}/Tasks__${dsId}/data_source.json`
+    const bytes = await read(makeAccessor(transport), spec(path), undefined)
+    const decoded = decodeJson(bytes) as Record<string, unknown>
+    expect(decoded.data_source_id).toBe('cccc1111-2222-3333-4444-555566667777')
+    expect(decoded.database_id).toBe('bbbb1111-2222-3333-4444-555566667777')
+    expect(decoded.properties).toEqual({ Name: { type: 'title' } })
   })
 
   it('returns JSON bytes containing the normalized page and its blocks', async () => {

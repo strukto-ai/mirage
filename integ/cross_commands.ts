@@ -180,13 +180,13 @@ async function checkReadFamily(
     `${label}: cat missing strerror`,
     cmiss[2] === 1 && cmiss[1] === `cat: ${miss}: No such file or directory\n`,
   );
-  // grep still searches the good operand, but the missing operand's read
-  // error forces exit 1 even though the other operand matched (matching
-  // single-mount grep, which flattens fs errors to 1).
+  // grep still searches the good operand, and the missing operand still
+  // decides the exit status: GNU prints the lines it did find and exits 2
+  // anyway, so a match does not excuse an operand it could not read.
   const gmiss = await run(ws, `grep aaa ${src} ${miss}`);
   check(
     `${label}: grep missing strerror`,
-    gmiss[2] === 1 &&
+    gmiss[2] === 2 &&
       gmiss[0].includes(`${src}:aaa`) &&
       gmiss[1] === `grep: ${miss}: No such file or directory\n`,
   );
@@ -662,6 +662,29 @@ async function checkWhoami(ws: Workspace): Promise<void> {
   check("whoami: ignores $USER (GNU effective user)", out === "integ-agent\n");
 }
 
+// Every other check copies ram -> dst. A cross-mount copy is asymmetric
+// (read path out of the source backend, write path into the destination),
+// so seed the tree on dst and bring it back the other way.
+async function checkReverse(ws: Workspace, dst: string, label: string): Promise<void> {
+  await run(ws, `mkdir -p ${dst}/rev/sub`);
+  await run(ws, `printf 'rrr\\n' > ${dst}/rev/a.txt`);
+  await run(ws, `printf 'sss\\n' > ${dst}/rev/sub/b.txt`);
+  await run(ws, `cp -r ${dst}/rev /ram/rev_${label}`);
+  let [out, , code] = await run(ws, `cat /ram/rev_${label}/a.txt`);
+  check(`${label}: cp -r back to ram a.txt`, out === "rrr\n");
+  [out, , code] = await run(ws, `cat /ram/rev_${label}/sub/b.txt`);
+  check(`${label}: cp -r back to ram sub/b.txt`, out === "sss\n");
+  [out, , code] = await run(ws, `cat ${dst}/rev/a.txt /ram/rev_${label}/sub/b.txt`);
+  check(`${label}: cat aggregates dst-first`, out === "rrr\nsss\n");
+  await run(ws, `mkdir -p ${dst}/revmove/sub`);
+  await run(ws, `printf 'm\\n' > ${dst}/revmove/sub/c.txt`);
+  await run(ws, `mv ${dst}/revmove /ram/revmoved_${label}`);
+  [out, , code] = await run(ws, `cat /ram/revmoved_${label}/sub/c.txt`);
+  check(`${label}: mv back to ram`, out === "m\n");
+  [out, , code] = await run(ws, `cat ${dst}/revmove/sub/c.txt`);
+  check(`${label}: mv back removes source`, code !== 0);
+}
+
 async function exercise(
   ws: Workspace,
   dst: string,
@@ -680,6 +703,7 @@ async function exercise(
   await checkMove(ws, dst, label);
   await checkSymlinks(ws, dst, label);
   await checkMetadata(ws, dst, label, nativeAttrs);
+  await checkReverse(ws, dst, label);
 }
 
 async function main(): Promise<void> {

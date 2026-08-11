@@ -12,31 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-from typing import Any
-
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.langfuse._client import (fetch_dataset_items,
-                                          fetch_dataset_runs, fetch_prompt,
-                                          fetch_trace)
+                                          fetch_dataset_runs, fetch_or_enoent,
+                                          fetch_prompt, fetch_trace)
+from mirage.core.langfuse.render import json_bytes, jsonl_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
-
-
-def _json_bytes(data: dict[str, Any]) -> bytes:
-    return json.dumps(data, ensure_ascii=False, indent=2).encode()
-
-
-def _jsonl_bytes(items: list[dict[str, Any]]) -> bytes:
-    if not items:
-        return b""
-    lines = [
-        json.dumps(item, ensure_ascii=False, separators=(",", ":"))
-        for item in items
-    ]
-    return ("\n".join(lines) + "\n").encode()
 
 
 async def read(
@@ -63,36 +47,44 @@ async def read(
 
     if parts[0] == "traces" and len(parts) == 2 and parts[1].endswith(".json"):
         trace_id = parts[1].removesuffix(".json")
-        data = await fetch_trace(accessor.api, trace_id)
-        return _json_bytes(data)
+        data = await fetch_or_enoent(fetch_trace(accessor.api, trace_id),
+                                     virtual)
+        return json_bytes(data)
 
     if (parts[0] == "sessions" and len(parts) == 3
             and parts[2].endswith(".json")):
         trace_id = parts[2].removesuffix(".json")
-        data = await fetch_trace(accessor.api, trace_id)
-        return _json_bytes(data)
+        data = await fetch_or_enoent(fetch_trace(accessor.api, trace_id),
+                                     virtual)
+        return json_bytes(data)
 
     if (parts[0] == "prompts" and len(parts) == 3
             and parts[2].endswith(".json")):
         prompt_name = parts[1]
         version = int(parts[2].removesuffix(".json"))
-        data = await fetch_prompt(accessor.api, prompt_name, version)
-        return _json_bytes(data)
+        data = await fetch_or_enoent(
+            fetch_prompt(accessor.api, prompt_name, version), virtual)
+        return json_bytes(data)
 
     if (parts[0] == "datasets" and len(parts) == 3
             and parts[2] == "items.jsonl"):
         dataset_name = parts[1]
-        items = await fetch_dataset_items(accessor.api, dataset_name)
-        return _jsonl_bytes(items)
+        items = await fetch_or_enoent(
+            fetch_dataset_items(accessor.api, dataset_name), virtual)
+        return jsonl_bytes(items)
 
     if (parts[0] == "datasets" and len(parts) == 4 and parts[2] == "runs"
             and parts[3].endswith(".jsonl")):
         dataset_name = parts[1]
         run_name = parts[3].removesuffix(".jsonl")
-        runs = await fetch_dataset_runs(accessor.api, dataset_name)
+        runs = await fetch_or_enoent(
+            fetch_dataset_runs(accessor.api, dataset_name), virtual)
         matched = [r for r in runs if r.get("name") == run_name]
         if not matched:
             raise enoent(virtual)
-        return _json_bytes(matched[0])
+        # A .jsonl path must render as line-delimited JSON, not an indented
+        # document: readers that split on newlines (jq) otherwise choke on the
+        # first bare brace.
+        return jsonl_bytes(matched[:1])
 
     raise enoent(virtual)

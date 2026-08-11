@@ -14,17 +14,16 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.provision import \
-    make_head_tail_provision
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
-from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,7 +31,7 @@ from mirage.types import PathSpec
 @command("tail",
          resource="history",
          spec=SPECS["tail"],
-         provision=make_head_tail_provision(history_stat))
+         aggregate=header_aggregate)
 async def tail(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
@@ -43,7 +42,7 @@ async def tail(
     q: bool = False,
     v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None
     from_line: int | None = None

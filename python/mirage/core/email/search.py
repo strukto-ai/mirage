@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email._client import fetch_message, list_message_uids
-from mirage.core.email.readdir import _date_from_header, _sanitize
+from mirage.core.email.readdir import _date_bucket, _sanitize
+from mirage.core.email.render import message_json_text
 from mirage.core.email.scope import EmailScope
 
 
@@ -76,7 +76,7 @@ async def search_messages(
 
 
 def _build_vfs_path(prefix: str, folder: str, msg: dict[str, Any]) -> str:
-    date_str = _date_from_header(msg.get("date", ""))
+    date_str = _date_bucket(msg)
     subject = _sanitize(msg.get("subject", "No Subject"))
     uid = msg.get("uid", "")
     filename = f"{subject}__{uid}.email.json"
@@ -102,7 +102,7 @@ async def search_and_format(
     pairs: list[tuple[str, str]] = []
     for uid in uids:
         msg = await fetch_message(accessor, folder, uid)
-        msg_text = json.dumps(msg, ensure_ascii=False, separators=(",", ":"))
+        msg_text = message_json_text(msg)
         vfs_path = _build_vfs_path(prefix, folder, msg)
         pairs.append((vfs_path, msg_text))
     return pairs

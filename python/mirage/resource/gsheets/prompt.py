@@ -48,7 +48,7 @@ PROMPT = """\
                     {{ "formattedValue": "...",
                       "userEnteredValue": {{...}},
                       "effectiveValue": {{...}} }}
-                ]}}    # empty cells are omitted, not nullified
+                ]}}    # an empty cell is {{}}, a trailing one absent
               ]
             }}
           ]
@@ -63,25 +63,15 @@ PROMPT = """\
     .sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
     .namedRanges[]
 
-  Read commands (alternative to cat for range-scoped reads — lighter):
-    gws sheets +read --spreadsheet <id> --range Sheet1!A1:C10"""
+  For range-scoped reads and writes, use the gws CLI if installed:
+    gws sheets read --spreadsheet <id> --range Sheet1!A1:C10"""
 
 WRITE_PROMPT = """\
-  Write commands:
-    gws sheets +write --spreadsheet <id> --range Sheet1!A1:B2 \\
+  Writes go through the gws CLI if installed:
+    gws sheets write --spreadsheet <id> --range Sheet1!A1:B2 \\
       --json-values '[["Name", "Score"], ["Alice", 42]]'
-
-    gws sheets +append --spreadsheet <id> --range Sheet1!A1 \\
-      --values "Bob,37"                          # comma-separated single row
-    gws sheets +append --spreadsheet <id> --range Sheet1!A1 \\
-      --json-values '[["Bob", 37], ["Carol", 51]]'   # multiple rows
-
-    gws sheets spreadsheets create \\
-      --json '{"properties": {"title": "Q2 Budget"}}'
-
-    gws sheets spreadsheets batchUpdate \\
-      --params '{"spreadsheetId": "<id>"}' \\
-      --json   '{"requests": [{"addSheet": {"properties": {"title": "Q3"}}}]}'
+    gws sheets append --spreadsheet <id> --values "Bob,37"
+    See gws sheets --help for the raw API passthroughs.
 
   Delete:
     rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive

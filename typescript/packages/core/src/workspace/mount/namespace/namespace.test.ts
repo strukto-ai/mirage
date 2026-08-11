@@ -118,16 +118,6 @@ describe('Namespace symlink table', () => {
     await ws.close()
   })
 
-  it('linksUnder returns direct children only', async () => {
-    const ws = new Workspace({ '/data': new RAMResource() })
-    await ws.namespace.symlink('/data/a', '/t1', 1)
-    await ws.namespace.symlink('/data/sub/b', '/t2', 1)
-    await ws.namespace.symlink('/other/c', '/t3', 1)
-    expect(ws.namespace.linksUnder('/data')).toEqual(new Map([['a', '/t1']]))
-    expect(ws.namespace.linksUnder('/data/sub')).toEqual(new Map([['b', '/t2']]))
-    await ws.close()
-  })
-
   it('purgeUnder drops nested entries', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     await ws.namespace.symlink('/data/sub/a', '/t1', 1)
@@ -179,7 +169,6 @@ describe('Namespace node metadata overlay', () => {
     await ws.namespace.setAttrs('/data/f.txt', { mode: 0o600 })
     expect(ws.namespace.symlinkTargets().size).toBe(0)
     expect(ws.namespace.hasLinks()).toBe(false)
-    expect(ws.namespace.linksUnder('/data').size).toBe(0)
     await ws.close()
   })
 

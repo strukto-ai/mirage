@@ -13,12 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
-from mirage.runtime.base import RunArgs, RunResult, Runtime
-from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+from mirage.runtime.config import HomeConfig, RuntimeConfig
+from mirage.runtime.errors import EvalError
+from mirage.runtime.js.base import JsRuntime
+from mirage.runtime.mixin import EvaluatorMixin
+from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
+                                  RunResult, ScriptSource)
+from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.wasm import WasmRuntime, WasmVFS
 
 wasmtime: Any
 try:
@@ -35,13 +44,38 @@ _WASM_NAME = "qjs-wasi.wasm"
 _BUILD_HINT = (
     f"the quickjs runtime needs a {_WASM_NAME} module: download a WASI "
     "build of quickjs-ng from "
-    "https://github.com/quickjs-ng/quickjs/releases, and point the yaml "
-    "`runtimes: [{name: quickjs, home: ...}]` entry, the Workspace runtime "
-    f"argument, or the {QUICKJS_HOME_ENV} environment variable at the "
-    "directory containing it")
+    "https://github.com/quickjs-ng/quickjs/releases, and point the runtime "
+    "entry's config `home` (yaml `runtimes: [{name: quickjs, config: "
+    f"{{home: ...}}}}]`) or the {QUICKJS_HOME_ENV} environment variable at "
+    "the directory containing it")
+
+# The one-shot eval harness: inputs bind as globals, the source runs
+# through indirect eval (global scope, completion value = the LAST
+# EXPRESSION), and the value or error rides a sentinel line appended to
+# stdout, the engine's only host-visible channel. Mirrors the TS
+# quickjs evaluator semantics; the JSON shapes match EvalValue.
+EVAL_SENTINEL = "__MIRAGE_EVAL__"
+
+JS_EVAL_HARNESS = """\
+const __mirage_inputs = JSON.parse({inputs_json});
+for (const __k of Object.keys(__mirage_inputs))
+  globalThis[__k] = __mirage_inputs[__k];
+let __mirage_payload;
+try {{
+  const __mirage_value = (0, eval)({source_json});
+  __mirage_payload =
+    {{ value: __mirage_value === undefined ? null : __mirage_value }};
+}} catch (__e) {{
+  __mirage_payload = {{ error: {{
+    name: (__e && __e.name) || 'Error',
+    message: (__e && __e.message) || String(__e),
+  }} }};
+}}
+std.out.puts('\\n{sentinel}' + JSON.stringify(__mirage_payload) + '\\n');
+"""
 
 
-class QuickJsRuntime(Runtime):
+class QuickJsRuntime(JsRuntime, EvaluatorMixin):
     """Run JavaScript on a WASI quickjs-ng under wasmtime, in-process.
 
     A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
@@ -58,52 +92,44 @@ class QuickJsRuntime(Runtime):
 
     Each run gets its own epoch-interruption engine (via the shared
     wasm runtime), so a cancelled run traps it and reclaims the
-    thread; a safeguard timeout stops the engine instead of leaking it.
+    thread; a limit timeout stops the engine instead of leaking it.
 
-    The module comes from the `home` argument (the yaml
-    `runtimes:` entry `home` option ends up here) or the
-    MIRAGE_QUICKJS_HOME environment variable.
-
-    Args:
-        home (str | None): directory containing qjs-wasi.wasm. None
-            reads MIRAGE_QUICKJS_HOME.
-        dispatch (Callable | None): workspace dispatch the guest's file
-            I/O bridges through; None leaves mounts invisible.
-        mount_prefixes (Callable[[], list[str]] | None): live list of
-            workspace mount prefixes, read per run (mounts can come
-            and go).
+    The module comes from the config `home` (the yaml entry's
+    ``config`` block ends up here) or the MIRAGE_QUICKJS_HOME
+    environment variable.
     """
 
     name = "quickjs"
-    captures = ("node", "js")
+
+    config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
+    config: HomeConfig
 
     def __init__(
-        self,
-        home: str | None = None,
-        dispatch: Callable[..., Any] | None = None,
-        mount_prefixes: Callable[[], list[str]] | None = None,
-    ) -> None:
+            self,
+            captures: Sequence[str] | None = None,
+            config: HomeConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the quickjs runtime requires the 'quickjs' extra. Install "
                 "with: pip install mirage-ai[quickjs], or select another "
                 "runtime")
-        root = home or os.environ.get(QUICKJS_HOME_ENV)
+        super().__init__(captures, config, script)
+        root = self.config.home or os.environ.get(QUICKJS_HOME_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
         self._wasm = Path(root) / _WASM_NAME
         if not self._wasm.is_file():
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
-        self._dispatch = dispatch
-        self._mount_prefixes = mount_prefixes
+        self._dispatch: DispatchFn | None = None
+        self._resolver: MountResolver | None = None
         self._runtime = WasmRuntime(self._wasm, "js")
 
-    def attach(self, dispatch: Callable[..., Any],
-               mount_prefixes: Callable[[], list[str]]) -> None:
+    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         if self._dispatch is None:
             self._dispatch = dispatch
-            self._mount_prefixes = mount_prefixes
+            self._resolver = resolver
 
     async def run(self, args: RunArgs) -> RunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
@@ -111,10 +137,15 @@ class QuickJsRuntime(Runtime):
         argv = ["qjs", "--std"]
         if args.flags.get("module"):
             argv.append("-m")
-        argv += ["-e", args.code, *args.args]
-        bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
-                  if self._dispatch is not None else None)
-        fs = GuestFs(bridge=bridge, mount_prefixes=self._mount_prefixes)
+        # A named program takes scriptArgs[0], the slot qjs fills with a
+        # script's path when it runs a file; unnamed -e leaves the args
+        # alone, so the js command keeps its spelling.
+        named = [args.prog] if args.prog else []
+        argv += ["-e", args.code, *named, *args.args]
+        core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
+                           self._resolver)
+                if self._dispatch is not None else None)
+        fs = WasmVFS(core=core)
         stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,
@@ -122,3 +153,54 @@ class QuickJsRuntime(Runtime):
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    async def eval(self,
+                   code: str,
+                   *,
+                   inputs: dict[str, EvalValue] | None = None,
+                   session: str | None = None) -> EvalResult:
+        """Evaluate one JS program; the completion value is the value.
+
+        Inputs bind as globals and the source runs at global scope via
+        indirect eval, so the LAST EXPRESSION is the value (what the
+        policy engine consumes for JS policy scripts). Each eval is a
+        fresh engine; the wasi build has no persistent interpreter, so
+        console sessions are not supported.
+
+        Args:
+            code (str): the JS source to evaluate.
+            inputs (dict[str, EvalValue] | None): globals for the run.
+            session (str | None): unsupported; a session id fails loud.
+
+        Raises:
+            EvalError: session requested, the program failed to parse
+                or raised, or the value could not be carried back.
+        """
+        if session is not None:
+            raise EvalError(
+                "the quickjs evaluator is one-shot only: each eval is a "
+                "fresh wasi engine, so console sessions are unsupported")
+        harness = JS_EVAL_HARNESS.format(
+            inputs_json=json.dumps(json.dumps(inputs or {})),
+            source_json=json.dumps(code),
+            sentinel=EVAL_SENTINEL,
+        )
+        result = await self.run(
+            RunArgs(code=harness, args=[], stdin=None, env={}, flags={}))
+        stdout = (result.stdout or b"").decode(errors="replace")
+        marker = f"\n{EVAL_SENTINEL}"
+        head, sep, tail = stdout.rpartition(marker)
+        if not sep:
+            stderr_text = (result.stderr or b"").decode(errors="replace")
+            raise EvalError(f"quickjs eval produced no value: "
+                            f"{stderr_text.strip() or 'engine failed'}")
+        payload = json.loads(tail.strip() or "{}")
+        if "error" in payload:
+            name = str(payload["error"].get("name", "Error"))
+            message = str(payload["error"].get("message", ""))
+            raise EvalError(f"{name}: {message}", syntax=name == "SyntaxError")
+        return EvalResult(value=payload.get("value"),
+                          stdout=head.encode(),
+                          stderr=result.stderr,
+                          exit_code=0,
+                          status="complete")

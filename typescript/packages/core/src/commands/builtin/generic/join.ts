@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -158,6 +160,7 @@ export async function joinGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('join'))
   if (paths.length > 2) throw extraOperandError(CommandName.JOIN, paths[2]?.rawPath ?? '')
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('join: requires two paths\n') })]
@@ -165,26 +168,22 @@ export async function joinGeneric(
   const p1 = paths[0]
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
-  const commonField = typeof opts.flags.j === 'string' ? Number.parseInt(opts.flags.j, 10) : null
-  const field1 =
-    (commonField ??
-      (typeof opts.flags.args_1 === 'string' ? Number.parseInt(opts.flags.args_1, 10) : 1)) - 1
-  const field2 =
-    (commonField ??
-      (typeof opts.flags['2'] === 'string' ? Number.parseInt(opts.flags['2'], 10) : 1)) - 1
-  const sep = typeof opts.flags.t === 'string' ? opts.flags.t : null
-  const aFlag = typeof opts.flags.a === 'string' ? opts.flags.a : null
-  const vFlag = typeof opts.flags.v === 'string' ? opts.flags.v : null
-  const eFlag = typeof opts.flags.e === 'string' ? opts.flags.e : null
-  const oFlag = typeof opts.flags.o === 'string' ? opts.flags.o : null
+  const commonField = fl.asInt('j') ?? null
+  const field1 = (commonField ?? fl.asInt('args_1') ?? 1) - 1
+  const field2 = (commonField ?? fl.asInt('2') ?? 1) - 1
+  const sep = fl.asStr('t') ?? null
+  const aFlag = fl.asStr('a') ?? null
+  const vFlag = fl.asStr('v') ?? null
+  const eFlag = fl.asStr('e') ?? null
+  const oFlag = fl.asStr('o') ?? null
   const data1 = DEC.decode(await materialize(stream(p1)))
   const data2 = DEC.decode(await materialize(stream(p2)))
-  const zeroTerminated = opts.flags.z === true || opts.flags.zero_terminated === true
+  const zeroTerminated = fl.asBool('zero_terminated')
   const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data1)
   const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLinesNoTrailing(data2)
-  const ignoreCase = opts.flags.i === true || opts.flags.ignore_case === true
+  const ignoreCase = fl.asBool('ignore_case')
   const headerLines: string[] = []
-  if (opts.flags.header === true && lines1.length > 0 && lines2.length > 0) {
+  if (fl.asBool('header') && lines1.length > 0 && lines2.length > 0) {
     const first1 = splitFields(lines1.shift() ?? '', sep)
     const first2 = splitFields(lines2.shift() ?? '', sep)
     headerLines.push(
@@ -192,7 +191,7 @@ export async function joinGeneric(
     )
   }
   let stderr: Uint8Array | null = null
-  if (opts.flags.check_order === true && opts.flags.nocheck_order !== true) {
+  if (fl.asBool('check_order') && !fl.asBool('nocheck_order')) {
     if (!isSorted(lines1, field1, sep, ignoreCase)) {
       stderr = ENC.encode('join: file 1 is not in sorted order\n')
     } else if (!isSorted(lines2, field2, sep, ignoreCase)) {

@@ -18,7 +18,7 @@ import { appendBytes as sshAppend } from '../../../core/ssh/append.ts'
 import { SCOPE_ERROR } from '../../../core/ssh/constants.ts'
 import { copy as sshCopy } from '../../../core/ssh/copy.ts'
 import { create as sshCreate } from '../../../core/ssh/create.ts'
-import { du as sshDu, duAll as sshDuAll } from '../../../core/ssh/du.ts'
+import { size as sshDu, entries as sshDuAll } from '../../../core/ssh/du/index.ts'
 import { exists as sshExists } from '../../../core/ssh/exists.ts'
 import { find as sshFind } from '../../../core/ssh/find.ts'
 import { mkdir as sshMkdir } from '../../../core/ssh/mkdir.ts'
@@ -27,6 +27,7 @@ import { readdir as sshReaddir } from '../../../core/ssh/readdir.ts'
 import { rename as sshRename } from '../../../core/ssh/rename.ts'
 import { rmR as sshRmR } from '../../../core/ssh/rm.ts'
 import { rmdir as sshRmdir } from '../../../core/ssh/rmdir.ts'
+import { setAttrs as sshSetAttrs } from '../../../core/ssh/set_attrs.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
 import { stream as sshStream } from '../../../core/ssh/stream.ts'
 import { truncate as sshTruncate } from '../../../core/ssh/truncate.ts'
@@ -53,6 +54,6 @@ export const SSH_IO: CommandIO<SSHAccessor> = {
   truncate: sshTruncate,
   append: sshAppend,
   find: sshFind,
-  duTotal: sshDu,
-  duAll: sshDuAll,
+  du: { size: sshDu, entries: sshDuAll },
+  setAttrs: sshSetAttrs,
 }

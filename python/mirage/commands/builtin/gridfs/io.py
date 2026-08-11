@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.gridfs.constants import SCOPE_ERROR
 from mirage.core.gridfs.copy import copy as _copy
 from mirage.core.gridfs.create import create as _create
-from mirage.core.gridfs.du import du as _du
-from mirage.core.gridfs.du import du_all as _du_all
+from mirage.core.gridfs.du import entries as _du_entries
+from mirage.core.gridfs.du import size as _du_size
 from mirage.core.gridfs.exists import exists as _exists
 from mirage.core.gridfs.find import find as _find
 from mirage.core.gridfs.mkdir import mkdir as _mkdir
@@ -35,6 +35,7 @@ from mirage.core.gridfs.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_read_stream,
     stat=_stat,
     is_mounted=lambda a: True,
@@ -50,8 +51,7 @@ IO = CommandIO(
     copy=_copy,
     create=_create,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du=DuOps(size=_du_size, entries=_du_entries),
     truncate=_truncate,
 )
 

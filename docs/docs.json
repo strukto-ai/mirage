@@ -49,7 +49,7 @@
       "twitter:site": "@struktoai",
       "twitter:creator": "@struktoai",
       "twitter:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light.png",
-      "twitter:image:alt": "Mirage · Unified Virtual Filesystem for AI Agents | Strukto"
+      "twitter:image:alt": "Mirage \u00b7 Unified Virtual Filesystem for AI Agents | Strukto"
     }
   },
   "navigation": {
@@ -75,6 +75,7 @@
               "home/cache",
               "home/snapshot",
               "home/observer",
+              "home/policy-engine",
               "home/auth"
             ]
           },
@@ -382,6 +383,19 @@
             ]
           },
           {
+            "group": "CLIs",
+            "pages": [
+              "python/cli/index",
+              "python/cli/himalaya",
+              "python/cli/gws",
+              "python/cli/slack",
+              "python/cli/discord",
+              "python/cli/ntn",
+              "python/cli/linear",
+              "python/cli/git"
+            ]
+          },
+          {
             "group": "Watch",
             "icon": "bell",
             "pages": [
@@ -393,7 +407,8 @@
             "group": "Runtimes",
             "pages": [
               "python/runtime/python",
-              "python/runtime/javascript"
+              "python/runtime/javascript",
+              "python/runtime/sandbox"
             ]
           }
         ]
@@ -487,6 +502,14 @@
                 ]
               },
               {
+                "group": "Microsoft",
+                "icon": "microsoft",
+                "pages": [
+                  "typescript/setup/onedrive",
+                  "typescript/setup/sharepoint"
+                ]
+              },
+              {
                 "group": "Cloud Files",
                 "icon": "folder-open",
                 "pages": [
@@ -527,6 +550,13 @@
                 ]
               },
               {
+                "group": "Memory",
+                "icon": "/images/mem0.svg",
+                "pages": [
+                  "typescript/setup/mem0"
+                ]
+              },
+              {
                 "group": "Notes",
                 "icon": "book",
                 "pages": [
@@ -543,10 +573,32 @@
             ]
           },
           {
+            "group": "CLIs",
+            "pages": [
+              "typescript/cli/index",
+              "typescript/cli/himalaya",
+              "typescript/cli/gws",
+              "typescript/cli/slack",
+              "typescript/cli/discord",
+              "typescript/cli/ntn",
+              "typescript/cli/linear",
+              "typescript/cli/git"
+            ]
+          },
+          {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "typescript/watch",
+              "typescript/watch-matrix"
+            ]
+          },
+          {
             "group": "Runtimes",
             "pages": [
               "typescript/runtime/python",
-              "typescript/runtime/javascript"
+              "typescript/runtime/javascript",
+              "typescript/runtime/sandbox"
             ]
           }
         ]

@@ -60,3 +60,32 @@ def test_execute_returns_clear_syntax_error(bad_cmd):
     stderr = io.stderr or b""
     assert b"syntax error" in stderr, (
         f"expected 'syntax error' in stderr for {bad_cmd!r}, got {stderr!r}")
+
+
+@pytest.mark.parametrize("bad_cmd", [
+    "echo `echo a",
+    "echo \"`echo '`'`\"",
+])
+def test_unterminated_backtick_is_a_syntax_error(bad_cmd):
+    """tree-sitter parses these as complete; bash exits 2 and so do we."""
+    ws = Workspace({"/data": RAMResource()})
+    io = asyncio.run(ws.execute(bad_cmd))
+    assert io.exit_code == 2, (
+        f"expected exit 2 for {bad_cmd!r}, got {io.exit_code}")
+    assert b"syntax error" in (io.stderr or b"")
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # A trailing backslash continues the line; with nothing to continue
+        # onto, bash drops it and runs the command.
+        ("echo a\\", b"a\n"),
+        ("echo \\", b"\n"),
+        ("echo a\\\\", b"a\\\n"),
+    ])
+def test_trailing_backslash_is_a_line_continuation(command, expected):
+    ws = Workspace({"/data": RAMResource()})
+    io = asyncio.run(ws.execute(command))
+    assert io.exit_code == 0, (io.exit_code, io.stderr)
+    assert io.stdout == expected

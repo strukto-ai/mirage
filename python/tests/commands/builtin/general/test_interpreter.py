@@ -14,15 +14,18 @@
 
 import pytest
 
-from mirage.commands.builtin.general.interpreter import (Source,
+from mirage.commands.builtin.general.interpreter import (Argv0Rules, Source,
                                                          resolve_source,
-                                                         run_code)
-from mirage.runtime.base import RunArgs, RunResult, Runtime
+                                                         run_code, run_output,
+                                                         skip_first_line)
+from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.types import RunArgs, RunResult
 from mirage.types import PathSpec
 
 
-class EchoRuntime(Runtime):
+class EchoRuntime(LanguageRuntime):
     name = "echo"
+    language = "python"
 
     def __init__(self, dispatch=None):
         self.seen: list[RunArgs] = []
@@ -30,16 +33,6 @@ class EchoRuntime(Runtime):
     async def run(self, args: RunArgs) -> RunResult:
         self.seen.append(args)
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
-
-
-class BrokenRuntime(Runtime):
-    name = "broken"
-
-    def __init__(self, dispatch=None):
-        raise ImportError("needs the broken extra")
-
-    async def run(self, args: RunArgs) -> RunResult:
-        raise AssertionError("unreachable")
 
 
 async def fake_dispatch(op, path, *args, **kwargs):
@@ -115,16 +108,72 @@ async def test_run_source_uses_bound_runtime_and_flags():
     runtime = EchoRuntime()
     prepared = Source(code="hi")
     stdout, io = await run_code("js", prepared, {"K": "V"}, {"module": True},
-                                runtime, EchoRuntime, (ImportError, ), None)
+                                runtime, None)
     assert io.exit_code == 0
     assert runtime.seen[0].flags == {"module": True}
     assert runtime.seen[0].env == {"K": "V"}
 
 
 @pytest.mark.asyncio
-async def test_run_source_fallback_failure_is_exit_127_hint():
+async def test_run_source_unbound_reports_recorded_hint():
+    """A default entry's build error surfaces as the 127 hint."""
     prepared = Source(code="hi")
     stdout, io = await run_code("python3", prepared, None, {}, None,
-                                BrokenRuntime, (ImportError, ), None)
+                                "needs the broken extra")
     assert io.exit_code == 127
-    assert b"needs the broken extra" in io.stderr
+    assert io.stderr == b"python3: needs the broken extra\n"
+
+
+@pytest.mark.asyncio
+async def test_run_source_unbound_refuses_without_hint():
+    """No captured runtime means refusal, not a hidden interpreter."""
+    prepared = Source(code="hi")
+    stdout, io = await run_code("python3", prepared, None, {}, None, None)
+    assert io.exit_code == 127
+    assert io.stderr == b"python3: command not found\n"
+
+
+def test_run_output_is_the_one_result_mapping():
+    stdout, io = run_output(
+        RunResult(stdout=b"out", stderr=b"err", exit_code=3))
+    assert stdout == b"out"
+    assert io.exit_code == 3
+    assert io.stderr == b"err"
+
+
+def test_run_output_empty_stdout_becomes_no_stream():
+    stdout, io = run_output(RunResult(stdout=b"", stderr=None, exit_code=0))
+    assert stdout is None
+    assert io.exit_code == 0
+    assert io.stderr is None
+
+
+def test_skip_first_line_empties_the_line_rather_than_dropping_it():
+    # CPython keeps the file's numbering under -x, so a raise on
+    # physical line 2 still reports line 2.
+    assert skip_first_line("junk\nprint(1)\n") == "\nprint(1)\n"
+
+
+def test_skip_first_line_on_a_one_line_file_leaves_nothing():
+    assert skip_first_line("junk") == ""
+
+
+@pytest.mark.asyncio
+async def test_skip_line_applies_to_a_script_operand():
+    _, prepared = await resolve_source("python3", [spec("/script.py")], (),
+                                       None, None, fake_dispatch, None, True,
+                                       None, Argv0Rules(), True)
+    assert prepared is not None
+    # The fixture script is a single line, so -x leaves nothing of it.
+    assert prepared.code == ""
+
+
+@pytest.mark.asyncio
+async def test_skip_line_leaves_a_payload_alone():
+    # CPython's -x reads the script file; -c, -m and stdin are
+    # untouched by it.
+    _, prepared = await resolve_source("python3", [], (), "print(1)",
+                                       None, None, None, True, None,
+                                       Argv0Rules(), True)
+    assert prepared is not None
+    assert prepared.code == "print(1)"

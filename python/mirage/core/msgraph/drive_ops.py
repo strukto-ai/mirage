@@ -37,6 +37,7 @@ from mirage.observe.context import (active_recorder, record, record_stream,
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
+from mirage.utils.ranges import range_header
 
 SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 UPLOAD_CHUNK = 10 * 327680
@@ -232,20 +233,37 @@ async def upload_session_write(config: MsGraphConfig, session_url: str,
             start += len(chunk)
 
 
-def _range_header(offset: int, size: int | None) -> str | None:
-    if not offset and size is None:
+def folder_child_count(item: dict[str, Any]) -> int | None:
+    """Child count from a driveItem's folder facet.
+
+    Graph returns the facet's ``childCount`` by default, so ``-empty``
+    needs no extra request. Absent (a ``$select`` that dropped it) reads
+    as unknown.
+
+    Args:
+        item (dict): a Graph driveItem.
+    """
+    facet = item.get("folder")
+    if not isinstance(facet, dict):
         return None
-    end = (offset + size - 1) if size is not None else ""
-    return f"bytes={offset}-{end}"
+    count = facet.get("childCount")
+    return count if isinstance(count, int) else None
 
 
 def entry_stat(item: dict[str, Any]) -> FileStat:
     name = item.get("name", "")
     if "folder" in item:
+        # Graph's folder `size` is aggregate storage metadata, not the
+        # byte length of any rendered content: keep it out of
+        # FileStat.size (see CLAUDE.md FUSE rules) and expose it as
+        # extra["size_bytes"].
         return FileStat(name=name,
                         type=FileType.DIRECTORY,
-                        size=item.get("size"),
-                        modified=item.get("lastModifiedDateTime"))
+                        modified=item.get("lastModifiedDateTime"),
+                        extra={
+                            "size_bytes": item.get("size"),
+                            "child_count": folder_child_count(item),
+                        })
     return FileStat(
         name=name,
         size=item.get("size"),
@@ -285,29 +303,27 @@ async def read_item(config: MsGraphConfig,
                     offset: int = 0,
                     size: int | None = None) -> bytes:
     pinned = revision_for(virtual)
-    range_header = _range_header(offset, size)
+    window = range_header(offset, size)
     start_ms = int(time.monotonic() * 1000)
     fingerprint = None
     revision = pinned
     try:
         if pinned:
             action = f"/versions/{quote(pinned, safe='')}/content"
-            data = await graph_get_bytes(config, loc.item(action),
-                                         range_header)
+            data = await graph_get_bytes(config, loc.item(action), window)
         elif active_recorder() is not None:
             fingerprint, revision, download_url = await capture_item_metadata(
                 config, loc)
             if download_url:
                 data = await graph_get_bytes(config,
                                              download_url,
-                                             range_header,
+                                             window,
                                              auth=False)
             else:
                 data = await graph_get_bytes(config, loc.item("/content"),
-                                             range_header)
+                                             window)
         else:
-            data = await graph_get_bytes(config, loc.item("/content"),
-                                         range_header)
+            data = await graph_get_bytes(config, loc.item("/content"), window)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)
@@ -380,7 +396,16 @@ async def du_tree_total(config: MsGraphConfig, loc: DriveLoc) -> int:
 
 
 async def du_tree_entries(config: MsGraphConfig,
-                          loc: DriveLoc) -> list[tuple[str, int]]:
+                          loc: DriveLoc) -> tuple[list[tuple[str, int]], int]:
+    """Per-file sizes under a drive item plus their total.
+
+    Paths are mount-relative and leaf files only; the caller lifts them
+    onto virtual paths and renders any roll-up line itself.
+
+    Args:
+        config (MsGraphConfig): Graph credentials and endpoint.
+        loc (DriveLoc): the drive item to walk.
+    """
     results: list[tuple[str, int]] = []
     total = 0
     async with new_session(config) as session:
@@ -390,8 +415,8 @@ async def du_tree_entries(config: MsGraphConfig,
             size = item.get("size", 0)
             results.append(("/" + rel, size))
             total += size
-    results.append(("/" + loc.virt if loc.virt else "/", total))
-    return results
+    results.sort()
+    return results, total
 
 
 async def find_items(
@@ -411,10 +436,42 @@ async def find_items(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    depth_offset: int = 0,
+    emit_start: bool = True,
 ) -> list[str]:
+    """Walk a drive subtree and return the matching mount-relative keys.
+
+    ``depth_offset`` and ``emit_start`` exist for callers that stack this
+    walk under synthetic namespace levels (SharePoint's site and library
+    directories): the offset shifts reported depths so ``-maxdepth`` and
+    ``-mindepth`` count from the real start path, and ``emit_start``
+    suppresses the per-library start path so only the caller's own start
+    is emitted.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        loc (DriveLoc): subtree root.
+        start_name (str): basename of the start path, as find prints it.
+        dir_exists (Callable): resolves whether the start is a directory.
+        name (str | None): -name pattern.
+        type (str | None): -type filter.
+        min_size (int | None): inclusive lower size bound.
+        max_size (int | None): inclusive upper size bound.
+        maxdepth (int | None): -maxdepth.
+        name_exclude (str | None): negated -name pattern.
+        or_names (list[str] | None): -o'd -name patterns.
+        iname (str | None): -iname pattern.
+        path_pattern (str | None): -path pattern.
+        mindepth (int | None): -mindepth.
+        empty (bool): whether -empty is in effect.
+        tree (PredNode | None): pre-built predicate tree.
+        depth_offset (int): added to every reported depth.
+        emit_start (bool): whether to emit the start path itself.
+    """
     base = loc.virt
     results: list[str] = []
     saw_descendant = False
+    start_children = 0
     tree = tree if tree is not None else build_tree(name=name,
                                                     iname=iname,
                                                     path_pattern=path_pattern,
@@ -425,15 +482,18 @@ async def find_items(
     async with new_session(config) as session:
         async for rel, item, is_dir in iter_tree(config, loc, session=session):
             relative = rel[len(base):].lstrip("/") if base else rel
-            depth = relative.count("/") + 1
+            rel_depth = relative.count("/") + 1
+            depth = rel_depth + depth_offset
+            if rel_depth == 1:
+                start_children += 1
             if maxdepth is not None and depth > maxdepth:
                 continue
             saw_descendant = True
             entry_name = rel.rsplit("/", 1)[-1]
             full_path = "/" + rel
             size = item.get("size", 0)
-            is_empty = (None if not empty else
-                        (size == 0 if not is_dir else False))
+            is_empty = (None if not empty else (
+                folder_child_count(item) == 0 if is_dir else size == 0))
             entry = FindEntry(key=full_path,
                               name=entry_name,
                               kind="d" if is_dir else "f",
@@ -450,14 +510,14 @@ async def find_items(
                 if max_size is not None and effective > max_size:
                     continue
             results.append(full_path)
-    exists = saw_descendant or await dir_exists()
+    exists = emit_start and (saw_descendant or await dir_exists())
     if exists:
         root_key = "/" + base if base else "/"
         emit_start_path(results,
                         root_key,
                         start_name,
                         kind="d",
-                        is_empty=False if empty else None,
+                        is_empty=start_children == 0 if empty else None,
                         exists=True,
                         tree=tree,
                         maxdepth=maxdepth,
@@ -465,6 +525,16 @@ async def find_items(
                         min_size=min_size,
                         max_size=max_size)
     return sorted(results)
+
+
+async def drive_root_empty(config: MsGraphConfig, loc: DriveLoc) -> bool:
+    """Whether a drive item has no children.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        loc (DriveLoc): the folder to probe.
+    """
+    return not await graph_list(config, loc.item("/children"))
 
 
 async def readdir_items(
@@ -487,15 +557,22 @@ async def readdir_items(
         cname = child.get("name", "")
         key = f"{base}/{cname}"
         names.append(key)
-        rtype = (ResourceType.FOLDER
-                 if "folder" in child else ResourceType.FILE)
+        is_dir = "folder" in child
+        rtype = ResourceType.FOLDER if is_dir else ResourceType.FILE
+        # Folder `size` is aggregate storage metadata, never rendered
+        # content length: cache it as extra, not as the entry size.
+        extra = ({
+            "size_bytes": child.get("size"),
+            "child_count": folder_child_count(child),
+        } if is_dir else {})
         index_entries.append(
             (cname,
              IndexEntry(id=key,
                         name=cname,
                         resource_type=rtype,
-                        size=child.get("size"),
-                        remote_time=child.get("lastModifiedDateTime", ""))))
+                        size=None if is_dir else child.get("size"),
+                        remote_time=child.get("lastModifiedDateTime", ""),
+                        extra=extra)))
     names = sorted(names)
     virtual_entries = sorted((prefix + e if prefix else e) for e in names)
     await index.set_dir(virtual_key, index_entries)
@@ -511,11 +588,13 @@ async def stat_item(config: MsGraphConfig, loc: DriveLoc, virtual: str,
             return FileStat(name=entry.name,
                             type=FileType.DIRECTORY,
                             size=entry.size,
-                            modified=entry.remote_time or None)
+                            modified=entry.remote_time or None,
+                            extra=dict(entry.extra))
         return FileStat(name=entry.name,
                         size=entry.size,
                         modified=entry.remote_time or None,
-                        type=guess_type(entry.name))
+                        type=guess_type(entry.name),
+                        extra=dict(entry.extra))
     parent = virtual_key.rsplit("/", 1)[0] or "/"
     parent_listing = await index.list_dir(parent)
     if parent_listing.entries is not None:

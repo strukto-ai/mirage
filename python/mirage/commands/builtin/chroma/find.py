@@ -7,10 +7,12 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.chroma.find import find as find_core
 from mirage.core.chroma.stat import stat as stat_core
 from mirage.core.chroma.stat import stat_light
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, StatPath
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -63,7 +65,10 @@ async def find(
     mindepth: str | None = None,
     index: IndexCacheStore,
     cwd: PathSpec | None = None,
-    **_extra: object,
+    L: bool = False,
+    links: LinkView | None = None,
+    stat_path: StatPath | None = None,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = default_paths(paths, cwd)
     paths = await resolve_glob(accessor, paths, index)
@@ -83,5 +88,8 @@ async def find(
                                     maxdepth=maxdepth,
                                     iname=iname,
                                     path=path,
-                                    mindepth=mindepth)
+                                    mindepth=mindepth,
+                                    links=links,
+                                    stat_path=stat_path,
+                                    follow=L)
     return await _normalize_find_output(stdout, search_path), io

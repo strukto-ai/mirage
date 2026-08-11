@@ -43,7 +43,7 @@ describe('gdocs readdir', () => {
     vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
       captured.modifiedAfter = opts?.modifiedAfter ?? null
       captured.modifiedBefore = opts?.modifiedBefore ?? null
-      return Promise.resolve([])
+      return Promise.resolve({ files: [], complete: true })
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
@@ -68,7 +68,7 @@ describe('gdocs readdir', () => {
     vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
       captured.modifiedAfter = opts?.modifiedAfter ?? null
       captured.modifiedBefore = opts?.modifiedBefore ?? null
-      return Promise.resolve([])
+      return Promise.resolve({ files: [], complete: true })
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
@@ -92,7 +92,7 @@ describe('gdocs readdir', () => {
     vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
       captured.modifiedAfter = opts?.modifiedAfter ?? null
       captured.modifiedBefore = opts?.modifiedBefore ?? null
-      return Promise.resolve([])
+      return Promise.resolve({ files: [], complete: true })
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
@@ -131,8 +131,8 @@ describe('gdocs readdir', () => {
     let calls = 0
     vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
       calls += 1
-      if (opts?.modifiedAfter) return Promise.resolve(mayOnly)
-      return Promise.resolve(full)
+      if (opts?.modifiedAfter) return Promise.resolve({ files: mayOnly, complete: true })
+      return Promise.resolve({ files: full, complete: true })
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
@@ -161,14 +161,17 @@ describe('gdocs readdir', () => {
   })
 
   it('filtered listing populates per-entry index so stat succeeds', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue([
-      {
-        id: 'may1',
-        name: 'MayDoc',
-        modifiedTime: '2026-05-15T00:00:00.000Z',
-        owners: [{ me: false }],
-      },
-    ])
+    vi.mocked(drive.listAllFiles).mockResolvedValue({
+      files: [
+        {
+          id: 'may1',
+          name: 'MayDoc',
+          modifiedTime: '2026-05-15T00:00:00.000Z',
+          owners: [{ me: false }],
+        },
+      ],
+      complete: true,
+    })
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -198,15 +201,18 @@ describe('gdocs readdir', () => {
   })
 
   it('keeps entry size null, Drive source size lands in extra', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue([
-      {
-        id: 'doc1',
-        name: 'My Doc',
-        modifiedTime: '2026-04-01T00:00:00.000Z',
-        size: '1234',
-        owners: [{ me: true }],
-      },
-    ])
+    vi.mocked(drive.listAllFiles).mockResolvedValue({
+      files: [
+        {
+          id: 'doc1',
+          name: 'My Doc',
+          modifiedTime: '2026-04-01T00:00:00.000Z',
+          size: '1234',
+          owners: [{ me: true }],
+        },
+      ],
+      complete: true,
+    })
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -238,5 +244,41 @@ describe('gdocs readdir', () => {
     )
     expect(result.size).toBeNull()
     expect(result.extra.source_size).toBe(1234)
+  })
+})
+
+describe('gdocs incomplete search', () => {
+  it('does not cache a short listing as the directory', async () => {
+    // Drive reporting a corpus it skipped means the listing is short.
+    // Caching it would pin the short listing until it expires, so a Shared
+    // Drive document stays invisible long after the cause clears. The
+    // entries are real, so they stay cached; only the directory is withheld.
+    const files = [
+      {
+        id: 'd1',
+        name: 'Doc',
+        modifiedTime: '2026-05-15T00:00:00.000Z',
+        owners: [{ me: true }],
+      },
+    ]
+    let complete = false
+    vi.mocked(drive.listAllFiles).mockImplementation((() =>
+      Promise.resolve({ files, complete })) as typeof drive.listAllFiles)
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const owned = new PathSpec({
+      virtual: '/gdocs/owned',
+      directory: '/gdocs/owned',
+      resourcePath: mountKey('/gdocs/owned', '/gdocs'),
+    })
+    const listed = await readdir(accessor, owned, index)
+    expect(listed).toHaveLength(1)
+    expect((await index.listDir('/gdocs/owned')).entries).toBeUndefined()
+    expect((await index.get(listed[0] ?? '')).entry?.id).toBe('d1')
+
+    complete = true
+    await readdir(accessor, owned, index)
+    expect((await index.listDir('/gdocs/owned')).entries).toBeDefined()
   })
 })

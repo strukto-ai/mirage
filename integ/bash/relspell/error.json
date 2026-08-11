@@ -63,7 +63,7 @@
       ],
       "command": "grep hello sub/missing.txt 2>&1",
       "expect": {
-        "exit": 1,
+        "exit": 2,
         "stdout": "grep: sub/missing.txt: No such file or directory\n",
         "stderr": ""
       }

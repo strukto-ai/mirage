@@ -20,7 +20,8 @@ from mirage.commands.builtin.gridfs import COMMANDS as GRIDFS_COMMANDS
 from mirage.core.gridfs.constants import SCOPE_ERROR
 from mirage.core.gridfs.copy import copy
 from mirage.core.gridfs.create import create
-from mirage.core.gridfs.du import du, du_all
+from mirage.core.gridfs.du import entries as du_entries
+from mirage.core.gridfs.du import size as du_size
 from mirage.core.gridfs.exists import exists
 from mirage.core.gridfs.find import find
 from mirage.core.gridfs.mkdir import mkdir
@@ -56,8 +57,8 @@ _GRIDFS_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,
@@ -69,6 +70,8 @@ class GridFSResource(BaseResource):
 
     accessor: GridFSAccessor
     name: str = ResourceName.GRIDFS
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _GRIDFS_OPS
     PROMPT: str = PROMPT
@@ -80,8 +83,8 @@ class GridFSResource(BaseResource):
         self.accessor = GridFSAccessor(self.config)
         for fn in GRIDFS_COMMANDS:
             self.register(fn)
-        for fn in GRIDFS_OPS:
-            self.register_op(fn)
+        for op in GRIDFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

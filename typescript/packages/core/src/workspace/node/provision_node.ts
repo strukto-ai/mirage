@@ -15,6 +15,7 @@
 import {
   getCaseItems,
   getCommandName,
+  getCforParts,
   getForParts,
   getFunctionBody,
   getFunctionName,
@@ -40,7 +41,7 @@ import {
 import { Precision, ProvisionResult } from '../../provision/types.ts'
 import { rollupList, rollupPipe } from '../../provision/rollup.ts'
 import { PathSpec } from '../../types.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { classifyParts } from '../expand/classify/index.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import { expandAndClassify, expandParts } from '../expand/parts.ts'
@@ -293,6 +294,12 @@ export async function provisionNode(
     return handleWhileProvision(recurseUnknown, body, session)
   }
 
+  if (kind === NodeKind.CFOR) {
+    // The iteration count comes from arithmetic: unbounded like while.
+    const [, body] = getCforParts(node)
+    return handleWhileProvision(recurseUnknown, body, session)
+  }
+
   if (kind === NodeKind.CASE) {
     const items = getCaseItems(node)
     const children: ProvisionResult[] = []
@@ -318,7 +325,8 @@ export async function provisionNode(
     kind === NodeKind.DECLARATION ||
     kind === NodeKind.UNSET ||
     kind === NodeKind.TEST ||
-    kind === NodeKind.VAR_ASSIGN
+    kind === NodeKind.VAR_ASSIGN ||
+    kind === NodeKind.VAR_ASSIGNS
   ) {
     return handleBuiltinProvision()
   }

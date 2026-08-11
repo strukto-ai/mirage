@@ -109,6 +109,78 @@ def _failed_arith_openers(root: tree_sitter.Node) -> list[int]:
     return offsets
 
 
+def strip_line_continuation(command: str) -> str:
+    """Drop a trailing backslash that continues the line, as bash does.
+
+    The reader removes ``\\<newline>`` before the parser ever sees it, and
+    a backslash ending the input is the same thing with nothing left to
+    continue onto: ``echo a\\`` runs ``echo a``. Only an odd-length run
+    of trailing backslashes ends in a live one, since each earlier pair
+    is an escaped backslash (``echo a\\\\`` keeps its literal backslash).
+
+    Args:
+        command (str): the raw command line.
+    """
+    stripped = command.rstrip("\\")
+    if (len(command) - len(stripped)) % 2 == 1:
+        return command[:-1]
+    return command
+
+
+def find_unterminated_backtick(command: str) -> str | None:
+    """Locate a backtick substitution that is never closed.
+
+    tree-sitter happily parses ``echo `echo a`` as a complete command,
+    so the region has to be scanned directly. Quoting follows the shell
+    reader: single quotes protect a backtick, double quotes do not, and
+    once inside a substitution only a backslash escapes, which is why
+    ``"`echo '`'`"`` is an error in bash rather than a quoted backtick.
+
+    Args:
+        command (str): the raw command line.
+
+    Returns:
+        str | None: text from the unmatched backtick on, or None.
+    """
+    quote: str | None = None
+    dollar_quote = False
+    opened: int | None = None
+    last_dollar = -2
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote == "'":
+            # $'...' takes backslash escapes, so \' does not close it;
+            # a plain '...' treats every backslash literally.
+            if dollar_quote and ch == "\\":
+                i += 2
+                continue
+            if ch == "'":
+                quote = None
+                dollar_quote = False
+            i += 1
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if opened is not None:
+            if ch == "`":
+                opened = None
+            i += 1
+            continue
+        if ch == "`":
+            opened = i
+        elif ch == "'" and quote is None:
+            quote = "'"
+            dollar_quote = last_dollar == i - 1
+        elif ch == '"':
+            quote = None if quote == '"' else '"'
+        elif ch == "$":
+            last_dollar = i
+        i += 1
+    return command[opened:] if opened is not None else None
+
+
 def parse(command: str) -> tree_sitter.Node:
     """Parse a shell command string into a tree-sitter AST.
 
@@ -128,7 +200,7 @@ def parse(command: str) -> tree_sitter.Node:
         tree_sitter.Node: root node, or the original errored root when no
         reparse helps.
     """
-    data = command.encode()
+    data = strip_line_continuation(command).encode()
     root = TS_PARSER.parse(data).root_node
     if not root.has_error:
         return root

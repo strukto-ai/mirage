@@ -72,6 +72,7 @@ export interface S3Config {
   accessKeyId?: string
   secretAccessKey?: string
   sessionToken?: string
+  profile?: string
   forcePathStyle?: boolean
   timeoutMs?: number
   presignedUrlProvider?: S3BrowserPresignedUrlProvider

@@ -1,0 +1,511 @@
+{
+  "cases": [
+    {
+      "id": "ln_cmd_team_list",
+      "seq": 567000,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear team list | jq -r '.[].team_key'",
+      "expect": {
+        "exit": 0,
+        "stdout": "PLAT\nWEB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_team_get",
+      "seq": 567001,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear team get PLAT | jq -r '.team_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Platform\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_team_members",
+      "seq": 567002,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear team members PLAT | jq -r '.[].display_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Alex Kim\nSam Rivera\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_issue_list",
+      "seq": 567003,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue list --team PLAT | jq -r '.[].issue_key'",
+      "expect": {
+        "exit": 0,
+        "stdout": "PLAT-1\nPLAT-2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_issue_get",
+      "seq": 567004,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue get PLAT-1 | jq -r '.title'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add search API\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_project_list",
+      "seq": 567005,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear project list --team PLAT | jq -rc '.[] | {name, issue_count}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"name\":\"Search\",\"issue_count\":1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_project_get",
+      "seq": 567006,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear project get prj_search --team PLAT | jq -r '.issues[].issue_key'",
+      "expect": {
+        "exit": 0,
+        "stdout": "PLAT-1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_cycle_list",
+      "seq": 567007,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear cycle list --team PLAT | jq -r '.[].name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Cycle 1\nCycle 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_cycle_current",
+      "seq": 567008,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear cycle current --team PLAT | jq -r '.name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Cycle 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_cycle_get",
+      "seq": 567009,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear cycle get cyc_1 --team PLAT | jq -r '.name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Cycle 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_label_list",
+      "seq": 567010,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear label list --team PLAT | jq -r '.[].name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "feature\nbug\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_comment_list",
+      "seq": 567011,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear comment list PLAT-1 | jq -r '.[].body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Started design doc.\nEndpoint stubbed, tests pending.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_user_list",
+      "seq": 567012,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear user list | jq -r '.[].email'",
+      "expect": {
+        "exit": 0,
+        "stdout": "alex@strukto.ai\nsam@strukto.ai\njo@strukto.ai\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_user_get",
+      "seq": 567013,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear user get sam@strukto.ai | jq -r '.display_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Sam Rivera\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_document_list",
+      "seq": 567014,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear document list --team PLAT | jq -r '.[].title'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Search Architecture\nIndexer Runbook\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_document_get",
+      "seq": 567015,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear document get doc_plat_arch --team PLAT | jq -r '.project_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cmd_search",
+      "seq": 567016,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear search index | jq -r '.[].identifier'",
+      "expect": {
+        "exit": 0,
+        "stdout": "PLAT-1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_help_head",
+      "seq": 567100,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear --help | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear: Linear GraphQL API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_group_help",
+      "seq": 567101,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue --help | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear issue: Manage issues\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_missing_team",
+      "seq": 567102,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue list 2>/dev/null; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_create",
+      "seq": 567103,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue create --team PLAT --title \"CLI probe\" --description \"born in the cli facet\" | jq -r '.title'",
+      "expect": {
+        "exit": 0,
+        "stdout": "CLI probe\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_update",
+      "seq": 567104,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue update PLAT-1 --title \"Renamed by cli\" | jq -r '.title'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Renamed by cli\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_assign",
+      "seq": 567105,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue assign PLAT-1 --assignee-email sam@strukto.ai | jq -r '.assignee_email'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sam@strukto.ai\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_set_priority",
+      "seq": 567106,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue set-priority PLAT-1 --priority 2 | jq -r '.priority'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_comment_add_stdin",
+      "seq": 567107,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "echo \"piped comment body\" | linear comment add PLAT-1 | jq -r '.body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "piped comment body\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_transition",
+      "seq": 567108,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue transition PLAT-1 --state-name Done | jq -r '.state_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_set_project",
+      "seq": 567109,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue set-project PLAT-2 --project prj_search | jq -r '.project_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_add_label",
+      "seq": 567110,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue add-label PLAT-2 --label lbl_feature | jq -r '.label_names | join(\",\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "bug,feature\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_comment_update",
+      "seq": 567111,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear comment update --comment cmt_plat1_1 --body \"edited by cli\" | jq -r '.body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "edited by cli\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_add_label_by_name",
+      "seq": 567112,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue add-label PLAT-1 --label-name bug | jq -r '.label_names | join(\",\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "feature,bug\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_cli_issue_set_project_by_name",
+      "seq": 567113,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue set-project PLAT-2 --project-name Search | jq -r '.project_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_type",
+      "seq": 567114,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "type linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear is a mirage CLI\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_type_word",
+      "seq": 567115,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "type -t linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "cli\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_which",
+      "seq": 567116,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "which linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_man_root",
+      "seq": 567117,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "man linear | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear: Linear GraphQL API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_man_leaf",
+      "seq": 567118,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "man linear issue create | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear issue create: Create an issue\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_man_index",
+      "seq": 567119,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "man | grep '^- linear'",
+      "expect": {
+        "exit": 0,
+        "stdout": "- linear — Linear GraphQL API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_type_a_shadowed",
+      "seq": 567120,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear() { echo shadowed; }; type -a linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear is a function\nlinear is a mirage CLI\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_which_miss",
+      "seq": 567121,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "which nope-xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

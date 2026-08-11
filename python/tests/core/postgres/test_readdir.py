@@ -19,7 +19,7 @@ import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.postgres.readdir import is_dir_name, readdir
+from mirage.core.postgres.readdir import readdir
 from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
 
@@ -106,6 +106,7 @@ async def test_readdir_entity_lists_schema_and_rows(accessor, index):
                  directory="/public/tables/users"), index)
     assert result == [
         "/public/tables/users/schema.json",
+        "/public/tables/users/semantic.json",
         "/public/tables/users/rows.jsonl",
     ]
 
@@ -119,6 +120,7 @@ async def test_readdir_view_entity_lists_schema_and_rows(accessor, index):
                  directory="/analytics/views/daily_revenue"), index)
     assert result == [
         "/analytics/views/daily_revenue/schema.json",
+        "/analytics/views/daily_revenue/semantic.json",
         "/analytics/views/daily_revenue/rows.jsonl",
     ]
 
@@ -146,9 +148,3 @@ async def test_readdir_caches_root_listing(accessor, index):
             index)
     assert first == second
     assert mock_list_schemas.call_count == 1
-
-
-def test_is_dir_name_classifies_by_extension():
-    assert is_dir_name("/public/tables") is True
-    assert is_dir_name("/database.json") is False
-    assert is_dir_name("/public/tables/users/rows.jsonl") is False

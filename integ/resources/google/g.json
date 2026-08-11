@@ -21,7 +21,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws docs +write --document doc0001 --text 'hello gdoc'",
+      "command": "gws docs write --document doc0001 --text 'hello gdoc'",
       "expect": {
         "exit": 0,
         "stdout": "{\"documentId\":\"doc0001\",\"replies\":[{}]}",
@@ -105,7 +105,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs +write --document $D --text 'from drive' | jq -c '.replies'",
+      "command": "D=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws docs write --document $D --text 'from drive' | jq -c '.replies'",
       "expect": {
         "exit": 0,
         "stdout": "[{}]\n",
@@ -136,7 +136,7 @@
       "command": "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Data\"}}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"autoRecalc\":\"ON_CHANGE\",\"timeZone\":\"Etc/GMT\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
         "stderr": ""
       }
     },
@@ -147,7 +147,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
+      "command": "gws sheets append --spreadsheet sheet0001 --range Sheet1 --values 'a,b,c'",
       "expect": {
         "exit": 0,
         "stdout": "{\"spreadsheetId\":\"sheet0001\",\"updates\":{\"spreadsheetId\":\"sheet0001\",\"updatedRange\":\"Sheet1!A1:C1\",\"updatedRows\":1,\"updatedColumns\":3,\"updatedCells\":3}}",
@@ -161,7 +161,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
+      "command": "gws sheets read --spreadsheet sheet0001 --range 'Sheet1!A1:C1'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A1:C1\",\"majorDimension\":\"ROWS\",\"values\":[[\"a\",\"b\",\"c\"]]}",
@@ -178,7 +178,7 @@
       "command": "gws sheets spreadsheets get --params '{\"spreadsheetId\": \"sheet0001\"}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"timeZone\":\"Etc/UTC\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"properties\":{\"title\":\"Data\",\"locale\":\"en_US\",\"autoRecalc\":\"ON_CHANGE\",\"timeZone\":\"Etc/GMT\"},\"sheets\":[{\"properties\":{\"sheetId\":0,\"title\":\"Sheet1\",\"index\":0,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}],\"spreadsheetUrl\":\"https://docs.google.com/spreadsheets/d/sheet0001/edit\"}",
         "stderr": ""
       }
     },
@@ -192,7 +192,7 @@
       "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"addSheet\": {\"properties\": {\"title\": \"Extra\"}}}]}'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\"}}}]}",
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"replies\":[{\"addSheet\":{\"properties\":{\"sheetId\":1,\"title\":\"Extra\",\"index\":1,\"sheetType\":\"GRID\",\"gridProperties\":{\"rowCount\":1000,\"columnCount\":26}}}}]}",
         "stderr": ""
       }
     },
@@ -290,7 +290,7 @@
       "command": "gws drive files list --params \"{\\\"q\\\": \\\"name = 'Notes'\\\"}\" | jq -c '[.files[] | {name, mimeType}]'",
       "expect": {
         "exit": 0,
-        "stdout": "{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}\n",
+        "stdout": "[{\"name\":\"Notes\",\"mimeType\":\"application/vnd.google-apps.document\"}]\n",
         "stderr": ""
       }
     },
@@ -304,7 +304,7 @@
       "command": "F=$(cat /data/Plan.gdoc.json | jq -r .documentId) && gws drive files update --params \"{\\\"fileId\\\": \\\"$F\\\"}\" --json '{\"name\": \"Plan2\"}' > /dev/null && ls /data | grep gdoc",
       "expect": {
         "exit": 0,
-        "stdout": "Plan.gdoc.json\n",
+        "stdout": "Plan2.gdoc.json\n",
         "stderr": ""
       }
     },
@@ -331,8 +331,8 @@
       "clear_cache": true,
       "command": "F=$(cat /data/Plan2.gdoc.json | jq -r .documentId) && gws drive files delete --params \"{\\\"fileId\\\": \\\"$F\\\"}\" && ls /data | grep -c gdoc",
       "expect": {
-        "exit": 0,
-        "stdout": "1\n",
+        "exit": 1,
+        "stdout": "0\n",
         "stderr": ""
       }
     },
@@ -361,7 +361,63 @@
       "expect": {
         "exit": 0,
         "stderr": "",
-        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n\"Notes copy\"\n"
+        "stdout": "{\"name\":\"Notes copy\",\"mimeType\":\"application/vnd.google-apps.document\"}\n[\"Notes copy\"]\n"
+      }
+    },
+    {
+      "id": "g_files_list_paginates_by_default",
+      "seq": 500027,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files list --params \"{\\\"q\\\": \\\"name contains 'Notes'\\\", \\\"pageSize\\\": 1}\" | jq -r '.files[].name' | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "Notes\nNotes copy\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_files_list_page_limit_truncates",
+      "seq": 500028,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files list --page-limit 1 --params \"{\\\"q\\\": \\\"name contains 'Notes'\\\", \\\"pageSize\\\": 1}\" | jq -r '.files[].name' | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_help_lists_services",
+      "seq": 500029,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws --help | grep -c 'API commands'",
+      "expect": {
+        "exit": 0,
+        "stdout": "8\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_help_lists_service_methods",
+      "seq": 500030,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files --help | grep -c 'passthrough'",
+      "expect": {
+        "exit": 0,
+        "stdout": "7\n",
+        "stderr": ""
       }
     },
     {
@@ -371,7 +427,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "gws sheets +write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets +read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
+      "command": "gws sheets write --spreadsheet sheet0001 --range 'Sheet1!A2:C2' --values 'x,y,z' > /dev/null && gws sheets read --spreadsheet sheet0001 --range 'Sheet1!A2:C2'",
       "expect": {
         "exit": 0,
         "stderr": "",
@@ -399,7 +455,7 @@
         "gdrive"
       ],
       "clear_cache": true,
-      "command": "S=$(cat /data/Board.gsheet.json | jq -r .spreadsheetId) && gws sheets +append --spreadsheet $S --range Sheet1 --values 'x,y' > /dev/null && gws sheets +read --spreadsheet $S --range 'Sheet1!A1:B1'",
+      "command": "S=$(cat /data/Board.gsheet.json | jq -r .spreadsheetId) && gws sheets append --spreadsheet $S --range Sheet1 --values 'x,y' > /dev/null && gws sheets read --spreadsheet $S --range 'Sheet1!A1:B1'",
       "expect": {
         "exit": 0,
         "stdout": "{\"range\":\"Sheet1!A1:B1\",\"majorDimension\":\"ROWS\",\"values\":[[\"x\",\"y\"]]}",

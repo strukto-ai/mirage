@@ -18,18 +18,21 @@ import { type Builder, resolveGlobOf } from '../adapter.ts'
 export const SHUF_BUILDER: Builder = {
   name: 'shuf',
   read: true,
-  write: true,
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const { write } = ops
-    if (write === undefined) throw new Error('shuf: backend provides no write op')
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return shufGeneric(
       resolved,
       texts,
       opts,
       (p) => ops.readStream(accessor, p, idx),
-      (p, data) => write(accessor, p, data),
+      // Only `-o` writes, so a read-only backend still serves plain shuf.
+      // Requiring the write op up front would break every read-only backend.
+      (p, data) => {
+        if (write === undefined) throw new Error('shuf: backend provides no write op')
+        return write(accessor, p, data)
+      },
     )
   },
 }

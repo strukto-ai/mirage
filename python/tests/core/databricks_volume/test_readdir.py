@@ -6,7 +6,8 @@ from mirage.core.databricks_volume.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
-from .conftest import ToThreadRecorder, directory_entry, file_entry
+from .conftest import (ToThreadRecorder, directory_entry, file_entry,
+                       file_metadata)
 
 
 @pytest.mark.asyncio
@@ -69,6 +70,30 @@ async def test_readdir_populates_index_with_size_and_modified(
     dir_lookup = await index.get("/volume/reports/archive")
     assert dir_lookup.entry is not None
     assert dir_lookup.entry.resource_type == "folder"
+
+
+@pytest.mark.asyncio
+async def test_readdir_backfills_lister_omitted_size(
+    accessor,
+    files,
+    index,
+    remote_root,
+):
+    # DirectoryEntry normally carries file_size; when the lister omits it,
+    # readdir does one HEAD per affected file instead of caching an
+    # unknown size.
+    files.directories[f"{remote_root}/reports"] = [
+        file_entry(f"{remote_root}/reports/latest.md", size=None),
+        file_entry(f"{remote_root}/reports/other.md", size=3),
+    ]
+    files.metadata[f"{remote_root}/reports/latest.md"] = file_metadata(7)
+    path = PathSpec.from_str_path("/volume/reports",
+                                  mount_key("/volume/reports", "/volume"))
+    await readdir(accessor, path, index)
+    lookup = await index.get("/volume/reports/latest.md")
+    assert lookup.entry is not None
+    assert lookup.entry.size == 7
+    assert files.get_metadata_calls == [f"{remote_root}/reports/latest.md"]
 
 
 @pytest.mark.asyncio

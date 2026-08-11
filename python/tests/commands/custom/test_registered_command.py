@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.commands.registry import RegisteredCommand, command
-from mirage.commands.spec import SPECS, CommandSpec, Operand, OperandKind
+from mirage.commands.spec import SPECS, CommandSpec, Operand
 from mirage.io.types import IOResult
 
 
@@ -41,7 +41,7 @@ def test_command_decorator_attaches_metadata():
 
     @command("myls",
              resource="s3",
-             spec=CommandSpec(rest=Operand(kind=OperandKind.PATH)))
+             spec=CommandSpec(rest=Operand(type="path")))
     async def my_ls(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
 
@@ -70,7 +70,7 @@ def test_command_decorator_with_filetype():
     @command("cat",
              resource="s3",
              filetype=".avro",
-             spec=CommandSpec(rest=Operand(kind=OperandKind.PATH)))
+             spec=CommandSpec(rest=Operand(type="path")))
     async def cat_avro(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
 

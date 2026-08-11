@@ -17,8 +17,9 @@ import { recordStream, revisionFor } from '../../observe/context.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './_client.ts'
-import { fpRevFromS3Response } from './read.ts'
+import { fpRevFromS3Response, read } from './read.ts'
 import { enoent } from '../../utils/errors.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
@@ -48,8 +49,8 @@ export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterab
   const input: Record<string, unknown> = { Bucket: config.bucket, Key: s3Key(rawPath, config) }
   if (pinnedRevision !== null) input.VersionId = pinnedRevision
 
-  // Use virtual (mount-prefixed) path so the record stays correct even
-  // when the stream body executes after setVirtualPrefix has been reset.
+  // Naming the virtual path keeps the record exact without consulting the
+  // active mount prefix; record() leaves an already-prefixed path alone.
   const rec = recordStream('read', virtual, ResourceName.S3)
 
   try {
@@ -93,13 +94,90 @@ export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterab
   }
 }
 
-export async function rangeRead(
+/**
+ * A byte window, taken the cheapest way the configured client allows.
+ *
+ * The SDK path asks for one ranged GET, which is the whole point on an object
+ * store. The browser path cannot: `createBrowserS3Client` fetches a presigned
+ * URL, and a presigned GET carries no `Range` — adding the header would make
+ * the request non-simple and trip a CORS preflight that presigned deployments
+ * generally do not allow. Its shim therefore refuses a `Range` input outright,
+ * so asking for one there would fail rather than quietly return the whole
+ * object as if it were the window.
+ *
+ * Streaming is the honest substitute: `bodyFromResponse` hands back a reader
+ * over the live body, so stopping at `offset + size` cancels the download
+ * instead of buffering the rest of the object and throwing it away.
+ *
+ * @param accessor the S3 accessor
+ * @param path the object path
+ * @param index the index cache store, forwarded to the SDK read
+ * @param offset first byte to read
+ * @param size how many bytes, or null for the rest of the object
+ */
+export async function readRange(
+  accessor: S3Accessor,
+  path: PathSpec,
+  index: IndexCacheStore | undefined,
+  offset: number,
+  size: number | null,
+): Promise<Uint8Array> {
+  if (accessor.config.presignedUrlProvider === undefined) {
+    return read(accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+  return windowFromStream(accessor, path, offset, size)
+}
+
+async function windowFromStream(
   accessor: S3Accessor,
   path: PathSpec,
   offset: number,
-  size: number,
+  size: number | null,
 ): Promise<Uint8Array> {
-  // Delegate to read() with explicit range parameters.
-  const { read } = await import('./read.ts')
-  return read(accessor, path, undefined, { offset, size })
+  const end = size === null ? Number.POSITIVE_INFINITY : offset + size
+  const pieces: Uint8Array[] = []
+  let seen = 0
+  let total = 0
+  for await (const chunk of stream(accessor, path)) {
+    const chunkEnd = seen + chunk.byteLength
+    if (chunkEnd > offset) {
+      const piece = chunk.subarray(
+        Math.max(0, offset - seen),
+        Math.min(chunk.byteLength, end - seen),
+      )
+      pieces.push(piece)
+      total += piece.byteLength
+    }
+    seen = chunkEnd
+    // Breaking here returns the generator, which cancels the body reader.
+    if (seen >= end) break
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const piece of pieces) {
+    out.set(piece, at)
+    at += piece.byteLength
+  }
+  return out
+}
+
+/**
+ * The resource-level `range_read(path, start, end)`, end exclusive.
+ *
+ * Every other backend's `rangeRead` and all of python's spell the window this
+ * way; s3 read its fourth argument as a length, so `range_read(p, 10, 20)`
+ * returned twenty bytes from offset ten where python returned ten.
+ *
+ * @param accessor the S3 accessor
+ * @param path the object path
+ * @param start first byte to read
+ * @param end one past the last byte to read
+ */
+export function rangeRead(
+  accessor: S3Accessor,
+  path: PathSpec,
+  start: number,
+  end: number,
+): Promise<Uint8Array> {
+  return readRange(accessor, path, undefined, start, end - start)
 }

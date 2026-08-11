@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "pg_find_rows",
+      "seq": 610040,
+      "targets": [
+        "postgres"
+      ],
+      "command": "find /pg/public/ -name rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "/pg/public/tables/authors/rows.jsonl\n/pg/public/tables/books/rows.jsonl\n/pg/public/views/recent_books/rows.jsonl\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_find_schema",
+      "seq": 610041,
+      "targets": [
+        "postgres"
+      ],
+      "command": "find /pg/public/ -name schema.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/pg/public/tables/authors/schema.json\n/pg/public/tables/books/schema.json\n/pg/public/views/recent_books/schema.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_find_size_plus_rows",
+      "seq": 610042,
+      "targets": [
+        "postgres"
+      ],
+      "command": "find /pg/public/tables/ -name rows.jsonl -size +1c",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_find_size_under_rows",
+      "seq": 610043,
+      "targets": [
+        "postgres"
+      ],
+      "command": "find /pg/public/tables/books/ -name rows.jsonl -size -1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "/pg/public/tables/books/rows.jsonl\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

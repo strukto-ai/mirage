@@ -18,17 +18,17 @@ import { normalizeComment } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { CommandSpec, OperandKind, Option } from '../../spec/types.ts'
+import { CommandSpec, FlagView, Option } from '../../spec/types.ts'
 import { resolveTextInput } from './_input.ts'
 
 const ENC = new TextEncoder()
 
 const SPEC = new CommandSpec({
   options: [
-    new Option({ long: '--card_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--comment_id', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--text', valueKind: OperandKind.TEXT }),
-    new Option({ long: '--text_file', valueKind: OperandKind.PATH }),
+    new Option({ long: '--card_id', type: 'str' }),
+    new Option({ long: '--comment_id', type: 'str' }),
+    new Option({ long: '--text', type: 'str' }),
+    new Option({ long: '--text_file', type: 'path' }),
   ],
 })
 
@@ -38,17 +38,19 @@ async function trelloCardCommentUpdateCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const cardId = opts.flags.card_id
-  if (typeof cardId !== 'string' || cardId === '') throw new Error('--card_id is required')
-  const commentId = opts.flags.comment_id
-  if (typeof commentId !== 'string' || commentId === '') {
+  const fl = new FlagView(opts.flags, SPEC)
+  const cardId = fl.asStr('card_id')
+  if (cardId === undefined || cardId === '') throw new Error('--card_id is required')
+  const commentId = fl.asStr('comment_id')
+  if (commentId === undefined || commentId === '') {
     throw new Error('--comment_id is required')
   }
-  const inlineText = typeof opts.flags.text === 'string' ? opts.flags.text : null
-  const textFile = typeof opts.flags.text_file === 'string' ? opts.flags.text_file : null
+  const inlineText = fl.asStr('text') ?? null
+  const textFile = fl.asStr('text_file') ?? null
   const text = await resolveTextInput(accessor.transport, {
     inlineText,
     filePath: textFile,
+    mountPrefix: opts.mountPrefix ?? '',
     stdin: opts.stdin,
     errorMessage: 'comment text is required',
   })

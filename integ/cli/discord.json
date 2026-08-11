@@ -1,0 +1,225 @@
+{
+  "cases": [
+    {
+      "id": "dc_help_head",
+      "seq": 565000,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord --help | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "discord: Discord REST API client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_missing_required",
+      "seq": 565001,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord send --channel 200000000000000001",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "discord send: option '--text' is required\nTry 'discord send --help' for more information.\n"
+      }
+    },
+    {
+      "id": "dc_server_info",
+      "seq": 565002,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord server-info --guild 100000000000000001 | jq -r '.name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Mirage HQ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_members",
+      "seq": 565003,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord members --guild 100000000000000001 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_members_query",
+      "seq": 565004,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord members --guild 100000000000000001 --query alice | jq -r '.[0].user.username'",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_read",
+      "seq": 565005,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord read --channel 200000000000000001 --limit 3 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_search",
+      "seq": 565006,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord search --guild 100000000000000001 --query deploy | jq -r '.[0].content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "deploy is green\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_react",
+      "seq": 565007,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord react --channel 200000000000000001 --message 1510934682009600000 --emoji \":+1:\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_react_missing",
+      "seq": 565008,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord react --channel 200000000000000001 --message 999 --emoji x 2>/dev/null; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_send",
+      "seq": 565009,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord send --channel 200000000000000001 --text \"hello from integ\" | jq -r '.content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from integ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_send_author",
+      "seq": 565010,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord send --channel 200000000000000001 --text \"who am i\" | jq -r '.author.username'",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-bot\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_edit",
+      "seq": 565011,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord edit --channel 200000000000000001 --message 1510934682009600000 --text \"deploy is amber\" | jq -r '.content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "deploy is amber\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_delete",
+      "seq": 565012,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord delete --channel 200000000000000001 --message 1510953556377600000",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"ok\":true}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_delete_missing",
+      "seq": 565013,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord delete --channel 200000000000000001 --message 999 2>/dev/null; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_thread_create",
+      "seq": 565014,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord thread-create --channel 200000000000000001 --message 1510972430745600000 --name \"budget talk\" | jq -r '.name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "budget talk\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_poll",
+      "seq": 565015,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord poll --channel 200000000000000001 --question \"Lunch?\" --answer Pizza --answer Sushi | jq -r '.poll.question.text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Lunch?\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_cli_thread_create_standalone",
+      "seq": 565016,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord thread-create --channel 200000000000000001 --name \"open floor\" | jq -r '.type'",
+      "expect": {
+        "exit": 0,
+        "stdout": "11\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

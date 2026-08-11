@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -43,8 +45,9 @@ export function readlinkGeneric(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('readlink: missing operand\n') })]
   }
-  const normalize = opts.flags.f === true || opts.flags.e === true || opts.flags.m === true
-  const noNewline = opts.flags.n === true
+  const fl = new FlagView(opts.flags, specOf('readlink'))
+  const normalize = fl.asBool('f') || fl.asBool('e') || fl.asBool('m')
+  const noNewline = fl.asBool('n')
   const results: string[] = []
   for (const p of paths) {
     let vp =

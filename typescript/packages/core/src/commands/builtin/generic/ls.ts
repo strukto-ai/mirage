@@ -12,23 +12,80 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { ChildMounts, LinkView } from '../../../ops/types.ts'
 import { formatLsLong } from '../utils/formatting.ts'
-import { gnuStrerror } from '../../../utils/errors.ts'
+import { gnuStrerror, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { rebaseOne } from '../../../utils/path.ts'
+import { CycleError, respellOne } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
+type SortBy = 'time' | 'size' | 'name'
+
+export const LS_OK = 0
+export const LS_MINOR_PROBLEM = 1
+export const LS_FAILURE = 2
+
+// One diagnostic plus how serious GNU ls considers it: `serious` marks a
+// failure on a command-line operand (exit 2); everything met while listing
+// or recursing below an operand is a minor problem (exit 1).
+interface LsWarning {
+  message: string
+  serious: boolean
+}
 
 interface WalkOpts {
   all: boolean
-  sortBy: 'time' | 'size' | 'name'
+  sortBy: SortBy
   reverse: boolean
+  recursive: boolean
+  // Links have no backend inode, so readdir never names them. Merging
+  // them in means every caller (plain, -R, -F, -l, sorting) sees them
+  // without knowing they are special.
+  links: LinkView | null
+  // -L reports the target's stat under the link's own name. A
+  // dereferenced directory link then carries FileType.DIRECTORY, which
+  // is what makes -R descend it.
+  deref: boolean
+  // Session-filtered child-mount names: the other half of namespace
+  // structure beside links, merged as directory rows. Under -R a
+  // backend-served listing withholds the merge and a child-mount root
+  // is never descended (the cross-mount fan-out assembles those
+  // groups); a directory only the namespace serves still renders its
+  // own group from it.
+  childMounts: ChildMounts | null
+}
+
+// One ls operand once its kind is known. `row` is set when the operand is not
+// a directory: GNU prints those first, as one block with no header. `groups`
+// holds one [dir, entries] pair per directory listed under the operand — one
+// for a plain listing, the whole pre-order subtree under -R. Both empty means
+// the operand could not be accessed.
+interface Operand {
+  readonly path: PathSpec
+  readonly row: FileStat | null
+  readonly groups: [PathSpec, FileStat[]][]
+}
+
+function errText(err: unknown): string {
+  return (
+    gnuStrerror((err as { code?: string }).code) ??
+    (err instanceof Error ? err.message : String(err))
+  )
+}
+
+// GNU ratchets the status upward: a serious problem always wins, a minor one
+// only upgrades a clean run.
+export function exitStatusFor(warnings: readonly LsWarning[]): number {
+  if (warnings.some((w) => w.serious)) return LS_FAILURE
+  return warnings.length > 0 ? LS_MINOR_PROBLEM : LS_OK
 }
 
 function childSpec(entryPath: string, prefix: string): PathSpec {
@@ -40,8 +97,15 @@ function childSpec(entryPath: string, prefix: string): PathSpec {
   })
 }
 
+// GNU -F suffixes: a directory gets "/", a symlink "@". The link mark
+// rides the row's type, so it needs no separate lookup.
+const CLASSIFY_SUFFIX: Partial<Record<FileType, string>> = {
+  [FileType.DIRECTORY]: '/',
+  [FileType.SYMLINK]: '@',
+}
+
 function formatShort(s: FileStat, classify: boolean): string {
-  const suffix = classify && s.type === FileType.DIRECTORY ? '/' : ''
+  const suffix = (classify && s.type != null ? CLASSIFY_SUFFIX[s.type] : undefined) ?? ''
   return `${s.name}${suffix}`
 }
 
@@ -59,22 +123,28 @@ function appendListing(
   for (const s of stats) lines.push(formatShort(s, classify))
 }
 
-function sortStats(
-  stats: FileStat[],
-  sortBy: 'time' | 'size' | 'name',
-  reverse: boolean,
-): FileStat[] {
-  const sorted = [...stats].sort((a, b) => {
-    if (sortBy === 'time') {
-      const am = a.modified ?? ''
-      const bm = b.modified ?? ''
-      return am < bm ? 1 : am > bm ? -1 : 0
-    }
-    if (sortBy === 'size') return (b.size ?? 0) - (a.size ?? 0)
-    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-  })
-  if (reverse) sorted.reverse()
-  return sorted
+function primaryValue(entry: FileStat, sortBy: SortBy): string | number {
+  return sortBy === 'time' ? (entry.modified ?? '') : (entry.size ?? 0)
+}
+
+// GNU's -t/-S comparators fall back to the name when the timestamps or sizes
+// tie, so the order is total. `-r` negates the whole comparison, tie-break
+// included, which is why callers fold the sign into this comparator instead of
+// reversing the finished array.
+function compareStats(a: FileStat, b: FileStat, sortBy: SortBy): number {
+  if (sortBy !== 'name') {
+    const av = primaryValue(a, sortBy)
+    const bv = primaryValue(b, sortBy)
+    // -t and -S list newest/largest first.
+    if (av < bv) return 1
+    if (av > bv) return -1
+  }
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+}
+
+function sortStats(stats: readonly FileStat[], sortBy: SortBy, reverse: boolean): FileStat[] {
+  const sign = reverse ? -1 : 1
+  return [...stats].sort((a, b) => sign * compareStats(a, b, sortBy))
 }
 
 // A file operand whose readdir came back empty: backends without real
@@ -85,78 +155,246 @@ async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
   try {
     const s = await stat(path)
     return s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
-  } catch {
+  } catch (err) {
+    if (!isWalkError(err)) throw err
     return null
   }
 }
 
 // GNU ls prints a file operand as given (`ls sub/x.txt` shows sub/x.txt,
-// not x.txt); the row carries the operand spelling. Every other field
-// (mode/uid/gid/atime overlay attrs included) is preserved, mirroring the
-// Python `s.model_copy(update={"name": ...})`.
+// not x.txt); the row carries the operand spelling. `with` preserves
+// every other field (mode/uid/gid/atime overlay attrs included), the
+// mirror of Python `s.model_copy(update={"name": ...})`.
 function asOperand(s: FileStat, path: PathSpec): FileStat {
-  return new FileStat({
-    name: path.rawPath,
-    size: s.size,
-    modified: s.modified,
-    fingerprint: s.fingerprint,
-    revision: s.revision,
-    type: s.type,
-    mode: s.mode,
-    uid: s.uid,
-    gid: s.gid,
-    atime: s.atime,
-    extra: s.extra,
-  })
+  return s.with({ name: path.rawPath })
 }
 
+// An entry that cannot be stat'd is skipped with its own diagnostic rather
+// than failing the whole directory: GNU keeps listing the siblings and exits
+// 1. Mirrors the per-entry tolerance of Python ls `_stat_entries`.
 async function listDir(
   readdir: Readdir,
   stat: Stat,
   dir: PathSpec,
   all: boolean,
-): Promise<FileStat[]> {
-  const entries = await readdir(dir)
-  const stats = await Promise.all(
-    entries.map((p) => stat(childSpec(p, mountPrefixOf(dir.virtual, dir.resourcePath)))),
-  )
-  return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
-}
-
-async function walkGrouped(
-  readdir: Readdir,
-  stat: Stat,
-  dir: PathSpec,
-  opts: WalkOpts,
-  groups: [PathSpec, FileStat[]][],
-  warnings: string[],
-): Promise<void> {
-  let stats: FileStat[]
+  warnings: LsWarning[],
+  links: LinkView | null,
+  deref: boolean,
+  stat2: Stat,
+  childMounts: ChildMounts | null,
+  recursive: boolean,
+): Promise<{ stats: FileStat[]; structureOnly: boolean }> {
+  let entries: string[]
+  let structureOnly = false
   try {
-    stats = await listDir(readdir, stat, dir, opts.all)
+    entries = await readdir(dir)
   } catch (err) {
-    const msg =
-      gnuStrerror((err as { code?: string }).code) ??
-      (err instanceof Error ? err.message : String(err))
-    warnings.push(`ls: cannot access '${dir.rawPath}': ${msg}`)
-    return
+    if (!isWalkError(err) || (childMounts?.(dir.virtual) ?? []).length === 0) throw err
+    // No backend serves it, but the namespace owes it children (a
+    // nested mount, a link's ancestors), so the door lists it as a
+    // directory and ls must agree: the merge below renders those rows
+    // from an empty backend listing. Under -R this group still renders;
+    // only descent into a child-mount root is withheld, because that
+    // listing is another backend's and the cross-mount fan-out
+    // assembles it.
+    entries = []
+    structureOnly = true
   }
-  const sorted = sortStats(stats, opts.sortBy, opts.reverse)
-  groups.push([dir, sorted])
-  for (const s of sorted) {
-    if (s.type === FileType.DIRECTORY) {
-      const base = rstripSlash(dir.virtual)
-      const childPath = `${base}/${s.name}`
-      await walkGrouped(
-        readdir,
-        stat,
-        childSpec(childPath, mountPrefixOf(dir.virtual, dir.resourcePath)),
-        opts,
-        groups,
-        warnings,
-      )
+  const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
+  const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
+  const stats: FileStat[] = []
+  for (let i = 0; i < settled.length; i++) {
+    const outcome = settled[i]
+    const entry = entries[i]
+    if (outcome === undefined || entry === undefined) continue
+    if (outcome.status === 'rejected') {
+      if (!isWalkError(outcome.reason)) throw outcome.reason
+      // An entry below an operand is never a command-line arg.
+      warnings.push({
+        message: `ls: cannot access '${entry}': ${errText(outcome.reason)}`,
+        serious: false,
+      })
+      continue
+    }
+    stats.push(outcome.value)
+  }
+  const seen = new Set(stats.map((s) => s.name))
+  for (const link of links?.children(dir.virtual) ?? []) {
+    if (seen.has(link.name)) continue
+    seen.add(link.name)
+    const resolved = deref && links !== null ? await derefEntry(dir, link, links, stat2) : null
+    stats.push(resolved ?? link)
+  }
+  if (!recursive || structureOnly) {
+    for (const name of childMounts?.(dir.virtual) ?? []) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      stats.push(new FileStat({ name, type: FileType.DIRECTORY }))
     }
   }
+  return {
+    stats: all ? stats : stats.filter((s) => !s.name.startsWith('.')),
+    structureOnly,
+  }
+}
+
+// The row for an operand that is itself a symlink, else null.
+//
+// A link has no backend inode, so readdir and stat both fail on one;
+// without this a link operand reads as a missing file, and a dangling
+// link fails the whole listing (GNU prints its row and exits 0). Named
+// with the operand's own spelling, like every other ls row.
+// The target's stat for a link child under -L, or null if unreadable.
+// GNU `ls -L` reports the referenced file while keeping the link's own
+// name, so a dangling link falls back to the link row.
+async function derefEntry(
+  directory: PathSpec,
+  link: FileStat,
+  links: LinkView,
+  stat: Stat,
+): Promise<FileStat | null> {
+  const child = `${rstripSlash(directory.virtual)}/${link.name}`
+  let target: string
+  try {
+    target = links.resolve(child)
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    return null
+  }
+  const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.resourcePath))
+  try {
+    const s = await stat(spec)
+    return s.with({ name: link.name })
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    return null
+  }
+}
+
+// Renaming a link row copies every field, not a hand-picked few: a link
+// carries real ownership (chown -h writes it), and listing the fields by
+// hand silently drops whatever the node grows next.
+function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
+  const row = links?.statAt(path.virtual) ?? null
+  if (row === null) return null
+  return row.with({ name: path.rawPath })
+}
+
+// List one operand and report whether it turned out to be a directory.
+async function probeOperand(
+  readdir: Readdir,
+  stat: Stat,
+  path: PathSpec,
+  opts: WalkOpts,
+  warnings: LsWarning[],
+  commandLineArg: boolean,
+): Promise<Operand> {
+  let stats: FileStat[]
+  let structureOnly = false
+  try {
+    const listed = await listDir(
+      readdir,
+      stat,
+      path,
+      opts.all,
+      warnings,
+      opts.links,
+      opts.deref,
+      stat,
+      opts.childMounts,
+      opts.recursive,
+    )
+    stats = listed.stats
+    structureOnly = listed.structureOnly
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    const row = await fileEntry(stat, path)
+    if (row !== null) return { path, row, groups: [] }
+    const link = linkRow(path, opts.links)
+    if (link !== null) return { path, row: link, groups: [] }
+    warnings.push({
+      message: `ls: cannot access '${path.rawPath}': ${errText(err)}`,
+      serious: commandLineArg,
+    })
+    return { path, row: null, groups: [] }
+  }
+  if (stats.length === 0) {
+    const row = await fileEntry(stat, path)
+    if (row !== null) return { path, row, groups: [] }
+    // Backends without real directories answer readdir on a link with
+    // an empty list instead of throwing, so the link operand has to be
+    // caught here too or it renders as an empty directory.
+    const link = linkRow(path, opts.links)
+    if (link !== null) return { path, row: link, groups: [] }
+  }
+  const entries = sortStats(stats, opts.sortBy, opts.reverse)
+  const groups: [PathSpec, FileStat[]][] = [[path, entries]]
+  if (opts.recursive) {
+    for (const s of entries) {
+      if (s.type !== FileType.DIRECTORY) continue
+      const childPath = `${rstripSlash(path.virtual)}/${s.name}`
+      if (structureOnly && (opts.childMounts?.(childPath) ?? []).length === 0) {
+        // A child-mount root: its listing is another backend's, so the
+        // cross-mount fan-out renders that group.
+        continue
+      }
+      const child = await probeOperand(
+        readdir,
+        stat,
+        childSpec(childPath, mountPrefixOf(path.virtual, path.resourcePath)),
+        opts,
+        warnings,
+        false,
+      )
+      // Appended one at a time: `push(...child.groups)` would spread the
+      // child's whole pre-order subtree as call arguments and overflow the
+      // engine's argument limit on a very wide tree. Mirrors Python's
+      // `groups.extend(child.groups)`.
+      for (const group of child.groups) groups.push(group)
+    }
+  }
+  return { path, row: null, groups }
+}
+
+// Sort row for one operand, named with the operand's own spelling.
+async function operandKey(operand: Operand, sortBy: SortBy, stat: Stat): Promise<FileStat> {
+  if (operand.row !== null) return operand.row
+  if (sortBy === 'name') {
+    return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
+  }
+  try {
+    return asOperand(await stat(operand.path), operand.path)
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    // The stat only supplies a sort key; an operand that cannot be statted
+    // sorts as if it had none rather than failing the listing.
+    return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
+  }
+}
+
+async function sortOperands(
+  operands: readonly Operand[],
+  sortBy: SortBy,
+  reverse: boolean,
+  stat: Stat,
+): Promise<Operand[]> {
+  const keyed: { key: FileStat; operand: Operand }[] = []
+  for (const operand of operands) {
+    keyed.push({ key: await operandKey(operand, sortBy, stat), operand })
+  }
+  const sign = reverse ? -1 : 1
+  keyed.sort((a, b) => sign * compareStats(a.key, b.key, sortBy))
+  return keyed.map((k) => k.operand)
+}
+
+function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResult {
+  const out: ByteSource = formatRecords(lines)
+  const exitCode = exitStatusFor(warnings)
+  if (warnings.length > 0) {
+    const stderr = formatRecords(warnings.map((w) => w.message))
+    return [out, new IOResult({ stderr, exitCode })]
+  }
+  return [out, new IOResult({ exitCode })]
 }
 
 export async function lsGeneric(
@@ -165,6 +403,7 @@ export async function lsGeneric(
   readdir: Readdir,
   stat: Stat,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('ls'))
   const targets: PathSpec[] =
     paths.length > 0
       ? paths
@@ -176,95 +415,83 @@ export async function lsGeneric(
             resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
-  const long = opts.flags.args_l === true && opts.flags.args_1 !== true
-  const all = opts.flags.a === true || opts.flags.A === true
-  const human = opts.flags.h === true
-  const reverse = opts.flags.r === true
-  const classify = opts.flags.F === true
-  const recursive = opts.flags.R === true
-  const listDirItself = opts.flags.d === true
-  const sortBy: 'time' | 'size' | 'name' =
-    opts.flags.t === true ? 'time' : opts.flags.S === true ? 'size' : 'name'
-  const warnings: string[] = []
+  const long = fl.asBool('args_l') && !fl.asBool('args_1')
+  const all = fl.asBool('a') || fl.asBool('A')
+  const human = fl.asBool('h')
+  const reverse = fl.asBool('r')
+  const classify = fl.asBool('F')
+  const recursive = fl.asBool('R')
+  const listDirItself = fl.asBool('d')
+  const sortBy: SortBy = fl.asBool('t') ? 'time' : fl.asBool('S') ? 'size' : 'name'
+  const links = opts.links ?? null
+  const deref = fl.asBool('L')
+  const warnings: LsWarning[] = []
   const lines: string[] = []
 
   if (listDirItself) {
+    // -d turns every operand into a plain row, sorted together and printed
+    // with no headers.
     const collected: FileStat[] = []
     for (const p of targets) {
+      const link = linkRow(p, links)
+      if (link !== null) {
+        collected.push(link)
+        continue
+      }
       try {
         // GNU ls -d prints the operand as given.
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
-        const msg =
-          gnuStrerror((err as { code?: string }).code) ??
-          (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
+        if (!isWalkError(err)) throw err
+        if ((opts.childMounts?.(p.virtual) ?? []).length > 0) {
+          // No backend serves it, but the namespace owes it children,
+          // so the door stats it as a directory and -d must print the
+          // same row.
+          collected.push(new FileStat({ name: p.rawPath, type: FileType.DIRECTORY }))
+          continue
+        }
+        warnings.push({
+          message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
+          serious: true,
+        })
       }
     }
-    appendListing(collected, long, human, classify, lines)
-    const out: ByteSource = formatRecords(lines)
-    const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-    if (warnings.length > 0) {
-      const stderr = formatRecords(warnings)
-      return [out, new IOResult({ stderr, exitCode })]
-    }
-    return [out, new IOResult({ exitCode })]
+    const rows = collected.length > 1 ? sortStats(collected, sortBy, reverse) : collected
+    appendListing(rows, long, human, classify, lines)
+    return finish(lines, warnings)
   }
 
-  if (recursive) {
-    const walkOpts: WalkOpts = { all, sortBy, reverse }
-    const groups: [PathSpec, FileStat[]][] = []
-    for (const p of targets) {
-      await walkGrouped(readdir, stat, p, walkOpts, groups, warnings)
-    }
-    for (let i = 0; i < groups.length; i++) {
-      const group = groups[i]
-      if (group === undefined) continue
-      const [dirSpec, entries] = group
-      if (i > 0) lines.push('')
-      const owner =
-        targets.find((t) => {
-          const b = rstripSlash(t.virtual)
-          return dirSpec.virtual === b || dirSpec.virtual.startsWith(b + '/')
-        }) ?? dirSpec
-      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.rawPath)}:`)
-      appendListing(entries, long, human, classify, lines)
-    }
-    const out: ByteSource = formatRecords(lines)
-    const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-    if (warnings.length > 0) {
-      const stderr = formatRecords(warnings)
-      return [out, new IOResult({ stderr, exitCode })]
-    }
-    return [out, new IOResult({ exitCode })]
+  const walkOpts: WalkOpts = {
+    all,
+    sortBy,
+    reverse,
+    recursive,
+    links,
+    deref,
+    childMounts: opts.childMounts ?? null,
   }
-
+  const probed: Operand[] = []
   for (const p of targets) {
-    let stats: FileStat[]
-    try {
-      stats = await listDir(readdir, stat, p, all)
-    } catch (err) {
-      try {
-        stats = [asOperand(await stat(p), p)]
-      } catch {
-        const msg =
-          gnuStrerror((err as { code?: string }).code) ??
-          (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
-        continue
+    probed.push(await probeOperand(readdir, stat, p, walkOpts, warnings, true))
+  }
+  const operands = probed.length > 1 ? await sortOperands(probed, sortBy, reverse, stat) : probed
+
+  // GNU names every listed directory once there is more than one operand
+  // (or under -R); a lone directory operand is listed bare.
+  const headed = recursive || targets.length > 1
+  const rows = operands.flatMap((o) => (o.row !== null ? [o.row] : []))
+  appendListing(rows, long, human, classify, lines)
+  let printed = rows.length > 0
+  for (const operand of operands) {
+    for (const [dirSpec, entries] of operand.groups) {
+      if (headed) {
+        if (printed) lines.push('')
+        lines.push(`${respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)}:`)
       }
+      appendListing(entries, long, human, classify, lines)
+      printed = true
     }
-    if (stats.length === 0) {
-      const fe = await fileEntry(stat, p)
-      if (fe !== null) stats = [fe]
-    }
-    appendListing(sortStats(stats, sortBy, reverse), long, human, classify, lines)
   }
-  const out: ByteSource = formatRecords(lines)
-  const exitCode = warnings.length > 0 && lines.length === 0 ? 1 : 0
-  if (warnings.length > 0) {
-    const stderr = formatRecords(warnings)
-    return [out, new IOResult({ stderr, exitCode })]
-  }
-  return [out, new IOResult({ exitCode })]
+
+  return finish(lines, warnings)
 }

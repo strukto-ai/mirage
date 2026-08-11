@@ -192,7 +192,7 @@
       "command": "grep -r 'worker-3' /mail/INBOX | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json:{\"from\":{\"name\":\"\",\"email\":\"ops@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[{\"name\":\"\",\"email\":\"marcus@example.com\"}],\"subject\":\"Server alert: worker-3\",\"date\":\"Wed, 07 Jan 2026 03:15:00 +0000\",\"body_text\":\"disk usage at 91 percent on worker-3\",\"body_html\":\"\",\"snippet\":\"disk usage at 91 percent on worker-3\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"3\",\"flags\":[]}\n",
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json:{\"from\":{\"name\":\"\",\"email\":\"ops@example.com\"},\"reply_to\":[],\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[{\"name\":\"\",\"email\":\"marcus@example.com\"}],\"subject\":\"Server alert: worker-3\",\"date\":\"Wed, 07 Jan 2026 03:15:00 +0000\",\"body_text\":\"disk usage at 91 percent on worker-3\",\"body_html\":\"\",\"snippet\":\"disk usage at 91 percent on worker-3\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"3\",\"flags\":[]}\n",
         "stderr": ""
       }
     },
@@ -205,7 +205,7 @@
       "command": "grep -ri 'invoice 4471' /mail | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/mail/Archive/2026-01-06/Invoice_4471__1.email.json:{\"from\":{\"name\":\"\",\"email\":\"billing@vendor.example\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Invoice 4471\",\"date\":\"Tue, 06 Jan 2026 08:45:00 +0000\",\"body_text\":\"invoice 4471 attached, total 240 usd\",\"body_html\":\"\",\"snippet\":\"invoice 4471 attached, total 240 usd\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":true,\"attachments\":[{\"filename\":\"invoice-4471.txt\",\"content_type\":\"text/plain\",\"size\":28}],\"uid\":\"1\",\"flags\":[\"\\\\Seen\"]}\n/mail/Archive/2026-01-06/Invoice_4471__1/invoice-4471.txt:invoice 4471\n",
+        "stdout": "/mail/Archive/2026-01-06/Invoice_4471__1.email.json:{\"from\":{\"name\":\"\",\"email\":\"billing@vendor.example\"},\"reply_to\":[],\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Invoice 4471\",\"date\":\"Tue, 06 Jan 2026 08:45:00 +0000\",\"body_text\":\"invoice 4471 attached, total 240 usd\",\"body_html\":\"\",\"snippet\":\"invoice 4471 attached, total 240 usd\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":true,\"attachments\":[{\"filename\":\"invoice-4471.txt\",\"content_type\":\"text/plain\",\"size\":28}],\"uid\":\"1\",\"flags\":[\"\\\\Seen\"]}\n/mail/Archive/2026-01-06/Invoice_4471__1/invoice-4471.txt:invoice 4471\n",
         "stderr": ""
       }
     },
@@ -236,6 +236,45 @@
       }
     },
     {
+      "id": "em_find_attachment_type_f",
+      "seq": 540204,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX -type f -name '*.csv'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1/budget.csv\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_find_attachment_dir_type_d",
+      "seq": 540205,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX -type d -name 'Q2_Budget_Review__1'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Q2_Budget_Review__1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_find_type_d_bare",
+      "seq": 540206,
+      "targets": [
+        "email"
+      ],
+      "command": "find /mail/INBOX/2026-01-05 -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05\n/mail/INBOX/2026-01-05/Q2_Budget_Review__1\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "em_rg_folder",
       "seq": 540018,
       "targets": [
@@ -244,7 +283,7 @@
       "command": "rg 'forecast' /mail/INBOX",
       "expect": {
         "exit": 0,
-        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json:{\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"body_html\":\"\",\"snippet\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"2\",\"flags\":[\"\\\\Seen\"]}\n",
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json:{\"from\":{\"name\":\"\",\"email\":\"marcus@example.com\"},\"reply_to\":[],\"to\":[{\"name\":\"\",\"email\":\"integ@example.com\"}],\"cc\":[],\"subject\":\"Standup notes\",\"date\":\"Mon, 05 Jan 2026 14:00:00 +0000\",\"body_text\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"body_html\":\"\",\"snippet\":\"yesterday shipped the parser\\ntoday reviewing the budget forecast\",\"message_id\":\"\",\"in_reply_to\":null,\"references\":[],\"has_attachments\":false,\"attachments\":[],\"uid\":\"2\",\"flags\":[\"\\\\Seen\"]}\n",
         "stderr": ""
       }
     },
@@ -254,10 +293,10 @@
       "targets": [
         "email"
       ],
-      "command": "himalaya envelope list --unseen | jq -r '.[].subject'",
+      "command": "himalaya envelope search not flag seen | jq -r '.[].subject'",
       "expect": {
         "exit": 0,
-        "stdout": "Q2 Budget Review\nServer alert: worker-3\n",
+        "stdout": "Server alert: worker-3\nQ2 Budget Review\n",
         "stderr": ""
       }
     },
@@ -267,7 +306,7 @@
       "targets": [
         "email"
       ],
-      "command": "himalaya envelope list --from billing@vendor.example --folder Archive | jq -r '.[].uid'",
+      "command": "himalaya envelope search -m Archive from billing@vendor.example | jq -r '.[].uid'",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -280,7 +319,7 @@
       "targets": [
         "email"
       ],
-      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message read --folder Archive --uid $U | jq -r .snippet",
+      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message read -m Archive $U | jq -r .snippet",
       "expect": {
         "exit": 0,
         "stdout": "invoice 4471 attached, total 240 usd\n",
@@ -293,7 +332,7 @@
       "targets": [
         "email"
       ],
-      "command": "himalaya message send --to integ@example.com --subject 'Ship update' --body 'departing tuesday'",
+      "command": "himalaya message compose --to integ@example.com --subject 'Ship update' --body 'departing tuesday' --send",
       "expect": {
         "exit": 0,
         "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"Ship update\"}",
@@ -321,7 +360,7 @@
         "email"
       ],
       "clear_cache": true,
-      "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && himalaya message reply --folder INBOX --uid $U --body 'numbers look good' | jq -r .subject",
+      "command": "U=$(cat /mail/INBOX/2026-01-05/Q2_Budget_Review__1.email.json | jq -r .uid) && himalaya message reply -m INBOX $U --body 'numbers look good' --send | jq -r .subject",
       "expect": {
         "exit": 0,
         "stdout": "Re: Q2 Budget Review\n",
@@ -335,7 +374,7 @@
         "email"
       ],
       "clear_cache": true,
-      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message forward --folder Archive --uid $U --to integ@example.com | jq -r .status",
+      "command": "U=$(cat /mail/Archive/2026-01-06/Invoice_4471__1.email.json | jq -r .uid) && himalaya message forward -m Archive $U --to integ@example.com --send | jq -r .status",
       "expect": {
         "exit": 0,
         "stdout": "sent\n",

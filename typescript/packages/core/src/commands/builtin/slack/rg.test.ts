@@ -25,7 +25,7 @@ const DEC = new TextDecoder()
 async function runRg(
   paths: PathSpec[],
   texts: string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
 ): Promise<{ stdout: string; exitCode: number }> {
   const cmd = SLACK_RG[0]
@@ -83,7 +83,7 @@ describe('slack rg', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { index: idx, transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('search.messages')
@@ -106,7 +106,7 @@ describe('slack rg', () => {
         }),
       ],
       ['hello'],
-      {},
+      { w: true },
       { transport },
     )
     expect(out.exitCode).toBe(1)

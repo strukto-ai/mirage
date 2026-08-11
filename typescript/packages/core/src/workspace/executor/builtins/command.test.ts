@@ -15,15 +15,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
+import { CLIRegistry } from '../../cli/registry.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { Session } from '../../session/session.ts'
-import { handleCommandBuiltin, handleType, parseFlags } from './command.ts'
+import { handleCommandBuiltin } from './command.ts'
 
 const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
 
 function makeRegistry(): MountRegistry {
   return {
     mountForCommand: (name: string): unknown => (MOUNT_COMMANDS.has(name) ? {} : null),
+    clis: new CLIRegistry(),
   } as unknown as MountRegistry
 }
 
@@ -41,36 +43,20 @@ function decode(b: Uint8Array | null): string {
   return b === null ? '' : new TextDecoder().decode(b)
 }
 
-describe('parseFlags', () => {
-  it('last of -v/-V wins', () => {
-    expect(parseFlags(['-v', 'ls'])).toEqual(['v', ['ls'], null])
-    expect(parseFlags(['-V', 'ls'])).toEqual(['V', ['ls'], null])
-    expect(parseFlags(['-vV', 'ls'])).toEqual(['V', ['ls'], null])
-    expect(parseFlags(['-Vv', 'ls'])).toEqual(['v', ['ls'], null])
+describe('command option handling', () => {
+  it.each([
+    [['-vV', 'cd'], 'cd is a shell builtin\n'],
+    [['-Vv', 'cd'], 'cd\n'],
+    [['-pv', 'cd'], 'cd\n'],
+  ])('last of -v/-V wins and -p is inert: %s', async (args, expected) => {
+    const [out] = await handleCommandBuiltin(vi.fn(), args, makeSession(), makeRegistry())
+    expect(await body(out)).toBe(expected)
   })
 
-  it('accepts -p but it is inert', () => {
-    expect(parseFlags(['-p', 'ls'])).toEqual([null, ['ls'], null])
-    expect(parseFlags(['-pv', 'ls'])).toEqual(['v', ['ls'], null])
-  })
-
-  it('stops at the first operand (flag after name belongs to target)', () => {
-    expect(parseFlags(['ls', '-l'])).toEqual([null, ['ls', '-l'], null])
-    expect(parseFlags(['-v', 'ls', '-l'])).toEqual(['v', ['ls', '-l'], null])
-  })
-
-  it('-- ends options', () => {
-    expect(parseFlags(['--', 'ls'])).toEqual([null, ['ls'], null])
-    expect(parseFlags(['-v', '--', 'ls'])).toEqual(['v', ['ls'], null])
-  })
-
-  it('reports the first invalid option', () => {
-    expect(parseFlags(['-x', 'ls'])).toEqual([null, [], '-x'])
-    expect(parseFlags(['-vx', 'ls'])).toEqual([null, [], '-x'])
-  })
-
-  it('a bare dash is an operand', () => {
-    expect(parseFlags(['-'])).toEqual([null, ['-'], null])
+  it('leaves a flag after the target name to the target', async () => {
+    const shell = vi.fn(() => Promise.resolve(new IOResult()))
+    await handleCommandBuiltin(shell, ['ls', '-l'], makeSession(), makeRegistry())
+    expect(shell).toHaveBeenCalledWith('ls -l', expect.anything())
   })
 })
 
@@ -156,6 +142,20 @@ describe('handleCommandBuiltin -v/-V', () => {
     expect(out).toBeNull()
     expect(decode(await materialize(io.stderr))).toBe('command: nope_xyz: not found\n')
     expect(io.exitCode).toBe(1)
+  })
+
+  it('-V warns for a missing name while exiting 0', async () => {
+    // bash prints the diagnostic and still exits 0 when another name
+    // resolved: the status and the stderr are independent.
+    const [out, io] = await handleCommandBuiltin(
+      vi.fn(),
+      ['-V', 'cd', 'nope_xyz'],
+      makeSession(),
+      makeRegistry(),
+    )
+    expect(await body(out)).toBe('cd is a shell builtin\n')
+    expect(decode(await materialize(io.stderr))).toBe('command: nope_xyz: not found\n')
+    expect(io.exitCode).toBe(0)
   })
 
   it('reports a function', async () => {
@@ -245,60 +245,5 @@ describe('handleCommandBuiltin run mode', () => {
     await handleCommandBuiltin(shell, ['cat'], session, makeRegistry())
     expect(maskedDuringCall).toBe(true)
     expect(session.functions.cat).toBe(fnBody)
-  })
-})
-
-describe('handleType', () => {
-  it('reports a builtin', async () => {
-    const [out, io] = handleType(['cd'], makeSession(), makeRegistry())
-    expect(await body(out)).toBe('cd is a shell builtin\n')
-    expect(io.exitCode).toBe(0)
-  })
-
-  it('reports a keyword', async () => {
-    const [out] = handleType(['if'], makeSession(), makeRegistry())
-    expect(await body(out)).toBe('if is a shell keyword\n')
-  })
-
-  it('-t prints the classification word', async () => {
-    expect(await body(handleType(['-t', 'cd'], makeSession(), makeRegistry())[0])).toBe('builtin\n')
-    expect(await body(handleType(['-t', 'if'], makeSession(), makeRegistry())[0])).toBe('keyword\n')
-  })
-
-  it('classifies a mount command as a builtin', async () => {
-    const [out] = handleType(['cat'], makeSession(), makeRegistry())
-    expect(await body(out)).toBe('cat is a shell builtin\n')
-  })
-
-  it('warns and exits 1 for an unknown name', async () => {
-    const [out, io] = handleType(['nope'], makeSession(), makeRegistry())
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(decode(await materialize(io.stderr))).toBe('type: nope: not found\n')
-  })
-
-  it('-t is silent for an unknown name', async () => {
-    const [out, io] = handleType(['-t', 'nope'], makeSession(), makeRegistry())
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(decode(await materialize(io.stderr))).toBe('')
-  })
-
-  it('uses the all-found exit rule', async () => {
-    const [out, io] = handleType(['cd', 'nope'], makeSession(), makeRegistry())
-    expect(await body(out)).toBe('cd is a shell builtin\n')
-    expect(io.exitCode).toBe(1)
-  })
-
-  it('-p is empty for a builtin', () => {
-    const [out, io] = handleType(['-p', 'cd'], makeSession(), makeRegistry())
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(0)
-  })
-
-  it('rejects an invalid option', async () => {
-    const [, io] = handleType(['-x', 'cd'], makeSession(), makeRegistry())
-    expect(io.exitCode).toBe(2)
-    expect(decode(await materialize(io.stderr)).startsWith('type: -x: invalid option\n')).toBe(true)
   })
 })

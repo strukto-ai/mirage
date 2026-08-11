@@ -12,16 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { noMount } from '../../utils/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { Runtime } from '../executor/runtime.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { VFSRuntime } from '../../runtime/table.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cachesReads, type Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
-import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import { MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
+import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import { CLIRegistry } from '../cli/registry.ts'
 import { MountEntry } from './mount.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 // The one thing the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -67,7 +71,27 @@ export class MountRegistry {
   // The world's vfs runtime, set by Workspace after construction.
   // Catch-all when its captures are empty; explicit captures make
   // unclaimed commands an admission failure (126).
-  vfsRuntime: Runtime | null = null
+  vfsRuntime: VFSRuntime | null = null
+  // The ordered runtime world, set by Runtimes at construction (the
+  // live array, so add() keeps it fresh). The CLI script arm selects
+  // an interpreter from it (a runtime: pin or the script's language),
+  // which the bindings map cannot answer: an entry behind another
+  // capturer never binds a command.
+  runtimeEntries: readonly Runtime[] = []
+  // Command admission policies. Policies itself is a bare mechanism;
+  // the registry seeds the POSIX mount-root rule (mount-root semantics
+  // are mount semantics) and user policies follow it (Workspace
+  // guards/policies options). Registry-hosted like vfsRuntime so the
+  // executor reaches them without new threading.
+  readonly policies = new Policies([
+    new MountRootPolicy(),
+    new OutputCapPolicy((prefix, name) => this.limitOverride(prefix, name)),
+  ])
+  // Installed CLIs. Not mount state: CLIs are fully separate from
+  // mounts (a CLI exists because it was installed, never because
+  // storage was mounted). The registry object is just the vehicle that
+  // already reaches every dispatch site, same as the runtime fields.
+  readonly clis = new CLIRegistry()
 
   setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler
@@ -204,6 +228,20 @@ export class MountRegistry {
     return null
   }
 
+  /**
+   * One mount's configured cap for a command or op name. The lookup
+   * OutputCapPolicy is seeded with; tolerant of a prefix that matches
+   * no mount (unmounted between stamp and boundary) by answering null.
+   */
+  limitOverride(prefix: string, name: string): Limit | null {
+    for (const m of this.mountList) {
+      if (m.prefix === prefix || rstripSlash(m.prefix) === prefix) {
+        return m.commandLimits.get(name) ?? null
+      }
+    }
+    return null
+  }
+
   isMountRoot(path: string): boolean {
     return this.mountForPrefix(path) !== null
   }
@@ -219,23 +257,8 @@ export class MountRegistry {
     return out.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0))
   }
 
-  childMountNames(parentPath: string, includeHidden = false): string[] {
-    const norm = normalizePrefix(parentPath)
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const m of this.mountList) {
-      if (m.prefix === norm) continue
-      if (!m.prefix.startsWith(norm)) continue
-      const rest = m.prefix.slice(norm.length)
-      const slash = rest.indexOf('/')
-      const name = slash === -1 ? rest : rest.slice(0, slash)
-      if (name === '') continue
-      if (!includeHidden && name.startsWith('.')) continue
-      if (seen.has(name)) continue
-      seen.add(name)
-      out.push(name)
-    }
-    return out.sort()
+  mountPrefixes(): string[] {
+    return this.mountList.map((m) => m.prefix)
   }
 
   opsMounts(): OpsMountInfo[] {
@@ -291,7 +314,7 @@ export class MountRegistry {
   resolve(path: string): [Resource, PathSpec, MountMode] {
     const m = this.mountFor(path)
     if (m === null) {
-      throw new Error(`no mount matches path: ${path}`)
+      throw noMount(path)
     }
     const hadTrailing = path.endsWith('/')
     const norm = `/${stripSlash(path)}`
@@ -307,14 +330,12 @@ export class MountRegistry {
   }
 
   mountFor(path: string): MountEntry | null {
-    const norm = `/${stripSlash(path)}`
-    for (const m of this.mountList) {
-      const prefixNoTrail = rstripSlash(m.prefix) || '/'
-      if (norm === prefixNoTrail || norm.startsWith(m.prefix)) {
-        return m
-      }
-    }
-    return null
+    const owner = ownerPrefix(
+      this.mountList.map((m) => m.prefix),
+      path,
+    )
+    if (owner === null) return null
+    return this.mountList.find((m) => m.prefix === owner) ?? null
   }
 
   allMounts(): readonly MountEntry[] {
@@ -352,6 +373,11 @@ export class MountRegistry {
    */
   matchCommandPrefix(words: string[]): number {
     if (words.length === 0) return 0
+    // An installed CLI head wins over any multiword mount command
+    // under the same first word (`himalaya message send`): dispatch is
+    // by name and the subcommand words belong to the tree walk, so the
+    // head alone is the command name.
+    if (words[0] !== undefined && this.clis.get(words[0]) !== null) return 1
     let best = 1
     const candidates = [...this.mountList]
     if (this.rootRef !== null) candidates.push(this.rootRef)

@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_SPECS, specOf } from '../../commands/spec/builtins.ts'
-import { OperandKind } from '../../commands/spec/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -30,8 +29,8 @@ class StubResource implements Resource {
   }
 }
 
-const PATH = OperandKind.PATH
-const TEXT = OperandKind.TEXT
+const PATH = 'path'
+const TEXT = 'str'
 
 describe('specWordKinds', () => {
   it('basic grep pattern and path', () => {

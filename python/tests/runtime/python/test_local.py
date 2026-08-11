@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from mirage.runtime.base import RunArgs
 from mirage.runtime.python import LocalRuntime
+from mirage.runtime.types import RunArgs
 
 
 def test_local_runs_on_host_interpreter():

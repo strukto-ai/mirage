@@ -12,26 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.resource.github import GitHubConfig, GitHubResource
 
 load_dotenv(".env.development")
 
 config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 
-resource = GitHubResource(
-    config=config,
-    owner="strukto-ai",
-    repo="mirage",
-    ref="main",
-)
+# Only the repo fetch is async; the rest of this example is deliberately
+# synchronous, because that is the point of a FUSE mount. There is no
+# outer loop here to conflict with.
+resource = asyncio.run(
+    GitHubResource.build(
+        config=config,
+        owner="strukto-ai",
+        repo="mirage",
+        ref="main",
+    ))
 
-with Workspace({"/github/": Mount(resource, mode=MountMode.READ,
-                                  fuse=True)}) as ws:
+with Workspace({
+        "/github/":
+        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
+}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")

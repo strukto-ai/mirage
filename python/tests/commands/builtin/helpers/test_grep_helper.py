@@ -63,8 +63,12 @@ async def grep(backend, path, pattern, **kwargs):
     whole_word = kwargs.pop("whole_word", False)
     show_filename = kwargs.pop("show_filename", None)
     warnings = kwargs.pop("warnings", None)
+    # These helpers predate the BRE default, so they keep the extended
+    # dialect their patterns were written in.
+    basic = kwargs.pop("basic", False)
 
-    compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
+    compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word,
+                               basic)
 
     if recursive:
         results = await grep_recursive(
@@ -104,6 +108,7 @@ async def grep(backend, path, pattern, **kwargs):
         only_matching=only_matching,
         max_count=max_count,
         whole_word=whole_word,
+        basic=basic,
         warnings=warnings,
     )
 
@@ -304,3 +309,67 @@ class TestWarnings:
                             "foo",
                             warnings=None)
         assert result == []
+
+    @pytest.mark.anyio
+    async def test_missing_file_warns_once_in_gnu_wording(self, backend):
+        warnings = []
+        result = await grep(backend,
+                            "/tmp/nonexistent.txt",
+                            "foo",
+                            files_only=True,
+                            warnings=warnings)
+        assert result == []
+        assert warnings == [
+            "grep: /tmp/nonexistent.txt: No such file or directory"
+        ]
+
+    @pytest.mark.anyio
+    async def test_files_only_names_a_directory_without_walking_it(
+            self, backend):
+        """GNU descends only under -r; -l alone reports the operand.
+
+        The directory holds a match, so a walk would put a filename on stdout.
+        """
+        await _mkdir(backend, "/tmp/walk")
+        await _write(backend, "/tmp/walk/a.txt", "needle")
+        warnings = []
+        result = await grep(backend,
+                            "/tmp/walk",
+                            "needle",
+                            files_only=True,
+                            warnings=warnings)
+        assert result == []
+        assert warnings == ["grep: /tmp/walk: Is a directory"]
+
+    @pytest.mark.anyio
+    async def test_recursive_still_walks_a_directory(self, backend):
+        """-r keeps the walk the no-flag case gives up.
+
+        Calls grep_files_only itself rather than the shared harness, which
+        routes recursive runs straight to grep_recursive and so would not
+        reach the branch under test.
+        """
+        await _mkdir(backend, "/tmp/rwalk")
+        await _write(backend, "/tmp/rwalk/a.txt", "needle")
+        rd, st, rb = _bind(backend)
+        warnings = []
+        result = await grep_files_only(
+            rd,
+            st,
+            rb,
+            "/tmp/rwalk",
+            "needle",
+            recursive=True,
+            ignore_case=False,
+            invert=False,
+            line_numbers=False,
+            count_only=False,
+            fixed_string=False,
+            only_matching=False,
+            max_count=None,
+            whole_word=False,
+            basic=False,
+            warnings=warnings,
+        )
+        assert result == ["/tmp/rwalk/a.txt"]
+        assert warnings == []

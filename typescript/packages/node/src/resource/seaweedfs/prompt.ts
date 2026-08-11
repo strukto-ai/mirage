@@ -16,5 +16,4 @@ export const SEAWEEDFS_PROMPT = `\
 {prefix}
   Remote SeaweedFS bucket (S3-compatible gateway).
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
-  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat.
-  cat on .parquet/.feather returns a formatted table.`
+  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat.`

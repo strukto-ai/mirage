@@ -12,15 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.langfuse import LangfuseAccessor
+from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.langfuse.render import jsonl_bytes
 from mirage.core.langfuse.stat import stat
 from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import FileType, PathSpec
+
+
+async def seed_dir(index, virtual_key: str, names: list[str]) -> None:
+    await index.set_dir(
+        virtual_key,
+        [(name,
+          IndexEntry(
+              id=name, name=name, resource_type="langfuse/x", vfs_name=name))
+         for name in names])
 
 
 @pytest.fixture
@@ -60,6 +71,7 @@ async def test_stat_traces_dir(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_trace_file(accessor, index):
+    await seed_dir(index, "/traces", ["abc.json"])
     result = await stat(
         accessor,
         PathSpec(resource_path="traces/abc.json",
@@ -71,6 +83,7 @@ async def test_stat_trace_file(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_session_dir(accessor, index):
+    await seed_dir(index, "/sessions", ["sid1"])
     result = await stat(
         accessor,
         PathSpec(resource_path="sessions/sid1",
@@ -82,6 +95,7 @@ async def test_stat_session_dir(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_prompt_version_file(accessor, index):
+    await seed_dir(index, "/prompts/summarize", ["1.json"])
     result = await stat(
         accessor,
         PathSpec(resource_path="prompts/summarize/1.json",
@@ -93,13 +107,20 @@ async def test_stat_prompt_version_file(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_dataset_items(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(resource_path="datasets/qa-eval/items.jsonl",
-                 virtual="/datasets/qa-eval/items.jsonl",
-                 directory="/datasets/qa-eval/items.jsonl"), index)
+    items = [{"id": "i-1", "input": "a"}]
+    with patch(
+            "mirage.core.langfuse.readdir.fetch_dataset_items",
+            new_callable=AsyncMock,
+            return_value=items,
+    ):
+        result = await stat(
+            accessor,
+            PathSpec(resource_path="datasets/qa-eval/items.jsonl",
+                     virtual="/datasets/qa-eval/items.jsonl",
+                     directory="/datasets/qa-eval/items.jsonl"), index)
     assert result.type == FileType.TEXT
     assert result.name == "items.jsonl"
+    assert result.size == len(jsonl_bytes(items))
 
 
 @pytest.mark.asyncio
@@ -114,10 +135,39 @@ async def test_stat_dotfile_raises(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_dataset_runs_dir(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(resource_path="datasets/qa-eval/runs",
-                 virtual="/datasets/qa-eval/runs",
-                 directory="/datasets/qa-eval/runs"), index)
+    with patch(
+            "mirage.core.langfuse.readdir.fetch_dataset_items",
+            new_callable=AsyncMock,
+            return_value=[],
+    ):
+        result = await stat(
+            accessor,
+            PathSpec(resource_path="datasets/qa-eval/runs",
+                     virtual="/datasets/qa-eval/runs",
+                     directory="/datasets/qa-eval/runs"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "runs"
+
+
+@pytest.mark.asyncio
+async def test_stat_unlisted_trace_raises(accessor, index):
+    # A recognizable path shape is not evidence the trace exists: an id absent
+    # from the parent listing must be ENOENT, not a confident stat.
+    await seed_dir(index, "/traces", ["present.json"])
+    with pytest.raises(FileNotFoundError):
+        await stat(
+            accessor,
+            PathSpec(resource_path="traces/absent.json",
+                     virtual="/traces/absent.json",
+                     directory="/traces/absent.json"), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_unlisted_prompt_version_raises(accessor, index):
+    await seed_dir(index, "/prompts/summarize", ["1.json"])
+    with pytest.raises(FileNotFoundError):
+        await stat(
+            accessor,
+            PathSpec(resource_path="prompts/summarize/9.json",
+                     virtual="/prompts/summarize/9.json",
+                     directory="/prompts/summarize/9.json"), index)

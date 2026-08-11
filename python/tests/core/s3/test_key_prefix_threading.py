@@ -7,7 +7,7 @@ from mirage.core.s3.read import read_bytes
 from mirage.core.s3.readdir import readdir
 from mirage.resource.s3 import S3Config
 from mirage.types import PathSpec
-from tests.integration.s3_mock import patch_s3_multi
+from tests.e2e.s3_mock import patch_s3_multi
 
 
 def _make_config(key_prefix: str | None = None) -> S3Config:

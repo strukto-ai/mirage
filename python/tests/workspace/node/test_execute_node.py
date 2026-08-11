@@ -21,6 +21,7 @@ from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.types import MountMode, PathSpec
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import Session
@@ -64,6 +65,10 @@ def _mock_registry():
     reg = MagicMock()
     reg.mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)
+    reg.policies.pre_command = AsyncMock(return_value=None)
+    # A bare MagicMock answers clis.get() with a truthy mock, which
+    # would spuriously dispatch every command as an installed CLI.
+    reg.clis = CLIRegistry()
     return reg, mount
 
 
@@ -317,6 +322,19 @@ def test_subshell_isolates_env():
     session = _session(env={"X": "before"})
     _exec("(export X=inside)", session=session)
     assert session.env["X"] == "before"
+
+
+def test_subshell_updates_status_between_commands():
+    """$? inside ( ... ) must reflect the previous command in the body."""
+    stdout, io, _, _, _, _ = _exec("(false; echo subshell=$?)")
+    assert io.exit_code == 0
+    assert stdout == b"subshell=1\n"
+
+
+def test_subshell_status_after_true_then_false():
+    stdout, io, _, _, _, _ = _exec("(true; false; echo s=$?)")
+    assert io.exit_code == 0
+    assert stdout == b"s=1\n"
 
 
 def test_subshell_isolates_cwd():
@@ -1282,6 +1300,19 @@ def test_brace_group():
     _, _, _, session, _, _ = _exec("{ export A=1; export B=2; }")
     assert session.env["A"] == "1"
     assert session.env["B"] == "2"
+
+
+def test_brace_group_updates_status_between_commands():
+    """$? inside { ... } must reflect the previous command in the group."""
+    stdout, io, _, _, _, _ = _exec("{ false; echo group=$?; }")
+    assert io.exit_code == 0
+    assert stdout == b"group=1\n"
+
+
+def test_brace_group_status_after_true_then_false():
+    stdout, io, _, _, _, _ = _exec("{ true; false; echo mid=$?; }")
+    assert io.exit_code == 0
+    assert stdout == b"mid=1\n"
 
 
 def test_brace_group_with_if():

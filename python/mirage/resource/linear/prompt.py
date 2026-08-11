@@ -121,60 +121,12 @@ PROMPT = """\
       "created_at": "...", "updated_at": "...", "url": "..."
     }}
 
-  Read commands (nested names, mirror the linear CLI; every command emits
-  normalized JSON to stdout so you can pipe to jq):
-    linear team list                        # all teams
-    linear team get <team-key>              # one team
-    linear team members <team-key>          # team roster
-    linear issue list --team <team-key>     # issues in a team
-    linear issue get <issue-key>            # one issue (e.g. STR-42)
-    linear project list --team <team-key>
-    linear project get <project-id> --team <team-key>
-    linear cycle list --team <team-key>
-    linear cycle current --team <team-key>  # latest cycle
-    linear cycle get <cycle-id> --team <team-key>
-    linear label list --team <team-key>
-    linear comment list <issue-key>
-    linear user list                        # all workspace users
-    linear user get <email>
-    linear document list --team <team-key>
-    linear document get <document-id> --team <team-key>
-    linear search "bug login"               # full-text across all issues"""
+  To act on issues (list/get/create/update/assign/transition,
+  comments, projects, cycles, labels, users, documents, search), use
+  the linear CLI if installed: linear --help"""
 
 WRITE_PROMPT = """\
-  Write commands (nested names; flags use UNDERSCORES, not hyphens;
-  --issue_id and --issue_key are interchangeable on every issue command):
-
-    linear issue create --team_id <team-id> \\
-      --title "Title" --description "Body"
-      # or: --description_file /path/to/desc.md
-
-    linear issue update --issue_key STR-42 \\
-      [--title "New title"] [--description "..." | --description_file ...]
-
-    linear issue assign --issue_key STR-42 --assignee_email user@example.com
-      # or: --assignee_id <user-id>
-
-    linear issue transition --issue_key STR-42 --state_name "In Review"
-      # or: --state_id <state-id>
-
-    linear issue set-priority --issue_key STR-42 --priority 2
-      # 0=none 1=urgent 2=high 3=medium 4=low
-
-    linear issue set-project --issue_key STR-42 --project_id <project-id>
-
-    linear issue add-label --issue_key STR-42 --label_id <label-id>
-
-    linear comment add --issue_key STR-42 --body "comment"
-      # or: --body_file /path/to/comment.md
-
-    linear comment update --comment_id <comment-id> --body "..."
-
-  IDs come from the path:
-    {prefix}/teams/STR__Strukto-ai__<team-id>/                  -> --team_id
-    {prefix}/teams/.../issues/STR-42__<issue-id>/               -> --issue_id
-    {prefix}/teams/.../projects/Roadmap__<project-id>.json      -> --project_id
-
-  Successful create returns JSON like:
-    {"issue_id": "<uuid>", "issue_key": "STR-23", "title": "...", ...}
-  Empty stdout means the call failed -- inspect stderr or retry."""
+  Writes go through the linear CLI if installed:
+    linear issue create --team STR --title "Title" --description "Body"
+    linear comment add STR-42 --body "comment"
+  See linear --help for every verb."""

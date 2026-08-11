@@ -17,7 +17,7 @@ from mirage.commands.builtin.generic.basename import \
     basename as generic_basename
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -28,18 +28,15 @@ async def basename(
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,
-    a: bool = False,
-    s: str | None = None,
-    z: bool = False,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["basename"])
-    suffix = s or fl.as_str("suffix")
+    suffix = fl.as_str("suffix")
     return await generic_basename(
         *texts,
-        multiple=a or fl.as_bool("multiple") or suffix is not None,
+        multiple=fl.as_bool("multiple") or suffix is not None,
         suffix=suffix,
-        zero=z or fl.as_bool("zero"),
+        zero=fl.as_bool("zero"),
     )
 
 

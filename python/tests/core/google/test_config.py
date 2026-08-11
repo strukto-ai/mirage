@@ -57,6 +57,8 @@ async def test_refresh_access_token_omits_client_secret_when_absent():
         async def __aexit__(self, *_):
             return None
 
+        status = 200
+
         def raise_for_status(self):
             return None
 
@@ -99,6 +101,8 @@ async def test_refresh_access_token_includes_client_secret_when_present():
 
         async def __aexit__(self, *_):
             return None
+
+        status = 200
 
         def raise_for_status(self):
             return None

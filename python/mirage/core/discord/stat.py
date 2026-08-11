@@ -103,6 +103,7 @@ async def stat(
                 raise enoent(virtual)
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
+            size=lookup.entry.size,
             type=FileType.JSON,
             extra={"user_id": lookup.entry.id},
         )
@@ -115,7 +116,17 @@ async def stat(
     # <guild>/channels/<ch>/<date>/chat.jsonl
     if (len(parts) == 5 and parts[1] == "channels" and _DATE_RE.match(parts[3])
             and parts[4] == "chat.jsonl"):
-        return FileStat(name="chat.jsonl", type=FileType.TEXT)
+        lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            await _populate_via_parent(accessor, virtual_key, prefix, index)
+            lookup = await index.get(virtual_key)
+        # A day whose history could not be listed (403/404/429) seals an
+        # empty date dir; the file still stats, with the size left unknown.
+        return FileStat(
+            name="chat.jsonl",
+            size=lookup.entry.size if lookup.entry is not None else None,
+            type=FileType.TEXT,
+        )
 
     # <guild>/channels/<ch>/<date>/files
     if (len(parts) == 5 and parts[1] == "channels" and _DATE_RE.match(parts[3])

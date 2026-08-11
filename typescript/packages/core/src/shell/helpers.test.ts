@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { TSNodeLike } from '../workspace/expand/variable.ts'
+import type { TSNodeLike } from './types.ts'
 import {
   getCommandAssignments,
   getCommandName,
@@ -34,7 +34,7 @@ import {
   getUnsetNames,
   getWhileParts,
 } from './helpers.ts'
-import { NodeType as NT, RedirectKind } from './types.ts'
+import { NodeType as NT, type Redirect, RedirectKind } from './types.ts'
 
 function node(
   type: string,
@@ -48,6 +48,30 @@ function node(
     namedChildren: opts.namedChildren ?? opts.children?.filter((c) => c.isNamed !== false) ?? [],
     isNamed: opts.isNamed ?? true,
   }
+}
+
+// Redirect.targetNode is declared `unknown`, so narrow it once here
+// instead of casting at every assertion.
+function targetTypeOf(redirect: Redirect | undefined): string | undefined {
+  return (redirect?.targetNode as TSNodeLike | null | undefined)?.type
+}
+
+function redirectStatement(
+  targetType: string,
+  targetText: string,
+  op: string = NT.REDIRECT_OUT,
+): TSNodeLike {
+  const command = node(NT.COMMAND, 'echo x', {
+    namedChildren: [node(NT.COMMAND_NAME, 'echo')],
+  })
+  const target = node(targetType, targetText)
+  const redirect = node(NT.FILE_REDIRECT, `${op} ${targetText}`, {
+    children: [node(op, op, { isNamed: false }), target],
+    namedChildren: [target],
+  })
+  return node(NT.REDIRECTED_STATEMENT, `echo x ${op} ${targetText}`, {
+    namedChildren: [command, redirect],
+  })
 }
 
 describe('getText / getCommandName', () => {
@@ -70,20 +94,44 @@ describe('getText / getCommandName', () => {
 describe('getParts', () => {
   it('includes normal named children', () => {
     const n = node('command', 'ls /ram', {
-      namedChildren: [node(NT.COMMAND_NAME, 'ls'), node(NT.WORD, '/ram')],
+      children: [node(NT.COMMAND_NAME, 'ls'), node(NT.WORD, '/ram')],
     })
     expect(getParts(n).map((c) => c.text)).toEqual(['ls', '/ram'])
   })
 
   it('skips FILE_REDIRECT and HERESTRING_REDIRECT children', () => {
     const n = node('command', '', {
-      namedChildren: [
+      children: [
         node(NT.COMMAND_NAME, 'echo'),
         node(NT.WORD, 'hi'),
         node(NT.FILE_REDIRECT, '>file'),
       ],
     })
     expect(getParts(n)).toHaveLength(2)
+  })
+
+  it('keeps a bare $ argument but not the $"..." marker', () => {
+    const dollar = node('$', '$', { isNamed: false })
+    dollar.startIndex = 5
+    dollar.endIndex = 6
+    const gapped = node(NT.STRING, '"x"')
+    gapped.startIndex = 7
+    gapped.endIndex = 10
+    const bare = node('command', 'echo $ "x"', {
+      children: [node(NT.COMMAND_NAME, 'echo'), dollar, gapped],
+    })
+    expect(getParts(bare).map((c) => c.text)).toEqual(['echo', '$', '"x"'])
+
+    const marker = node('$', '$', { isNamed: false })
+    marker.startIndex = 5
+    marker.endIndex = 6
+    const adjacent = node(NT.STRING, '"x"')
+    adjacent.startIndex = 6
+    adjacent.endIndex = 9
+    const translated = node('command', 'echo $"x"', {
+      children: [node(NT.COMMAND_NAME, 'echo'), marker, adjacent],
+    })
+    expect(getParts(translated).map((c) => c.text)).toEqual(['echo', '"x"'])
   })
 })
 
@@ -134,6 +182,58 @@ describe('getRedirects herestring ordering', () => {
     const [, redirects] = getRedirects(statement)
     expect(redirects.map((r) => r.kind)).toEqual([RedirectKind.STDIN, RedirectKind.HERESTRING])
     expect(redirects[1]?.target).toBe('here')
+  })
+})
+
+describe('getRedirects quoted targets', () => {
+  // Quoting a redirect target is purely syntactic in bash. raw_string
+  // (single quotes) was missing from the target-type gate, so the
+  // target node was dropped and the target fell back to '', silently
+  // redirecting every single-quoted target to one phantom empty path.
+  it.each([
+    [NT.RAW_STRING, "'/out.txt'"],
+    [NT.STRING, '"/out.txt"'],
+    [NT.WORD, '/out.txt'],
+    [NT.ANSI_C_STRING, "$'/out 1.txt'"],
+    [NT.TRANSLATED_STRING, '$"/out.txt"'],
+  ])('carries the target node for %s', (targetType, targetText) => {
+    const [, redirects] = getRedirects(redirectStatement(targetType, targetText))
+    expect(redirects[0]?.targetNode).not.toBeNull()
+    expect(targetTypeOf(redirects[0])).toBe(targetType)
+    expect(redirects[0]?.target).toBe(targetText)
+  })
+
+  // Every operator shares parseFileRedirect, so a single-quoted target
+  // has to survive on all of them, not just plain `>`.
+  it.each([NT.REDIRECT_APPEND, NT.REDIRECT_IN, NT.REDIRECT_BOTH])(
+    'carries a raw_string target for %s',
+    (op) => {
+      const [, redirects] = getRedirects(redirectStatement(NT.RAW_STRING, "'/out.txt'", op))
+      expect(targetTypeOf(redirects[0])).toBe(NT.RAW_STRING)
+    },
+  )
+
+  it('carries a raw_string herestring body', () => {
+    const body = node(NT.RAW_STRING, "'hi'")
+    const herestring = node(NT.HERESTRING_REDIRECT, "<<< 'hi'", {
+      children: [node(NT.HERESTRING_TOKEN, '<<<', { isNamed: false }), body],
+      namedChildren: [body],
+    })
+    const cmd = node(NT.COMMAND, "cat <<< 'hi'", {
+      namedChildren: [node(NT.COMMAND_NAME, 'cat'), herestring],
+    })
+    const outWord = node(NT.WORD, 'out.txt')
+    const outRedirect = node(NT.FILE_REDIRECT, '> out.txt', {
+      children: [node(NT.REDIRECT_OUT, '>', { isNamed: false }), outWord],
+      namedChildren: [outWord],
+    })
+    const statement = node(NT.REDIRECTED_STATEMENT, "cat <<< 'hi' > out.txt", {
+      namedChildren: [cmd, outRedirect],
+    })
+    const [, redirects] = getRedirects(statement)
+    const here = redirects.filter((r) => r.kind === RedirectKind.HERESTRING)
+    expect(here).toHaveLength(1)
+    expect(targetTypeOf(here[0])).toBe(NT.RAW_STRING)
   })
 })
 

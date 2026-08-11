@@ -127,24 +127,24 @@ mirage       workspace delete cross_loaded
 ./mirage-ts  workspace delete cross_loaded
 ```
 
-## 7. Per-mount safeguards (Python CLI)
+## 7. Per-mount command limits (Python CLI)
 
-A mount can cap what a command streams back with `command_safeguards`,
+A mount can cap what a command streams back with `command_limits`,
 so a runaway `cat`/`grep`/`rg` can't flood the agent or hang forever.
 Each entry sets `max_lines` / `max_bytes` (output cap) and/or
 `timeout_seconds` (deadline), with `on_exceed: truncate` (stop, exit 0,
 add a notice) or `on_exceed: error` (stop, exit 1, add a notice).
 
-This section is **Python-only**: the TS config schema does not yet carry
-`command_safeguards`. It runs against its own workspace
-(`cross_sg`) from [workspace_safeguards.yaml](workspace_safeguards.yaml),
+Both CLIs parse and apply the same `command_limits` block (the cross
+harness pins this). This walkthrough uses the Python CLI against its own
+workspace (`cross_sg`) from [workspace_limits.yaml](workspace_limits.yaml),
 so the steps above are untouched. That file guards `/s3` with:
 `head` → 10 lines / truncate, `grep` → 20 lines / error, `rg` → a 1 ms
 timeout.
 
 ```bash
 set -a && source .env.development && set +a
-mirage workspace create examples/python/cross/workspace_safeguards.yaml --id cross_sg
+mirage workspace create examples/python/cross/workspace_limits.yaml --id cross_sg
 ```
 
 Warm the object once (the first S3 read fetches the whole object and can

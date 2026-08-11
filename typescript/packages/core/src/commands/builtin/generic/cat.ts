@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
+import { asyncChain } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const NL = 0x0a
@@ -59,14 +61,6 @@ export async function* numberLines(source: AsyncIterable<Uint8Array>): AsyncIter
   }
 }
 
-async function* chainStreams(
-  streams: readonly AsyncIterable<Uint8Array>[],
-): AsyncIterable<Uint8Array> {
-  for (const s of streams) {
-    for await (const chunk of s) yield chunk
-  }
-}
-
 interface CatDisplay {
   numberLines: boolean
   numberNonblank: boolean
@@ -76,20 +70,16 @@ interface CatDisplay {
   squeezeBlank: boolean
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): CatDisplay {
-  const showAll = flags.A === true || flags.show_all === true
+function parseFlags(flags: Record<string, FlagValue>): CatDisplay {
+  const showAll = flags.show_all === true
   return {
-    numberLines: flags.n === true || flags.number === true,
-    numberNonblank: flags.b === true || flags.number_nonblank === true,
-    showEnds: flags.E === true || flags.show_ends === true || flags.e === true || showAll,
-    showTabs: flags.T === true || flags.show_tabs === true || flags.t === true || showAll,
+    numberLines: flags.number === true,
+    numberNonblank: flags.number_nonblank === true,
+    showEnds: flags.show_ends === true || flags.e === true || showAll,
+    showTabs: flags.show_tabs === true || flags.t === true || showAll,
     showNonprinting:
-      flags.v === true ||
-      flags.show_nonprinting === true ||
-      flags.e === true ||
-      flags.t === true ||
-      showAll,
-    squeezeBlank: flags.s === true || flags.squeeze_blank === true,
+      flags.show_nonprinting === true || flags.e === true || flags.t === true || showAll,
+    squeezeBlank: flags.squeeze_blank === true,
   }
 }
 
@@ -193,7 +183,7 @@ export async function catGeneric(
       cacheKeys.push(p.mountPath)
       outputs.push(cachable)
     }
-    const merged = outputs.length === 1 ? outputs[0] : chainStreams(outputs)
+    const merged = outputs.length === 1 ? outputs[0] : asyncChain(...outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')
     const out: ByteSource = wantsDisplay ? displayLines(merged, display) : merged
     return [

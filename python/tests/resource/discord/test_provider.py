@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.config import DiscordConfig
 from mirage.resource.discord.discord import DiscordResource
 from mirage.types import ResourceName
 
@@ -43,7 +43,7 @@ def test_resource_accessor(config):
 
 def test_resource_commands(config):
     resource = DiscordResource(config)
-    # 56 native (generic factory read set incl. find and sed + bespoke
-    # grep/rg/head + discord_* writers + md5sum/sha1sum/sha384sum/sha512sum)
-    # + 9 filetype cmds x 7 columnar exts
-    assert len(resource._commands) == 56 + 9 * 7
+    # 52 native (generic factory read set incl. find and sed + bespoke
+    # grep/rg/head + md5sum/sha1sum/sha384sum/sha512sum); acting on
+    # Discord moved to the discord CLI
+    assert len(resource._commands) == 52

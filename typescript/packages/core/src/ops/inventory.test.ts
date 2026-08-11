@@ -31,11 +31,14 @@ import { LANCEDB_OPS } from './lancedb/index.ts'
 import { LANGFUSE_OPS } from './langfuse/index.ts'
 import { LINEAR_OPS } from './linear/index.ts'
 import { MONGODB_OPS } from './mongodb/index.ts'
+import { MEM0_OPS } from './mem0/index.ts'
 import { NOTION_OPS } from './notion/index.ts'
+import { ONEDRIVE_OPS } from './onedrive/index.ts'
 import { POSTGRES_OPS } from './postgres/index.ts'
 import { QDRANT_OPS } from './qdrant/index.ts'
 import { RAM_OPS } from './ram/index.ts'
 import { SLACK_OPS } from './slack/index.ts'
+import { SHAREPOINT_OPS } from './sharepoint/index.ts'
 import { TRELLO_OPS } from './trello/index.ts'
 
 // Golden snapshot of every backend's registered op surface, taken before
@@ -62,12 +65,15 @@ const TABLES = {
   lancedb: LANCEDB_OPS,
   langfuse: LANGFUSE_OPS,
   linear: LINEAR_OPS,
+  mem0: MEM0_OPS,
   mongodb: MONGODB_OPS,
   notion: NOTION_OPS,
+  onedrive: ONEDRIVE_OPS,
   postgres: POSTGRES_OPS,
   qdrant: QDRANT_OPS,
   ram: RAM_OPS,
   slack: SLACK_OPS,
+  sharepoint: SHAREPOINT_OPS,
   trello: TRELLO_OPS,
 }
 
@@ -76,9 +82,6 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['create', 'box', '', true],
     ['mkdir', 'box', '', true],
     ['read', 'box', '', false],
-    ['read', 'box', '.feather', false],
-    ['read', 'box', '.hdf5', false],
-    ['read', 'box', '.parquet', false],
     ['readdir', 'box', '', false],
     ['rename', 'box', '', true],
     ['rmdir', 'box', '', true],
@@ -182,6 +185,11 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['readdir', 'linear', '', false],
     ['stat', 'linear', '', false],
   ],
+  mem0: [
+    ['read', 'mem0', '', false],
+    ['readdir', 'mem0', '', false],
+    ['stat', 'mem0', '', false],
+  ],
   mongodb: [
     ['read', 'mongodb', '', false],
     ['readdir', 'mongodb', '', false],
@@ -191,6 +199,18 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['read', 'notion', '', false],
     ['readdir', 'notion', '', false],
     ['stat', 'notion', '', false],
+  ],
+  onedrive: [
+    ['create', 'onedrive', '', true],
+    ['mkdir', 'onedrive', '', true],
+    ['read', 'onedrive', '', false],
+    ['readdir', 'onedrive', '', false],
+    ['rename', 'onedrive', '', true],
+    ['rmdir', 'onedrive', '', true],
+    ['stat', 'onedrive', '', false],
+    ['truncate', 'onedrive', '', true],
+    ['unlink', 'onedrive', '', true],
+    ['write', 'onedrive', '', true],
   ],
   postgres: [
     ['read', 'postgres', '', false],
@@ -206,9 +226,6 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['append', 'ram', '', true],
     ['create', 'ram', '', true],
     ['mkdir', 'ram', '', true],
-    ['read', 'ram', '.feather', false],
-    ['read', 'ram', '.h5', false],
-    ['read', 'ram', '.parquet', false],
     ['read', 'ram', '', false],
     ['readdir', 'ram', '', false],
     ['rename', 'ram', '', true],
@@ -223,6 +240,18 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['read', 'slack', '', false],
     ['readdir', 'slack', '', false],
     ['stat', 'slack', '', false],
+  ],
+  sharepoint: [
+    ['create', 'sharepoint', '', true],
+    ['mkdir', 'sharepoint', '', true],
+    ['read', 'sharepoint', '', false],
+    ['readdir', 'sharepoint', '', false],
+    ['rename', 'sharepoint', '', true],
+    ['rmdir', 'sharepoint', '', true],
+    ['stat', 'sharepoint', '', false],
+    ['truncate', 'sharepoint', '', true],
+    ['unlink', 'sharepoint', '', true],
+    ['write', 'sharepoint', '', true],
   ],
   trello: [
     ['read', 'trello', '', false],

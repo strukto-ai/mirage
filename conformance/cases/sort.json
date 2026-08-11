@@ -6,7 +6,7 @@
       "cmd": "sort -k2 /data/sk_fields.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -19,7 +19,7 @@
       "cmd": "sort -k2,2 /data/sk_fields.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -32,7 +32,7 @@
       "cmd": "sort -k2,2n -k1,1r /data/sk_fields.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -45,7 +45,7 @@
       "cmd": "sort -k2,2n /data/sk_ties.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -58,7 +58,7 @@
       "cmd": "sort -s -k2,2n /data/sk_ties.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -71,7 +71,7 @@
       "cmd": "sort -rk2,2n /data/sk_ties.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -84,7 +84,7 @@
       "cmd": "sort -t: -k1.2,1.3 /data/sk_colon.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 0,
@@ -97,7 +97,7 @@
       "cmd": "sort -k0 /data/sk_fields.txt",
       "matrix": {
         "python": ["ram", "disk", "redis"],
-        "typescript": ["ram"]
+        "typescript": ["ram", "disk", "redis"]
       },
       "expect": {
         "exit": 2,

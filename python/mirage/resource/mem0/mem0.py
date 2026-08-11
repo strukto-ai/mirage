@@ -36,6 +36,9 @@ class Mem0Resource(BaseResource):
     accessor: Mem0Accessor
     name: str = ResourceName.MEM0
     caches_reads: bool = True
+    # readdir and stat store the rendered JSON's byte length and read
+    # serves those same bytes, so sizes are exact by construction.
+    SIZES_ALWAYS_KNOWN: bool = True
     _ops = _MEM0_OPS
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = False

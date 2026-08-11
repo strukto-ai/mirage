@@ -129,6 +129,24 @@ def normalize_project(
     }
 
 
+def project_issue_rows(issues: list[dict[str, Any]],
+                       project_id: str | None) -> list[dict[str, Any]]:
+    rows = []
+    for issue in issues:
+        if (issue.get("project") or {}).get("id") != project_id:
+            continue
+        state = issue.get("state") or {}
+        rows.append({
+            "issue_id": issue.get("id"),
+            "issue_key": issue.get("identifier"),
+            "title": issue.get("title"),
+            "state_id": state.get("id"),
+            "state_name": state.get("name"),
+            "url": issue.get("url"),
+        })
+    return rows
+
+
 def normalize_label(label: dict[str, Any]) -> dict[str, Any]:
     return {
         "label_id": label.get("id"),

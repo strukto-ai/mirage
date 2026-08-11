@@ -59,6 +59,21 @@ If the modified date is unavailable, the date prefix is omitted.
 Reading a document file returns the full Google Docs API JSON for
 that document.
 
+### Shared Drives
+
+The listing covers every corpus the account can reach, so a document that
+lives in a Shared Drive appears here too. A Shared Drive document has no
+owner (the drive owns it), so it lands under `shared`, which is what that
+directory means. This matches the `gdrive` mount, where Shared Drives are
+top-level directories: without it the same account would see a document
+under one Google mount and not the other, with no error explaining the
+difference.
+
+Drive answers an all-corpora search best-effort. When it reports that it
+skipped a corpus, the short listing is still returned but is not cached as
+the directory, so the next `ls` re-lists instead of serving the gap until
+the cache expires.
+
 ## Cache
 
 The Google Docs resource uses `IndexCacheStore`. Index entries store
@@ -74,6 +89,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
 
 load_dotenv(".env.development")
@@ -88,6 +104,7 @@ resource = GDocsResource(config=config)
 
 async def main():
     ws = Workspace({"/gdocs": resource}, mode=MountMode.READ)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List structure
     r = await ws.execute("ls /gdocs/")
@@ -123,7 +140,7 @@ async def main():
 
     # Append text to a document
     r = await ws.execute(
-        'gws docs +write --document 1AbCdEf --text "Appended via MIRAGE."')
+        'gws docs write --document 1AbCdEf --text "Appended via MIRAGE."')
     print(await r.stdout_str())
 
 
@@ -151,48 +168,5 @@ Standard commands available on the mounted Google Docs tree:
 | `basename` / `dirname` / `realpath` | Path utilities              |
 | `nl`                                | Number lines                |
 
-Resource-specific commands:
-
-### `gws docs documents create`
-
-Create a new Google Docs document.
-
-```bash
-gws docs documents create --json '{"title":"MIRAGE Example Doc"}'
-```
-
-| Option   | Required | Description                  |
-| -------- | -------- | ---------------------------- |
-| `--json` | yes      | JSON body with `title` field |
-
-Returns the created document JSON.
-
-### `gws docs documents batchUpdate`
-
-Batch update a document.
-
-```bash
-gws docs documents batchUpdate --params '{"documentId":"1AbCdEf"}' --json '{"requests":[]}'
-```
-
-| Option     | Required | Description                |
-| ---------- | -------- | -------------------------- |
-| `--params` | yes      | JSON with `documentId`     |
-| `--json`   | yes      | JSON with `requests` array |
-
-Returns the batch update response JSON.
-
-### `gws docs +write`
-
-Append text to a document.
-
-```bash
-gws docs +write --document 1AbCdEf --text "Appended via MIRAGE."
-```
-
-| Option       | Required | Description        |
-| ------------ | -------- | ------------------ |
-| `--document` | yes      | Google document ID |
-| `--text`     | yes      | Text to append     |
-
-Returns the update response JSON.
+Acting on documents (appending text, raw API calls) goes through
+the [gws CLI](/python/cli/gws) when installed.

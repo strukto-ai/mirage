@@ -19,12 +19,13 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.postgres._provision import head_tail_provision
 from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.postgres import _client
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
@@ -32,10 +33,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tail",
-         resource="postgres",
-         spec=SPECS["tail"],
-         provision=head_tail_provision)
+@command("tail", resource="postgres", spec=SPECS["tail"])
 async def tail(
     accessor: PostgresAccessor,
     paths: list[PathSpec],
@@ -46,7 +44,7 @@ async def tail(
     q: bool = False,
     v: bool = False,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None
     from_line: int | None = None
@@ -59,7 +57,8 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         scope = detect_scope(paths[0])
-        if (len(paths) == 1 and isinstance(scope, PostgresEntityRowsScope)
+        if (len(paths) == 1 and not has_unresolved_glob(paths)
+                and isinstance(scope, PostgresEntityRowsScope)
                 and c_int is None and n_int is not None):
             limit = min(n_int, accessor.config.default_row_limit)
             pool = await accessor.pool()

@@ -58,8 +58,11 @@ async def _request(
         ) as resp:
             if resp.status >= 400:
                 text = await resp.text()
+                # The endpoint rides in the message the way TypeScript's
+                # TrelloApiError carries it: an agent reading the failure
+                # needs to know which call 404'd, not just that one did.
                 raise TrelloAPIError(
-                    f"Trello API error: HTTP {resp.status}: {text}",
+                    f"Trello API error ({path}): HTTP {resp.status}: {text}",
                     status=resp.status,
                 )
             return await resp.json()

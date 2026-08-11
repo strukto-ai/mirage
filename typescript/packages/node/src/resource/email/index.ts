@@ -19,5 +19,5 @@ export {
   type EmailConfig,
   type EmailConfigInput,
   type EmailConfigRedacted,
-} from './config.ts'
+} from '../../core/email/config.ts'
 export { EMAIL_PROMPT, EMAIL_WRITE_PROMPT } from './prompt.ts'

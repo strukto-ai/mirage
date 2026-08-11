@@ -20,9 +20,8 @@ import { downloadFile } from './files.ts'
 import { getHistoryJsonl } from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir as discordReaddir } from './readdir.ts'
+import { memberJsonBytes } from './render.ts'
 import { stripSlash } from '../../utils/slash.ts'
-
-const encoder = new TextEncoder()
 
 function fileNotFound(key: string): Error {
   const e = new Error(`ENOENT: ${key}`) as Error & { code: string }
@@ -107,7 +106,7 @@ export async function read(
     const members = await listMembers(accessor, guildLookup.entry.id)
     for (const m of members) {
       if (m.user?.id === lookup.entry.id) {
-        return encoder.encode(JSON.stringify(m))
+        return memberJsonBytes(m)
       }
     }
     throw fileNotFound(key)

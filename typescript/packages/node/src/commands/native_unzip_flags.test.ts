@@ -80,4 +80,49 @@ describe.each(NATIVE_BACKENDS)('native unzip flags (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('unzip -p with a member outputs only that member', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('hello\n'))
+      env.createFile('b.txt', ENC.encode('world\n'))
+      await env.mirage('zip /data/out.zip /data/a.txt /data/b.txt')
+      const result = await env.mirage('unzip -p /data/out.zip data/a.txt')
+      expect(result).toBe('hello\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('unzip -p with a missing member exits 11 with a caution', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('hello\n'))
+      await env.mirage('zip /data/out.zip /data/a.txt')
+      env.ws.cwd = '/data'
+      const io = await env.ws.execute('unzip -p /data/out.zip NOSUCHFILE.xml')
+      expect(io.exitCode).toBe(11)
+      expect(new TextDecoder().decode(io.stdout)).toBe('')
+      expect(new TextDecoder().decode(io.stderr)).toBe(
+        'caution: filename not matched:  NOSUCHFILE.xml\n',
+      )
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('unzip extraction writes only the selected member', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('a.txt', ENC.encode('hello\n'))
+      env.createFile('b.txt', ENC.encode('world\n'))
+      await env.mirage('zip /data/out.zip /data/a.txt /data/b.txt')
+      await env.mirage('unzip -q /data/out.zip data/a.txt -d /data/ext')
+      const listing = await env.mirage('ls /data/ext/data')
+      expect(listing).toContain('a.txt')
+      expect(listing).not.toContain('b.txt')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

@@ -15,15 +15,15 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { WordPolicy, route, wordPolicy } from '../route/index.ts'
+import { WordPolicy, endOptionsAfterProgram, route, wordPolicy } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
-import { OperandKind } from '../../commands/spec/types.ts'
-import { specForCommand, specWordKinds } from './spec_hints.ts'
-import type { TSNodeLike } from './variable.ts'
+import { type ValueType } from '../../commands/spec/types.ts'
+import { specForCommand, specWordBases, specWordKinds } from './spec_hints.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 
 /**
  * One command's expanded argument vector.
@@ -85,20 +85,36 @@ export async function expandArgv(
   // `gws docs documents get`); the registry says how many.
   const consumed = registry.matchCommandPrefix(expanded)
   const name = expanded.slice(0, consumed).join(' ')
+  // Before anything reads the line: an option carrying a program hands
+  // the words after it to that program, and POSIX's own `--` is how that
+  // handoff is spelled. Only when the interpreter is what runs, though:
+  // a shell function of the same name takes the line instead (bash's own
+  // rule), and it must receive the words as typed rather than a marker
+  // meant for a parser it does not have. `command python3` masks the
+  // function for its inner run, which is exactly when the rewrite
+  // applies again. A CLI cannot reach here at all, since registerCli
+  // refuses a shell builtin's name.
+  const shadowed = Object.hasOwn(session.functions, name)
+  const lineWords = shadowed
+    ? [...expanded]
+    : [...expanded.slice(0, consumed), ...endOptionsAfterProgram(name, expanded.slice(consumed))]
 
   const policy = wordPolicy(route(name, session, registry))
-  let wordKinds: (OperandKind | null)[] | null = null
+  let wordKinds: (ValueType | null)[] | null = null
+  let wordBases: (string | null)[] | null = null
   if (policy === WordPolicy.MOUNT) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
-      const extra: (OperandKind | null)[] = new Array<OperandKind | null>(consumed - 1).fill(
-        OperandKind.TEXT,
-      )
-      wordKinds = [...extra, ...specWordKinds(spec, expanded.slice(consumed))]
+      const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
+      wordKinds = [...extra, ...specWordKinds(spec, lineWords.slice(consumed))]
+      const bases = specWordBases(spec, lineWords.slice(consumed), session.cwd)
+      if (bases !== null) {
+        wordBases = [...new Array<string | null>(consumed - 1).fill(null), ...bases]
+      }
     }
   }
 
-  let classified = classifyParts(expanded, registry, session.cwd, wordKinds)
+  let classified = classifyParts(lineWords, registry, session.cwd, wordKinds, wordBases)
   // set -f: glob words become literal paths for every consumer,
   // including backend pushdown, so `cat *.txt` looks up a file
   // literally named `*.txt` like bash with noglob.

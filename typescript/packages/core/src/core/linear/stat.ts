@@ -84,16 +84,17 @@ export async function stat(
   if (parts.length === 3 && parts[0] === 'teams') {
     const leaf = parts[2]
     if (leaf === 'team.json') {
+      if (index === undefined) throw enoent(path)
       const teamKey = makeVirtualKey(prefix, parts.slice(0, 2).join('/'))
-      let teamId: string | null = null
-      if (index !== undefined) {
-        const result = await index.get(teamKey)
-        teamId = result.entry?.id ?? null
-      }
+      const result = await lookupWithFallback(accessor, teamKey, prefix, index)
+      if (result.entry === undefined || result.entry === null) throw enoent(path)
+      const size = result.entry.extra.team_json_size
       return new FileStat({
         name: 'team.json',
         type: FileType.JSON,
-        extra: { team_id: teamId },
+        size: typeof size === 'number' ? size : null,
+        modified: result.entry.remoteTime,
+        extra: { team_id: result.entry.id },
       })
     }
     if (
@@ -114,6 +115,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      size: result.entry.size,
       modified: result.entry.remoteTime,
       extra: { user_id: result.entry.id },
     })
@@ -131,27 +133,22 @@ export async function stat(
     })
   }
 
-  if (parts.length === 5 && parts[0] === 'teams' && parts[2] === 'issues') {
-    const issueKey = makeVirtualKey(prefix, parts.slice(0, 4).join('/'))
-    let issueId: string | null = null
-    if (index !== undefined) {
-      const result = await index.get(issueKey)
-      issueId = result.entry?.id ?? null
-    }
-    if (parts[4] === 'issue.json') {
-      return new FileStat({
-        name: 'issue.json',
-        type: FileType.JSON,
-        extra: { issue_id: issueId },
-      })
-    }
-    if (parts[4] === 'comments.jsonl') {
-      return new FileStat({
-        name: 'comments.jsonl',
-        type: FileType.TEXT,
-        extra: { issue_id: issueId },
-      })
-    }
+  if (
+    parts.length === 5 &&
+    parts[0] === 'teams' &&
+    parts[2] === 'issues' &&
+    (parts[4] === 'issue.json' || parts[4] === 'comments.jsonl')
+  ) {
+    if (index === undefined) throw enoent(path)
+    const result = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    if (result.entry === undefined || result.entry === null) throw enoent(path)
+    return new FileStat({
+      name: parts[4],
+      type: parts[4] === 'issue.json' ? FileType.JSON : FileType.TEXT,
+      size: result.entry.size,
+      modified: result.entry.remoteTime,
+      extra: { issue_id: result.entry.id },
+    })
   }
 
   if (
@@ -167,6 +164,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      size: result.entry.size,
       modified: result.entry.remoteTime,
       extra: { [idKey]: result.entry.id },
     })

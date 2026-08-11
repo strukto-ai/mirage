@@ -44,6 +44,9 @@ export interface BoxResourceState {
 export class BoxResource implements Resource {
   readonly kind: string = ResourceName.BOX
   readonly cachesReads: boolean = true
+  // Box item listings carry an exact byte `size` for every file (0
+  // included); sizeless weblinks are filtered out of listings.
+  readonly sizesAlwaysKnown: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = BOX_PROMPT
   readonly config: BoxConfig
@@ -52,17 +55,11 @@ export class BoxResource implements Resource {
 
   constructor(config: BoxConfig) {
     this.config = config
-    const tm = new BoxTokenManager({
-      ...(config.endpoint !== undefined ? { endpoint: config.endpoint } : {}),
-      ...(config.clientId !== undefined ? { clientId: config.clientId } : {}),
-      ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
-      ...(config.refreshToken !== undefined ? { refreshToken: config.refreshToken } : {}),
-      ...(config.accessToken !== undefined ? { accessToken: config.accessToken } : {}),
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-      ...(config.onRefreshTokenRotated !== undefined
-        ? { onRefreshTokenRotated: config.onRefreshTokenRotated }
-        : {}),
-    })
+    // The whole config goes to the token manager, never a hand-picked
+    // subset: a field added to BoxConfig would silently stop reaching it
+    // (that is how gdrive lost apiBase and kept refreshing at the real
+    // Google endpoint against a fake server).
+    const tm = new BoxTokenManager(config)
     this.accessor = new BoxAccessor({
       tokenManager: tm,
       ...(config.rootFolderId !== undefined ? { rootFolderId: config.rootFolderId } : {}),

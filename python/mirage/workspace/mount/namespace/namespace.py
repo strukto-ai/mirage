@@ -16,8 +16,10 @@ import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from mirage.core.timeutil import epoch_to_iso
 from mirage.resource.base import BaseResource
-from mirage.types import MountMode, NodeMetaKey
+from mirage.types import (LINK_TARGET_KEY, FileStat, FileType, MountMode,
+                          NodeMetaKey)
 from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
@@ -42,6 +44,12 @@ class NodeMeta:
     uid: int | str | None = None
     gid: int | str | None = None
     atime: str | None = None
+    # Time of the last content write observed through mirage. Unlike
+    # `mtime` (an explicit touch, which wins over the backend), this is
+    # a fallback that only surfaces when the backend reports no
+    # modified time at all, so `find -mtime` works on mtime-less
+    # backends for files written through mirage.
+    observed_mtime: float | None = None
 
     def is_empty(self) -> bool:
         return all(getattr(self, key) is None for key in NodeMetaKey)
@@ -60,6 +68,7 @@ class NodeMeta:
         uid = entry.get(NodeMetaKey.UID)
         gid = entry.get(NodeMetaKey.GID)
         atime = entry.get(NodeMetaKey.ATIME)
+        observed = entry.get(NodeMetaKey.OBSERVED_MTIME)
         return cls(
             target=target if isinstance(target, str) else None,
             mtime=float(mtime) if isinstance(mtime, (int, float)) else None,
@@ -67,7 +76,37 @@ class NodeMeta:
             uid=uid if isinstance(uid, (int, str)) else None,
             gid=gid if isinstance(gid, (int, str)) else None,
             atime=atime if isinstance(atime, str) else None,
+            observed_mtime=(float(observed) if isinstance(
+                observed, (int, float)) else None),
         )
+
+
+def link_stat(name: str, meta: NodeMeta) -> FileStat:
+    """Render a symlink node as a stat row.
+
+    Size is the target string's byte length and mode is left unset so
+    the formatter supplies 0777, which is what a real symlink inode
+    reports (a link carries no permission bits of its own). Ownership is
+    not in that category: a link has a real uid/gid that ``chown -h``
+    writes and ``ls -l`` shows, so both ride through from the node. The
+    target rides along in ``extra`` so every surface that has to name it
+    (ls -l's ``name -> target``, file's "symbolic link to") reads one
+    fact rather than querying the link table a second time.
+
+    Args:
+        name (str): name to report, usually the link's basename.
+        meta (NodeMeta): the node entry; its target must not be None.
+    """
+    target = meta.target or ""
+    return FileStat(
+        name=name,
+        size=len(target.encode("utf-8")),
+        modified=epoch_to_iso(meta.mtime) if meta.mtime is not None else None,
+        type=FileType.SYMLINK,
+        uid=meta.uid,
+        gid=meta.gid,
+        extra={LINK_TARGET_KEY: target},
+    )
 
 
 class Namespace:
@@ -278,21 +317,33 @@ class Namespace:
         await self._store.delete([path])
         return True
 
-    async def clear_times(self, path: str) -> None:
+    async def clear_times(self,
+                          path: str,
+                          observed: float | None = None) -> None:
         """Drop overlay times after a content write.
 
         write(2) refreshes mtime, so a stored overlay time would
         otherwise shadow the backend's fresh one forever. Permission and
         ownership survive writes; a symlink entry keeps its own times.
+        Content writes (not removals) also record the observed write
+        time, the fallback merge_overlay_stat surfaces when the backend
+        reports no mtime of its own.
 
         Args:
             path (str): absolute virtual path that was written.
+            observed (float | None): epoch seconds of a content write
+                to record; None for removal ops.
         """
         meta = self._nodes.get(path)
+        if meta is None and observed is not None:
+            meta = self._nodes.setdefault(path, NodeMeta())
         if meta is None or meta.target is not None:
             return
         meta.mtime = None
         meta.atime = None
+        # None (a removal) also drops any prior observed time, so a
+        # deleted path's meta does not linger.
+        meta.observed_mtime = observed
         if meta.is_empty():
             del self._nodes[path]
             await self._store.delete([path])
@@ -353,22 +404,53 @@ class Namespace:
             return path
         return resolve_symlinks(path, targets)
 
-    def links_under(self, directory: str) -> dict[str, str]:
-        """Links living directly under a directory.
+    def link_stat_at(self, path: str) -> FileStat | None:
+        """lstat a path: the link's own stat, or None when not a link.
+
+        A symlink has no backend inode, so the node table is the only
+        authority for it. Every no-follow stat surface (the ops facade,
+        the dispatcher, FUSE) answers through here so they cannot
+        disagree about what a link looks like.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        meta = self._nodes.get(path.rstrip("/") or path)
+        if meta is None or meta.target is None:
+            return None
+        return link_stat(path.rstrip("/").rsplit("/", 1)[-1], meta)
+
+    def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
+        """Every link at any depth under a directory, with its own stat.
+
+        A walker (``find``) needs the whole subtree, unlike a listing
+        (``ls``) which wants one level.
 
         Args:
             directory (str): absolute virtual directory path.
-
-        Returns:
-            dict[str, str]: link basename to target, for entries whose
-            parent is exactly ``directory``.
         """
         base = directory.rstrip("/") + "/"
-        out: dict[str, str] = {}
+        return [(path, link_stat(path.rsplit("/", 1)[-1], meta))
+                for path, meta in self._nodes.items()
+                if meta.target is not None and path.startswith(base)]
+
+    def link_stats_under(self, directory: str) -> list[FileStat]:
+        """Stat rows for the links living directly under a directory.
+
+        Links are namespace state and invisible to a backend readdir, so
+        listing commands merge these rows into the backend's entries
+        before sorting, the way the kernel returns them from one
+        readdir.
+
+        Args:
+            directory (str): absolute virtual directory path.
+        """
+        base = directory.rstrip("/") + "/"
+        out: list[FileStat] = []
         for path, meta in self._nodes.items():
             if (meta.target is not None and path.startswith(base)
                     and "/" not in path[len(base):]):
-                out[path[len(base):]] = meta.target
+                out.append(link_stat(path[len(base):], meta))
         return out
 
     async def purge_under(self, directory: str) -> int:

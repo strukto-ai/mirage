@@ -73,3 +73,52 @@ def test_split_d():
     stdout, _ = _run_raw(ws, "ls /data")
     result = _bytes(stdout).decode()
     assert "part00" in result
+
+
+def _stderr_text(io):
+    err = io.stderr
+    if err is None:
+        return ""
+    return err.decode() if isinstance(err, bytes) else str(err)
+
+
+def test_split_junk_bytes_rejects_without_writing():
+    # Regression: a junk -b used to fall through to line mode with
+    # lines_per_file=0 and write one output file per input line.
+    ws = _ws(**{"/f.txt": b"a\nb\nc\nd\n"})
+    _, io = _run_raw(ws, "split -b abc /data/f.txt /data/chunk_")
+    assert io.exit_code == 1
+    assert "split: invalid number of bytes: 'abc'" in _stderr_text(io)
+    stdout, _ = _run_raw(ws, "ls /data")
+    assert b"chunk_" not in _bytes(stdout)
+
+
+def test_split_junk_suffix_length_rejects_without_writing():
+    # Regression: a junk -a rendered an empty suffix, so every chunk was
+    # written to the same output path and only the last survived.
+    ws = _ws(**{"/f.txt": b"a\nb\nc\nd\n"})
+    _, io = _run_raw(ws, "split -a abc -l 1 /data/f.txt /data/chunk_")
+    assert io.exit_code == 1
+    assert "split: invalid suffix length: 'abc'" in _stderr_text(io)
+    stdout, _ = _run_raw(ws, "ls /data")
+    assert b"chunk_" not in _bytes(stdout)
+
+
+def test_split_bytes_suffix_1k():
+    ws = _ws(**{"/f.bin": b"A" * 1500})
+    _, io = _run_raw(ws, "split -b 1k /data/f.bin /data/p_")
+    assert io.exit_code == 0
+    stdout_a, _ = _run_raw(ws, "cat /data/p_aa")
+    stdout_b, _ = _run_raw(ws, "cat /data/p_ab")
+    assert len(_bytes(stdout_a)) == 1024
+    assert len(_bytes(stdout_b)) == 476
+
+
+def test_split_hex_suffix_start_parses_base_16():
+    ws = _ws(**{"/f.txt": b"a\nb\n"})
+    _, io = _run_raw(ws, "split --hex-suffixes=10 -l 1 /data/f.txt /data/h")
+    assert io.exit_code == 0
+    stdout, _ = _run_raw(ws, "ls /data")
+    result = _bytes(stdout).decode()
+    assert "h10" in result
+    assert "h11" in result

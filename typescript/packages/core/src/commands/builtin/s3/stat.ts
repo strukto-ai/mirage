@@ -13,14 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
-import { resolveGlobOf } from '../generic_bind/index.ts'
+import { overlaidStat, resolveGlobOf } from '../generic_bind/index.ts'
 import { S3_IO } from './io.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { statGeneric } from '../generic/stat.ts'
-import { metadataProvision } from '../generic_bind/provision.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
 
@@ -32,7 +31,11 @@ async function statCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return statGeneric(resolved, opts, (p) => s3Stat(accessor, p, opts.index ?? undefined))
+  return statGeneric(
+    resolved,
+    opts,
+    overlaidStat((p) => s3Stat(accessor, p, opts.index ?? undefined), opts.statOverlay),
+  )
 }
 
 export const S3_STAT = command({
@@ -40,5 +43,4 @@ export const S3_STAT = command({
   resource: ResourceName.S3,
   spec: specOf('stat'),
   fn: statCommand,
-  provision: metadataProvision,
 })

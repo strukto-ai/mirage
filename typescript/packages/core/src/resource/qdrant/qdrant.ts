@@ -35,6 +35,9 @@ export interface QdrantResourceOptions {
 export class QdrantResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.QDRANT
   readonly isRemote: boolean = true
+  // readdir seeds exact rendered sizes from the scroll payloads and stat
+  // falls back to rendering the row itself, so sizes are exact either way.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = false
   readonly prompt: string = QDRANT_PROMPT
   readonly config: QdrantConfigResolved
@@ -48,10 +51,6 @@ export class QdrantResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 

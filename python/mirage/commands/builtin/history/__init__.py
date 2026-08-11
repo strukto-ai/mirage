@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.generic_bind.provision import \
+    with_default_provisions
 from mirage.commands.builtin.history.cat import cat
 from mirage.commands.builtin.history.find import find
 from mirage.commands.builtin.history.grep import grep
@@ -23,5 +25,10 @@ from mirage.commands.builtin.history.stat import stat
 from mirage.commands.builtin.history.tail import tail
 from mirage.commands.builtin.history.tree import tree
 from mirage.commands.builtin.history.wc import wc
+from mirage.core.history.stat import stat as history_stat
 
-COMMANDS = [cat, find, grep, head, history_cmd, ls, rg, stat, tail, tree, wc]
+# The rendered histfile stats with a real size, so the shared family
+# defaults give exact estimates over the view mount.
+COMMANDS = with_default_provisions(
+    [cat, find, grep, head, history_cmd, ls, rg, stat, tail, tree, wc],
+    history_stat)

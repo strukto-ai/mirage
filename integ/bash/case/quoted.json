@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "case_single_quoted_pattern_matches",
+      "seq": 930170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "case a in 'a') echo hit;; *) echo miss;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_double_and_ansi_quoted_patterns_match",
+      "seq": 930171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "case a in \"a\") echo dq;; esac; case b in $'b') echo ansi;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "dq\nansi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_quoted_glob_is_literal",
+      "seq": 930172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "case '*' in '*') echo lit;; esac; case x in '*') echo bad;; *) echo live;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "lit\nlive\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_quoted_expansion_is_literal",
+      "seq": 930173,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x='*'; case y in \"$x\") echo bad;; *) echo lit;; esac; case y in $x) echo live;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "lit\nlive\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_concat_mixes_literal_and_glob",
+      "seq": 930174,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "case ab in 'a'*) echo hit;; *) echo miss;; esac; case Xb in 'a'*) echo hit;; *) echo miss;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\nmiss\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_backslash_escapes_glob_char",
+      "seq": 930175,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "case 'a*b' in a\\*b) echo hit;; *) echo miss;; esac; case aXb in a\\*b) echo hit;; *) echo miss;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\nmiss\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_pattern_never_word_splits",
+      "seq": 930176,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "p='a b'; case 'a b' in $p) echo hit;; *) echo miss;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "hit\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

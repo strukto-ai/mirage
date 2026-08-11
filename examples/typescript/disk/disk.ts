@@ -58,15 +58,6 @@ async function main(): Promise<void> {
   await run(ws, 'basename /data/example.json')
   await run(ws, 'dirname /data/example.json')
 
-  console.log('\n━━━ filetype dispatch (parquet via DISK + read op) ━━━')
-  await run(ws, 'head -n 3 /data/example.parquet')
-  console.log('\n--- fs.promises.readFile (read op with .parquet filetype) ---')
-  try {
-    const text = await fs.promises.readFile('/data/example.parquet', 'utf-8')
-    console.log(text.slice(0, 200))
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err))
-  }
 
   console.log('\n━━━ write-through ━━━')
   await run(ws, "echo 'hello from disk' | tee /data/mirage_hello.txt")

@@ -15,9 +15,9 @@
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
+from mirage.core.email.config import EmailConfig
 from mirage.core.email.readdir import readdir
 from mirage.resource.base import BaseResource
-from mirage.resource.email.config import EmailConfig
 from mirage.resource.email.prompt import PROMPT, WRITE_PROMPT
 from mirage.types import ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
@@ -30,6 +30,14 @@ class EmailResource(BaseResource):
     accessor: EmailAccessor
     name: str = ResourceName.EMAIL
     caches_reads: bool = True
+    # Every listed file carries an exact size: .email.json is rendered at
+    # readdir from the full BODY.PEEK[] the listing already fetches, and an
+    # attachment's size is its decoded payload length.
+    SIZES_ALWAYS_KNOWN: bool = True
+    # An API-backed tree that changes rarely; a day-long index spares the
+    # provider a full re-walk every 10 minutes. Mirrors the TypeScript
+    # resource.
+    index_ttl: float = 86_400
     PROMPT: str = PROMPT
     WRITE_PROMPT: str = WRITE_PROMPT
 

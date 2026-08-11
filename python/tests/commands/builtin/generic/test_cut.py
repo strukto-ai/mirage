@@ -11,11 +11,11 @@ def _unused_read_stream(_path):
 def test_multi_char_delimiter_is_rejected():
     with pytest.raises(ValueError,
                        match="delimiter must be a single character"):
-        parse_flags({"d": ",,", "f": "1"})
+        parse_flags({"delimiter": ",,", "fields": "1"})
 
 
 def test_single_char_delimiter_is_accepted():
-    parsed = parse_flags({"d": ",", "f": "1"})
+    parsed = parse_flags({"delimiter": ",", "fields": "1"})
     assert parsed.delimiter == ","
 
 
@@ -26,8 +26,8 @@ async def test_multi_char_delimiter_exits_one():
         read_stream=_unused_read_stream,
         stdin=b"a,b\n",
         flags={
-            "d": ",,",
-            "f": "1"
+            "delimiter": ",,",
+            "fields": "1"
         },
     )
 

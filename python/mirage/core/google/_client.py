@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import time
 from typing import Any
 
@@ -27,8 +28,63 @@ DOCS_API_BASE = "https://docs.googleapis.com/v1"
 SLIDES_API_BASE = "https://slides.googleapis.com/v1"
 SHEETS_API_BASE = "https://sheets.googleapis.com/v4"
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1"
+CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+FORMS_API_BASE = "https://forms.googleapis.com/v1"
 DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3"
 TOKEN_BUFFER_SECONDS = 300
+
+
+def google_error_message(body: str, status: int, reason: str | None) -> str:
+    """Pull Google's own error text out of an error response body.
+
+    Google reports why a call failed in the body, in one of two shapes: the
+    APIs use ``{"error": {"message": ...}}`` and the OAuth token endpoint
+    uses a flat ``{"error": ..., "error_description": ...}``. Falls back to
+    the raw body, then to the HTTP reason phrase.
+
+    Args:
+        body (str): the raw response body.
+        status (int): HTTP status code.
+        reason (str | None): HTTP reason phrase, the last resort.
+    """
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        error = parsed.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return str(error["message"])
+        if isinstance(error, str):
+            description = parsed.get("error_description")
+            return f"{error}: {description}" if description else error
+    return body.strip() or reason or f"HTTP {status}"
+
+
+async def raise_for_google_status(resp: aiohttp.ClientResponse) -> None:
+    """Raise with Google's message instead of the bare HTTP reason phrase.
+
+    ``resp.raise_for_status()`` raises before anything reads the body, so
+    the reason Google gave is discarded and the caller only ever sees
+    "Bad Request". An agent cannot correct an error it cannot read, so the
+    body is read first and its message becomes the exception's. The
+    exception type is unchanged, since callers classify on it (a 403 during
+    a mutation becomes EACCES in ``gdrive/resolve.py``).
+
+    Args:
+        resp (aiohttp.ClientResponse): the response to check.
+    """
+    if resp.status < 400:
+        return
+    raw = await resp.read()
+    raise aiohttp.ClientResponseError(
+        resp.request_info,
+        resp.history,
+        status=resp.status,
+        message=google_error_message(raw.decode("utf-8", errors="replace"),
+                                     resp.status, resp.reason),
+        headers=resp.headers,
+    )
 
 
 def token_url(config: GoogleConfig) -> str:
@@ -65,6 +121,16 @@ def gmail_base(token_manager: "TokenManager") -> str:
     return f"{base}/gmail/v1" if base else GMAIL_API_BASE
 
 
+def calendar_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/calendar/v3" if base else CALENDAR_API_BASE
+
+
+def forms_base(token_manager: "TokenManager") -> str:
+    base = token_manager.config.api_base
+    return f"{base}/v1" if base else FORMS_API_BASE
+
+
 async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:
     """Exchange refresh token for a new access token.
 
@@ -84,7 +150,7 @@ async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:
         data["client_secret"] = client_secret
     async with aiohttp.ClientSession() as session:
         async with session.post(token_url(config), data=data) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             body = await resp.json()
             return body["access_token"], body["expires_in"]
 
@@ -122,7 +188,7 @@ async def google_get(
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             return await resp.json()
 
 
@@ -134,7 +200,7 @@ async def google_post(
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=json) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             return await resp.json()
 
 
@@ -146,7 +212,7 @@ async def google_put(
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.put(url, headers=headers, json=json) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             return await resp.json()
 
 
@@ -162,7 +228,7 @@ async def google_patch(
                                  headers=headers,
                                  json=json,
                                  params=params) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             return await resp.json()
 
 
@@ -192,7 +258,7 @@ async def google_send_bytes(
                                    headers=headers,
                                    data=data,
                                    params=params) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             return await resp.json()
 
 
@@ -203,15 +269,26 @@ async def google_delete(
     headers = await google_headers(token_manager)
     async with aiohttp.ClientSession() as session:
         async with session.delete(url, headers=headers) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
 
 
 async def google_get_bytes(
     token_manager: TokenManager,
     url: str,
+    range_header: str | None = None,
 ) -> bytes:
+    """GET a URL as raw bytes, optionally only a byte range of it.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        url (str): API URL.
+        range_header (str | None): an HTTP ``Range`` value, or None for
+            the whole body.
+    """
     headers = await google_headers(token_manager)
+    if range_header:
+        headers["Range"] = range_header
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
-            resp.raise_for_status()
+            await raise_for_google_status(resp)
             return await resp.read()

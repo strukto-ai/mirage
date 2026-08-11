@@ -14,7 +14,7 @@
 
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
+import type { Limit, MountSpec } from '@struktoai/mirage-node'
 import { Workspace, newWorkspaceId } from '@struktoai/mirage-node'
 import { configToWorkspaceArgs, loadWorkspaceConfigFile } from './config.ts'
 
@@ -70,28 +70,22 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
   const config = loadWorkspaceConfigFile(configPath)
   const args = await configToWorkspaceArgs(config)
   const resources: Record<string, MountSpec> = {}
-  const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
-  for (const [prefix, [resource, mode, safeguards]] of Object.entries(args.resources)) {
+  const commandLimits: Record<string, Record<string, Limit>> = {}
+  for (const [prefix, [resource, mode, limits]] of Object.entries(args.resources)) {
     resources[prefix] = [resource, mode]
-    if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
+    if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
   }
+  // Every option the config produced rides through, so a new config
+  // knob needs no edit here (the hand-written list is what dropped
+  // `clis` on the daemon's own create route).
   const workspace = new Workspace(resources, {
-    mode: args.options.mode,
-    consistency: args.options.consistency,
-    ...(args.options.sessionId !== undefined ? { sessionId: args.options.sessionId } : {}),
-    ...(args.options.agentId !== undefined ? { agentId: args.options.agentId } : {}),
+    ...args.options,
     workspaceId: args.options.workspaceId ?? newWorkspaceId(),
-    ...(args.options.store !== undefined ? { store: args.options.store } : {}),
-    ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
-    ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-    ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-    ...(args.options.runtimes !== undefined ? { runtimes: args.options.runtimes } : {}),
-    ...(args.options.route !== undefined ? { route: args.options.route } : {}),
+    ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
   })
   try {
-    for (const [prefix, target] of Object.entries(args.fuseMounts)) {
-      const mountpoint = typeof target === 'string' ? target : undefined
-      await workspace.addFuseMount(prefix, mountpoint)
+    for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
+      await workspace.addFuseMount(prefix, mountpoint, undefined, backend)
     }
   } catch (error) {
     await workspace.close()

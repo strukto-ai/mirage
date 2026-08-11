@@ -32,6 +32,9 @@ class HistoryViewResource(BaseResource):
     accessor: HistoryAccessor
 
     name = "history"
+    # The view renders from in-memory events, so stat() sizes it by
+    # rendering: cheap, no network, and never None.
+    SIZES_ALWAYS_KNOWN: bool = True
 
     def __init__(self, observer) -> None:
         super().__init__()
@@ -39,5 +42,5 @@ class HistoryViewResource(BaseResource):
         self.accessor = HistoryAccessor(observer)
         for fn in COMMANDS:
             self.register(fn)
-        for fn in OPS:
-            self.register_op(fn)
+        for op in OPS:
+            self.register_op(op)

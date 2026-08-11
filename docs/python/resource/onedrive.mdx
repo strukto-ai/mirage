@@ -25,8 +25,12 @@ from mirage.resource.onedrive import OneDriveResource, OneDriveConfig
 config = OneDriveConfig(
     access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"],
     # Optional:
+    # Name at most one drive:
     # drive_id="b!...",        # target a specific drive (required for app-only tokens)
-    # site_id="contoso.sharepoint.com,...",  # use a SharePoint site's default drive
+    # site_id="contoso.sharepoint.com,...",  # a SharePoint site's default drive
+    # group_id="...",          # a Teams / Microsoft 365 group's library
+    # user_id="user@contoso.com",  # another user's drive (app-only)
+    # graph_base_url="https://graph.microsoft.us/v1.0",  # non-worldwide root
     # key_prefix="Documents/",  # mount a sub-folder as the root
     # timeout=30,
 )
@@ -41,16 +45,42 @@ modes are supported.
 
 ### Config Reference
 
-| Field          | Required | Description                                                           |
-| -------------- | -------- | --------------------------------------------------------------------- |
-| `access_token` | Yes      | Microsoft Graph OAuth2 bearer token                                   |
-| `drive_id`     | No       | Target a specific drive. Required for app-only tokens (no `/me/drive`) |
-| `site_id`      | No       | Resolve a SharePoint site's default drive instead of `/me/drive`      |
-| `key_prefix`   | No       | Mount a sub-folder of the drive as the root                           |
-| `timeout`      | No       | Request timeout in seconds (default `30`)                             |
+| Field            | Required | Description                                                            |
+| ---------------- | -------- | ---------------------------------------------------------------------- |
+| `access_token`   | Yes      | Microsoft Graph OAuth2 bearer token                                    |
+| `drive_id`       | No       | Target a specific drive. Required for app-only tokens (no `/me/drive`) |
+| `site_id`        | No       | A SharePoint site's default drive                                      |
+| `group_id`       | No       | A Teams / Microsoft 365 group's document library                       |
+| `user_id`        | No       | Another user's drive, by id or UPN (app-only auth)                     |
+| `graph_base_url` | No       | Full service root, for any deployment but the worldwide one            |
+| `key_prefix`     | No       | Mount a sub-folder of the drive as the root                            |
+| `timeout`        | No       | Request timeout in seconds (default `30`)                              |
 
-Drive resolution order: `drive_id`, then the `site_id` site's default drive,
-then `/me/drive`.
+### Naming the drive
+
+`drive_id`, `site_id`, `group_id` and `user_id` are four ways of saying which
+drive the mount is, so set **at most one**. Setting two raises at config time
+rather than silently addressing whichever came first, which otherwise surfaces
+much later as an unexplained 404. Setting none means `/me/drive`, the
+signed-in user's own drive, which is the only form that needs no extra
+identifier and the only one unavailable to an app-only token.
+
+### The service root
+
+Mounts address `https://graph.microsoft.com/v1.0` unless `graph_base_url` says
+otherwise. Set it to reach anything else: a sovereign cloud, a private
+endpoint, or a test server. Give the full root including the version segment,
+for example `https://graph.microsoft.us/v1.0`.
+
+This matters most for the sovereign deployments, which are network-isolated
+instances rather than regions: a token minted for one is rejected by the
+others, so a mount pointed at the wrong root fails outright rather than
+degrading. mirage does not ship a table of their hostnames, since it has no
+way to verify one; take the root from Microsoft's national cloud
+documentation for your tenant.
+
+Because the root is read from the config rather than a module constant, two
+mounts in one process can address different deployments.
 
 ## Filesystem Layout
 

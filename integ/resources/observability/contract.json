@@ -1,0 +1,756 @@
+{
+  "cases": [
+    {
+      "id": "ro_cat_missing",
+      "seq": 620000,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "cat {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_stat_missing",
+      "seq": 620001,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "stat {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_ls_missing",
+      "seq": 620002,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "ls {mount}/__nf_missing__",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: cannot access '{mount}/__nf_missing__': No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_grep_missing",
+      "seq": 620003,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack"
+      ],
+      "command": "grep x {mount}/__nf_missing__",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_cat_dotfile",
+      "seq": 620004,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "cat {mount}/.hidden",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: {mount}/.hidden: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_test_e_missing",
+      "seq": 620005,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "test -e {mount}/__nf_missing__; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ro_write_refused",
+      "seq": 620006,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "echo hi > {mount}/__nf_new__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "{mount}/__nf_new__: Operation not supported\n"
+      }
+    },
+    {
+      "id": "ro_mkdir_refused",
+      "seq": 620007,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "mkdir {mount}/__nf_dir__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: {mount}/__nf_dir__: Operation not supported\n"
+      }
+    },
+    {
+      "id": "ro_root_is_dir",
+      "seq": 620008,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "test -d {mount}; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ro_head_missing",
+      "seq": 620020,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "head {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_head_n_missing",
+      "seq": 620021,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "head -n 1 {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_tail_missing",
+      "seq": 620022,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "tail {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_wc_missing",
+      "seq": 620023,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "wc -l {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_wc_c_missing",
+      "seq": 620024,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "wc -c {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_nl_missing",
+      "seq": 620025,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "nl {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_cut_missing",
+      "seq": 620026,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "cut -c1-3 {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_sort_missing",
+      "seq": 620027,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "sort {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sort: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_uniq_missing",
+      "seq": 620028,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "uniq {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_rev_missing",
+      "seq": 620029,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "rev {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rev: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_tac_missing",
+      "seq": 620030,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "tac {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tac: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_sed_missing",
+      "seq": 620031,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "sed -n 1p {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_awk_missing",
+      "seq": 620032,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "awk '{print}' {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "awk: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_jq_missing",
+      "seq": 620033,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "jq . {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "jq: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_md5sum_missing",
+      "seq": 620034,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "md5sum {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "md5sum: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_sha256sum_missing",
+      "seq": 620035,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "sha256sum {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sha256sum: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_xxd_missing",
+      "seq": 620036,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "xxd {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "xxd: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_base64_missing",
+      "seq": 620037,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "base64 {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "base64: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_strings_missing",
+      "seq": 620038,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "strings {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "strings: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_file_missing",
+      "seq": 620039,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "file {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "file: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_rg_missing",
+      "seq": 620041,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack"
+      ],
+      "command": "rg x {mount}/__nf_missing__",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: {mount}/__nf_missing__: No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_realpath_missing",
+      "seq": 620043,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "realpath -e {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "realpath: '{mount}/__nf_missing__': No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_touch_refused_missing",
+      "seq": 620044,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "touch {mount}/__nf_new__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "touch: cannot touch '{mount}/__nf_new__': Read-only file system\n"
+      }
+    },
+    {
+      "id": "ro_rm_refused_missing",
+      "seq": 620045,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "rm {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rm: {mount}/__nf_missing__: Operation not supported\n"
+      }
+    },
+    {
+      "id": "ro_tee_refused_missing",
+      "seq": 620046,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "echo x | tee {mount}/__nf_new__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tee: {mount}/__nf_new__: Operation not supported\n"
+      }
+    },
+    {
+      "id": "ro_du_missing",
+      "seq": 620047,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "du {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: cannot access '{mount}/__nf_missing__': No such file or directory\n"
+      }
+    },
+    {
+      "id": "ro_tree_missing",
+      "seq": 620048,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "tree {mount}/__nf_missing__",
+      "expect": {
+        "exit": 2,
+        "stdout": "{mount}/__nf_missing__  [error opening dir]\n\n0 directories, 0 files\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

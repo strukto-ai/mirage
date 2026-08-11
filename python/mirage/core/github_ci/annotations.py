@@ -24,6 +24,7 @@ async def list_annotations(config: GitHubCIConfig,
         list[dict[str, Any]], await ci_get(
             config.token,
             "/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
+            base_url=config.base_url,
             owner=config.owner,
             repo=config.repo,
             check_run_id=check_run_id,

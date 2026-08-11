@@ -30,7 +30,7 @@ import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
 import { appendBytes as appendCore } from '../../core/ssh/append.ts'
 import { copy as copyCore } from '../../core/ssh/copy.ts'
 import { create as createCore } from '../../core/ssh/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/ssh/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/ssh/du/index.ts'
 import { exists as existsCore } from '../../core/ssh/exists.ts'
 import { find as findCore, type FindOptions as SshFindOptions } from '../../core/ssh/find.ts'
 import { mkdir as mkdirCore } from '../../core/ssh/mkdir.ts'
@@ -59,6 +59,9 @@ export interface SSHResourceState {
 export class SSHResource extends BaseResource implements Resource {
   readonly kind = ResourceName.SSH
   readonly cachesReads: boolean = true
+  // SFTP stat/readdir report the remote inode's exact byte size for every
+  // file; reads are the same raw bytes.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
   readonly prompt = SSH_PROMPT
   readonly config: SSHConfig
@@ -76,8 +79,8 @@ export class SSHResource extends BaseResource implements Resource {
     read_stream: streamCore,
     range_read: rangeReadCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -95,8 +98,9 @@ export class SSHResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return this.accessor.close()
+  override async close(): Promise<void> {
+    await this.accessor.close()
+    await super.close()
   }
 
   ops(): readonly RegisteredOp[] {
@@ -164,7 +168,7 @@ export class SSHResource extends BaseResource implements Resource {
   }
 
   du(p: PathSpec): Promise<number> {
-    return duCore(this.accessor, p)
+    return duSizeCore(this.accessor, p)
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {

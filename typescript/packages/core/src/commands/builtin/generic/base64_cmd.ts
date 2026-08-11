@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
@@ -58,11 +60,12 @@ export async function base64Generic(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(opts.flags, specOf('base64'))
   if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
-  const decode = opts.flags.d === true || opts.flags.D === true || opts.flags.decode === true
-  const wrapValue = opts.flags.w ?? opts.flags.wrap
+  const decode = fl.asBool('D') || fl.asBool('decode')
+  const wrapValue = fl.asStr('wrap')
   const wrap = typeof wrapValue === 'string' ? Number.parseInt(wrapValue, 10) : null
-  const ignoreGarbage = opts.flags.i === true || opts.flags.ignore_garbage === true
+  const ignoreGarbage = fl.asBool('ignore_garbage')
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {

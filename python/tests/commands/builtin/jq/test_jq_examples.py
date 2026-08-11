@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from .conftest import EXAMPLE_JSON, EXAMPLE_JSONL, jq, write_to_backend
+from .conftest import EXAMPLE_JSON, EXAMPLE_JSONL, jq, jq_all, write_to_backend
 
 
 class TestJqExampleJson:
@@ -45,14 +45,14 @@ class TestJqExampleJson:
 
     def test_department_names(self, backend):
         self._load(backend)
-        result = jq(backend, "/tmp/example.json", ".departments[] | .name")
+        result = jq_all(backend, "/tmp/example.json", ".departments[] | .name")
         assert "Engineering" in result
         assert "Product" in result
 
     def test_nested_team_names(self, backend):
         self._load(backend)
-        result = jq(backend, "/tmp/example.json",
-                    ".departments[0].teams[] | .name")
+        result = jq_all(backend, "/tmp/example.json",
+                        ".departments[0].teams[] | .name")
         assert "Platform" in result
 
     def test_deep_member_access(self, backend):
@@ -134,8 +134,9 @@ class TestJqExampleJsonl:
 
     def test_select_queue_operations(self, backend):
         self._load(backend)
-        result = jq(backend, "/tmp/example.jsonl",
-                    '.[] | select(.type == "queue-operation") | .operation')
+        result = jq_all(
+            backend, "/tmp/example.jsonl",
+            '.[] | select(.type == "queue-operation") | .operation')
         assert "enqueue" in result
         assert "dequeue" in result
 

@@ -39,9 +39,11 @@ ws = Workspace({"/notion": resource}, mode=MountMode.WRITE)
   databases/
     <database-title>__<database-id>/
       database.json
-      <row-page-title>__<page-id>/
-        page.json
-        ...
+      <data-source-name>__<data-source-id>/
+        data_source.json
+        <row-page-title>__<page-id>/
+          page.json
+          ...
 ```
 
 Example:
@@ -49,96 +51,132 @@ Example:
 ```text
 /notion/
   pages/
-    Project-Roadmap__a1b2c3d4/
+    Project_Roadmap__a1b2c3d4/
       page.json
-      Q1-Goals__e5f6g7h8/
+      Q1_Goals__e5f6g7h8/
         page.json
-      Q2-Goals__i9j0k1l2/
+      Q2_Goals__i9j0k1l2/
         page.json
-    Meeting-Notes__m3n4o5p6/
+    Meeting_Notes__m3n4o5p6/
       page.json
   databases/
     Tasks__4a3b21915e77/
       database.json
-      Write-proposal__62212c5affe6/
-        page.json
-      Build-dashboards__f988c5a145ef/
-        page.json
-    Roadmap__2c4d6a7f5bf3/
-      database.json
+      Tasks__d5000000-2222-3333-4444-555566667777/
+        data_source.json
+        Write_proposal__62212c5affe6/
+          page.json
+        Build_dashboards__f988c5a145ef/
+          page.json
 ```
 
-The `pages/` hierarchy mirrors Notion's standalone page tree. The
-`databases/` hierarchy lists databases shared with the integration and
-then the row pages returned by querying each database. Each database
-directory contains `database.json` with the database metadata and its
-typed property schema (the columns), but not the rows themselves; the
-rows are the row-page directories alongside it, so `ls` the database
-directory to enumerate them. Each page directory contains a `page.json`
-file with the page metadata and content. Child pages appear as nested
-directories.
+The `pages/` hierarchy mirrors Notion's standalone page tree. Each page
+directory contains a `page.json` with the page metadata and content, and
+child pages appear as nested directories.
 
-`page.json` carries the page metadata (`page_id`, `title`, `url`,
-timestamps, `parent_type`/`parent_id`, `created_by`/`last_edited_by`),
-a `markdown` field with the page body rendered as Markdown, and the raw
-`blocks`. Blocks with children embed them recursively under a
-`children` key, and the Markdown renders nested blocks with
-indentation.
+The `databases/` hierarchy is one level deeper than the page tree,
+because the `2025-09-03` API generation split a database into a
+container plus one or more **data sources**. The column schema and the
+rows both live on the data source, so a row page sits at depth 4 under
+`databases/`, not 3. The name stutters for a single-source database
+because Notion names the auto-created data source after its database;
+that disappears the moment a database holds two.
 
-`database.json` carries the database metadata (`database_id`, `title`,
-`url`, timestamps, `parent`, `archived`, `is_inline`) and `properties`,
-the database's typed column schema. It does not embed the rows; read a
-row's `page.json` for its content, since a database row is itself a page
-with `parent_type` of `database_id`.
+`ls` a data source directory to enumerate its row pages.
 
 ### database.json
 
-The database's identity plus its typed column schema (Notion's own
-property objects), with no rows inline. `ls` the database directory to
-enumerate row pages:
+The container's identity. It carries `database_id`, `title`, `url`,
+timestamps, `parent`, `archived`, `is_inline`, and the `data_sources`
+stubs that name the directories beneath it. It **does not carry
+`properties`**: at this API version the column schema lives on the data
+source, and `GET /v1/databases/{id}` no longer answers with one.
 
 ```json
 {
-  "database_id": "2c4d6a7f-5bf3-8036-bed2-d1c95826f76b",
-  "title": "Item",
-  "url": "https://www.notion.so/2c4d6a7f5bf38036bed2d1c95826f76b",
-  "created_time": "2025-12-09T23:36:00.000Z",
-  "last_edited_time": "2026-04-15T12:30:00.000Z",
+  "database_id": "eeee1111-2222-3333-4444-555566667777",
+  "title": "Tasks",
+  "url": "https://www.notion.so/eeee1111222233334444555566667777",
+  "created_time": "2026-01-01T00:00:00.000Z",
+  "last_edited_time": "2026-01-02T00:00:00.000Z",
   "parent": { "type": "workspace", "workspace": true },
   "archived": false,
   "is_inline": false,
+  "data_sources": [
+    { "id": "d5000000-2222-3333-4444-555566667777", "name": "Tasks" }
+  ]
+}
+```
+
+### data_source.json
+
+The typed column schema (Notion's own property objects), with no rows
+inline:
+
+```json
+{
+  "data_source_id": "d5000000-2222-3333-4444-555566667777",
+  "database_id": "eeee1111-2222-3333-4444-555566667777",
+  "title": "Tasks",
+  "created_time": "2026-01-01T00:00:00.000Z",
+  "last_edited_time": "2026-01-02T00:00:00.000Z",
+  "database_parent": { "type": "workspace", "workspace": true },
+  "archived": false,
   "properties": {
     "Name": { "id": "title", "type": "title", "title": {} },
-    "Number": { "id": "e%5BNQ", "type": "number", "number": { "format": "number" } },
-    "Date": { "id": "%3BgQq", "type": "date", "date": {} }
+    "Priority": { "id": "pri", "type": "number", "number": { "format": "number" } },
+    "Due": { "id": "du", "type": "date", "date": {} }
   }
 }
 ```
 
-To create a row, `notion-page-create` with a `database_id` parent and a
-`properties` object whose keys match this schema.
+A data source id is **not** its database id. Turn one into the other
+with `ntn datasources resolve <database-id>`.
 
 ### page.json
 
-A page (including a database row). Notion blocks render to `markdown`
-and stay available raw under `blocks`:
+A page, including a database row. Notion blocks render to `markdown` and
+stay available raw under `blocks`; a row's cell values are under
+`properties`, as Notion's own property objects, answering to the schema
+in the `data_source.json` one level up:
 
 ```json
 {
-  "page_id": "2c4d6a7f-5bf3-8022-826b-ed4700254ed2",
-  "title": "item_0",
-  "url": "https://www.notion.so/item_0-2c4d6a7f5bf38022826bed4700254ed2",
-  "created_time": "2025-12-09T23:36:00.000Z",
-  "last_edited_time": "2025-12-09T23:44:00.000Z",
-  "parent_type": "database_id",
-  "parent_id": "2c4d6a7f-5bf3-8036-bed2-d1c95826f76b",
+  "page_id": "ffff1111-2222-3333-4444-555566667777",
+  "title": "Write spec",
+  "url": "https://www.notion.so/ffff1111222233334444555566667777",
+  "created_time": "2026-01-01T00:00:00.000Z",
+  "last_edited_time": "2026-01-02T00:00:00.000Z",
+  "parent_type": "data_source_id",
+  "parent_id": "d5000000-2222-3333-4444-555566667777",
   "archived": false,
   "created_by": "faa6ebe0-0686-466d-96b3-2480ddda715b",
   "last_edited_by": "faa6ebe0-0686-466d-96b3-2480ddda715b",
+  "properties": {
+    "Name": {
+      "id": "title",
+      "type": "title",
+      "title": [{ "type": "text", "plain_text": "Write spec" }]
+    },
+    "Priority": { "id": "pri", "type": "number", "number": 2 },
+    "Done": { "id": "dn", "type": "checkbox", "checkbox": true }
+  },
   "markdown": "",
   "blocks": []
 }
 ```
+
+So a row's cells are readable with the ordinary tools:
+
+```bash
+jq '.properties.Priority.number' "$ROW/page.json"
+jq -r '.properties | to_entries[] | "\(.key)\t\(.value.type)"' "$ROW/page.json"
+```
+
+Blocks with children embed them recursively under a `children` key, and
+the Markdown renders nested blocks with indentation. A standalone page's
+`properties` holds only its title, which is what the API returns for
+one.
 
 ## Cache
 
@@ -170,13 +208,24 @@ async def main():
     r = await ws.execute("ls /notion/pages/")
     print(await r.stdout_str())
 
-    # List shared databases and rows in a database
+    # List shared databases, then a database's data sources, then its rows
     r = await ws.execute("ls /notion/databases/")
+    print(await r.stdout_str())
+    r = await ws.execute("tree -L 3 /notion/databases/")
     print(await r.stdout_str())
 
     # Read a page
     r = await ws.execute(
-        'cat "/notion/pages/Project-Roadmap__a1b2c3d4/page.json"'
+        'cat "/notion/pages/Project_Roadmap__a1b2c3d4/page.json"'
+    )
+    print(await r.stdout_str())
+
+    # Read one row's cells
+    r = await ws.execute(
+        'jq ".properties.Priority.number" '
+        '"/notion/databases/Tasks__4a3b21915e77'
+        '/Tasks__d5000000-2222-3333-4444-555566667777'
+        '/Write_proposal__62212c5affe6/page.json"'
     )
     print(await r.stdout_str())
 
@@ -189,22 +238,18 @@ async def main():
     print(await r.stdout_str())
 
     # Search pages with the Notion search API
-    r = await ws.execute('notion-search --query "Roadmap" --limit 5')
+    r = await ws.execute('ntn api v1/search -d \'{"query":"Roadmap"}\'')
     print(await r.stdout_str())
 
-    # Create a new page
+    # Create a new page from Markdown
     r = await ws.execute(
-        'notion-page-create --json \'{"parent":{"page_id":"a1b2c3d4"},'
-        '"properties":{"title":[{"text":{"content":"New Page"}}]}}\''
+        "ntn pages create --content '# New Page' --parent page:a1b2c3d4"
     )
     print(await r.stdout_str())
 
-    # Append content to an existing page
+    # Replace an existing page's body
     r = await ws.execute(
-        'notion-block-append --params \'{"block_id":"a1b2c3d4"}\''
-        ' --json \'{"children":[{"type":"paragraph","paragraph":'
-        '{"rich_text":[{"text":{"content":"Appended paragraph"}}]}}]}\''
-    )
+        "ntn pages edit a1b2c3d4 --content '# Replaced body'")
     print(await r.stdout_str())
 
 
@@ -228,41 +273,8 @@ Standard commands available on the mounted Notion tree:
 | `find`          | Recursive search with `-name`, `-maxdepth` |
 | `tree`          | Directory tree view                        |
 
-Resource-specific commands:
-
-### `notion-page-create`
-
-Create a new page under a parent page. Prints the new page normalized as JSON.
-
-| Option   | Required | Description                                                            |
-| -------- | -------- | ---------------------------------------------------------------------- |
-| `--json` | yes      | Page body with `parent` (required) and `properties`, per the Notion API |
-
-In the TypeScript SDK this command takes `--parent <parent-path>` and
-`--title "title"` instead of a raw `--json` body.
-
-### `notion-block-append`
-
-Append content blocks to an existing page. Prints the refreshed page as JSON.
-
-| Option     | Required | Description                                       |
-| ---------- | -------- | ------------------------------------------------- |
-| `--params` | yes      | JSON object with the target `block_id` (page ID)  |
-| `--json`   | yes      | JSON object with the `children` blocks to append  |
-
-### `notion-comment-add`
-
-Add a comment to a page. Prints the created comment as JSON.
-
-| Option   | Required | Description                                          |
-| -------- | -------- | ---------------------------------------------------- |
-| `--json` | yes      | Comment body with `parent` (required) and `rich_text` |
-
-### `notion-search`
-
-Search pages with the Notion search API.
-
-| Option    | Required | Description                  |
-| --------- | -------- | ---------------------------- |
-| `--query` | yes      | Search query                 |
-| `--limit` | no       | Max results (default 20)     |
+Acting on Notion (creating, editing and trashing pages, querying data
+sources, and every route that has no typed verb) goes through the
+[ntn CLI](/python/cli/ntn) when installed. Ids are positional: use the
+`<page-id>` / `<database-id>` / `<data-source-id>` from a path segment as
+the operand.

@@ -5,6 +5,7 @@ import {
   mountPrefixOf,
   PathSpec,
   ResourceName,
+  type DeltaHook,
   type FileStat,
   type FindOptions,
   type RegisteredCommand,
@@ -16,7 +17,7 @@ import { NEXTCLOUD_COMMANDS } from '../../commands/builtin/nextcloud/index.ts'
 import { SCOPE_ERROR } from '../../core/nextcloud/constants.ts'
 import { copy as copyCore } from '../../core/nextcloud/copy.ts'
 import { create as createCore } from '../../core/nextcloud/create.ts'
-import { du as duCore, duAll as duAllCore } from '../../core/nextcloud/du.ts'
+import { size as duSizeCore, entries as duEntriesCore } from '../../core/nextcloud/du/index.ts'
 import { exists as existsCore } from '../../core/nextcloud/exists.ts'
 import { find as findCore } from '../../core/nextcloud/find.ts'
 import { mkdir as mkdirCore } from '../../core/nextcloud/mkdir.ts'
@@ -30,6 +31,7 @@ import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/nex
 import { truncate as truncateCore } from '../../core/nextcloud/truncate.ts'
 import { unlink as unlinkCore } from '../../core/nextcloud/unlink.ts'
 import { write as writeCore } from '../../core/nextcloud/write.ts'
+import { buildDeltaHook } from '../../core/nextcloud/watch.ts'
 import { NEXTCLOUD_OPS } from '../../ops/nextcloud/index.ts'
 import {
   redactNextcloudConfig,
@@ -48,6 +50,9 @@ export interface NextcloudResourceState {
 export class NextcloudResource extends BaseResource implements Resource {
   readonly kind = ResourceName.NEXTCLOUD
   readonly cachesReads = true
+  // WebDAV PROPFIND carries getcontentlength for every file; readdir
+  // backfills any lister-omitted size with one stat per affected file.
+  readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot = true
   readonly prompt = NEXTCLOUD_PROMPT
   readonly accessor: NextcloudAccessor
@@ -64,8 +69,8 @@ export class NextcloudResource extends BaseResource implements Resource {
     read_stream: streamCore,
     range_read: rangeReadCore,
     rm_recursive: rmRCore,
-    du_total: duCore,
-    du_all: duAllCore,
+    du_size: duSizeCore,
+    du_entries: duEntriesCore,
     create: createCore,
     truncate: truncateCore,
     exists: existsCore,
@@ -78,10 +83,6 @@ export class NextcloudResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 
@@ -160,7 +161,7 @@ export class NextcloudResource extends BaseResource implements Resource {
   }
 
   du(path: PathSpec): Promise<number> {
-    return duCore(this.accessor, path)
+    return duSizeCore(this.accessor, path)
   }
 
   find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
@@ -182,6 +183,10 @@ export class NextcloudResource extends BaseResource implements Resource {
         )
       : paths
     return resolveGlobCore(this.accessor, effective, this.index)
+  }
+
+  deltaHook(): DeltaHook {
+    return buildDeltaHook(this.accessor)
   }
 
   getState(): Promise<NextcloudResourceState> {

@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_SPECS } from './builtins.ts'
-import { OperandKind } from './types.ts'
 
 describe('BUILTIN_SPECS', () => {
   it('is frozen', () => {
@@ -29,36 +28,36 @@ describe('BUILTIN_SPECS', () => {
 
   it('ls takes PATH rest args', () => {
     const spec = BUILTIN_SPECS.ls
-    expect(spec?.rest?.kind).toBe(OperandKind.PATH)
+    expect(spec?.rest?.type).toBe('path')
   })
 
   it('grep has a TEXT positional arg followed by PATH rest', () => {
     const spec = BUILTIN_SPECS.grep
-    expect(spec?.positional[0]?.kind).toBe(OperandKind.TEXT)
-    expect(spec?.rest?.kind).toBe(OperandKind.PATH)
+    expect(spec?.positional[0]?.type).toBe('str')
+    expect(spec?.rest?.type).toBe('path')
   })
 
   it('head recognizes -n and -c as TEXT-valued flags', () => {
     const spec = BUILTIN_SPECS.head
     const n = spec?.options.find((o) => o.short === '-n')
     const c = spec?.options.find((o) => o.short === '-c')
-    expect(n?.valueKind).toBe(OperandKind.TEXT)
-    expect(c?.valueKind).toBe(OperandKind.TEXT)
+    expect(n?.type).toBe('str')
+    expect(c?.type).toBe('str')
   })
 
   it('echo has -n and -e boolean flags and TEXT rest', () => {
     const spec = BUILTIN_SPECS.echo
-    expect(spec?.rest?.kind).toBe(OperandKind.TEXT)
+    expect(spec?.rest?.type).toBe('str')
     const n = spec?.options.find((o) => o.short === '-n')
     const e = spec?.options.find((o) => o.short === '-e')
-    expect(n?.valueKind).toBe(OperandKind.NONE)
-    expect(e?.valueKind).toBe(OperandKind.NONE)
+    expect(n?.type).toBe('bool')
+    expect(e?.type).toBe('bool')
   })
 
   it('du has a long --max-depth flag with TEXT value', () => {
     const spec = BUILTIN_SPECS.du
     const maxDepth = spec?.options.find((o) => o.long === '--max-depth')
-    expect(maxDepth?.valueKind).toBe(OperandKind.TEXT)
+    expect(maxDepth?.type).toBe('str')
   })
 
   it('covers the full python set size', () => {

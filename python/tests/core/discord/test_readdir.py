@@ -19,8 +19,9 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.readdir import readdir
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.render import history_jsonl_bytes, member_json_bytes
 from mirage.types import PathSpec
 
 
@@ -188,3 +189,114 @@ async def test_readdir_channel_dates(accessor, index):
     import re
     date_re = re.compile(r"^/My Server/channels/general/\d{4}-\d{2}-\d{2}$")
     assert all(date_re.match(r) for r in result)
+
+
+@pytest.mark.asyncio
+async def test_readdir_date_sizes_chat_jsonl(accessor, index):
+    await index.put(
+        "/My Server",
+        IndexEntry(
+            id="G001",
+            name="My Server",
+            resource_type="discord/guild",
+            vfs_name="My Server",
+        ),
+    )
+    await index.put(
+        "/My Server/channels/general",
+        IndexEntry(
+            id="C001",
+            name="general",
+            resource_type="discord/channel",
+            vfs_name="general",
+        ),
+    )
+    messages = [
+        {
+            "id": "1",
+            "content": "hello",
+            "author": {
+                "username": "alice"
+            }
+        },
+        {
+            "id": "2",
+            "content": "world",
+            "author": {
+                "username": "bob"
+            }
+        },
+    ]
+    with patch(
+            "mirage.core.discord.readdir.list_messages_for_day",
+            new_callable=AsyncMock,
+            return_value=messages,
+    ):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="My Server/channels/general/2024-01-15",
+                     virtual="/My Server/channels/general/2024-01-15",
+                     directory="/My Server/channels/general/2024-01-15"),
+            index)
+
+    lookup = await index.get(
+        "/My Server/channels/general/2024-01-15/chat.jsonl")
+    assert lookup.entry.size == len(history_jsonl_bytes(messages))
+
+
+@pytest.mark.asyncio
+async def test_readdir_members_sized(accessor, index):
+    await index.put(
+        "/My Server",
+        IndexEntry(
+            id="G001",
+            name="My Server",
+            resource_type="discord/guild",
+            vfs_name="My Server",
+        ),
+    )
+    members = [{"user": {"id": "U001", "username": "alice"}, "nick": "al"}]
+    with patch(
+            "mirage.core.discord.readdir.list_members",
+            new_callable=AsyncMock,
+            return_value=members,
+    ):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="My Server/members",
+                     virtual="/My Server/members",
+                     directory="/My Server/members"), index)
+
+    lookup = await index.get("/My Server/members/alice__U001.json")
+    assert lookup.entry.size == len(member_json_bytes(members[0]))
+
+
+@pytest.mark.asyncio
+async def test_readdir_unknown_shape_raises_enoent(accessor, index):
+    await index.put(
+        "/My Server",
+        IndexEntry(
+            id="G001",
+            name="My Server",
+            resource_type="discord/guild",
+            vfs_name="My Server",
+        ),
+    )
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="My Server/nope",
+                     virtual="/My Server/nope",
+                     directory="/My Server/nope"), index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_leaf_raises_enotdir(accessor, index):
+    # A file is ENOTDIR, not ENOENT: callers tell "read this" from "nothing
+    # here" by the errno.
+    key = "My Server/channels/general/2026-06-01/chat.jsonl"
+    with pytest.raises(NotADirectoryError):
+        await readdir(
+            accessor,
+            PathSpec(resource_path=key, virtual="/" + key,
+                     directory="/" + key), index)

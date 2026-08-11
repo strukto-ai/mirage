@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 from typing import Any
 
@@ -45,6 +46,67 @@ class ContentDriftError(Exception):
             f"{path}: snapshot fingerprint {snapshot_fingerprint!r}, "
             f"live {live_repr}; data on the underlying source has changed "
             "since the snapshot was taken")
+
+
+class DriftQueue:
+    """Fingerprint checks a load queued, drained on the first async op.
+
+    ``Workspace.load`` records one entry per read whose snapshot
+    manifest carried a fingerprint but no stable revision (a pinned
+    read needs no check: the pin guarantees the bytes). The first
+    ``dispatch`` or ``execute`` drains them, so downstream code can
+    rely on consistent state.
+    """
+
+    def __init__(self) -> None:
+        self._entries: list[tuple[str, str]] = []
+        self._pending = False
+
+    @property
+    def pending(self) -> bool:
+        return self._pending
+
+    @property
+    def paths(self) -> list[str]:
+        """Paths still queued for a check (audit surface)."""
+        return [path for path, _ in self._entries]
+
+    def queue(self, path: str, fingerprint: str) -> None:
+        """Record one path to check against its live source.
+
+        Args:
+            path (str): virtual path recorded in the snapshot.
+            fingerprint (str): marker the snapshot recorded for it.
+        """
+        self._entries.append((path, fingerprint))
+        self._pending = True
+
+    async def drain(self, ws) -> None:
+        """Stat every queued path in parallel; raise on the first drift.
+
+        Subsequent calls are no-ops. Stats are issued with
+        ``asyncio.gather`` so first-op latency does not scale linearly
+        with the number of recorded reads.
+
+        Args:
+            ws: Workspace whose registry resolves the paths.
+
+        Raises:
+            ContentDriftError: a live fingerprint differs from the
+                recorded one.
+        """
+        self._pending = False
+        if not self._entries:
+            return
+        checks = [
+            check_drift(ws, path, fingerprint)
+            for path, fingerprint in self._entries
+        ]
+        self._entries.clear()
+        results = await asyncio.gather(*checks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
 
 def capture_fingerprints(ws) -> list[dict[str, Any]]:
@@ -109,7 +171,6 @@ def install_fingerprints(ws, fingerprint_entries: list[dict[str, Any]],
         fingerprint_entries: entries from a snapshot's FINGERPRINTS.
         drift_policy: STRICT queues drift checks; OFF skips and evicts.
     """
-    ws._drift_policy = drift_policy
     if drift_policy == DriftPolicy.OFF:
         if fingerprint_entries:
             ws._cache.evict_paths(f[FingerprintKey.PATH]
@@ -127,8 +188,7 @@ def install_fingerprints(ws, fingerprint_entries: list[dict[str, Any]],
             continue
         fingerprint = f.get(FingerprintKey.FINGERPRINT)
         if fingerprint is not None:
-            ws._pending_drift.append((mount, path, fingerprint))
-    ws._drift_check_pending = bool(ws._pending_drift)
+            ws._drift.queue(path, fingerprint)
 
 
 def live_only_mount_prefixes(ws) -> list[str]:

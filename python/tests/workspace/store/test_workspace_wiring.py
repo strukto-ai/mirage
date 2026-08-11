@@ -73,7 +73,7 @@ async def test_workspace_does_not_close_shared_passed_store():
 
 @pytest.mark.asyncio
 async def test_workspace_closes_its_cache_once(monkeypatch):
-    monkeypatch.setattr("mirage.workspace.workspace.RAMFileCacheStore",
+    monkeypatch.setattr("mirage.workspace.workspace.cache.RAMFileCacheStore",
                         ClosingCache)
     ws = Workspace({"/data": RAMResource()})
     cache = ws.cache

@@ -59,6 +59,21 @@ If the modified date is unavailable, the date prefix is omitted.
 Reading a spreadsheet file returns the full Google Sheets API JSON
 for that spreadsheet, including sheet metadata.
 
+### Shared Drives
+
+The listing covers every corpus the account can reach, so a spreadsheet that
+lives in a Shared Drive appears here too. A Shared Drive spreadsheet has no
+owner (the drive owns it), so it lands under `shared`, which is what that
+directory means. This matches the `gdrive` mount, where Shared Drives are
+top-level directories: without it the same account would see a spreadsheet
+under one Google mount and not the other, with no error explaining the
+difference.
+
+Drive answers an all-corpora search best-effort. When it reports that it
+skipped a corpus, the short listing is still returned but is not cached as
+the directory, so the next `ls` re-lists instead of serving the gap until
+the cache expires.
+
 ## Cache
 
 The Google Sheets resource uses `IndexCacheStore`. Index entries
@@ -75,6 +90,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
 
 load_dotenv(".env.development")
@@ -89,6 +105,7 @@ resource = GSheetsResource(config=config)
 
 async def main():
     ws = Workspace({"/gsheets": resource}, mode=MountMode.READ)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List structure
     r = await ws.execute("ls /gsheets/")
@@ -119,12 +136,12 @@ async def main():
 
     # Read cell values
     r = await ws.execute(
-        'gws sheets +read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"')
+        'gws sheets read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"')
     print(await r.stdout_str())
 
     # Append rows
     r = await ws.execute(
-        "gws sheets +append --spreadsheet 1AbCdEf --values Alice,30,NYC")
+        "gws sheets append --spreadsheet 1AbCdEf --values Alice,30,NYC")
     print(await r.stdout_str())
 
     # Create a new spreadsheet
@@ -158,86 +175,5 @@ Standard commands available on the mounted Google Sheets tree:
 | `basename` / `dirname` / `realpath` | Path utilities                 |
 | `nl`                                | Number lines                   |
 
-Resource-specific commands:
-
-### `gws sheets +read`
-
-Read cell values from a spreadsheet range.
-
-```bash
-gws sheets +read --spreadsheet 1AbCdEf --range "Sheet1!A1:C3"
-```
-
-| Option          | Required | Description               |
-| --------------- | -------- | ------------------------- |
-| `--spreadsheet` | yes      | Google spreadsheet ID     |
-| `--range`       | yes      | A1 notation range to read |
-
-Returns the cell values as JSON.
-
-### `gws sheets +write`
-
-Write cell values to a spreadsheet range.
-
-```bash
-gws sheets +write --spreadsheet 1AbCdEf --range "Sheet1!A1" --values "x,y,z"
-```
-
-| Option          | Required | Description                                    |
-| --------------- | -------- | ---------------------------------------------- |
-| `--spreadsheet` | yes      | Spreadsheet ID                                 |
-| `--range`       | yes      | A1 notation range to overwrite                 |
-| `--values`      | no       | Comma-separated values for a single row        |
-| `--json-values` | no       | JSON array of rows (alternative to `--values`) |
-
-One of `--values` or `--json-values` is required.
-
-Returns the update response JSON.
-
-### `gws sheets +append`
-
-Append rows to a spreadsheet.
-
-```bash
-gws sheets +append --spreadsheet 1AbCdEf --values Alice,30,NYC
-gws sheets +append --spreadsheet 1AbCdEf --range "Sheet1!A1" --json-values '[["Bob",25,"LA"]]'
-```
-
-| Option          | Required | Description                          |
-| --------------- | -------- | ------------------------------------ |
-| `--spreadsheet` | yes      | Google spreadsheet ID                |
-| `--range`       | no       | A1 notation range (defaults to `A1`) |
-| `--values`      | no       | Comma-separated values for one row   |
-| `--json-values` | no       | JSON 2D array of values              |
-
-Either `--values` or `--json-values` is required. Returns the
-append response JSON.
-
-### `gws sheets spreadsheets create`
-
-Create a new spreadsheet.
-
-```bash
-gws sheets spreadsheets create --json '{"properties":{"title":"MIRAGE Sheet"}}'
-```
-
-| Option   | Required | Description                             |
-| -------- | -------- | --------------------------------------- |
-| `--json` | yes      | JSON body with `properties.title` field |
-
-Returns the created spreadsheet JSON.
-
-### `gws sheets spreadsheets batchUpdate`
-
-Batch update a spreadsheet.
-
-```bash
-gws sheets spreadsheets batchUpdate --params '{"spreadsheetId":"1AbCdEf"}' --json '{"requests":[]}'
-```
-
-| Option     | Required | Description                |
-| ---------- | -------- | -------------------------- |
-| `--params` | yes      | JSON with `spreadsheetId`  |
-| `--json`   | yes      | JSON with `requests` array |
-
-Returns the batch update response JSON.
+Acting on spreadsheets (read/write/append ranges, raw API calls)
+goes through the [gws CLI](/python/cli/gws) when installed.

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { enoent, enotdir, type PathSpec } from '@struktoai/mirage-core'
+
 export { norm, parent, gnuBasename as basename } from '@struktoai/mirage-core'
 
 export function dirname(p: string): string {
@@ -50,6 +52,11 @@ export async function resolveDirHandle(
   return handle
 }
 
+// `create` applies to the named file only, never to its parents: that is
+// what O_CREAT means, and OPFS would otherwise build the whole chain on
+// demand (a silent `mkdir -p`) where GNU reports ENOENT. A missing parent
+// surfaces as NotFoundError and a plain-file component as TypeMismatchError,
+// which the callers map to ENOENT/ENOTDIR against the operand.
 export async function resolveFileHandle(
   root: FileSystemDirectoryHandle,
   virtual: string,
@@ -62,7 +69,7 @@ export async function resolveFileHandle(
   }
   let dir = root
   for (const seg of segs) {
-    dir = await dir.getDirectoryHandle(seg, { create: options.create ?? false })
+    dir = await dir.getDirectoryHandle(seg, { create: false })
   }
   return dir.getFileHandle(fileName, { create: options.create ?? false })
 }
@@ -82,6 +89,51 @@ export async function resolveParentDirHandle(
     dir = await dir.getDirectoryHandle(seg, { create: options.create ?? false })
   }
   return [dir, name]
+}
+
+// Translate a handle-resolution failure on a write target into the errno the
+// command layer reports. OPFS raises NotFoundError for a missing component
+// and TypeMismatchError for one that is a plain file, which are exactly
+// rename(2)'s ENOENT and ENOTDIR. Anything else is a real fault and is
+// rethrown untouched.
+export function destError(err: unknown, spec: PathSpec): unknown {
+  if (isNotFound(err)) return enoent(spec)
+  if (isTypeMismatch(err)) return enotdir(spec)
+  return err
+}
+
+// What lives at a mount-local key: 'file', 'dir', or null when nothing does.
+// OPFS raises the same TypeMismatchError whichever kind is in the way, so a
+// chain walk that has to tell GNU's two errnos apart can only get the split by
+// trying both handle kinds.
+export async function kindAt(
+  root: FileSystemDirectoryHandle,
+  key: string,
+): Promise<'file' | 'dir' | null> {
+  let dir: FileSystemDirectoryHandle
+  let name: string
+  try {
+    ;[dir, name] = await resolveParentDirHandle(root, key, { create: false })
+  } catch (err) {
+    // A chain that stops short is "nothing here"; anything else (a
+    // SecurityError, an invalid state) is a real backend failure and must
+    // not read as an absent component.
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+    return null
+  }
+  try {
+    await dir.getDirectoryHandle(name, { create: false })
+    return 'dir'
+  } catch (err) {
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+  }
+  try {
+    await dir.getFileHandle(name, { create: false })
+    return 'file'
+  } catch (err) {
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+  }
+  return null
 }
 
 export function isNotFound(err: unknown): boolean {

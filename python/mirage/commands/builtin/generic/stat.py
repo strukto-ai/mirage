@@ -1,23 +1,23 @@
-import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.formatting import _ls_mode_string
 from mirage.commands.builtin.utils.output import format_records
 from mirage.core.timeutil import iso_to_epoch
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
-# GNU printf-style directive: %[flags][width][.precision]conversion, where
-# conversion is a letter (optionally H/L-prefixed for device major/minor) or
-# a literal %. Parsing flags/width/precision up front stops them being
-# mistaken for the conversion char (e.g. %04a must not read as directive "0").
-_FORMAT_RE = re.compile(r"%([#0 +-]*)(\d*)(?:\.(\d*))?([HL]?[A-Za-z%])")
-
 _STR_DIRECTIVES = frozenset("nNF")
+
+_FORMAT_FLAGS = frozenset("#0 +-")
+
+_ASCII_DIGITS = frozenset("0123456789")
 
 _TYPE_LABELS = {
     FileType.DIRECTORY: "directory",
+    FileType.SYMLINK: "symbolic link",
     FileType.TEXT: "regular file",
     FileType.BINARY: "regular file",
     FileType.JSON: "regular file",
@@ -25,6 +25,25 @@ _TYPE_LABELS = {
 }
 
 _DEFAULT_OWNER = "user"
+
+
+@dataclass(frozen=True, slots=True)
+class _FormatDirective:
+    """One parsed ``%[flags][width][.precision]conversion`` directive.
+
+    Args:
+        end (int): index just past the directive in the format string.
+        flags (str): any of ``# 0 + -``.
+        width (str): minimum field width (digits) or empty.
+        precision (str | None): precision digits, or None when absent.
+        spec (str): the conversion char, H/L-prefixed for device major/minor.
+    """
+
+    end: int
+    flags: str
+    width: str
+    precision: str | None
+    spec: str
 
 
 def _type_label(s: FileStat) -> str:
@@ -35,11 +54,20 @@ def _type_label(s: FileStat) -> str:
 def _effective_mode(s: FileStat) -> int:
     if s.mode is not None:
         return s.mode & 0o7777
-    return 0o755 if s.type == FileType.DIRECTORY else 0o644
+    if s.type == FileType.DIRECTORY:
+        return 0o755
+    # A symlink carries no permission bits of its own; GNU reports 0777.
+    if s.type == FileType.SYMLINK:
+        return 0o777
+    return 0o644
 
 
 def _type_bits(s: FileStat) -> int:
-    return 0o040000 if s.type == FileType.DIRECTORY else 0o100000
+    if s.type == FileType.DIRECTORY:
+        return 0o040000
+    if s.type == FileType.SYMLINK:
+        return 0o120000
+    return 0o100000
 
 
 def _owner(value: int | str | None) -> str:
@@ -142,10 +170,85 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
     return "?"
 
 
+def _is_conversion(char: str) -> bool:
+    return char == "%" or "A" <= char <= "Z" or "a" <= char <= "z"
+
+
+def _parse_format_directive(fmt: str, start: int) -> _FormatDirective | None:
+    """Scan one GNU printf-style directive starting at a ``%``.
+
+    Walks flags, width and precision with an explicit cursor so a long run
+    of flag/width characters that never reaches a conversion char costs
+    linear time instead of backtracking (CodeQL #247).
+
+    Args:
+        fmt (str): the whole format string.
+        start (int): index of the leading ``%``.
+    """
+    end = len(fmt)
+    cursor = start + 1
+    flags_start = cursor
+    while cursor < end and fmt[cursor] in _FORMAT_FLAGS:
+        cursor += 1
+    flags = fmt[flags_start:cursor]
+
+    width_start = cursor
+    while cursor < end and fmt[cursor] in _ASCII_DIGITS:
+        cursor += 1
+    width = fmt[width_start:cursor]
+
+    precision: str | None = None
+    if cursor < end and fmt[cursor] == ".":
+        cursor += 1
+        precision_start = cursor
+        while cursor < end and fmt[cursor] in _ASCII_DIGITS:
+            cursor += 1
+        precision = fmt[precision_start:cursor]
+
+    if cursor >= end or not _is_conversion(fmt[cursor]):
+        return None
+    spec = fmt[cursor]
+    cursor += 1
+    if spec in ("H", "L") and cursor < end and _is_conversion(fmt[cursor]):
+        spec += fmt[cursor]
+        cursor += 1
+    return _FormatDirective(end=cursor,
+                            flags=flags,
+                            width=width,
+                            precision=precision,
+                            spec=spec)
+
+
 def _format_stat(fmt: str, s: FileStat, name: str) -> str:
-    return _FORMAT_RE.sub(
-        lambda m: _apply_flags(_directive_value(m.group(4), s, name), m.group(
-            1), m.group(2), m.group(3), m.group(4)), fmt)
+    parts: list[str] = []
+    cursor = 0
+    while cursor < len(fmt):
+        start = fmt.find("%", cursor)
+        if start == -1:
+            parts.append(fmt[cursor:])
+            break
+        parts.append(fmt[cursor:start])
+        directive = _parse_format_directive(fmt, start)
+        if directive is None:
+            parts.append("%")
+            cursor = start + 1
+            continue
+        parts.append(
+            _apply_flags(_directive_value(directive.spec, s,
+                                          name), directive.flags,
+                         directive.width, directive.precision, directive.spec))
+        cursor = directive.end
+    return "".join(parts)
+
+
+def _render_stat(s: FileStat) -> str:
+    """Render the default (no -c) stat line.
+
+    Args:
+        s (FileStat): the stat to render.
+    """
+    return (f"name={s.name} size={s.size} modified={s.modified}"
+            f" type={s.type.value if s.type else None}")
 
 
 async def stat(
@@ -154,13 +257,36 @@ async def stat(
     stat_fn: Callable[..., Awaitable[FileStat]],
     c: str | None = None,
     f: str | None = None,
+    L: bool = False,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Report file status, GNU stat semantics.
+
+    Args:
+        paths (list[PathSpec]): operands to stat.
+        stat_fn (Callable): backend stat for a resolved path.
+        c (str | None): output format string.
+        f (str | None): output format string (alias of -c here).
+        L (bool): dereference symlinks instead of reporting the link.
+        links (LinkView | None): the namespace's symlink facts;
+            absent when the workspace holds no links.
+    """
     if not paths:
         raise ValueError("stat: missing operand")
     fmt = c if c is not None else f
     lines: list[str] = []
     err = b""
     for p in paths:
+        # GNU stat lstats: a symlink operand reports the link itself,
+        # not its target, unless -L asks to dereference. A link has no
+        # backend inode, so the namespace is the only authority for it.
+        linked = None if L or links is None else links.stat_at(p.virtual)
+        if linked is not None:
+            if fmt is not None:
+                lines.append(_format_stat(fmt, linked, p.raw_path))
+            else:
+                lines.append(_render_stat(linked))
+            continue
         try:
             s = await stat_fn(p)
         except FS_ERRORS as exc:
@@ -170,9 +296,7 @@ async def stat(
         if fmt is not None:
             lines.append(_format_stat(fmt, s, p.raw_path))
         else:
-            lines.append(f"name={s.name} size={s.size}"
-                         f" modified={s.modified}"
-                         f" type={s.type.value if s.type else None}")
+            lines.append(_render_stat(s))
     io = IOResult(exit_code=1 if err else 0, stderr=err or None)
     if not lines:
         return None, io

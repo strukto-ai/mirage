@@ -1,0 +1,890 @@
+{
+  "cases": [
+    {
+      "id": "hm_help_root",
+      "seq": 562000,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya: IMAP/SMTP mail client\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_help_group",
+      "seq": 562001,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya message: Manage messages\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_help_leaf",
+      "seq": 562002,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya message compose: Compose a new message from flags\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_help_alias_resolves_to_canonical",
+      "seq": 562003,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message write --help | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "himalaya message compose: Compose a new message from flags\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_help_search_documents_the_dsl",
+      "seq": 562004,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search --help | grep -c 'order by'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_unknown_verb",
+      "seq": 562005,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya: 'bogus' is not a himalaya command. See 'himalaya --help'.\n"
+      }
+    },
+    {
+      "id": "hm_unknown_group_verb",
+      "seq": 562006,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya: 'bogus' is not a himalaya envelope command. See 'himalaya envelope --help'.\n"
+      }
+    },
+    {
+      "id": "hm_upstream_verb_we_lack_fails_loud",
+      "seq": 562007,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message move 1 --to Archive",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya: 'move' is not a himalaya message command. See 'himalaya message --help'.\n"
+      }
+    },
+    {
+      "id": "hm_missing_operand",
+      "seq": 562008,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message read",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya message read: message id is required\n"
+      }
+    },
+    {
+      "id": "hm_bad_query_never_reaches_the_server",
+      "seq": 562009,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search sender alice",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya envelope search: expected a condition (date, before, after, from, to, subject, body, flag) but found 'sender'\n"
+      }
+    },
+    {
+      "id": "hm_unknown_flag_is_rejected",
+      "seq": 562010,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list --bogus",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "himalaya envelope list: unrecognized option '--bogus'\nTry 'himalaya envelope list --help' for more information.\n"
+      }
+    },
+    {
+      "id": "hm_unknown_mailbox_fails_loud",
+      "seq": 562011,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list -m Nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya envelope list: no such mailbox 'Nope'\n"
+      }
+    },
+    {
+      "id": "hm_list_mailbox_flag",
+      "seq": 562012,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list -m Archive | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Invoice 4471\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_list_alias_ls",
+      "seq": 562013,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope ls -m Archive | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Invoice 4471\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_list_orders_most_recent_first",
+      "seq": 562014,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\nStandup notes\nQ2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_list_pages_from_one",
+      "seq": 562015,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list --page 2 --page-size 1 | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_subject_condition",
+      "seq": 562016,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search subject Standup | jq -r '.[].uid'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_alias_sr",
+      "seq": 562017,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope sr subject Standup | jq -r '.[].uid'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_and_operator",
+      "seq": 562018,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search from marcus@example.com and subject Standup | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_not_flag",
+      "seq": 562019,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search not flag seen | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\nQ2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_or_operator",
+      "seq": 562020,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search subject Standup or subject alert | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\nStandup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_parentheses_regroup",
+      "seq": 562021,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search '(subject Standup or subject alert)' and not flag seen | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_after_is_strictly_greater",
+      "seq": 562022,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search after 2026-01-06 | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_before_is_exclusive",
+      "seq": 562023,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search before 2026-01-06 | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\nQ2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_order_by_subject",
+      "seq": 562024,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search order by subject | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Q2 Budget Review\nServer alert: worker-3\nStandup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_mailbox_flag",
+      "seq": 562025,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search -m Archive subject Invoice | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Invoice 4471\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_pages_like_list",
+      "seq": 562026,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search --page 2 --page-size 1 | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_date_condition_reaches_the_server",
+      "seq": 562027,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search date 2026-01-05 | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_to_condition",
+      "seq": 562028,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search to integ@example.com | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\nStandup notes\nQ2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_body_condition",
+      "seq": 562029,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search body forecast | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_flag_seen",
+      "seq": 562030,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search flag seen | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_flag_draft_matches_nothing",
+      "seq": 562031,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search flag draft | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_negated_flag_matches_everything",
+      "seq": 562032,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search not flag draft | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\nStandup notes\nQ2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_order_by_desc",
+      "seq": 562033,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search order by subject desc | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Standup notes\nServer alert: worker-3\nQ2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_order_by_date_asc",
+      "seq": 562034,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search order by date asc | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Q2 Budget Review\nStandup notes\nServer alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_order_by_from",
+      "seq": 562035,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search order by from asc | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Q2 Budget Review\nStandup notes\nServer alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_order_by_to_is_stable",
+      "seq": 562036,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search order by to | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Q2 Budget Review\nStandup notes\nServer alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_search_quoted_pattern_keeps_spaces",
+      "seq": 562037,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope search subject '\"Server alert\"' | jq -r '.[].subject'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Server alert: worker-3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_read_takes_the_id_positionally",
+      "seq": 562038,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message read -m Archive 1 | jq -r .snippet",
+      "expect": {
+        "exit": 0,
+        "stdout": "invoice 4471 attached, total 240 usd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_read_raw_serves_rfc5322",
+      "seq": 562039,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message read -m Archive 1 --raw | grep -c '^Subject: Invoice 4471'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_from_overrides_the_account",
+      "seq": 562040,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --from ops@example.com --to a@b.com --body hi | grep '^From:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "From: ops@example.com\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_cc_header",
+      "seq": 562041,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to a@b.com --cc x@y.com --body hi | grep '^Cc:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Cc: x@y.com\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_signature_rides_after_the_delimiter",
+      "seq": 562042,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to a@b.com --body hi --signature 'Sent from mirage' | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "-- \r\nSent from mirage\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_body_falls_back_to_stdin",
+      "seq": 562043,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "echo 'piped body' | himalaya message compose --to a@b.com --subject S | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "piped body\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_alias_write",
+      "seq": 562044,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message write --to a@b.com --subject Aliased --body hi | grep '^Subject:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Subject: Aliased\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_alias_new",
+      "seq": 562045,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message new --to a@b.com --subject Aliased --body hi | grep '^Subject:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Subject: Aliased\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_top_posts_by_default",
+      "seq": 562046,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply -m INBOX 1 --body mine | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "> final numbers due friday\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_bottom_posting_style",
+      "seq": 562047,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply -m INBOX 1 --body mine -P bottom | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "mine\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_quote_headline",
+      "seq": 562048,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply -m INBOX 1 --body mine -Q 'On Monday, Alice wrote:' | grep -c '^On Monday, Alice wrote:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_forward_quote_headline",
+      "seq": 562049,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message forward -m Archive 1 --to x@y.com -Q 'Forwarded message:' | grep -c '^Forwarded message:'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_writes_mime_to_stdout",
+      "seq": 562100,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'CLI probe' --body 'sent from the cli facet'",
+      "expect": {
+        "exit": 0,
+        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: CLI probe\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 7bit\r\nMIME-Version: 1.0\r\n\r\nsent from the cli facet\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_send",
+      "seq": 562101,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'CLI probe' --body 'sent from the cli facet' --send",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"status\":\"sent\",\"to\":\"integ@example.com\",\"subject\":\"CLI probe\"}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_send_visible_via_mount",
+      "seq": 562102,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'sent from the cli facet' /mail/INBOX | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_pipes_into_send",
+      "seq": 562103,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'Piped probe' --body 'through the pipe' | himalaya message send | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Piped probe\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_send_refuses_an_empty_message",
+      "seq": 562104,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "printf '' | himalaya message send",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya message send: no message provided: pass it as an argument or pipe it via standard input\n"
+      }
+    },
+    {
+      "id": "hm_bcc_send",
+      "seq": 562105,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to nobody@example.com --bcc integ@example.com --subject 'Bcc probe' --body 'blind copy' --send",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"status\":\"sent\",\"to\":\"nobody@example.com\",\"subject\":\"Bcc probe\"}",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_bcc_reaches_the_blind_copy",
+      "seq": 562106,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'blind copy' /mail/INBOX | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_bcc_header_does_not_survive_delivery",
+      "seq": 562107,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "U=$(himalaya envelope search subject Bcc | jq -r '.[0].uid') && himalaya message read $U --raw | grep -c '^Bcc:' | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_quotes_the_source_without_sending",
+      "seq": 562108,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply -m INBOX 1 --body 'numbers look good' | grep -c '^> please find the budget attached'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_send",
+      "seq": 562109,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply -m INBOX 1 --body 'numbers look good' --send | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Re: Q2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_reply_all_is_spelled_with_cc",
+      "seq": 562110,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message reply -m INBOX 1 --cc marcus@example.com --body 'ack all' --send | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Re: Q2 Budget Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_forward_send",
+      "seq": 562111,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message forward -m Archive 1 --to integ@example.com --send | jq -r .status",
+      "expect": {
+        "exit": 0,
+        "stdout": "sent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_forward_alias_fwd",
+      "seq": 562112,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message fwd -m Archive 1 --to integ@example.com --send | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Fwd: Invoice 4471\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_send_takes_the_message_as_an_operand",
+      "seq": 562113,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message send \"$(himalaya message compose --to integ@example.com --subject 'Operand probe' --body 'via operand')\" | jq -r .subject",
+      "expect": {
+        "exit": 0,
+        "stdout": "Operand probe\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_attach_prep",
+      "seq": 562114,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "printf 'the note body\\n' > /scratch/note.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_attach_builds_multipart_mixed",
+      "seq": 562115,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'With file' --body 'see attached' --attach /scratch/note.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: With file\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"8964b7638e5ed9c5f62cd5fd2c0ed207\"\r\n\r\n--8964b7638e5ed9c5f62cd5fd2c0ed207\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 7bit\r\n\r\nsee attached\r\n\r\n--8964b7638e5ed9c5f62cd5fd2c0ed207\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"note.txt\"\r\nMIME-Version: 1.0\r\n\r\ndGhlIG5vdGUgYm9keQo=\r\n\r\n--8964b7638e5ed9c5f62cd5fd2c0ed207--\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_compose_attach_missing_file_names_the_path",
+      "seq": 562116,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --body x --attach /scratch/gone.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya message compose: read attachment /scratch/gone.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "hm_compose_nonascii_serializes_like_python",
+      "seq": 562117,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'Résumé détaillé' --body 'naïve résumé body'",
+      "expect": {
+        "exit": 0,
+        "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: =?utf-8?b?UsOpc3Vtw6kgZMOpdGFpbGzDqQ==?=\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 8bit\r\nMIME-Version: 1.0\r\n\r\nnaïve résumé body\r\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "id": "tee_multi_operand",
+      "seq": 601052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee3 && printf 'DUP' | tee /data/ptee3/a.txt /data/ptee3/b.txt > /dev/null && cat /data/ptee3/a.txt && printf '|' && cat /data/ptee3/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "DUP|DUP",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tee_a_multi_operand",
+      "seq": 601053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee4 && printf 'x' > /data/ptee4/a.txt && printf 'y' > /data/ptee4/b.txt && printf 'Z' | tee -a /data/ptee4/a.txt /data/ptee4/b.txt > /dev/null && cat /data/ptee4/a.txt && printf '|' && cat /data/ptee4/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "xZ|yZ",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
+    },
+    {
+      "id": "tee_a_creates_missing",
+      "seq": 601054,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/ptee5 && printf 'NEW' | tee -a /data/ptee5/fresh.txt > /dev/null && cat /data/ptee5/fresh.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "NEW",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
+    }
+  ]
+}

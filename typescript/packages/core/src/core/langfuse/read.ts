@@ -15,20 +15,15 @@
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
-import { fetchDatasetItems, fetchDatasetRuns, fetchPrompt, fetchTrace } from './_client.ts'
+import {
+  fetchDatasetItems,
+  fetchDatasetRuns,
+  fetchOrEnoent,
+  fetchPrompt,
+  fetchTrace,
+} from './_client.ts'
 import { enoent } from '../../utils/errors.ts'
-
-const ENC = new TextEncoder()
-
-function toJsonBytes(data: unknown): Uint8Array {
-  return ENC.encode(JSON.stringify(data, null, 2))
-}
-
-function toJsonlBytes(items: readonly Record<string, unknown>[]): Uint8Array {
-  if (items.length === 0) return new Uint8Array()
-  const text = items.map((item) => JSON.stringify(item)).join('\n') + '\n'
-  return ENC.encode(text)
-}
+import { toJsonBytes, toJsonlBytes } from './render.ts'
 
 export async function read(
   accessor: LangfuseAccessor,
@@ -44,13 +39,13 @@ export async function read(
 
   if (parts[0] === 'traces' && parts.length === 2 && (parts[1] ?? '').endsWith('.json')) {
     const traceId = (parts[1] ?? '').slice(0, -'.json'.length)
-    const data = await fetchTrace(accessor.transport, traceId)
+    const data = await fetchOrEnoent(fetchTrace(accessor.transport, traceId), path)
     return toJsonBytes(data)
   }
 
   if (parts[0] === 'sessions' && parts.length === 3 && (parts[2] ?? '').endsWith('.json')) {
     const traceId = (parts[2] ?? '').slice(0, -'.json'.length)
-    const data = await fetchTrace(accessor.transport, traceId)
+    const data = await fetchOrEnoent(fetchTrace(accessor.transport, traceId), path)
     return toJsonBytes(data)
   }
 
@@ -59,13 +54,13 @@ export async function read(
     const versionStr = (parts[2] ?? '').slice(0, -'.json'.length)
     const version = Number.parseInt(versionStr, 10)
     if (Number.isNaN(version)) throw enoent(path)
-    const data = await fetchPrompt(accessor.transport, promptName, version)
+    const data = await fetchOrEnoent(fetchPrompt(accessor.transport, promptName, version), path)
     return toJsonBytes(data)
   }
 
   if (parts[0] === 'datasets' && parts.length === 3 && parts[2] === 'items.jsonl') {
     const datasetName = parts[1] ?? ''
-    const items = await fetchDatasetItems(accessor.transport, datasetName)
+    const items = await fetchOrEnoent(fetchDatasetItems(accessor.transport, datasetName), path)
     return toJsonlBytes(items)
   }
 
@@ -77,11 +72,14 @@ export async function read(
   ) {
     const datasetName = parts[1] ?? ''
     const runName = (parts[3] ?? '').slice(0, -'.jsonl'.length)
-    const runs = await fetchDatasetRuns(accessor.transport, datasetName)
+    const runs = await fetchOrEnoent(fetchDatasetRuns(accessor.transport, datasetName), path)
     const matched = runs.filter((r) => r.name === runName)
     const first = matched[0]
     if (first === undefined) throw enoent(path)
-    return toJsonBytes(first)
+    // A .jsonl path must render as line-delimited JSON, not an indented
+    // document: readers that split on newlines (jq) otherwise choke on the
+    // first bare brace.
+    return toJsonlBytes([first])
   }
 
   throw enoent(path)

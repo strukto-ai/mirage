@@ -12,12 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat } from '../types.ts'
-
 // Ops with lstat semantics: they act on the entry named by the path, so
 // no stat surface (dispatch, the fs facade, FUSE) may rewrite their
 // operand through the symlink table.
 export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set(['unlink', 'rename', 'rmdir'])
+
+// Content-writing ops whose completion stamps an observed mtime on the
+// namespace node (removals invalidate but must not stamp).
+export const STAMP_WRITE_OPS: ReadonlySet<string> = new Set([
+  'write',
+  'write_bytes',
+  'append',
+  'create',
+  'truncate',
+  'mkdir',
+])
 
 // The symlink surface a namespace offers to lower layers. The workspace
 // Namespace satisfies this structurally; the fs facade and FUSE consume
@@ -30,12 +39,10 @@ export interface NamespaceLinks {
   isLink(path: string): boolean
   // The stored target for a link path, null when not a link.
   readlink(path: string): string | null
-  // Link basename to target for entries directly under a directory.
-  linksUnder(directory: string): Map<string, string>
+  // Every link path to its stored target, the whole table.
+  symlinkTargets(): Map<string, string>
   // Create or overwrite a symlink entry; target is kept verbatim.
   symlink(link: string, target: string, mtime: number): Promise<void>
   // Drop a node entry; true when one existed.
   unlink(path: string): Promise<boolean>
 }
-
-export type StatOverlay = (path: string, stat: FileStat) => FileStat

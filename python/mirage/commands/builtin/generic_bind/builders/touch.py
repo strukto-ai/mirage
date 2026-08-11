@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 
 async def touch(
@@ -38,13 +39,25 @@ async def touch(
     exists = ops.require(Operation.EXISTS)
     write = ops.require(Operation.WRITE)
     created: dict[str, ByteSource] = {}
+    errors: list[str] = []
     for p in paths:
         if c:
             continue
-        if not await exists(accessor, p):
+        if await exists(accessor, p):
+            continue
+        try:
             await write(accessor, p, b"")
-            created[p.mount_path] = b""
-    return None, IOResult(writes=created)
+        except FS_ERRORS as exc:
+            # One unusable operand is not an aborted command: GNU reports
+            # it and still touches the remaining ones.
+            errors.append(f"touch: cannot touch '{p.virtual}': "
+                          f"{fs_strerror(exc)}")
+            continue
+        created[p.mount_path] = b""
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return None, IOResult(writes=created,
+                          stderr=stderr,
+                          exit_code=1 if errors else 0)
 
 
 BUILDER = Builder('touch',

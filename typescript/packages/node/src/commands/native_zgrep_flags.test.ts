@@ -189,4 +189,55 @@ describe.each(NATIVE_BACKENDS)('native zgrep flags (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  // zgrep is grep over decompressed bytes, so + is an ordinary character.
+  it('zgrep reads a basic expression', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f.txt', ENC.encode('aab\na+b\n'))
+      await env.mirage('gzip /data/f.txt')
+      const result = await env.mirage("zgrep 'a+b' /data/f.txt.gz")
+      expect(result).toContain('a+b')
+      expect(result).not.toContain('aab')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('zgrep -E reads an extended expression', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f.txt', ENC.encode('aab\na+b\n'))
+      await env.mirage('gzip /data/f.txt')
+      const result = await env.mirage("zgrep -E 'a+b' /data/f.txt.gz")
+      expect(result).toContain('aab')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('zgrep -G asks for the default dialect', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f.txt', ENC.encode('aab\na+b\n'))
+      await env.mirage('gzip /data/f.txt')
+      const result = await env.mirage("zgrep -G 'a+b' /data/f.txt.gz")
+      expect(result).toContain('a+b')
+      expect(result).not.toContain('aab')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('zgrep backslash-plus is the basic operator', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f.txt', ENC.encode('aab\na+b\n'))
+      await env.mirage('gzip /data/f.txt')
+      const result = await env.mirage("zgrep 'a\\+b' /data/f.txt.gz")
+      expect(result).toContain('aab')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

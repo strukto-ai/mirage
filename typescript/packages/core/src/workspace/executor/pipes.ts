@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
+import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { asyncChain, closeQuietly, mergeStdoutStderr } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
+import { finishStatement } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import type { Session } from '../session/session.ts'
-import type { TSNodeLike } from '../expand/variable.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground } from './jobs.ts'
 
@@ -161,8 +161,7 @@ export async function handleConnection(
   const children = [leftExec]
 
   if (op === NT.AND) {
-    const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-    session.lastExitCode = leftIo.exitCode
+    const leftBytes = await finishStatement(leftStdout, leftIo, session)
     if (leftIo.exitCode !== 0) {
       // The failing command is left of the final `&&`, which bash
       // exempts from `set -e`.
@@ -190,8 +189,7 @@ export async function handleConnection(
   }
 
   if (op === NT.OR) {
-    const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-    session.lastExitCode = leftIo.exitCode
+    const leftBytes = await finishStatement(leftStdout, leftIo, session)
     if (leftIo.exitCode === 0) {
       return [
         leftBytes,
@@ -216,8 +214,7 @@ export async function handleConnection(
   }
 
   // ; (semicolon) or other: run both regardless
-  const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-  session.lastExitCode = leftIo.exitCode
+  const leftBytes = await finishStatement(leftStdout, leftIo, session)
   let rightStdout: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
@@ -257,17 +254,7 @@ export async function handleSubshell(
   jobTable: JobTable | null = null,
   agentId: string | null = null,
 ): Promise<Result> {
-  const savedCwd = session.cwd
-  const savedEnv = { ...session.env }
-  const savedOptions = { ...session.shellOptions }
-  const savedReadonly = new Set(session.readonlyVars)
-  const savedArrays: Record<string, string[]> = {}
-  for (const [k, v] of Object.entries(session.arrays)) savedArrays[k] = [...v]
-  const savedFunctions = { ...session.functions }
-  const savedPositional = [...session.positionalArgs]
-  const savedLastBgJob = session.lastBgJobId
-  const savedGetoptsPos = session.getoptsPos
-  const savedGetoptsOptind = session.getoptsOptind
+  const saved = session.snapshot()
   try {
     const allStdout: ByteSource[] = []
     let mergedIo = new IOResult()
@@ -293,6 +280,8 @@ export async function handleSubshell(
         )
         if (bgStdout !== null) allStdout.push(bgStdout)
         mergedIo = await mergedIo.merge(bgIo)
+        // Seed $? for later body commands (mirrors program loop).
+        session.lastExitCode = bgIo.exitCode
         lastExec = bgExec
         i += 2
         continue
@@ -311,6 +300,7 @@ export async function handleSubshell(
         const sigIo = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
         mergedIo = await mergedIo.merge(sigIo)
         mergedIo.exitCode = err.containedCode
+        session.lastExitCode = err.containedCode
         lastExec = new ExecutionNode({
           command: '()',
           exitCode: err.containedCode,
@@ -318,6 +308,7 @@ export async function handleSubshell(
         })
         break
       }
+      stdout = await finishStatement(stdout, io, session)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       lastExec = childExec
@@ -337,16 +328,7 @@ export async function handleSubshell(
     const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
     return [combined, mergedIo, lastExec]
   } finally {
-    session.cwd = savedCwd
-    session.env = savedEnv
-    session.shellOptions = savedOptions
-    session.readonlyVars = savedReadonly
-    session.arrays = savedArrays
-    session.functions = savedFunctions
-    session.positionalArgs = savedPositional
-    session.lastBgJobId = savedLastBgJob
-    session.getoptsPos = savedGetoptsPos
-    session.getoptsOptind = savedGetoptsOptind
+    session.restore(saved)
   }
 }
 

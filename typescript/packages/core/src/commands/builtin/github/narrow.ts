@@ -19,12 +19,8 @@ import { resolveGlobOf } from '../generic_bind/index.ts'
 import { GITHUB_IO } from './io.ts'
 import { countScopeFiles, scopeRelativeKey, shouldUseSearch } from '../../../core/github/scope.ts'
 import { narrowPaths } from '../../../core/github/search.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { rebaseRaw } from '../../../utils/path.ts'
-import { PatternType } from '../constants.ts'
-import { formatRecords } from '../utils/output.ts'
-import { classifyPattern, searchQuery } from '../grep_helper.ts'
+import { isLiteralPattern, searchQuery } from '../grep_helper.ts'
 
 const resolveGlob = resolveGlobOf(GITHUB_IO)
 
@@ -37,15 +33,23 @@ export interface NarrowResult {
 // Resolve grep/rg scope paths, narrowing via GitHub code search. Narrows any
 // recursive scope (repo root or subdirectory) on the default branch when a
 // literal can be pushed down to code search and the scope is larger than
-// SCOPE_WARN; otherwise expands the scope by glob. Regex patterns narrow on an
-// extracted required literal and stay exact because the caller still scans the
-// regex over the narrowed files.
+// SCOPE_WARN; otherwise expands the scope by glob.
+//
+// Push-down requires -w. GitHub code search matches whole words while grep
+// matches substrings, so for a bare literal the search result is a strict
+// subset of the grep matches: a file containing the literal only inside a
+// longer word (quokka inside quokkabuild) never comes back and would be
+// silently dropped from the scan. Under -w both sides mean the same thing,
+// and any tokenizer disagreement can only over-fetch, which the local scan
+// then filters. A regex narrowed on an extracted literal stays excluded
+// even under -w, because the searched term is then only part of the match.
 export async function narrowScope(
   accessor: GitHubAccessor,
   paths: PathSpec[],
   pattern: string | null,
   fixedString: boolean,
   recursive: boolean,
+  wholeWord: boolean,
   index?: IndexCacheStore,
 ): Promise<NarrowResult> {
   const first = paths[0]
@@ -54,7 +58,12 @@ export async function narrowScope(
   const fileCount = countScopeFiles(accessor.tree, key)
   const query = pattern !== null ? searchQuery(pattern, fixedString) : null
   const useSearch =
-    query !== null && shouldUseSearch(recursive, accessor.isDefaultBranch) && fileCount > SCOPE_WARN
+    query !== null &&
+    wholeWord &&
+    pattern !== null &&
+    isLiteralPattern(pattern, fixedString) &&
+    shouldUseSearch(recursive, accessor.isDefaultBranch) &&
+    fileCount > SCOPE_WARN
   if (useSearch) {
     const narrowed = await narrowPaths(accessor, query, paths)
     if (narrowed.length > 0) {
@@ -63,43 +72,4 @@ export async function narrowScope(
   }
   const resolved = await resolveGlob(accessor, paths, index ?? undefined)
   return { resolved, fileCount, usedSearch: false }
-}
-
-// Emit the narrowed file list for a plain literal -l without reading. When
-// code search has already narrowed the scope to the files containing a fully
-// literal pattern, those files are exactly the answer to -l
-// (files-with-matches), so the content fetches the generic command would do
-// can be skipped entirely. Returns null whenever the short-circuit is unsafe
-// (no -l, a non-literal pattern, or a flag that changes which lines match) so
-// the caller falls back to the generic scan. pathPredicate reproduces any file
-// filtering the generic command applies (rg's hidden/--type/--glob rules).
-export function filesOnlyShortcircuit(
-  flags: Record<string, string | boolean | string[]>,
-  pattern: string | null,
-  resolved: PathSpec[],
-  scope: PathSpec,
-  pathPredicate?: (p: string) => boolean,
-): [ByteSource, IOResult] | null {
-  const filesOnly = flags.args_l === true || flags.l === true
-  if (!filesOnly || pattern === null) return null
-  if (
-    flags.i === true ||
-    flags.w === true ||
-    flags.v === true ||
-    flags.c === true ||
-    flags.o === true
-  ) {
-    return null
-  }
-  const fixed = flags.F === true
-  const pt = classifyPattern(pattern, fixed)
-  const fullyLiteral =
-    fixed || pt === PatternType.EXACT || (pt === PatternType.SIMPLE && !pattern.includes('.'))
-  if (!fullyLiteral) return null
-  const hits = resolved
-    .filter((p) => pathPredicate === undefined || pathPredicate(p.virtual))
-    .map((p) => p.virtual)
-  if (hits.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
-  const spelled = rebaseRaw(hits, scope.virtual, scope.rawPath)
-  return [formatRecords([...spelled].sort()), new IOResult()]
 }

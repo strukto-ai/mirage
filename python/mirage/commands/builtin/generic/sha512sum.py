@@ -21,6 +21,7 @@ async def sha512sum(
     status: bool = False,
     quiet: bool = False,
     warn: bool = False,
+    cwd: PathSpec | str = "/",
 ) -> tuple[ByteSource | None, IOResult]:
     return await hashsum(paths,
                          factory=hashlib.sha512,
@@ -36,7 +37,8 @@ async def sha512sum(
                          ignore_missing=ignore_missing,
                          status=status,
                          quiet=quiet,
-                         warn=warn)
+                         warn=warn,
+                         cwd=cwd)
 
 
 __all__ = ["sha512sum"]

@@ -14,6 +14,7 @@
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.email.io import resolve_glob
 from mirage.commands.builtin.generic.grep import grep as generic_grep
@@ -24,7 +25,7 @@ from mirage.commands.builtin.grep_helper import (compile_pattern,
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import EmailScope, detect_scope
@@ -41,7 +42,7 @@ async def grep_provision(
     paths: list[PathSpec],
     *texts: str,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor,
@@ -53,7 +54,8 @@ async def grep_provision(
 @command("grep",
          resource="email",
          spec=SPECS["grep"],
-         provision=grep_provision)
+         provision=grep_provision,
+         aggregate=prefix_aggregate)
 async def grep(
     accessor: EmailAccessor,
     paths: list[PathSpec],
@@ -61,7 +63,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)

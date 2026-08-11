@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "id": "history_default_session",
+      "seq": 310005,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history",
+      "expect": {
+        "exit": 0,
+        "stdout": "1  echo marker-one\n2  echo marker-two\n3  echo persisted > /data/h.txt\n4  cat /data/h.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_last_2",
+      "seq": 310006,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "history 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "4  cat /data/h.txt\n5  history\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_s2_isolated",
+      "seq": 310007,
+      "targets": [
+        "ram-history"
+      ],
+      "session": "s2",
+      "command": "history",
+      "expect": {
+        "exit": 0,
+        "stdout": "1  echo marker-s2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

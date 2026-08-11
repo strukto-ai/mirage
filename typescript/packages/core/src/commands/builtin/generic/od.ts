@@ -1,21 +1,33 @@
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { CommandFnResult } from '../../config.ts'
+import { UsageError } from '../../errors.ts'
+import { OD_COUNT_PATTERN, OD_OVERFLOW_UNITS, OD_SIZE_UNITS, UINTMAX } from '../constants.ts'
 
 const ENC = new TextEncoder()
 
-export function parseCount(value: string): number {
-  const units: Readonly<Record<string, number>> = {
-    b: 512,
-    K: 1024,
-    KB: 1000,
-    M: 1024 ** 2,
-    MB: 1000 ** 2,
+export function parseCount(value: string, flag: string): number {
+  const match = OD_COUNT_PATTERN.exec(value)
+  if (match === null) throw new UsageError(`od: invalid ${flag} argument '${value}'`, 1)
+  const number = match[1] ?? ''
+  const suffix = match[2] ?? ''
+  const multiplier = OD_SIZE_UNITS[suffix] ?? OD_OVERFLOW_UNITS[suffix]
+  if (suffix !== '' && multiplier === undefined) {
+    throw new UsageError(`od: invalid suffix in ${flag} argument '${value}'`, 1)
   }
-  const suffix = Object.keys(units)
-    .sort((a, b) => b.length - a.length)
-    .find((unit) => value.endsWith(unit))
-  const numeric = suffix === undefined ? value : value.slice(0, -suffix.length)
-  return Number.parseInt(numeric, 0) * (suffix === undefined ? 1 : (units[suffix] ?? 1))
+  const base =
+    number.slice(0, 2).toLowerCase() === '0x'
+      ? 16
+      : number.startsWith('0') && number.length > 1
+        ? 8
+        : 10
+  const digits = base === 16 ? number.slice(2) : number
+  // The too-large check compares in BigInt: 2**64 - 1 is valid and 2**64
+  // is not, a boundary doubles cannot hold.
+  const magnitude =
+    (base === 16 ? BigInt(`0x${digits}`) : base === 8 ? BigInt(`0o${digits}`) : BigInt(digits)) *
+    BigInt(multiplier ?? 1)
+  if (magnitude > UINTMAX) throw new UsageError(`od: ${flag} argument '${value}' too large`, 1)
+  return Number(magnitude)
 }
 
 function address(offset: number, radix: string): string {
@@ -80,11 +92,14 @@ export async function odGeneric(
     const block = data.slice(offset, offset + 16)
     for (let index = 0; index < typeSpecs.length; index += 1) {
       const location = index === 0 ? address(skip + offset, addressRadix) : ''
-      const prefix = location !== '' ? `${location} ` : addressRadix === 'n' ? '' : ' '.repeat(8)
+      // GNU prints every value as " %s", so a suppressed address column
+      // still leaves one leading space per line.
+      const prefix = location !== '' ? `${location} ` : addressRadix === 'n' ? ' ' : ' '.repeat(8)
       lines.push(prefix + formatValues(block, typeSpecs[index] ?? 'o2'))
     }
   }
   const finalAddress = address(skip + data.length, addressRadix)
   if (finalAddress !== '') lines.push(finalAddress)
+  if (lines.length === 0) return [new Uint8Array(0), new IOResult()]
   return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
 }

@@ -36,6 +36,82 @@
         "o",
         "1"
       ]
+    },
+    {
+      "id": "find_mtime_recent_write",
+      "seq": 502170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "box",
+        "dropbox"
+      ],
+      "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mtprobe.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_excludes_old_window",
+      "seq": 502171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "box",
+        "dropbox"
+      ],
+      "command": "find /data -name mtprobe.txt -mtime +5; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_touch_backdate",
+      "seq": 502172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "box",
+        "dropbox"
+      ],
+      "command": "touch -d 2020-01-01 /data/mtprobe.txt; find /data -name mtprobe.txt -mtime +5",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mtprobe.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_cleanup",
+      "seq": 502173,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "box",
+        "dropbox"
+      ],
+      "command": "rm /data/mtprobe.txt; echo done",
+      "expect": {
+        "exit": 0,
+        "stdout": "done\n",
+        "stderr": ""
+      }
     }
   ]
 }

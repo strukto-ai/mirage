@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -158,24 +160,25 @@ export async function diffGeneric(
   readdir?: Readdir,
   stat?: Stat,
 ): Promise<[ByteSource | null, IOResult]> {
+  const fl = new FlagView(opts.flags, specOf('diff'))
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('diff: requires two paths\n') })]
   }
   const flags: DiffFlags = {
-    i: opts.flags.i === true,
-    w: opts.flags.w === true,
-    b: opts.flags.b === true,
-    e: opts.flags.e === true,
-    q: opts.flags.q === true,
-    u: opts.flags.u === true,
+    i: fl.asBool('i'),
+    w: fl.asBool('w'),
+    b: fl.asBool('b'),
+    e: fl.asBool('e'),
+    q: fl.asBool('q'),
+    u: fl.asBool('u'),
   }
   const p0 = paths[0]
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
   let output: Uint8Array | undefined
   try {
-    if (opts.flags.r === true && readdir !== undefined && stat !== undefined) {
+    if (fl.asBool('r') && readdir !== undefined && stat !== undefined) {
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) output = await diffDirs(readdir, stat, stream, p0, p1, flags)

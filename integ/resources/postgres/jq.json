@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "id": "pg_jq_titles",
+      "seq": 610070,
+      "targets": [
+        "postgres"
+      ],
+      "command": "jq '.title' /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alpha\"\n\"beta\"\n\"gamma\"\n\"delta\"\n\"epsilon\"\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

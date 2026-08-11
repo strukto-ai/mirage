@@ -201,7 +201,30 @@ def test_redirect_to_forbidden_mount_is_denied():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"not allowed" in (io.stderr or b"")
+    # A refused redirect target is shell-attributed like GNU
+    # ("bash: line 1: /b/leaked.txt: Permission denied"); the mount
+    # guard's own "not allowed to access mount" prose stays on the
+    # exception (the FUSE bridge still sniffs it) instead of reaching
+    # the user as the path.
+    assert (io.stderr or b"") == b"/b/leaked.txt: Permission denied\n"
+
+
+def test_append_to_forbidden_mount_is_shell_attributed():
+    # `>>` pre-reads the existing content before writing, and that read
+    # hits the mount guard first. The pre-read must swallow the denial so
+    # the write reports it as the same shell-attributed line `>` gets,
+    # instead of unwinding to the workspace-level OSError handler (which
+    # kills the rest of the line and stamps the line's first word).
+    ws = _two_mounts_with_secret()
+
+    async def run():
+        return await ws.execute("echo leaked >> /b/leaked.txt; echo next",
+                                session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert (io.stdout or b"") == b"next\n"
+    assert (io.stderr or b"") == b"/b/leaked.txt: Permission denied\n"
 
 
 def test_cross_mount_copy_into_forbidden_mount_is_denied():
@@ -283,7 +306,7 @@ def test_read_grant_blocks_redirect_write():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"read-only" in (io.stderr or b"")
+    assert io.stderr == b"/a/y.txt: Permission denied\n"
     assert "/y.txt" not in a._store.files
 
 
@@ -310,7 +333,7 @@ def test_grant_cannot_widen_read_mount():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert b"read-only" in (io.stderr or b"")
+    assert io.stderr == b"/a/y.txt: Permission denied\n"
 
 
 def test_user_root_mount_governed_by_grants():
@@ -336,7 +359,7 @@ def test_user_root_mount_governed_by_grants():
     assert b"not allowed" in (denied.stderr or b"")
     assert read_ok.exit_code == 0 and b"top" in (read_ok.stdout or b"")
     assert write_denied.exit_code != 0
-    assert b"read-only" in (write_denied.stderr or b"")
+    assert write_denied.stderr == b"/root.txt: Permission denied\n"
 
 
 def test_implicit_root_keeps_pathless_commands_working():
@@ -402,3 +425,43 @@ def test_filesystem_alias_roles():
     assert sess.mount_modes["/a"] == MountMode.WRITE
     with pytest.raises(ValueError):
         ws.create_session("bits", mounts={"/a": "w"})
+
+
+def test_tree_does_not_disclose_an_ungranted_nested_mount():
+    """`tree` crosses a mount boundary from the mount table alone.
+
+    A crossing entry's row is synthesized as a directory without asking
+    any backend, so the dispatcher never sees it and cannot refuse it:
+    before the session filter, `tree /base` drew `private` and counted
+    it, while `ls`, `find` and `du` on the same tree all hid it.
+    """
+    base = _seed("top.txt", b"public\n")
+    private = _seed("secret.txt", b"SECRET\n")
+    ws = Workspace({"/base": base, "/base/private": private})
+    ws.create_session("agent", mounts=["/base"])
+
+    async def run():
+        return await ws.execute("tree /base", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    out = (io.stdout or b"").decode()
+    assert "private" not in out
+    assert out == "/base\n`-- top.txt\n\n1 directory, 1 file\n"
+
+
+def test_tree_still_crosses_a_granted_nested_mount():
+    """The filter must not cost a session the mounts it does hold."""
+    base = _seed("top.txt", b"public\n")
+    inner = _seed("leaf.txt", b"deep\n")
+    ws = Workspace({"/base": base, "/base/inner": inner})
+    ws.create_session("agent", mounts=["/base", "/base/inner"])
+
+    async def run():
+        return await ws.execute("tree /base", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert (io.stdout or b"").decode() == (
+        "/base\n|-- inner\n|   `-- leaf.txt\n`-- top.txt\n\n"
+        "2 directories, 2 files\n")

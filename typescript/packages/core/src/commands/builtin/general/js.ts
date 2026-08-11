@@ -17,8 +17,10 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { handleJs } from '../../../workspace/executor/js/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveScript } from '../utils/operands.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -39,12 +41,12 @@ async function jsCommand(
     ]
   }
 
-  if (opts.runtime === undefined) {
+  if (!(opts.runtime instanceof LanguageRuntime)) {
     return [
       null,
       new IOResult({
         exitCode: 127,
-        stderr: ENC.encode('js: javascript runtime is not available\n'),
+        stderr: ENC.encode('js: command not found\n'),
       }),
     ]
   }
@@ -59,10 +61,10 @@ async function jsCommand(
     ]
   }
 
-  const eFlag = opts.flags.e
-  const code = typeof eFlag === 'string' ? eFlag : null
+  const fl = new FlagView(opts.flags, specOf('js'))
+  const code = fl.asStr('e') ?? null
   const hasCode = code !== null
-  const module = opts.flags.m === true || opts.flags.module === true
+  const module = fl.asBool('module')
   let scriptPath: PathSpec | null = null
   let argStrs: string[]
   if (hasCode) {
@@ -96,6 +98,8 @@ async function jsCommand(
       env: opts.env ?? {},
       code: resolvedCode,
       module,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+      ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
     },
     { runtime: opts.runtime },
   )

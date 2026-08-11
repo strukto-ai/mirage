@@ -17,19 +17,17 @@ from functools import partial
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import StatPath
 from mirage.types import PathSpec
 
 
-@command("tree",
-         resource="history",
-         spec=SPECS["tree"],
-         provision=metadata_provision)
+@command("tree", resource="history", spec=SPECS["tree"])
 async def tree(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
@@ -41,12 +39,14 @@ async def tree(
     d: bool = False,
     P: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **_extra: object,
+    stat_path: StatPath | None = None,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_tree(
         paths[0],
         readdir=partial(readdir, accessor),
         stat=partial(stat, accessor),
+        stat_path=stat_path,
         max_depth=int(L) if L is not None else None,
         show_hidden=a,
         ignore_pattern=args_I,

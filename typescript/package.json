@@ -41,7 +41,9 @@
       "body-parser@>=2.0.0 <2.3.0": ">=2.3.0 <3",
       "axios@>=1.0.0 <1.18.0": ">=1.18.0 <2",
       "brace-expansion@>=1.0.0 <1.1.16": ">=1.1.16 <2",
-      "brace-expansion@>=5.0.0 <5.0.7": ">=5.0.7 <6"
+      "brace-expansion@>=5.0.0 <5.0.7": ">=5.0.7 <6",
+      "find-my-way@<=9.6.0": ">=9.7.0 <10",
+      "postcss@<=8.5.17": ">=8.5.18 <9"
     }
   },
   "devDependencies": {
@@ -59,7 +61,6 @@
     "knip": "^6.26.0",
     "prettier": "^3.8.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.0.0",
-    "vitest": "^3.2.6"
+    "typescript-eslint": "^8.0.0"
   }
 }

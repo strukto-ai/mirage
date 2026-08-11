@@ -14,16 +14,15 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.provision import \
-    make_head_tail_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
-from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,14 +30,14 @@ from mirage.types import PathSpec
 @command("head",
          resource="history",
          spec=SPECS["head"],
-         provision=make_head_tail_provision(history_stat))
+         aggregate=header_aggregate)
 async def head(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags)

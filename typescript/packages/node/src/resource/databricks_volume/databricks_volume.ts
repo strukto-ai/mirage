@@ -79,6 +79,10 @@ async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, str
 export class DatabricksVolumeResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.DATABRICKS_VOLUME
   readonly cachesReads: boolean = true
+  // The Files API lists DirectoryEntry.file_size and stat HEADs report
+  // Content-Length, both the exact byte count the download returns;
+  // readdir backfills any lister-omitted size with one HEAD.
+  readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
   readonly prompt: string = DATABRICKS_VOLUME_PROMPT
   readonly config: DatabricksVolumeConfig
@@ -113,10 +117,6 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   }
 
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 
@@ -194,14 +194,13 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    // Databricks readdir returns slash-less paths, so classification always
-    // falls back to stat (which the walker resolves via the index cache).
+    // Databricks readdir returns slash-less paths, so the walker classifies
+    // through stat (which resolves via the index cache).
     return walkFind(
       p,
       {
         readdir: (spec, idx) => databricksVolumeReaddir(this.accessor, spec, idx),
         stat: (spec, idx) => databricksVolumeStat(this.accessor, spec, idx),
-        isDirName: () => null,
       },
       options,
       this.index,

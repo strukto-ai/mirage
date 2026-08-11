@@ -333,7 +333,7 @@ async def test_idle_timer_canceled_when_new_workspace_created():
 async def test_create_workspace_bridges_fuse_through_manager(monkeypatch):
     calls = []
 
-    def _fake_add(self, prefix, mountpoint=None):
+    def _fake_add(self, prefix, mountpoint=None, backend=None):
         calls.append((prefix, mountpoint))
         return mountpoint or "/tmp/fake"
 
@@ -348,11 +348,12 @@ async def test_create_workspace_bridges_fuse_through_manager(monkeypatch):
                 "mounts": {
                     "/data/": {
                         "resource": "ram",
-                        "fuse": True
+                        "backend": "fuse"
                     },
                     "/pinned/": {
                         "resource": "ram",
-                        "fuse": "/tmp/pinned"
+                        "backend": "fuse",
+                        "mountpoint": "/tmp/pinned"
                     },
                 },
             },
@@ -367,7 +368,7 @@ async def test_create_workspace_bridges_fuse_through_manager(monkeypatch):
 async def test_create_workspace_rolls_back_on_fuse_failure(monkeypatch):
     closed = []
 
-    def _boom_add(self, prefix, mountpoint=None):
+    def _boom_add(self, prefix, mountpoint=None, backend=None):
         if not closed:
             orig = self.close
 
@@ -389,7 +390,7 @@ async def test_create_workspace_rolls_back_on_fuse_failure(monkeypatch):
                 "mounts": {
                     "/data/": {
                         "resource": "ram",
-                        "fuse": True
+                        "backend": "fuse"
                     },
                 },
             },

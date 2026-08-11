@@ -12,18 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from pathlib import Path
 
 import pytest
 
-from mirage import MountMode, Workspace
+from mirage import GuardSpec, MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
                            RedisStoreBlock, S3StoreBlock, WorkspaceConfig,
                            load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
-from mirage.runtime.base import ScriptSource
+from mirage.runtime.types import ScriptSource
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
@@ -45,7 +46,8 @@ def test_load_minimal_yaml():
     assert cfg.cache is None
 
 
-def test_load_full_yaml_with_env_interpolation():
+@pytest.mark.asyncio
+async def test_load_full_yaml_with_env_interpolation():
     env = {
         "TEST_BUCKET": "my-test-bucket",
         "TEST_AWS_KEY": "AKIAEXAMPLE",
@@ -58,9 +60,12 @@ def test_load_full_yaml_with_env_interpolation():
     assert cfg.cache.limit == "256MB"
     assert cfg.mounts["/s3"].config["bucket"] == "my-test-bucket"
     assert cfg.mounts["/s3"].config["aws_access_key_id"] == "AKIAEXAMPLE"
-    assert cfg.mounts["/"].fuse == "/tmp/mirage-fuse-full"
-    assert cfg.fuse_mounts() == {"/": "/tmp/mirage-fuse-full"}
-    assert "fuse_mounts" not in cfg.to_workspace_kwargs()
+    assert cfg.mounts["/"].backend is MountBackend.FUSE
+    assert cfg.mounts["/"].mountpoint == "/tmp/mirage-fuse-full"
+    assert cfg.kernel_mounts() == {
+        "/": (MountBackend.FUSE, "/tmp/mirage-fuse-full")
+    }
+    assert "kernel_mounts" not in await cfg.to_workspace_kwargs()
 
 
 def test_missing_env_var_raises_with_full_list():
@@ -75,9 +80,10 @@ def test_redis_cache_discriminated_union():
     assert cfg.cache.key_prefix == "test_cache:"
 
 
-def test_to_workspace_kwargs_yields_constructible_workspace():
+@pytest.mark.asyncio
+async def test_to_workspace_kwargs_yields_constructible_workspace():
     cfg = load_config(FIXTURES / "minimal.yaml")
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert "/" in kwargs["resources"]
     mount = kwargs["resources"]["/"]
     assert isinstance(mount.resource, RAMResource)
@@ -86,14 +92,16 @@ def test_to_workspace_kwargs_yields_constructible_workspace():
     assert ws is not None
 
 
-def test_to_workspace_kwargs_emits_redis_cache_config():
+@pytest.mark.asyncio
+async def test_to_workspace_kwargs_emits_redis_cache_config():
     cfg = load_config(FIXTURES / "redis_cache.yaml")
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert isinstance(kwargs["cache"], RedisCacheConfig)
     assert kwargs["cache"].url == "redis://localhost:6379/3"
 
 
-def test_to_workspace_kwargs_emits_ram_cache_config():
+@pytest.mark.asyncio
+async def test_to_workspace_kwargs_emits_ram_cache_config():
     cfg = load_config({
         "cache": {
             "type": "ram",
@@ -105,13 +113,14 @@ def test_to_workspace_kwargs_emits_ram_cache_config():
             }
         },
     })
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert isinstance(kwargs["cache"], CacheConfig)
     assert not isinstance(kwargs["cache"], RedisCacheConfig)
     assert kwargs["cache"].limit == "128MB"
 
 
-def test_store_redis_block_builds_redis_provider():
+@pytest.mark.asyncio
+async def test_store_redis_block_builds_redis_provider():
     cfg = load_config({
         "store": {
             "type": "redis",
@@ -126,12 +135,13 @@ def test_store_redis_block_builds_redis_provider():
     })
     assert cfg.store is not None
     assert cfg.store.key_prefix == "test_store:"
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert isinstance(kwargs["store"], RedisWorkspaceStateStore)
     assert isinstance(kwargs["store"].namespace("ws1"), RedisNamespaceStore)
 
 
-def test_store_ram_block_builds_ram_provider():
+@pytest.mark.asyncio
+async def test_store_ram_block_builds_ram_provider():
     cfg = load_config({
         "store": {
             "type": "ram"
@@ -142,13 +152,14 @@ def test_store_ram_block_builds_ram_provider():
             }
         },
     })
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert isinstance(kwargs["store"], RAMWorkspaceStateStore)
     assert kwargs["owns_store"] is True
     assert isinstance(kwargs["store"].namespace("ws1"), RAMNamespaceStore)
 
 
-def test_store_disk_block_builds_disk_provider(tmp_path):
+@pytest.mark.asyncio
+async def test_store_disk_block_builds_disk_provider(tmp_path):
     cfg = load_config({
         "store": {
             "type": "disk",
@@ -162,13 +173,14 @@ def test_store_disk_block_builds_disk_provider(tmp_path):
     })
     assert cfg.store is not None
     assert cfg.store.root == str(tmp_path)
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     assert isinstance(kwargs["store"], DiskWorkspaceStateStore)
     assert kwargs["owns_store"] is True
     assert isinstance(kwargs["store"].namespace("ws1"), DiskNamespaceStore)
 
 
-def test_store_disk_group_override(tmp_path):
+@pytest.mark.asyncio
+async def test_store_disk_group_override(tmp_path):
     cfg = load_config({
         "store": {
             "type": "ram",
@@ -184,12 +196,13 @@ def test_store_disk_group_override(tmp_path):
         },
     })
     assert isinstance(cfg.store.workspace, DiskStoreBlock)
-    store = cfg.to_workspace_kwargs()["store"]
+    store = (await cfg.to_workspace_kwargs())["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.sessions("ws1"), DiskSessionStore)
 
 
-def test_store_group_override_redirects_one_plane():
+@pytest.mark.asyncio
+async def test_store_group_override_redirects_one_plane():
     cfg = load_config({
         "store": {
             "type": "ram",
@@ -206,13 +219,14 @@ def test_store_group_override_redirects_one_plane():
         },
     })
     assert isinstance(cfg.store.observer, RedisStoreBlock)
-    store = cfg.to_workspace_kwargs()["store"]
+    store = (await cfg.to_workspace_kwargs())["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
     assert type(store.observer("ws1")).__name__ == "RedisObserverStore"
 
 
-def test_store_s3_workspace_group_builds_s3_provider():
+@pytest.mark.asyncio
+async def test_store_s3_workspace_group_builds_s3_provider():
     cfg = load_config({
         "store": {
             "type": "ram",
@@ -230,13 +244,14 @@ def test_store_s3_workspace_group_builds_s3_provider():
         },
     })
     assert isinstance(cfg.store.workspace, S3StoreBlock)
-    store = cfg.to_workspace_kwargs()["store"]
+    store = (await cfg.to_workspace_kwargs())["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
     assert type(store.sessions("ws1")).__name__ == "S3SessionStore"
 
 
-def test_workspace_id_passes_through():
+@pytest.mark.asyncio
+async def test_workspace_id_passes_through():
     cfg = load_config({
         "workspace_id": "agent-ws-7",
         "mounts": {
@@ -245,7 +260,7 @@ def test_workspace_id_passes_through():
             }
         },
     })
-    assert cfg.to_workspace_kwargs()["workspace_id"] == "agent-ws-7"
+    assert (await cfg.to_workspace_kwargs())["workspace_id"] == "agent-ws-7"
 
 
 def test_store_block_rejects_unknown_field():
@@ -280,12 +295,12 @@ def test_unknown_mount_field_rejected():
         })
 
 
-def test_workspace_built_from_config_executes_command():
+@pytest.mark.asyncio
+async def test_workspace_built_from_config_executes_command():
     cfg = load_config(FIXTURES / "minimal.yaml")
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     ws = Workspace(**kwargs)
-    import asyncio
-    result = asyncio.run(ws.execute("echo hello"))
+    result = await ws.execute("echo hello")
     assert result.exit_code == 0
     assert (result.stdout or b"").startswith(b"hello")
 
@@ -305,7 +320,8 @@ def test_round_trip_dict_source_matches_yaml(tmp_path):
     assert from_yaml.model_dump() == from_dict.model_dump()
 
 
-def test_resource_built_via_registry_has_correct_type():
+@pytest.mark.asyncio
+async def test_resource_built_via_registry_has_correct_type():
     cfg = load_config({
         "mounts": {
             "/s3": {
@@ -320,28 +336,322 @@ def test_resource_built_via_registry_has_correct_type():
             },
         },
     })
-    kwargs = cfg.to_workspace_kwargs()
+    kwargs = await cfg.to_workspace_kwargs()
     mount = kwargs["resources"]["/s3"]
     assert isinstance(mount.resource, S3Resource)
     assert mount.mode == MountMode.READ
 
 
-def test_script_paths_resolve_against_config_dir(tmp_path):
-    (tmp_path / "route.py").write_text("'local'")
+@pytest.mark.asyncio
+async def test_script_paths_resolve_against_config_dir(tmp_path):
+    (tmp_path / "policy.py").write_text("'local'")
     (tmp_path / "entry.py").write_text("ctx['command'] == 'python3'")
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     resource: ram
-route: route.py
+policy: policy.py
 runtimes:
   - name: local
     script: entry.py
   - vfs
 """)
     cfg = load_config(cfg_file)
-    kwargs = cfg.to_workspace_kwargs()
-    assert kwargs["route"] == ScriptSource("'local'")
+    kwargs = await cfg.to_workspace_kwargs()
+    assert kwargs["policy"] == ScriptSource("'local'")
     entry = kwargs["runtimes"][0]
     assert entry.script == ScriptSource("ctx['command'] == 'python3'")
+
+
+@pytest.mark.asyncio
+async def test_js_script_path_stamps_the_language(tmp_path):
+    (tmp_path / "policy.js").write_text("null")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+policy: policy.js
+""")
+    cfg = load_config(cfg_file)
+    kwargs = await cfg.to_workspace_kwargs()
+    assert kwargs["policy"] == ScriptSource("null", language="js")
+    assert kwargs["policy"].language == "js"
+
+
+@pytest.mark.asyncio
+async def test_guards_block_compiles_to_guard_specs(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+guards:
+  - reason: production data is protected
+    commands: [rm, mv]
+    paths: ["/data/prod/*"]
+  - reason: interpreters are off
+    commands: [python3]
+""")
+    cfg = load_config(cfg_file)
+    kwargs = await cfg.to_workspace_kwargs()
+    assert kwargs["guards"] == [
+        GuardSpec(reason="production data is protected",
+                  commands=("rm", "mv"),
+                  paths=("/data/prod/*", )),
+        GuardSpec(reason="interpreters are off", commands=("python3", )),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_clis_section_parses_and_maps_to_kwargs():
+    cfg = load_config({
+        "mounts": {
+            "/data": {
+                "resource": "ram"
+            }
+        },
+        "clis": {
+            "sl": {
+                "cli": "slack",
+                "config": {
+                    "token": "x"
+                }
+            },
+            "bare": {
+                "cli": "gws"
+            },
+        },
+    })
+    kwargs = await cfg.to_workspace_kwargs()
+    assert kwargs["clis"] == {
+        "sl": ("slack", {
+            "token": "x"
+        }),
+        "bare": ("gws", {}),
+    }
+
+
+@pytest.mark.asyncio
+async def test_clis_script_entry_synthesizes_a_spec(tmp_path):
+    (tmp_path / "pager.py").write_text("print('page')")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.py
+    runtime: monty
+    config:
+      page_size: 20
+""")
+    cfg = load_config(cfg_file)
+    kwargs = await cfg.to_workspace_kwargs()
+    spec, config = kwargs["clis"]["pager"]
+    assert spec.name == "pager"
+    assert spec.script == ScriptSource("print('page')")
+    assert spec.runtime == "monty"
+    assert config == {"page_size": 20}
+
+
+@pytest.mark.asyncio
+async def test_clis_js_script_stamps_the_language(tmp_path):
+    (tmp_path / "pager.mjs").write_text("console.log('page')")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.mjs
+""")
+    cfg = load_config(cfg_file)
+    kwargs = await cfg.to_workspace_kwargs()
+    spec, _ = kwargs["clis"]["pager"]
+    # .mjs also stamps module: the path is gone once the source is
+    # embedded, so the engine could not otherwise know to run it as an
+    # ES module and `import` would fail.
+    assert spec.script == ScriptSource("console.log('page')",
+                                       language="js",
+                                       module=True)
+
+
+@pytest.mark.asyncio
+async def test_clis_plain_js_script_is_not_a_module(tmp_path):
+    (tmp_path / "pager.js").write_text("console.log('page')")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.js
+""")
+    spec, _ = (await
+               load_config(cfg_file).to_workspace_kwargs())["clis"]["pager"]
+    assert spec.script.language == "js"
+    assert spec.script.module is False
+
+
+@pytest.mark.asyncio
+async def test_clis_path_form_reference_rebases_on_the_config_dir(
+        tmp_path, monkeypatch):
+    # `cli: ./tool.py:TREE` means "next to the config file", the same
+    # build-context rule script: follows; without rebasing it resolves
+    # against the process cwd and only works by luck.
+    (tmp_path / "tool.py").write_text(
+        "from mirage import CLISpec\n"
+        "TREE = CLISpec(name='tool', subcommands=(CLISpec(name='run',\n"
+        "               fn=lambda inv: None), ))\n")
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  tool:
+    cli: ./tool.py:TREE
+""")
+    monkeypatch.chdir(tmp_path.parent)
+    cfg = load_config(cfg_file)
+    ref, _ = (await cfg.to_workspace_kwargs())["clis"]["tool"]
+    assert ref == f"{tmp_path / 'tool.py'}:TREE"
+
+
+@pytest.mark.asyncio
+async def test_clis_module_dotpath_reference_is_left_alone(tmp_path):
+    # importlib resolves a dotpath, not the filesystem, so rebasing it
+    # would break the import.
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  tool:
+    cli: mypkg.clis:TREE
+""")
+    cfg = load_config(cfg_file)
+    ref, _ = (await cfg.to_workspace_kwargs())["clis"]["tool"]
+    assert ref == "mypkg.clis:TREE"
+
+
+@pytest.mark.asyncio
+async def test_clis_registered_name_reference_is_left_alone(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  sl:
+    cli: slack
+""")
+    cfg = load_config(cfg_file)
+    ref, _ = (await cfg.to_workspace_kwargs())["clis"]["sl"]
+    assert ref == "slack"
+
+
+@pytest.mark.asyncio
+async def test_clis_script_file_must_exist(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+clis:
+  pager:
+    script: pager.py
+""")
+    cfg = load_config(cfg_file)
+    with pytest.raises(FileNotFoundError):
+        await cfg.to_workspace_kwargs()
+
+
+def test_clis_entry_takes_exactly_one_of_cli_or_script():
+    mounts = {"/data": {"resource": "ram"}}
+    with pytest.raises(ValueError, match="exactly one of cli or script"):
+        load_config({
+            "mounts": mounts,
+            "clis": {
+                "sl": {
+                    "cli": "slack",
+                    "script": "pager.py"
+                }
+            },
+        })
+    with pytest.raises(ValueError, match="exactly one of cli or script"):
+        load_config({
+            "mounts": mounts,
+            "clis": {
+                "sl": {
+                    "config": {
+                        "token": "x"
+                    }
+                }
+            },
+        })
+
+
+def test_clis_runtime_takes_script():
+    with pytest.raises(ValueError, match="it takes script"):
+        load_config({
+            "mounts": {
+                "/data": {
+                    "resource": "ram"
+                }
+            },
+            "clis": {
+                "sl": {
+                    "cli": "slack",
+                    "runtime": "monty"
+                }
+            },
+        })
+
+
+def test_clis_block_refuses_unknown_keys():
+    with pytest.raises(ValueError, match="mode"):
+        load_config({
+            "mounts": {
+                "/data": {
+                    "resource": "ram"
+                }
+            },
+            "clis": {
+                "sl": {
+                    "cli": "slack",
+                    "mode": "write"
+                }
+            },
+        })
+
+
+def _shared_fixture_cases(name: str) -> list[dict]:
+    # integ/fixtures/config/{rejected,accepted}.json are the contract: the
+    # TypeScript suite (packages/server/src/config.test.ts) reads the same
+    # two files, so a config that loads in one language and not the other
+    # fails a test until both loaders agree.
+    fixture = (Path(__file__).parents[3] / "integ" / "fixtures" / "config" /
+               f"{name}.json")
+    cases = json.loads(fixture.read_text())["cases"]
+    assert cases, f"the {name} fixture must not be empty"
+    return cases
+
+
+def test_shared_rejection_fixture_is_refused():
+    for case in _shared_fixture_cases("rejected"):
+        with pytest.raises(ValueError):
+            load_config(case["config"])
+
+
+def test_shared_acceptance_fixture_is_accepted():
+    # Every key of every block, so a field added to a model here and
+    # never mirrored into the TypeScript key tables fails there.
+    for case in _shared_fixture_cases("accepted"):
+        load_config(case["config"])

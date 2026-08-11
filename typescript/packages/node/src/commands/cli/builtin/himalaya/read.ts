@@ -1,0 +1,46 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import {
+  FlagView,
+  IOResult,
+  type ByteSource,
+  type CLIInvocation,
+  type CommandFnResult,
+} from '@struktoai/mirage-core'
+import { EmailAccessor } from '../../../../accessor/email.ts'
+import { fetchMessage, fetchRawMessage } from '../../../../core/email/_client.ts'
+import type { EmailConfig } from '../../../../core/email/config.ts'
+import { messageJsonBytes } from '../../../../core/email/render.ts'
+import { firstText } from './util.ts'
+
+export async function read(inv: CLIInvocation): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
+  const uid = firstText(inv.texts, 'message id')
+  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
+  const accessor = new EmailAccessor(inv.config as EmailConfig)
+  try {
+    if (fl.asBool('raw')) {
+      const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)
+      return [raw, new IOResult()]
+    }
+    const processed = await fetchMessage(accessor, mailbox, uid)
+    // The same renderer the mount serves, so `message read` and `cat`
+    // of the .email.json cannot drift apart.
+    const out: ByteSource = messageJsonBytes(processed)
+    return [out, new IOResult()]
+  } finally {
+    await accessor.close()
+  }
+}

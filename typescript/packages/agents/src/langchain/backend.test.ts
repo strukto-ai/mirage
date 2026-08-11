@@ -127,15 +127,15 @@ describe('LangchainWorkspace.read', () => {
   })
 
   it.each(['/x.parquet', '/x.h5', '/x.hdf5', '/x.feather'])(
-    'routes Mirage-rendered %s through the read op (not binary-redirect)',
+    'redirects %s to the shell now that no renderer is registered',
     async (path) => {
       const ws = mkWs()
       await ws.fs.writeFile(path, new Uint8Array([0x00, 0x01, 0x02, 0x03]))
       const r = await new LangchainWorkspace(ws).read(path)
-      // Either the filetype handler parses it (success) or rejects the corrupt
-      // bytes with a parse error — but it must NOT be our "use shell commands"
-      // redirect, which would mean we misclassified the extension as opaque binary.
-      expect(r.error ?? '').not.toMatch(/Use shell commands/i)
+      // Mirage ships no filetype renderers, so these read back as raw bytes.
+      // Claiming text/plain would hand the model binary decoded as UTF-8.
+      expect(r.content).toBeUndefined()
+      expect(r.error).toMatch(/binary/i)
     },
   )
 })

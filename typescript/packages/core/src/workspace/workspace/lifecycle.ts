@@ -1,0 +1,91 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import type { FileCache } from '../../cache/file/mixin.ts'
+import type { Resource } from '../../resource/base.ts'
+import type { JobTable } from '../../shell/job_table.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+import type { WorkspaceStateStore } from '../store/base.ts'
+import type { WatchManager } from './watch.ts'
+
+export interface CloseDeps {
+  watch: WatchManager
+  cache: FileCache & Resource
+  ownsStateStore: boolean
+  stateStore: WorkspaceStateStore
+  closers: (() => Promise<void>)[]
+  jobTable: JobTable
+  registry: MountRegistry
+  opened: Set<Resource>
+  openOrder: Resource[]
+  sharedResources: Set<Resource>
+}
+
+/**
+ * Release everything the workspace owns, exactly once (the caller
+ * guards re-entry). Mirrors the Python `close_async` in
+ * `workspace/lifecycle.py`.
+ *
+ * Order matters: the watch runtime goes first (it reads mounts), then
+ * in-flight cache drains settle, then the state store if this workspace
+ * built it, then the runtime closers and jobs, and finally every
+ * resource not shared with a sibling workspace.
+ */
+export async function closeWorkspace(deps: CloseDeps): Promise<void> {
+  await deps.watch.detach()
+  const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
+  for (const task of drainTasks) {
+    await task
+  }
+  // Per-plane stores from the provider close through it below; a
+  // caller-passed provider (or direct store override) may be shared
+  // with sibling workspaces, so only its owner closes it.
+  if (deps.ownsStateStore) {
+    await deps.stateStore.close()
+  }
+  try {
+    await deps.cache.clear()
+  } finally {
+    // The workspace builds its own cache, so it always closes it: a
+    // `cache: {type: redis}` config leaves it holding a client that
+    // nothing else would release, and clear() above connects to it.
+    // Mirrors the try/finally pairing in Python's `close_async`.
+    await deps.cache.close()
+  }
+  for (const fn of deps.closers.splice(0)) {
+    try {
+      await fn()
+    } catch {
+      // keep tearing down; swallow subsystem-cleanup failures
+    }
+  }
+  // Teardown only requests the cancel; jobs die with their process, like
+  // processes at reboot. Awaiting each console here would block shutdown
+  // on a job that is mid-write.
+  for (const job of deps.jobTable.runningJobs()) {
+    job.abort?.abort()
+  }
+  const toClose = new Set<Resource>(deps.openOrder)
+  for (const mount of deps.registry.allMounts()) {
+    toClose.add(mount.resource)
+  }
+  for (const r of toClose) {
+    // Resources reused from another live workspace (copy() / load
+    // resource overrides) stay open here; their origin closes them.
+    if (deps.sharedResources.has(r)) continue
+    await r.close()
+  }
+  deps.opened.clear()
+  deps.openOrder.length = 0
+}

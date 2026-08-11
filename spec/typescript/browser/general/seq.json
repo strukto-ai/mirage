@@ -1,5 +1,13 @@
 {
   "_meta": {
+    "by_resource": {
+      "": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
@@ -7,49 +15,32 @@
     "resources": []
   },
   "description": "Print a sequence of numbers.",
-  "ignore_tokens": [],
   "options": [
     {
-      "description": "Use the given separator between numbers.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
+      "description": "Use the given string as separator between numbers.",
       "short": "-s",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     },
     {
       "description": "Pad numbers with zeros to equal width.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-w",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
       "description": "Format each number with a printf-style format string.",
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-f",
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     }
   ],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "type": "str"
     },
     {
-      "kind": "text",
-      "provided_by": []
+      "type": "str"
     },
     {
-      "kind": "text",
-      "provided_by": []
+      "type": "str"
     }
-  ],
-  "rest": null
+  ]
 }

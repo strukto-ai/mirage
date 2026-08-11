@@ -102,4 +102,34 @@ describe('box readdir', () => {
     )
     expect(out).toEqual(['/box/a.txt'])
   })
+
+  it('indexes 0-byte files with size 0 and hides weblinks', async () => {
+    vi.mocked(api.listFolderItems).mockResolvedValue([
+      {
+        type: 'file' as const,
+        id: '444',
+        name: 'empty.txt',
+        size: 0,
+        modified_at: '2026-04-01T00:00:00Z',
+      },
+      {
+        type: 'web_link' as const,
+        id: '555',
+        name: 'homepage',
+        modified_at: '2026-04-01T00:00:00Z',
+      },
+    ])
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const out = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      index,
+    )
+    expect(out).toEqual(['/empty.txt'])
+    const entry = (await index.get('/empty.txt')).entry
+    expect(entry?.size).toBe(0)
+    expect((await index.get('/homepage')).entry ?? null).toBeNull()
+  })
 })

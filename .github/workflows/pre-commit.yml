@@ -30,7 +30,7 @@ jobs:
           enable-cache: true
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -64,3 +64,6 @@ jobs:
           ./python/.venv/bin/python scripts/gen_specs.py
           node --experimental-strip-types typescript/scripts/gen-specs.ts
           git diff --exit-code spec/
+
+      - name: Spec parity
+        run: ./python/.venv/bin/python scripts/check_spec_parity.py

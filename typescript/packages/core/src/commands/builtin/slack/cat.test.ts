@@ -26,7 +26,7 @@ const DEC = new TextDecoder()
 
 async function runCat(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, string | boolean | number | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
 ): Promise<string> {
   const cmd = SLACK_CAT[0]
@@ -105,7 +105,7 @@ describe('slack cat', () => {
           ),
         }),
       ],
-      { n: true },
+      { number: true },
       { index: idx, transport },
     )
     expect(out.startsWith('     1\t')).toBe(true)

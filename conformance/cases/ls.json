@@ -11,7 +11,9 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {
@@ -30,13 +32,158 @@
           "redis"
         ],
         "typescript": [
-          "ram"
+          "ram",
+          "disk",
+          "redis"
         ]
       },
       "expect": {
         "exit": 0,
         "stdout_text": "deep\nnested.txt\n",
         "stderr_text": ""
+      }
+    },
+    {
+      "id": "ls_missing_operand_exit",
+      "cmd": "ls /data/nope 2>/dev/null; echo rc=$?",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "rc=2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "ls_missing_operand_beside_good_exit",
+      "cmd": "ls /data/nope /data/sub 2>/dev/null; echo rc=$?",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/sub:\ndeep\nnested.txt\nrc=2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "ls_missing_enoent",
+      "cmd": "ls /data/missing",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "ls: cannot access '/data/missing': No such file or directory\n"
+      }
+    },
+    {
+      "id": "ls_missing_nested_enoent",
+      "cmd": "ls /data/sub/missing",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "ls: cannot access '/data/sub/missing': No such file or directory\n"
+      }
+    },
+    {
+      "id": "ls_missing_parent_enoent",
+      "cmd": "ls /data/missing/deeper",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "ls: cannot access '/data/missing/deeper': No such file or directory\n"
+      }
+    },
+    {
+      "id": "ls_file_component_enotdir",
+      "cmd": "ls /data/a.txt/x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "ls: cannot access '/data/a.txt/x': Not a directory\n"
+      }
+    },
+    {
+      "id": "ls_file_component_deeper_enotdir",
+      "cmd": "ls /data/a.txt/x/y",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "ls: cannot access '/data/a.txt/x/y': Not a directory\n"
       }
     }
   ]

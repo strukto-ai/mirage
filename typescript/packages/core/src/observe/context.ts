@@ -18,7 +18,7 @@ import { rstripSlash } from '../utils/slash.ts'
 
 interface RecordingState {
   records: OpRecord[]
-  virtualPrefix: string
+  mountPrefix: string
 }
 
 const storage = createAsyncContext<RecordingState>()
@@ -35,14 +35,48 @@ interface RevisionsState {
 const revisionsStorage = createAsyncContext<RevisionsState>()
 
 export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], virtualPrefix: '' }
+  const state: RecordingState = { records: [], mountPrefix: '' }
   const value = await storage.run(state, fn)
   return [value, state.records]
 }
 
-export function setVirtualPrefix(prefix: string): void {
+/**
+ * Run `fn` with `prefix` as the mount prefix records are named against.
+ *
+ * Derives a state for this async branch and shares only the records array,
+ * so two mounts consumed concurrently (`cat /s3/a & cat /db/b`) cannot see
+ * or clobber each other's prefix. Mirrors python's `push_mount_prefix`,
+ * whose `Recorder` is frozen and re-set per task for the same reason.
+ *
+ * Inert (runs `fn` unchanged) when no recording context is active.
+ */
+export function runWithMountPrefix<T>(prefix: string, fn: () => Promise<T>): Promise<T> {
   const state = storage.getStore()
-  if (state !== undefined) state.virtualPrefix = prefix
+  if (state === undefined) return fn()
+  return Promise.resolve(storage.run({ records: state.records, mountPrefix: prefix }, fn))
+}
+
+/**
+ * Wrap a stream so `prefix` is the active mount prefix during each pull from
+ * the underlying source. A command may return a stream that defers its
+ * backend read to the first chunk request, by which point the mount's own
+ * scope has already exited, so without this the record lands with no prefix.
+ * Mirrors python's `with_mount_prefix`.
+ */
+export async function* withMountPrefix(
+  prefix: string,
+  it: AsyncIterable<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+  const iter = it[Symbol.asyncIterator]()
+  try {
+    for (;;) {
+      const step = await runWithMountPrefix(prefix, () => iter.next())
+      if (step.done === true) return
+      yield step.value
+    }
+  } finally {
+    await iter.return?.(undefined)
+  }
 }
 
 // Whether a recording context is active. Backends that need an extra API
@@ -71,7 +105,7 @@ export function record(
   state.records.push(
     new OpRecord({
       op,
-      path: applyPrefix(state.virtualPrefix, path),
+      path: applyPrefix(state.mountPrefix, path),
       source,
       bytes: nbytes,
       timestamp: Date.now(),
@@ -92,7 +126,7 @@ export function recordStream(
   if (state === undefined) return null
   const rec = new OpRecord({
     op,
-    path: applyPrefix(state.virtualPrefix, path),
+    path: applyPrefix(state.mountPrefix, path),
     source,
     bytes: 0,
     timestamp: Date.now(),
@@ -131,9 +165,13 @@ export function revisionFor(path: string): string | null {
   return map.get(path) ?? null
 }
 
+// Backends name the mount-relative path ('/report.json') and a few name the
+// virtual one already ('/s3/report.json'), so tell them apart before
+// prefixing. The test has to be for a path boundary, not a bare startsWith:
+// a mount at /s3 holding s3-report.txt would otherwise look already-prefixed
+// and record as '/s3-report.txt'. Mirrors python's _virtual.
 function applyPrefix(prefix: string, path: string): string {
-  if (prefix !== '' && !path.startsWith(prefix)) {
-    return rstripSlash(prefix) + path
-  }
-  return path
+  const root = rstripSlash(prefix)
+  if (root === '' || path === root || path.startsWith(`${root}/`)) return path
+  return root + path
 }

@@ -29,6 +29,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { fileReadProvision } from './provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(GMAIL_IO)
 
@@ -49,16 +50,20 @@ async function grepCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const pattern = patternArg(texts, opts.flags)
-  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  const fl = new FlagView(opts.flags, specOf('grep'))
+  const maxCount = fl.asInt('m') ?? null
   // Output-shaping flags need real per-line matching, which the search-API
   // push-down cannot emulate; fall through to the generic grep over
   // rendered files instead.
-  const shaping = ['args_l', 'l', 'c', 'n', 'o', 'v', 'q'].some((flag) => opts.flags[flag] === true)
+  const shaping = ['args_l', 'c', 'n', 'o', 'v', 'q'].some((flag) => fl.asBool(flag))
 
   const first = paths[0]
   if (first !== undefined && pattern !== null && !pattern.includes('\n') && !shaping) {
     const scope = detectScope(first)
-    if (scope.useNative) {
+    // Gmail search matches whole words while grep matches substrings,
+    // and the native path returns search results verbatim as the output, so
+    // a bare literal would under-report. Only -w makes the two agree.
+    if (scope.useNative && fl.asBool('w')) {
       const filePrefix =
         mountPrefixOf(first.virtual, first.resourcePath) !== ''
           ? mountPrefixOf(first.virtual, first.resourcePath)

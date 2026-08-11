@@ -12,7 +12,52 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// This layer reports what the server said and never decides whether that is an
+// error: curl treats a 404 as a successful transfer (exit 0, body on stdout)
+// while wget treats it as exit 8, so the status has to reach the command. An
+// earlier version threw on !resp.ok here, which made both tools fail on any
+// 4xx and leaked 'fetch failed' onto stderr for a refused connection.
+
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
+const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
+
+export interface HttpResponse {
+  status: number
+  reason: string
+  body: Uint8Array
+  url: string
+}
+
+export function isHttpError(resp: HttpResponse): boolean {
+  return resp.status >= 400
+}
+
+/**
+ * The request never got an HTTP response. Carries the host and port rather
+ * than the platform's error text, which differs between runtimes and
+ * platforms and so cannot be asserted in a cross-language test.
+ */
+export class HttpConnectError extends Error {
+  readonly host: string
+  readonly port: number
+
+  constructor(host: string, port: number) {
+    super(`Failed to connect to ${host} port ${String(port)}`)
+    this.name = 'HttpConnectError'
+    this.host = host
+    this.port = port
+  }
+}
+
+function endpoint(url: string): { host: string; port: number } {
+  try {
+    const parsed = new URL(url)
+    const port = parsed.port !== '' ? Number(parsed.port) : (DEFAULT_PORTS[parsed.protocol] ?? 80)
+    return { host: parsed.hostname, port }
+  } catch {
+    return { host: url, port: 80 }
+  }
+}
 
 let httpProxyBase: string | null = null
 
@@ -35,7 +80,7 @@ export interface HttpRequestOptions {
   followRedirects?: boolean
 }
 
-async function doFetch(url: string, options: HttpRequestOptions): Promise<Uint8Array> {
+async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
   const method = options.method ?? 'GET'
   const timeoutMs = options.timeoutMs ?? 30_000
   const controller = new AbortController()
@@ -56,18 +101,29 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<Uint8A
     if (options.body !== undefined) {
       init.body = options.body as BodyInit
     }
-    const resp = await fetch(applyProxy(url), init)
-    if (!resp.ok) {
-      throw new Error(`HTTP ${String(resp.status)} ${resp.statusText}`)
+    let resp: Response
+    try {
+      resp = await fetch(applyProxy(url), init)
+    } catch (err) {
+      // A transport failure carries no status. Abort (the timeout) has to
+      // propagate as itself so the limit layer can report it.
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      const { host, port } = endpoint(url)
+      throw new HttpConnectError(host, port)
     }
     const buf = await resp.arrayBuffer()
-    return new Uint8Array(buf)
+    return {
+      status: resp.status,
+      reason: resp.statusText,
+      body: new Uint8Array(buf),
+      url,
+    }
   } finally {
     clearTimeout(timer)
   }
 }
 
-export function httpRequest(url: string, options: HttpRequestOptions = {}): Promise<Uint8Array> {
+export function httpRequest(url: string, options: HttpRequestOptions = {}): Promise<HttpResponse> {
   const method = options.method ?? 'GET'
   return doFetch(url, { ...options, method })
 }
@@ -79,8 +135,9 @@ export function httpFormRequest(
     formData?: Record<string, string>
     headers?: Record<string, string>
     timeoutMs?: number
+    followRedirects?: boolean
   } = {},
-): Promise<Uint8Array> {
+): Promise<HttpResponse> {
   const method = opts.method ?? 'POST'
   const form = new URLSearchParams()
   for (const [k, v] of Object.entries(opts.formData ?? {})) {
@@ -95,13 +152,14 @@ export function httpFormRequest(
     headers,
     body: new TextEncoder().encode(form.toString()),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    ...(opts.followRedirects !== undefined ? { followRedirects: opts.followRedirects } : {}),
   })
 }
 
 export function httpGet(
   url: string,
   opts: { headers?: Record<string, string>; timeoutMs?: number } = {},
-): Promise<Uint8Array> {
+): Promise<HttpResponse> {
   const options: HttpRequestOptions = { method: 'GET' }
   if (opts.headers !== undefined) options.headers = opts.headers
   if (opts.timeoutMs !== undefined) options.timeoutMs = opts.timeoutMs

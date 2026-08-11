@@ -1,0 +1,348 @@
+{
+  "suite": "pyodide",
+  "cases": [
+    {
+      "id": "eval",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "read_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "hello from ram\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(open('/ram/data.txt').read().strip() + '-pyodide')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello from ram-pyodide\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "write_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/ram/from-pyodide.txt', 'w').write('pyodide-wrote-this')\" && cat /ram/from-pyodide.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "pyodide-wrote-this"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mkdir_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; os.makedirs('/ram/a/b')\" && ls /ram/a",
+          "expect": {
+            "exit": 0,
+            "stdout": "b\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unlink_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo -n x > /ram/gone.txt && python3 -c \"from pathlib import Path; Path('/ram/gone.txt').unlink()\" && ls /ram",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "rmtree_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir /ram/d && echo -n x > /ram/d/inner.txt && python3 -c \"import shutil; shutil.rmtree('/ram/d')\" && ls /ram",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo -n one > /ram/a.txt && python3 -c \"import os; os.rename('/ram/a.txt', '/ram/b.txt')\" && cat /ram/b.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "one"
+          }
+        }
+      ]
+    },
+    {
+      "id": "append_preserves_mount",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "keep.txt": "base"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/ram/keep.txt', 'a').write('-more')\" && cat /ram/keep.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "base-more"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename_across_mounts_refused",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          },
+          "/other": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "echo -n keep > /ram/c.txt && python3 -c \"import os; os.rename('/ram/c.txt', '/other/c.txt')\"",
+          "expect": {
+            "exit": 1
+          }
+        },
+        {
+          "command": "cat /ram/c.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "keep"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_mounts_one_mountpoint",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "resource": "ram",
+            "files": {
+              "leaf.txt": "deep\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print(sorted(os.listdir('/data')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['inner', 'top.txt']\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(open('/data/inner/leaf.txt').read().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "deep\n"
+          }
+        },
+        {
+          "command": "python3 -c \"open('/data/inner/w.txt', 'w').write('guest')\" && cat /data/inner/w.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "guest"
+          }
+        }
+      ]
+    },
+    {
+      "id": "nested_rename_exdev",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": {
+              "top.txt": "top\n"
+            }
+          },
+          "/data/inner": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf 'import errno\\nimport os\\ntry:\\n    os.rename(\"/data/top.txt\", \"/data/inner/moved.txt\")\\n    print(\"renamed\")\\nexcept OSError as e:\\n    print(\"exdev\" if e.errno == errno.EXDEV else e)\\n' > /data/x.py",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 /data/x.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "exdev\n"
+          }
+        },
+        {
+          "command": "cat /data/top.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "top\n"
+          }
+        }
+      ]
+    }
+  ]
+}

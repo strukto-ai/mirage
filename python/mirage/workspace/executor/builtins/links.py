@@ -20,6 +20,7 @@ from typing import Any
 
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec, word_text
+from mirage.utils.errors import MISS_ERRORS
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.shared import (Result, abs_path, fail,
                                                        ok, split_flags)
@@ -89,11 +90,142 @@ async def handle_ln(
     return ok("ln", out)
 
 
-def handle_readlink(
+async def resolve_path_stat(dispatch: Callable[..., Any],
+                            path: PathSpec) -> FileStat | None:
+    """What a path is, asked on both channels a backend can answer on.
+
+    A point lookup alone cannot decide. On a prefix store a directory is
+    not an object, it is the set of keys under it, so ``stat`` misses
+    what ``readdir`` would list. Absence therefore takes *both* channels
+    coming back empty, which is the only evidence that nothing is there.
+
+    The listing has to be non-empty to count: those stores answer a
+    missing path with ``[]`` rather than raising, and cannot hold an
+    empty directory anyway (one with no keys under it does not exist).
+    Measured across every integ target: an implicit directory answers
+    here, a missing path does not.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        path (PathSpec): path to resolve.
+    """
+    try:
+        stat, _ = await dispatch("stat", path)
+    except MISS_ERRORS:
+        stat = None
+    if stat is not None:
+        return stat
+    try:
+        entries, _ = await dispatch("readdir", path)
+    except MISS_ERRORS:
+        return None
+    if not entries:
+        return None
+    return FileStat(name=posixpath.basename(path.virtual.rstrip("/")),
+                    type=FileType.DIRECTORY)
+
+
+async def path_stat(dispatch: Callable[..., Any],
+                    virtual: str) -> FileStat | None:
+    """Stat one virtual path through the workspace, None when absent.
+
+    Resolves through the op dispatcher rather than one backend, so a path
+    under another mount answers correctly. This is what a traversal
+    command asks about its own start point: a directory can be walked, a
+    file is reported as itself, and None is GNU's missing-operand error.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path.
+    """
+    spec = PathSpec(virtual=virtual,
+                    directory=virtual[:virtual.rfind("/") + 1] or "/",
+                    resource_path="")
+    return await resolve_path_stat(dispatch, spec)
+
+
+async def path_readdir(dispatch: Callable[..., Any],
+                       virtual: str) -> list[str]:
+    """List one virtual path through the workspace, as virtual paths.
+
+    Resolves through the op dispatcher rather than one backend, so a
+    directory served by another mount answers. This is what a walker
+    reads once it crosses a mount boundary: the subtree under a nested
+    mount lives in a resource the walker's own accessor cannot open.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path of the directory.
+    """
+    spec = PathSpec(virtual=virtual,
+                    directory=virtual[:virtual.rfind("/") + 1] or "/",
+                    resource_path="")
+    entries, _ = await dispatch("readdir", spec)
+    return list(entries)
+
+
+async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
+    """Whether a resolved virtual path names something that exists.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path.
+    """
+    try:
+        return await path_stat(dispatch, virtual) is not None
+    except (OSError, ValueError):
+        return False
+
+
+async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
+                           virtual: str) -> FileStat | None:
+    """The stat of what a link points at, or None when it dangles.
+
+    Under ``-L`` the reported entity is the target, so its type drives
+    ``-type`` and its size and mtime drive ``-size`` and ``-mtime``. The
+    stat goes through dispatch rather than one backend because a link
+    may point into another mount.
+
+    Only the two ways a link can legitimately have no target are mapped
+    to None: a loop (ELOOP) and a missing target, the latter by
+    ``_stat_or_none``. Every other backend failure propagates, because a
+    permission or connection error is not a dangling link and reporting
+    it as one would print the link as ``-type l`` and exit 0.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path of the link.
+    """
+    try:
+        target = namespace.follow(virtual)
+    except CycleError:
+        return None
+    spec = PathSpec(virtual=target,
+                    directory=target[:target.rfind("/") + 1] or "/",
+                    resource_path="")
+    return await _stat_or_none(dispatch, spec)
+
+
+async def handle_readlink(
     namespace: Namespace,
+    dispatch: Callable[..., Any],
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
+    """Print a symlink's target, GNU readlink semantics.
+
+    The three canonicalizing flags differ only in how much of the
+    resolved path has to exist: ``-m`` requires nothing, ``-f`` requires
+    every component but the last, and ``-e`` requires all of it. A path
+    that falls short prints nothing and exits 1.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        dispatch (Callable): op dispatcher, used for the existence check.
+        session (Session): current session, for the working directory.
+        args (list[str | PathSpec]): the command's words after the name.
+    """
     flags, operands = split_flags(args, "fenm")
     if not operands:
         return fail("readlink", "readlink: missing operand\n")
@@ -106,9 +238,16 @@ def handle_readlink(
             # -f/-e/-m canonicalize: resolve every symlink (including a
             # trailing one) and normalize the path, GNU realpath-style.
             try:
-                lines.append(posixpath.normpath(namespace.follow(abs_op)))
+                resolved = posixpath.normpath(namespace.follow(abs_op))
             except CycleError:
                 exit_code = 1
+                continue
+            probe = (resolved if "e" in flags else
+                     posixpath.dirname(resolved) if "f" in flags else None)
+            if probe is not None and not await path_exists(dispatch, probe):
+                exit_code = 1
+                continue
+            lines.append(resolved)
             continue
         target = namespace.readlink(abs_op)
         if target is None:
@@ -269,7 +408,11 @@ __all__ = [
     "follow_paths",
     "handle_ln",
     "handle_readlink",
+    "link_target_stat",
+    "path_exists",
+    "path_readdir",
     "link_flags",
     "prepare_mv",
+    "resolve_path_stat",
     "strip_link_operands",
 ]

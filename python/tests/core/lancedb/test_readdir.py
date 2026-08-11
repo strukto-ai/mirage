@@ -14,8 +14,7 @@
 
 import pytest
 
-from mirage.core.lancedb.readdir import is_dir_name, readdir
-from mirage.resource.lancedb.config import LanceDBConfig
+from mirage.core.lancedb.readdir import readdir
 from mirage.types import PathSpec
 
 
@@ -51,12 +50,3 @@ async def test_group_lists_next_level(accessor):
 async def test_leaf_lists_row_files(accessor):
     out = await readdir(accessor, _ps("/animals/cat/big"))
     assert _names(out) == {"1.md", "1.png"}
-
-
-def test_is_dir_name_classifies_row_files():
-    cfg = LanceDBConfig(uri="mem://", blob_column="img", blob_ext="png")
-    assert is_dir_name("/animals/cat", config=cfg) is True
-    assert is_dir_name("/animals/cat/big/1.md", config=cfg) is False
-    assert is_dir_name("/animals/cat/big/1.png", config=cfg) is False
-    no_blob = LanceDBConfig(uri="mem://")
-    assert is_dir_name("/animals/cat/big/1.png", config=no_blob) is True

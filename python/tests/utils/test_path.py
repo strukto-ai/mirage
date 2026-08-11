@@ -12,8 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.path import (expand_tilde, glob_prefix_match, gnu_basename,
-                               gnu_dirname, norm, parent, resolve_path)
+import pytest
+
+from mirage.utils.path import (ancestors, drop_trailing_segments, expand_tilde,
+                               glob_prefix_match, gnu_basename, gnu_dirname,
+                               norm, norm_dir, owner_prefix, parent,
+                               resolve_path, respell_one)
 
 
 def test_norm_strips_and_adds_leading_slash():
@@ -22,6 +26,36 @@ def test_norm_strips_and_adds_leading_slash():
     assert norm("///a///") == "/a"
     assert norm("") == "/"
     assert norm("/") == "/"
+
+
+def test_norm_dir_yields_trailing_slash_form():
+    assert norm_dir("a/b") == "/a/b/"
+    assert norm_dir("/a/b/") == "/a/b/"
+    assert norm_dir("///a///") == "/a/"
+    assert norm_dir("") == "/"
+    assert norm_dir("/") == "/"
+
+
+def test_owner_prefix_takes_the_longest_boundary_match():
+    prefixes = ["/", "/data/", "/data/inner/"]
+    assert owner_prefix(prefixes, "/data/inner/x") == "/data/inner/"
+    assert owner_prefix(prefixes, "/data/x") == "/data/"
+    assert owner_prefix(prefixes, "/data") == "/data/"
+    assert owner_prefix(prefixes, "/other") == "/"
+    assert owner_prefix(prefixes, "/") == "/"
+
+
+def test_owner_prefix_respects_path_boundaries():
+    assert owner_prefix(["/data/"], "/database") is None
+    assert owner_prefix(["/data"], "/data/x") == "/data"
+    assert owner_prefix(["/data/"], "/data/") == "/data/"
+    assert owner_prefix([], "/data") is None
+
+
+def test_owner_prefix_keeps_the_input_spelling():
+    assert owner_prefix(["/data"], "/data/x") == "/data"
+    assert owner_prefix(["/data/"], "/data/x") == "/data/"
+    assert owner_prefix(["data/"], "/data/x") == "data/"
 
 
 def test_parent_of_normalized_key():
@@ -185,3 +219,68 @@ def test_glob_prefix_match_covers_descendants_of_matched_dir():
 def test_glob_prefix_match_intermediate_segment_glob():
     assert glob_prefix_match("/a/one/b.txt", "/a/*/b.txt") is True
     assert glob_prefix_match("/a/one/c.txt", "/a/*/b.txt") is False
+
+
+def test_ancestors_lists_proper_parents_outermost_first():
+    assert ancestors("/a/b/c") == ["/a", "/a/b"]
+
+
+def test_ancestors_of_a_root_child_is_empty():
+    assert ancestors("/a") == []
+
+
+def test_ancestors_of_root_is_empty():
+    assert ancestors("/") == []
+
+
+def test_ancestors_tolerates_a_trailing_slash():
+    assert ancestors("/a/b/") == ["/a"]
+
+
+@pytest.mark.parametrize("path,count,expected", [
+    ("a/b/c", 1, "a/b"),
+    ("/x/y/z", 2, "/x"),
+    ("f.txt/sub", 1, "f.txt"),
+    ("/data/mkc/f.txt/sub", 1, "/data/mkc/f.txt"),
+    ("a.txt", 0, "a.txt"),
+])
+def test_drop_trailing_segments(path, count, expected):
+    assert drop_trailing_segments(path, count) == expected
+
+
+def test_drop_trailing_segments_is_clamped():
+    # An ancestor name must stay a path; returning "" would quote nothing.
+    assert drop_trailing_segments("/a", 1) == "/a"
+    assert drop_trailing_segments("a/b", 5) == "a/b"
+
+
+@pytest.mark.parametrize("path,original,raw,expected", [
+    ("/data/sub/x", "/data", ".", "./sub/x"),
+    ("/data/sub", "/data/sub", "sub", "sub"),
+    ("/data/x:hit", "/data", ".", "./x:hit"),
+    ("/other/x", "/data", ".", "/other/x"),
+    ("/data/x", "/data", "/data", "/data/x"),
+])
+def test_respell_one_respells_the_typed_base(path, original, raw, expected):
+    assert respell_one(path, original, raw) == expected
+
+
+@pytest.mark.parametrize("path,original,expected", [
+    ("/data/sub/x", "/data", "sub/x"),
+    ("/data/x:hit", "/data", "x:hit"),
+    ("/ram/a.txt:hello", "/", "ram/a.txt:hello"),
+    ("/data", "/data", "."),
+])
+def test_respell_one_empty_raw_is_the_bare_no_operand_spelling(
+        path, original, expected):
+    # GNU grep -r with no path operand prints names relative to the cwd
+    # with no ./ prefix; the synthetic operand carries raw_path "".
+    assert respell_one(path, original, "") == expected
+
+
+def test_respell_one_root_original_collapses_to_raw():
+    # A traversal rooted at "/" respells the root line itself: bare
+    # form and typed "." both print ".", never "./".
+    assert respell_one("/", "/", ".") == "."
+    assert respell_one("/", "/", "") == "."
+    assert respell_one("/ram/a.txt", "/", ".") == "./ram/a.txt"

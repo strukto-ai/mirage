@@ -58,6 +58,28 @@ describe('Workspace.execute', () => {
     await ws.close()
   })
 
+  it('readonly registers a bare name and an array assignment', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('RO=1; readonly RO; RO=2')
+    expect(res.exitCode).toBe(1)
+    expect(new TextDecoder().decode(res.stderr)).toBe('bash: RO: readonly variable\n')
+    const res2 = await ws.execute("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
+    expect(new TextDecoder().decode(res2.stdout)).toBe('rc=1\n')
+    expect(new TextDecoder().decode(res2.stderr)).toBe(
+      'bash: unset: RA: cannot unset: readonly variable\n',
+    )
+    await ws.close()
+  })
+
+  it("source positional args keep the operand's spelling", async () => {
+    const { ws } = buildWorkspace()
+    await ws.execute("printf 'echo a1=$1\\n' > /ram/s.sh")
+    // A path-looking argument stays as typed, not resolved.
+    const res = await ws.execute('cd /ram && source /ram/s.sh ./sub/x.txt')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a1=./sub/x.txt\n')
+    await ws.close()
+  })
+
   it('runs `pwd` and prints /', async () => {
     const { ws } = buildWorkspace()
     const res = await ws.execute('pwd')
@@ -312,6 +334,57 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
       'set -- -ab; OPTIND=1; getopts ab o; (getopts ab o); getopts ab o; echo "$o"',
     )
     expect(new TextDecoder().decode(res.stdout)).toBe('b\n')
+    await ws.close()
+  })
+})
+
+// Shell names are script-controlled, so a name colliding with an
+// `Object.prototype` member must behave exactly like any other name:
+// session records and lookup tables are null-prototype (ownRecord,
+// SPEC_TABLE) and the seams read own entries only. Python's dicts get
+// this for free; these pins keep the TypeScript side honest.
+describe('Object.prototype-colliding names', () => {
+  it('an unknown command named toString is command-not-found, exit 127', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('toString')
+    expect(res.exitCode).toBe(127)
+    expect(new TextDecoder().decode(res.stderr)).toContain('toString: command not found')
+    await ws.close()
+  })
+
+  it('command -v and type do not report prototype members as functions', async () => {
+    const { ws } = buildWorkspace()
+    const v = await ws.execute('command -v toString')
+    expect(v.exitCode).toBe(1)
+    expect(new TextDecoder().decode(v.stdout)).toBe('')
+    const t = await ws.execute('type constructor')
+    expect(t.exitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('a prefix assignment on an unknown command does not leak into the session', async () => {
+    const { ws } = buildWorkspace()
+    await ws.execute('X=7 toString')
+    const res = await ws.execute('echo "[$X]"')
+    expect(new TextDecoder().decode(res.stdout)).toBe('[]\n')
+    await ws.close()
+  })
+
+  it('__proto__ is an ordinary shell variable', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('__proto__=5; echo "[$__proto__]"')
+    expect(new TextDecoder().decode(res.stdout)).toBe('[5]\n')
+    const unset = await ws.execute('__proto__=5; unset __proto__; echo "[$__proto__]"')
+    expect(new TextDecoder().decode(unset.stdout)).toBe('[]\n')
+    await ws.close()
+  })
+
+  it('a shell function named toString defines, runs, and unsets', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('toString() { echo ran; }; toString')
+    expect(new TextDecoder().decode(res.stdout)).toBe('ran\n')
+    const gone = await ws.execute('toString() { echo ran; }; unset -f toString; toString')
+    expect(gone.exitCode).toBe(127)
     await ws.close()
   })
 })

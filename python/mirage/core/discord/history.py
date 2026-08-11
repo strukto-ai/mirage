@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
+from mirage.core.discord._client import discord_get
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
-from mirage.resource.discord.config import DiscordConfig
+from mirage.core.discord.render import history_jsonl_bytes
 
 DISCORD_EPOCH = 1420070400000
 
@@ -70,6 +71,7 @@ async def stream_messages_for_day(
             last_id_fn=lambda m: m["id"],
             page_size=page_size,
             start_after=after,
+            newest_first=True,
     ):
         in_range = [m for m in page if int(m["id"]) <= before_int]
         if in_range:
@@ -119,8 +121,27 @@ async def get_history_jsonl(
         bytes: JSONL-encoded messages.
     """
     messages = await list_messages_for_day(config, channel_id, date_str)
-    lines = [
-        json.dumps(m, ensure_ascii=False, separators=(",", ":"))
-        for m in messages
-    ]
-    return ("\n".join(lines) + "\n").encode() if lines else b""
+    return history_jsonl_bytes(messages)
+
+
+async def fetch_recent_messages(
+    config: DiscordConfig,
+    channel_id: str,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Fetch the most recent messages of a channel (one API page).
+
+    Args:
+        config (DiscordConfig): Discord credentials.
+        channel_id (str): channel ID.
+        limit (int): maximum number of messages (Discord caps at 100).
+
+    Returns:
+        list[dict]: messages sorted oldest-first.
+    """
+    page = await discord_get(config, f"/channels/{channel_id}/messages",
+                             {"limit": limit})
+    items = [m for m in page
+             if isinstance(m, dict)] if isinstance(page, list) else []
+    items.sort(key=lambda m: int(m["id"]))
+    return items

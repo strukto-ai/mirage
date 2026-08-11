@@ -14,7 +14,7 @@
 
 from mirage.workspace.snapshot.api import snapshot
 from mirage.workspace.snapshot.config import MountArgs
-from mirage.workspace.snapshot.drift import (ContentDriftError,
+from mirage.workspace.snapshot.drift import (ContentDriftError, DriftQueue,
                                              capture_fingerprints, check_drift,
                                              install_fingerprints,
                                              live_only_mount_prefixes)
@@ -45,6 +45,7 @@ __all__ = [
     "is_safe_blob_path",
     "norm_mount_prefix",
     "ContentDriftError",
+    "DriftQueue",
     "capture_fingerprints",
     "check_drift",
     "install_fingerprints",

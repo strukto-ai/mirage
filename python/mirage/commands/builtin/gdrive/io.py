@@ -14,17 +14,16 @@
 
 from functools import partial
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.gdrive.copy import copy as _copy
 from mirage.core.gdrive.create import create as _create
-from mirage.core.gdrive.du import du as _du
-from mirage.core.gdrive.du import du_all as _du_all
+from mirage.core.gdrive.du import entries as _du_entries
+from mirage.core.gdrive.du import size as _du_size
 from mirage.core.gdrive.exists import exists as _exists
 from mirage.core.gdrive.find import find as _find
 from mirage.core.gdrive.mkdir import mkdir as _mkdir
 from mirage.core.gdrive.read import read as _read
-from mirage.core.gdrive.readdir import is_dir_name as _is_dir_name
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.rename import rename as _rename
 from mirage.core.gdrive.rm import rm_r as _rm_r
@@ -42,9 +41,9 @@ from mirage.core.gdrive.write import write_bytes as _write
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
-    is_dir_name=lambda _accessor, child: _is_dir_name(child),
     is_mounted=lambda a: True,
     local=False,
     write=_write,
@@ -59,8 +58,7 @@ IO = CommandIO(
     create=_create,
     truncate=_truncate,
     find=_find,
-    du_total=_du,
-    du_all=_du_all,
+    du=DuOps(size=_du_size, entries=_du_entries),
 )
 
 resolve_glob = IO.resolve_glob

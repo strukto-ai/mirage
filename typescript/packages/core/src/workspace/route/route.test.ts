@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CLISpec } from '../../commands/cli/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { Consumer, SHELL_CONSUMERS, route } from './index.ts'
+import { Consumer, SHELL_CONSUMERS, dereferences, route, routeAll } from './index.ts'
 import { Session } from '../session/session.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -26,6 +28,14 @@ function fixture(): { session: Session; ws: Workspace } {
   registry.registerResource(ram)
   const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops: registry })
   return { session: new Session({ sessionId: 't' }), ws }
+}
+
+function noopVerb(): [null, IOResult] {
+  return [null, new IOResult()]
+}
+
+function cliTree(): CLISpec {
+  return new CLISpec({ name: 'prog', subcommands: [new CLISpec({ name: 'run', fn: noopVerb })] })
 }
 
 describe('route', () => {
@@ -76,11 +86,75 @@ describe('route', () => {
     expect(route('nosuchcmd', session, ws.registry)).toBe(Consumer.UNKNOWN)
   })
 
+  it('routes an installed CLI to CLI', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    expect(route('prog', session, ws.registry)).toBe(Consumer.CLI)
+  })
+
+  it('function shadows an installed CLI', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    session.functions.prog = []
+    expect(route('prog', session, ws.registry)).toBe(Consumer.FUNCTION)
+  })
+
+  it('an unregistered CLI routes UNKNOWN', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    ws.unregisterCli('prog')
+    expect(route('prog', session, ws.registry)).toBe(Consumer.UNKNOWN)
+  })
+
   it('only shell consumers resolve globs', () => {
     expect(SHELL_CONSUMERS.has(Consumer.SESSION)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.NAMESPACE)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.FUNCTION)).toBe(true)
+    // A CLI is a program: bash hands programs glob matches, never
+    // patterns.
+    expect(SHELL_CONSUMERS.has(Consumer.CLI)).toBe(true)
     expect(SHELL_CONSUMERS.has(Consumer.MOUNT)).toBe(false)
     expect(SHELL_CONSUMERS.has(Consumer.UNKNOWN)).toBe(false)
+  })
+})
+
+describe('routeAll', () => {
+  it('reports every layer, winner first', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    expect(routeAll('prog', session, ws.registry)).toEqual([Consumer.CLI])
+    session.functions.prog = 'prog() { :; }'
+    expect(routeAll('prog', session, ws.registry)).toEqual([Consumer.FUNCTION, Consumer.CLI])
+  })
+
+  it('is empty where route says UNKNOWN', () => {
+    const { session, ws } = fixture()
+    expect(routeAll('bogus', session, ws.registry)).toEqual([])
+    expect(route('bogus', session, ws.registry)).toBe(Consumer.UNKNOWN)
+  })
+
+  it('agrees with route on the winner', () => {
+    const { session, ws } = fixture()
+    ws.registerCli('prog', cliTree())
+    session.functions.greet = 'greet() { :; }'
+    for (const name of ['cd', 'ln', 'greet', 'prog', 'cat', 'bogus']) {
+      const layers = routeAll(name, session, ws.registry)
+      expect(route(name, session, ws.registry)).toBe(layers[0] ?? Consumer.UNKNOWN)
+    }
+  })
+})
+
+describe('find link-policy options', () => {
+  it('takes the last of -P/-H/-L', () => {
+    // GNU: `find -L -P x` does not follow, `find -P -L x` does.
+    expect(dereferences('find', ['find', '-L', '-P', '/data/link'])).toBe(false)
+    expect(dereferences('find', ['find', '-P', '-L', '/data/link'])).toBe(true)
+    expect(dereferences('find', ['find', '-L', '-P', '-L', '/data/link'])).toBe(true)
+    expect(dereferences('find', ['find', '-H', '/data/link'])).toBe(true)
+    expect(dereferences('find', ['find', '/data/link'])).toBe(false)
+  })
+
+  it('only counts options before the operand', () => {
+    expect(dereferences('find', ['find', '/data/link', '-L'])).toBe(false)
   })
 })

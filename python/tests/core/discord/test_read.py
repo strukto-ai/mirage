@@ -20,8 +20,8 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.read import read
-from mirage.resource.discord.config import DiscordConfig
 from mirage.types import PathSpec
 
 

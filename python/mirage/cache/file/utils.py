@@ -27,3 +27,21 @@ def parse_limit(limit: str | int) -> int:
 
 def default_fingerprint(data: bytes) -> str:
     return hashlib.md5(data).hexdigest()
+
+
+def glob_escape(literal: str) -> str:
+    """Escape a literal for use inside a redis MATCH pattern.
+
+    Cache keys are mount paths, and a path may legitimately contain the
+    glob metacharacters redis SCAN interprets, so a prefix like
+    ``/data[1]/`` would otherwise match nothing (or the wrong keys).
+
+    Args:
+        literal (str): Text to match verbatim.
+    """
+    out: list[str] = []
+    for ch in literal:
+        if ch in "*?[]\\":
+            out.append("\\")
+        out.append(ch)
+    return "".join(out)

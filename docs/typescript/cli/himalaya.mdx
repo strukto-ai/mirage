@@ -1,0 +1,188 @@
+---
+title: himalaya
+description: IMAP/SMTP mail client following the pimalaya/himalaya vocabulary.
+icon: terminal
+---
+
+IMAP/SMTP mail client following the pimalaya/himalaya vocabulary. Install it on the workspace and the whole tree is
+discoverable with `himalaya --help`.
+
+## Install
+
+```typescript
+import { EmailResource, HIMALAYA, Workspace } from '@struktoai/mirage-node'
+
+const config = {
+  imapHost: 'imap.example.com',
+  smtpHost: 'smtp.example.com',
+  username: 'agent@example.com',
+  password: 'app-password',
+}
+const ws = new Workspace({ '/mail': new EmailResource(config) })
+ws.registerCli('himalaya', HIMALAYA, config)
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
+
+## Verbs
+
+The verbs follow the [himalaya](https://github.com/pimalaya/himalaya)
+CLI structure: `himalaya envelope list|search` to triage, `himalaya
+message read|compose|send|reply|forward` to act. Messages are addressed
+by positional id, the mailbox by `-m/--mailbox`, and reads return JSON
+rather than a rendered table.
+
+Upstream aliases resolve too: `envelope ls`, `envelope sr`, `message
+write`, `message new`, `message fwd`.
+
+### `himalaya envelope list`
+
+List a mailbox, most recent first.
+
+```bash
+himalaya envelope list -m INBOX --page 2 --page-size 10
+```
+
+| Option            | Required | Description                   |
+| ----------------- | -------- | ----------------------------- |
+| `-m, --mailbox`   | no       | Mailbox name (default: INBOX) |
+| `-p, --page`      | no       | Page number, starting from 1  |
+| `-s, --page-size` | no       | Max envelopes per page (25)   |
+
+Only the newest `page * page_size` messages are fetched, so listing the
+first page costs one page of header fetches rather than a scan of the
+whole mailbox. The account's `max_messages` (default 200) bounds how far
+back paging can reach; an `order by` is unrelated to arrival order, so a
+sorted search considers that whole window.
+
+### `himalaya envelope search`
+
+Filter and sort with himalaya's own query DSL. The query is the trailing
+operand, so it is words rather than flags.
+
+```bash
+himalaya envelope search -m INBOX not flag seen and from alice@example.com
+himalaya envelope search after 2026-01-01 order by subject asc
+himalaya envelope search subject '"quarterly review"'
+```
+
+Conditions: `date <yyyy-mm-dd>`, `before <yyyy-mm-dd>`,
+`after <yyyy-mm-dd>`, `from <pattern>`, `to <pattern>`,
+`subject <pattern>`, `body <pattern>`, and
+`flag <seen|answered|flagged|draft|deleted>`. Combine them with `and`,
+`or` and `not`, group with parentheses, and sort with
+`order by <date|from|to|subject> [asc|desc]`.
+
+Three things to know about the grammar. The date conditions read the
+message's own `Date:` header, not the mailbox's received-at timestamp, so
+imported or delayed mail lands on the day it was sent. `after` is
+strictly greater than the given day, unlike IMAP's inclusive `SENTSINCE`.
+And a pattern containing spaces needs *literal* double quotes inside the
+shell's quoting (`'"quarterly review"'`), because the shell's own quotes
+are gone by the time the query reaches the parser, exactly as upstream
+behaves.
+
+The same paging flags as `envelope list` apply. A query that does not
+parse exits 1 without contacting the server.
+
+### `himalaya message read`
+
+```bash
+himalaya message read -m INBOX 12345
+himalaya message read -m INBOX 12345 --raw
+```
+
+| Option          | Required | Description                      |
+| --------------- | -------- | -------------------------------- |
+| `<ID>`          | yes      | Message id, positional           |
+| `-m, --mailbox` | no       | Mailbox name (default: INBOX)    |
+| `--raw`         | no       | Write the RFC 5322 bytes instead |
+
+### `himalaya message compose`
+
+The built-in flag composer. Without `--send` it writes the assembled RFC
+5322 message to stdout, so it can be piped into `message send` or into
+another composer.
+
+```bash
+himalaya message compose --to you@example.org --subject Hello --body Hi --send
+himalaya message compose --to you@example.org --subject Hello --body Hi | himalaya message send
+echo "the body" | himalaya message compose --to you@example.org --subject Hello --send
+himalaya message compose --to you@example.org --subject Report --body 'see attached' --attach /data/report.pdf --send
+```
+
+| Option          | Required | Description                                    |
+| --------------- | -------- | ---------------------------------------------- |
+| `--from`        | no       | Sender address (default: the account username) |
+| `-t, --to`      | no       | Recipient(s), repeatable or comma-separated    |
+| `--cc`          | no       | Carbon-copy recipient(s)                       |
+| `--bcc`         | no       | Blind carbon-copy recipient(s)                 |
+| `-s, --subject` | no       | Subject line                                   |
+| `--body`        | no       | Inline body (falls back to stdin)              |
+| `--attach`      | no       | Attachment file path, repeatable               |
+| `--signature`   | no       | Signature appended after a `-- ` line          |
+| `--send`        | no       | Send through SMTP instead of writing to stdout |
+
+### `himalaya message send`
+
+Sends a raw RFC 5322 message taken from the operand or from stdin. This
+is the sink a composer chain feeds.
+
+```bash
+himalaya message send < message.eml
+himalaya message compose --to you@example.org --subject Hi --body yo | himalaya message send
+```
+
+### `himalaya message reply`
+
+Fetches the source message, prefills `Re:` on the subject plus
+`In-Reply-To` / `References`, derives the recipient from the source's
+`Reply-To` (else its `From`), and quotes the source body. Like
+`compose`, it writes MIME to stdout unless `--send` is passed.
+
+```bash
+himalaya message reply -m INBOX 12345 --body 'Thanks for the update' --send
+himalaya message reply -m INBOX 12345 --cc team@example.org --body Ack --send
+```
+
+It carries every composer flag above, plus the mailbox and:
+
+| Option                 | Required | Description                                |
+| ---------------------- | -------- | ------------------------------------------ |
+| `<ID>`                 | yes      | Source message id, positional              |
+| `-P, --posting-style`  | no       | `top` (default) or `bottom`                |
+| `-Q, --quote-headline` | no       | Literal line placed before the quoted body |
+
+There is no `--all` flag, matching upstream: reply-all is spelled by
+naming the other recipients with `--cc`, which `message read` reports.
+
+### `himalaya message forward`
+
+```bash
+himalaya message forward -m INBOX 12345 --to colleague@example.com --send
+```
+
+Same flags as `reply`. The subject gains `Fwd:`, `References` carries
+over, and `In-Reply-To` does not.
+
+## Divergences from upstream
+
+Deliberate gaps, all of which fail loudly rather than silently:
+
+- `message add`, `copy`, `move`, `delete`, `flag add`, `attachment
+  download`, `mailbox` and the protocol-specific subgroups (`imap`,
+  `jmap`, `gmail`, `msgraph`, `smtp`) are not implemented. An unknown
+  verb exits 1 with git's wording.
+- `--save <MAILBOX>` is absent because the email backend has no IMAP
+  `APPEND`, and `message read --seen` is absent because the mount is
+  read-only and never flips `\Seen`.
+- `envelope list` renders JSON, not a table, so its table flags
+  (`--max-width`, `--recipient`, `--has-attachment`) do not exist.
+- Body and signature files (`--body-file`, `--signature-file`) are
+  not wired up; `--attach` is, reading each path through the
+  workspace, with the content type guessed from a fixed extension
+  table rather than a full mime database.
+
+Server behavior can differ too: whether `from alice` matches
+`alice@example.com` as a substring is up to the IMAP server, not mirage.

@@ -17,8 +17,9 @@ import type { S3Config } from '../s3/config.ts'
 
 export interface R2Config {
   bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
   accountId?: string
   endpoint?: string
   region?: string
@@ -31,8 +32,9 @@ export interface R2Config {
 
 export interface R2ConfigRedacted {
   bucket: string
-  accessKeyId: string
-  secretAccessKey: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  sessionToken?: string
   accountId?: string
   endpoint: string
   region: string
@@ -45,8 +47,9 @@ export interface R2ConfigRedacted {
 
 const R2ConfigSchema = z.object({
   bucket: z.string(),
-  accessKeyId: secretStr(),
-  secretAccessKey: secretStr(),
+  accessKeyId: secretStr().optional(),
+  secretAccessKey: secretStr().optional(),
+  sessionToken: secretStr().optional(),
   accountId: z.string().optional(),
   endpoint: z.string(),
   region: z.string(),
@@ -70,8 +73,9 @@ export function r2ToS3Config(config: R2Config): S3Config {
     bucket: config.bucket,
     region: config.region ?? 'auto',
     endpoint: resolvedR2Endpoint(config),
-    accessKeyId: config.accessKeyId,
-    secretAccessKey: config.secretAccessKey,
+    ...(config.accessKeyId !== undefined ? { accessKeyId: config.accessKeyId } : {}),
+    ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
+    ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
@@ -94,6 +98,7 @@ export function normalizeR2Config(input: Record<string, unknown>): R2Config {
       account_id: 'accountId',
       access_key_id: 'accessKeyId',
       secret_access_key: 'secretAccessKey',
+      session_token: 'sessionToken',
       aws_profile: 'profile',
       endpoint_url: 'endpoint',
       path_style: 'forcePathStyle',

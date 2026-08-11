@@ -23,11 +23,11 @@ from mirage.core.databricks_volume._helpers import parent_path
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.observe.context import record
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.errors import enoent
 
 
-def _is_directory_metadata(metadata: object) -> bool:
+def _is_directory_metadata(metadata: JsonValue) -> bool:
     value = getattr(metadata, "is_directory", None)
     if value is not None:
         return bool(value)

@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "export_quoted_assignment",
+      "seq": 930180,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "export 'QXA=bar'; echo [$QXA]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[bar]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "export_double_quoted_expansion",
+      "seq": 930181,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "qxv=v; export \"QXB=$qxv\"; echo [$QXB]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[v]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "declare_quoted_value_keeps_spaces",
+      "seq": 930182,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "declare 'QXC=y z'; echo [$QXC]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[y z]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "declare_quoted_compound_stays_scalar",
+      "seq": 930183,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "declare 'QXD=(1 2)'; echo [$QXD] [${QXD[1]-unset}]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[(1 2)] [unset]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "local_quoted_assignment_scopes",
+      "seq": 930184,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "qf() { local 'QXE=v'; echo in:[$QXE]; }; qf; echo out:[$QXE]",
+      "expect": {
+        "exit": 0,
+        "stdout": "in:[v]\nout:[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "readonly_quoted_assignment_sets_value",
+      "seq": 930185,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readonly 'QXRO=v'; echo [$QXRO]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[v]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

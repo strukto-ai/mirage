@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { breToRegExp } from '../../utils/bre.ts'
+import { isMissingPath } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
@@ -20,6 +22,7 @@ import { getExtension } from '../resolve.ts'
 import { PatternType } from './constants.ts'
 import { grepContextLines } from './grep_context.ts'
 import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
+import type { FlagValue } from '../spec/types.ts'
 
 export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   '.parquet',
@@ -40,11 +43,11 @@ export function escapeRegex(s: string): string {
 }
 
 // Resolve the pattern-list argument from -e values (list[str] when
-// repeatable) or the positional. Returns the POSIX newline-joined pattern
+// multiple) or the positional. Returns the POSIX newline-joined pattern
 // list, or null when neither was supplied.
 export function patternArg(
   texts: readonly string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, FlagValue>,
 ): string | null {
   const e = flags.e
   if (Array.isArray(e) && e.length > 0) return e.join('\n')
@@ -66,7 +69,7 @@ export interface PatternResolution {
 export async function resolvePatternFromFlags(
   name: string,
   texts: readonly string[],
-  flags: Record<string, string | boolean | string[]>,
+  flags: Record<string, FlagValue>,
   paths: readonly PathSpec[],
   mountPrefix: string | null | undefined,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -112,16 +115,32 @@ export function mergePatternList(
   return parts.join('\n')
 }
 
-function buildPatternStr(pattern: string, fixedString = false, wholeWord = false): string {
+// One pattern's regex source, in the syntax it was written in.
+function sourceOf(part: string, fixedString: boolean, basic: boolean): string {
+  if (fixedString) return escapeRegex(part)
+  return basic ? breToRegExp(part) : part
+}
+
+// Build a regex source string from a POSIX pattern list. `basic` says the
+// patterns are basic regular expressions, which grep reads by default and which
+// invert most of the RegExp operators; false leaves them alone, which is right
+// for -E and for rg's own dialect.
+function buildPatternStr(
+  pattern: string,
+  fixedString = false,
+  wholeWord = false,
+  basic = false,
+): string {
   const parts = pattern.split('\n')
   if (parts.length === 1) {
-    let patStr = fixedString ? escapeRegex(pattern) : pattern
+    let patStr = sourceOf(pattern, fixedString, basic)
     if (wholeWord) patStr = `\\b${patStr}\\b`
     return patStr
   }
   const subs: string[] = []
   for (const part of parts) {
-    let sub = fixedString ? escapeRegex(part) : `(?:${part})`
+    const source = sourceOf(part, fixedString, basic)
+    let sub = fixedString ? source : `(?:${source})`
     if (wholeWord) sub = `\\b${sub}\\b`
     subs.push(sub)
   }
@@ -133,8 +152,9 @@ export function compilePattern(
   ignoreCase = false,
   fixedString = false,
   wholeWord = false,
+  basic = false,
 ): RegExp {
-  return new RegExp(buildPatternStr(pattern, fixedString, wholeWord), ignoreCase ? 'i' : '')
+  return new RegExp(buildPatternStr(pattern, fixedString, wholeWord, basic), ignoreCase ? 'i' : '')
 }
 
 export function isRegexPattern(pattern: string, fixedString: boolean): boolean {
@@ -207,6 +227,58 @@ export function extractRequiredLiteral(pattern: string): string | null {
 export function searchQuery(pattern: string, fixedString: boolean): string | null {
   if (classifyPattern(pattern, fixedString) !== PatternType.REGEX) return pattern
   return extractRequiredLiteral(pattern)
+}
+
+// Whether the pattern is searched verbatim, with no regex extraction.
+// Push-down against a whole-word search index is only complete when the term
+// handed to the provider is the entire match. A regex narrowed on an extracted
+// literal fails that: `foo[0-9]` under -w matches `foo1`, but a whole-word
+// search for `foo` never returns a file whose only token is `foo1`.
+export function isLiteralPattern(pattern: string, fixedString: boolean): boolean {
+  if (fixedString) return true
+  const pt = classifyPattern(pattern, fixedString)
+  return pt === PatternType.EXACT || (pt === PatternType.SIMPLE && !pattern.includes('.'))
+}
+
+// True when a flag alters the match set or output shape of grep/rg. A search
+// push-down prints each matching record as one whole line, so it cannot honor
+// -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
+// file-filtering --glob/--type; the wrapper must defer to the generic scan
+// when any is present.
+export function hasSearchShapingFlags(flags: Record<string, FlagValue>): boolean {
+  if (
+    flags.v === true ||
+    flags.n === true ||
+    flags.c === true ||
+    flags.args_l === true ||
+    flags.l === true ||
+    flags.w === true ||
+    flags.o === true ||
+    flags.q === true ||
+    flags.H === true ||
+    flags.h === true ||
+    flags.args_I === true
+  ) {
+    return true
+  }
+  return (
+    typeof flags.m === 'string' ||
+    typeof flags.A === 'string' ||
+    typeof flags.B === 'string' ||
+    typeof flags.C === 'string' ||
+    flags.type !== undefined ||
+    flags.glob !== undefined
+  )
+}
+
+// True when a literal-substring push-down (LIKE/ILIKE) faithfully reproduces
+// grep/rg: a literal pattern with no shaping flags. A newline-joined pattern
+// list (-F with multiple -e) is a set of independent alternatives LIKE cannot
+// express, so it stays on the generic path. Backends that push a real regex
+// down (mongodb) gate on hasSearchShapingFlags alone instead.
+export function searchPushdownOk(flags: Record<string, FlagValue>, pattern: string): boolean {
+  if (pattern.includes('\n')) return false
+  return isLiteralPattern(pattern, flags.F === true) && !hasSearchShapingFlags(flags)
 }
 
 export interface GrepLinesOptions {
@@ -377,6 +449,7 @@ export interface GrepFilesOnlyOptions {
   onlyMatching: boolean
   maxCount: number | null
   wholeWord: boolean
+  basic: boolean
 }
 
 export async function grepRecursive(
@@ -451,6 +524,47 @@ export async function grepRecursive(
   return results
 }
 
+// The exit status grep and ripgrep share. An operand the search could not read
+// is exit 2, and it outranks a match: both tools print the lines they did find
+// and still exit 2. The one exception is grep's -q, documented as exiting zero
+// when a match is found "even if an error was detected". Everything else is the
+// familiar 0 for a match, 1 for none.
+export function exitCodeFor(matched: boolean, failed: boolean, quiet: boolean): number {
+  if (matched && quiet) return 0
+  if (failed) return 2
+  return matched ? 0 : 1
+}
+
+// Whether an operand names a directory, asked on both channels. Both are
+// consulted because on a prefix store a directory is the set of keys under it
+// rather than an object, so stat misses one that readdir lists happily. The
+// listing has to be non-empty to count: such a store answers readdir for any
+// path at all, returning nothing for one that does not exist, so a bare "it did
+// not throw" reads every missing file as a directory. The cost is that a
+// genuinely empty directory is invisible there, which is the same thing `du`
+// already documents and the safer way round: naming a missing file is a report
+// a caller can act on, calling it a directory is not.
+async function operandIsDirectory(
+  readdirFn: AsyncReaddirFn,
+  info: FileStat | null,
+  path: string,
+): Promise<boolean> {
+  if (info !== null) return info.type === FileType.DIRECTORY
+  try {
+    return (await readdirFn(path)).length > 0
+  } catch {
+    return false
+  }
+}
+
+// GNU's stderr line for an operand grep could not read. A directory does not
+// reach here: it is recognized from its type before the read, because what a
+// read throws for one is whatever the backend happens to do about it.
+function operandError(path: string, err: unknown): string {
+  if (isMissingPath(err)) return `grep: ${path}: No such file or directory`
+  return `grep: ${path}: ${err instanceof Error ? err.message : String(err)}`
+}
+
 export async function grepFilesOnly(
   readdirFn: AsyncReaddirFn,
   statFn: AsyncStatFn,
@@ -460,59 +574,61 @@ export async function grepFilesOnly(
   opts: GrepFilesOnlyOptions,
   warnings: string[] | null = null,
 ): Promise<string[]> {
-  const compiled = compilePattern(pattern, opts.ignoreCase, opts.fixedString, opts.wholeWord)
+  const compiled = compilePattern(
+    pattern,
+    opts.ignoreCase,
+    opts.fixedString,
+    opts.wholeWord,
+    opts.basic,
+  )
+  // What the operand is, asked before it is read. A failed read is a
+  // backend-dependent proxy for the type and a poor one: a keyed store reads a
+  // directory path without complaint and returns nothing, and ssh answers with
+  // an SFTP error that is not a filesystem error at all, so classifying
+  // afterwards gets a different answer per backend.
+  let info: FileStat | null = null
+  try {
+    info = await statFn(path)
+  } catch {
+    info = null
+  }
   if (opts.recursive) {
     // GNU only walks directory operands; a file operand under -r takes the
     // plain single-file scan (python grep_files_only parity). Stat failures
     // keep the walk so missing operands surface its error shape.
-    let operandIsFile = false
-    try {
-      const s = await statFn(path)
-      operandIsFile = s.type !== FileType.DIRECTORY
-    } catch {
-      operandIsFile = false
-    }
+    const operandIsFile = info !== null && info.type !== FileType.DIRECTORY
     if (!operandIsFile) {
       return grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
     }
   }
-  try {
-    const data = await readBytesFn(path)
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(data)
-    const lines = text.split('\n')
-    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-    let count = 0
-    for (const line of lines) {
-      const found = compiled.test(line)
-      const matched = opts.invert ? !found : found
-      if (matched) {
-        count += 1
-        if (opts.maxCount !== null && count >= opts.maxCount) break
-      }
-    }
-    if (opts.countOnly) return [String(count)]
-    return count > 0 ? [path] : []
-  } catch (err) {
-    if (warnings !== null)
-      warnings.push(`grep: ${path}: ${err instanceof Error ? err.message : String(err)}`)
+  // GNU names a directory operand and moves on without descending into it; only
+  // -r walks one, and that branch returned above. Walking here would make -l
+  // alone behave like -rl.
+  if (await operandIsDirectory(readdirFn, info, path)) {
+    if (warnings !== null) warnings.push(`grep: ${path}: Is a directory`)
+    return []
   }
+  let data: Uint8Array
   try {
-    const s = await statFn(path)
-    if (s.type === FileType.DIRECTORY) {
-      return await grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
-    }
+    data = await readBytesFn(path)
   } catch (err) {
-    if (warnings !== null)
-      warnings.push(`grep: ${path}: ${err instanceof Error ? err.message : String(err)}`)
-    try {
-      await readdirFn(path)
-      return await grepRecursive(readdirFn, statFn, readBytesFn, path, compiled, opts, warnings)
-    } catch (err2) {
-      if (warnings !== null)
-        warnings.push(`grep: ${path}: ${err2 instanceof Error ? err2.message : String(err2)}`)
+    if (warnings !== null) warnings.push(operandError(path, err))
+    return []
+  }
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(data)
+  const lines = text.split('\n')
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  let count = 0
+  for (const line of lines) {
+    const found = compiled.test(line)
+    const matched = opts.invert ? !found : found
+    if (matched) {
+      count += 1
+      if (opts.maxCount !== null && count >= opts.maxCount) break
     }
   }
-  return []
+  if (opts.countOnly) return [String(count)]
+  return count > 0 ? [path] : []
 }
 
 // Prefix every line chunk with a filename label (grep -H). The grep stream

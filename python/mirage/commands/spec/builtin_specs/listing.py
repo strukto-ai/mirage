@@ -12,134 +12,124 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
-                                        Option)
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 
-SPECS: dict[str,
-            CommandSpec] = {
-                'ls':
-                CommandSpec(
-                    options=(
-                        Option(short="-l"),
-                        Option(short="-a"),
-                        Option(short="-A"),
-                        Option(short="-h"),
-                        Option(short="-t"),
-                        Option(short="-S"),
-                        Option(short="-r"),
-                        Option(short="-1"),
-                        Option(short="-R"),
-                        Option(short="-d"),
-                        Option(short="-F"),
-                        # Accepted no-op like grep --color (#471).
-                        Option(long="--color",
-                               value_kind=OperandKind.TEXT,
-                               value_optional=True),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                ),
-                'stat':
-                CommandSpec(
-                    options=(
-                        Option(short="-c", value_kind=OperandKind.TEXT),
-                        Option(short="-f", value_kind=OperandKind.TEXT),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                ),
-                'pwd':
-                CommandSpec(
-                    options=(
-                        Option(short="-P"),
-                        Option(short="-L"),
-                    ),
-                    rest=Operand(kind=OperandKind.TEXT),
-                ),
-                'find':
-                CommandSpec(
-                    options=(
-                        Option(short="-name",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-type",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-maxdepth",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-size",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-mtime",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-iname",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-path",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-mindepth",
-                               value_kind=OperandKind.TEXT,
-                               repeatable=True),
-                        Option(short="-print"),
-                        Option(short="-print0"),
-                        Option(short="-delete"),
-                        Option(short="-depth"),
-                        Option(short="-prune"),
-                        Option(short="-ls"),
-                        Option(short="-empty"),
-                        Option(short="-o"),
-                        Option(short="-or"),
-                        Option(short="-a"),
-                        Option(short="-and"),
-                        Option(short="-not"),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                    ignore_tokens=frozenset({"(", ")"}),
-                ),
-                'tree':
-                CommandSpec(
-                    options=(
-                        Option(short="-a"),
-                        Option(short="-L", value_kind=OperandKind.TEXT),
-                        Option(short="-I", value_kind=OperandKind.TEXT),
-                        Option(short="-d"),
-                        Option(short="-P", value_kind=OperandKind.TEXT),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                ),
-                'du':
-                CommandSpec(
-                    options=(
-                        Option(short="-h"),
-                        Option(short="-s"),
-                        Option(short="-a"),
-                        Option(long="--max-depth",
-                               value_kind=OperandKind.TEXT),
-                        Option(short="-c"),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                ),
-                'df':
-                CommandSpec(
-                    options=(
-                        Option(short="-h"),
-                        Option(short="-H"),
-                        Option(short="-k"),
-                        Option(short="-i"),
-                        Option(short="-a"),
-                        Option(short="-T"),
-                        Option(short="-P"),
-                        Option(short="-B", value_kind=OperandKind.TEXT),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                ),
-                'file':
-                CommandSpec(
-                    options=(
-                        Option(short="-b"),
-                        Option(short="-i"),
-                    ),
-                    rest=Operand(kind=OperandKind.PATH),
-                ),
-            }
+SPECS: dict[str, CommandSpec] = {
+    'ls':
+    CommandSpec(
+        options=(
+            Option(short="-l"),
+            Option(short="-a"),
+            Option(short="-A"),
+            Option(short="-h"),
+            Option(short="-t"),
+            Option(short="-S"),
+            Option(short="-r"),
+            Option(short="-1"),
+            Option(short="-R"),
+            Option(short="-d"),
+            Option(short="-F"),
+            Option(short="-L"),
+            # Accepted no-op like grep --color (#471).
+            Option(long="--color", type="str", value_optional=True),
+        ),
+        rest=Operand(type="path"),
+    ),
+    'stat':
+    CommandSpec(
+        options=(
+            Option(short="-c", type="str"),
+            Option(short="-f", type="str"),
+            Option(short="-L"),
+        ),
+        rest=Operand(type="path"),
+    ),
+    'pwd':
+    CommandSpec(
+        options=(
+            Option(short="-P"),
+            Option(short="-L"),
+        ),
+        rest=Operand(type="str"),
+    ),
+    'find':
+    CommandSpec(
+        options=(
+            Option(short="-name", type="str", multiple=True),
+            Option(short="-type", type="str", multiple=True),
+            Option(short="-maxdepth", type="str", multiple=True),
+            Option(short="-size", type="str", multiple=True),
+            Option(short="-mtime", type="str", multiple=True),
+            Option(short="-iname", type="str", multiple=True),
+            Option(short="-path", type="str", multiple=True),
+            Option(short="-mindepth", type="str", multiple=True),
+            # GNU find's link policy: -P (no follow) is the default, -H
+            # follows only the start point, -L follows everything.
+            Option(short="-P"),
+            Option(short="-H"),
+            Option(short="-L"),
+            Option(short="-print"),
+            Option(short="-print0"),
+            Option(short="-delete"),
+            Option(short="-depth"),
+            Option(short="-prune"),
+            Option(short="-ls"),
+            Option(short="-empty"),
+            Option(short="-o"),
+            Option(short="-or"),
+            Option(short="-a"),
+            Option(short="-and"),
+            Option(short="-not"),
+        ),
+        rest=Operand(type="path"),
+        ignore_tokens=frozenset({"(", ")"}),
+    ),
+    'tree':
+    CommandSpec(
+        options=(
+            Option(short="-a"),
+            Option(short="-L", type="str"),
+            Option(short="-I", type="str"),
+            Option(short="-d"),
+            Option(short="-P", type="str"),
+        ),
+        rest=Operand(type="path"),
+    ),
+    'du':
+    CommandSpec(
+        options=(
+            Option(short="-h"),
+            Option(short="-s"),
+            Option(short="-a"),
+            Option(short="-d", long="--max-depth", type="str"),
+            Option(short="-c"),
+            Option(short="-L"),
+            Option(short="-P"),
+        ),
+        rest=Operand(type="path"),
+    ),
+    'df':
+    CommandSpec(
+        options=(
+            Option(short="-h"),
+            Option(short="-H"),
+            Option(short="-k"),
+            Option(short="-i"),
+            Option(short="-a"),
+            Option(short="-T"),
+            Option(short="-P"),
+            Option(short="-B", type="str"),
+        ),
+        rest=Operand(type="path"),
+    ),
+    'file':
+    CommandSpec(
+        options=(
+            Option(short="-b"),
+            Option(short="-i"),
+            Option(short="-L"),
+            Option(short="-h"),
+        ),
+        rest=Operand(type="path"),
+    ),
+}

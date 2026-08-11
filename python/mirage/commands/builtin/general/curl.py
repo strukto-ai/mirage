@@ -15,13 +15,25 @@
 from typing import Any, Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
-from mirage.commands.builtin.utils.http import (_http_form_request,
+from mirage.commands.builtin.utils.http import (HttpConnectError,
+                                                _http_form_request,
                                                 _http_request)
+from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.errors import OperationNotSupportedError
+from mirage.utils.errors import (WALK_ERRORS, OperationNotSupportedError,
+                                 fs_strerror)
+
+# Exit codes real curl uses for the failures mirage can hit. An HTTP error
+# status is deliberately absent: curl treats 4xx/5xx as a successful transfer
+# and prints the body, and only -f/--fail turns it into EXIT_HTTP_ERROR.
+EXIT_NO_URL = 2
+EXIT_CONNECT = 7
+EXIT_HTTP_ERROR = 22
+EXIT_WRITE = 23
 
 
 def _resolve_target(o: str | PathSpec, cwd: PathSpec | None) -> PathSpec:
@@ -51,13 +63,14 @@ async def curl(
     X: str | None = None,
     d: str | None = None,
     F: str | None = None,
-    o: str | None = None,
+    o: PathSpec | str | None = None,
     L: bool = False,
+    fail: bool = False,
     s: bool = False,
     S: bool = False,
     dispatch: Callable[..., Any] | None = None,
     cwd: PathSpec | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     headers: dict[str, str] = {}
     if H:
@@ -66,35 +79,74 @@ async def curl(
     if A:
         headers["User-Agent"] = A
     if not texts:
-        raise ValueError("curl: missing URL")
-    if F:
-        method = X or "POST"
-        key, _, value = F.partition("=")
-        result = _http_form_request(texts[0],
-                                    method=method,
-                                    form_data={key: value},
-                                    headers=headers)
-    else:
-        method = X or ("POST" if d else "GET")
-        body = d.encode() if d else None
-        result = _http_request(texts[0],
-                               method=method,
-                               headers=headers,
-                               data=body)
+        raise UsageError(
+            "curl: (2) no URL specified\n"
+            "curl: try 'curl --help' or 'curl --manual' for more information",
+            exit_code=EXIT_NO_URL)
+    # -s silences the message, -S puts it back. Neither changes the exit code.
+    quiet = s and not S
+    try:
+        if F:
+            method = X or "POST"
+            key, _, value = F.partition("=")
+            resp = _http_form_request(texts[0],
+                                      method=method,
+                                      form_data={key: value},
+                                      headers=headers,
+                                      follow_redirects=L)
+        else:
+            method = X or ("POST" if d else "GET")
+            body = d.encode() if d else None
+            resp = _http_request(texts[0],
+                                 method=method,
+                                 headers=headers,
+                                 data=body,
+                                 follow_redirects=L)
+    except HttpConnectError as exc:
+        err = b"" if quiet else (
+            f"curl: ({EXIT_CONNECT}) Failed to connect to {exc.host} port "
+            f"{exc.port}: Could not connect to server\n").encode()
+        return None, IOResult(exit_code=EXIT_CONNECT, stderr=err)
+    # Only -f makes an error status an error, and then nothing is written.
+    if fail and resp.is_error:
+        err = b"" if quiet else (
+            f"curl: ({EXIT_HTTP_ERROR}) The requested URL returned error: "
+            f"{resp.status}\n").encode()
+        return None, IOResult(exit_code=EXIT_HTTP_ERROR, stderr=err)
+    result = resp.body
     if o is not None:
         o_str = o.virtual if isinstance(o, PathSpec) else o
         if dispatch is not None:
             scope = _resolve_target(o, cwd)
             try:
                 await dispatch("write", scope, data=result)
-            except (PermissionError, OperationNotSupportedError,
-                    ValueError) as exc:
-                err = f"curl: {o_str}: {exc}\n".encode()
-                return None, IOResult(exit_code=1, stderr=err)
-        msg = f"saved to {o_str}".encode()
-        if s:
-            msg = b""
-        return msg, IOResult(writes={o_str: result})
-    if s:
-        return result, IOResult()
+            # WALK_ERRORS is the shared recoverable set (every filesystem error
+            # plus the ValueError store backends raise for "not a directory"),
+            # so a missing parent cannot escape the way it did when this caught
+            # only three types.
+            except WALK_ERRORS as exc:
+                # Deliberate divergence: real curl says "client returned ERROR
+                # on write of N bytes" and drops the cause. A mirage write can
+                # fail for reasons a local file cannot (read-only mount,
+                # unsupported op), so the exit code matches curl while the
+                # message keeps the path and the reason.
+                #
+                # The refusals whose wording is load-bearing (read-only mount,
+                # unsupported op) keep their raw message; an unusable path
+                # carries only the path as its message, so it needs the GNU
+                # strerror.
+                # str() on an OSError renders "[Errno 13] msg: 'path'", so the
+                # errno and a python repr would reach stderr; strerror is the
+                # message on its own.
+                detail = getattr(exc, "strerror", None) or str(exc)
+                if not isinstance(
+                        exc, (PermissionError, OperationNotSupportedError)):
+                    strerror = fs_strerror(exc)
+                    if strerror is not None:
+                        detail = strerror
+                err = b"" if quiet else (
+                    f"curl: ({EXIT_WRITE}) {o_str}: {detail}\n").encode()
+                return None, IOResult(exit_code=EXIT_WRITE, stderr=err)
+        # Real curl writes the body to the file and prints nothing on stdout.
+        return None, IOResult(writes={o_str: result})
     return result, IOResult()

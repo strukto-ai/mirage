@@ -18,6 +18,7 @@ from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github_ci.annotations import list_annotations
 from mirage.core.github_ci.artifacts import download_artifact
+from mirage.core.github_ci.render import ci_json_bytes
 from mirage.core.github_ci.runs import (download_job_log, get_job, get_run,
                                         list_jobs_for_run)
 from mirage.core.github_ci.workflows import get_workflow
@@ -44,7 +45,7 @@ async def read(
         if lookup.entry is None:
             raise enoent(virtual)
         wf = await get_workflow(accessor.config, lookup.entry.id)
-        return json.dumps(wf, indent=2, ensure_ascii=False).encode()
+        return ci_json_bytes(wf)
 
     # /runs/<workflow>_<run-id>/run.json
     if (len(parts) == 3 and parts[0] == "runs" and parts[2] == "run.json"):
@@ -53,7 +54,7 @@ async def read(
         if lookup.entry is None:
             raise enoent(virtual)
         run = await get_run(accessor.config, lookup.entry.id)
-        return json.dumps(run, indent=2, ensure_ascii=False).encode()
+        return ci_json_bytes(run)
 
     # /runs/<workflow>_<run-id>/annotations.jsonl
     if (len(parts) == 3 and parts[0] == "runs"
@@ -81,7 +82,7 @@ async def read(
         if lookup.entry is None:
             raise enoent(virtual)
         job = await get_job(accessor.config, lookup.entry.id)
-        return json.dumps(job, indent=2, ensure_ascii=False).encode()
+        return ci_json_bytes(job)
 
     # /runs/<workflow>_<run-id>/jobs/<job>_<job-id>.log
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "jobs"

@@ -10,6 +10,7 @@ permissions:
       - typescript/**
       - examples/typescript/**
       - integ/**
+      - conformance/**
       - .github/workflows/test_typescript.yml
   pull_request:
     branches: [main]
@@ -36,6 +37,7 @@ jobs:
               - 'typescript/**'
               - 'examples/typescript/**'
               - 'integ/**'
+              - 'conformance/**'
               - '.github/workflows/test_typescript.yml'
 
   test:
@@ -57,7 +59,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -99,6 +101,7 @@ jobs:
           run disk/disk.ts integ/truth/typescript/disk.txt
           run disk/disk_vfs.ts integ/truth/typescript/disk_vfs.txt
           run other/custom_command.ts integ/truth/typescript/custom_command.txt
+          run filetype/filetype.ts integ/truth/typescript/filetype.txt
           run pyodide/basic.ts integ/truth/typescript/pyodide_basic.txt
           run pyodide/env.ts integ/truth/typescript/pyodide_env.txt
           run pyodide/heredoc.ts integ/truth/typescript/pyodide_heredoc.txt
@@ -110,7 +113,7 @@ jobs:
           run redis/redis_vfs.ts integ/truth/typescript/redis_vfs.txt
           run version/branching.ts integ/truth/version_branching.txt
 
-  python-fs-shim:
+  python-fs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
@@ -118,11 +121,11 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
-      - name: Set up Node 24 (for --experimental-wasm-jspi)
+      - name: Set up Node 24
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -140,16 +143,16 @@ jobs:
         working-directory: typescript
         run: pnpm -r --filter './packages/*' build
 
-      - name: Python FS shim example (output checked against integ/ truth file)
+      - name: Python filesystem example (output checked against integ/ truth file)
         working-directory: examples/typescript
         run: |
-          node --experimental-wasm-jspi --import tsx/esm pyodide/vfs.ts 2>&1 \
+          node --import tsx/esm pyodide/vfs.ts 2>&1 \
             | bash ../../integ/check_lines.sh ../../integ/truth/typescript/pyodide_vfs.txt
 
   gate:
     name: test-typescript-gate
     runs-on: ubuntu-latest
-    needs: [changes, test, python-fs-shim]
+    needs: [changes, test, python-fs]
     if: always()
     steps:
       - name: Check required jobs

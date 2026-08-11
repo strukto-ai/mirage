@@ -14,15 +14,14 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic.cat import needs_display
-from mirage.commands.builtin.generic_bind.provision import \
-    make_file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
-from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,14 +29,14 @@ from mirage.types import PathSpec
 @command("cat",
          resource="history",
          spec=SPECS["cat"],
-         provision=make_file_read_provision(history_stat))
+         aggregate=concat_aggregate)
 async def cat(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         contents: dict[str, bytes] = {

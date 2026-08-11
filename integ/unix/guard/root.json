@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "guard_root_seed",
+      "seq": 611040,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data/guardroot && echo keep > /data/guardroot/k.txt && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "guard_root_rmdir_is_busy",
+      "seq": 611041,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "rmdir /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rmdir: failed to remove '/data': Device or resource busy\n"
+      }
+    },
+    {
+      "id": "guard_root_mv_is_busy",
+      "seq": 611042,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mv /data /data/guardroot/dst",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data' to '/data/guardroot/dst': Device or resource busy\n"
+      }
+    },
+    {
+      "id": "guard_root_mkdir_is_eexist",
+      "seq": 611043,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/data': File exists\n"
+      }
+    },
+    {
+      "id": "guard_root_mkdir_p_is_a_noop",
+      "seq": 611044,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "mkdir -p /data && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "guard_root_touch_is_a_directory",
+      "seq": 611045,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "touch /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "touch: cannot touch '/data': Is a directory\n"
+      }
+    },
+    {
+      "id": "guard_root_ln_is_eexist",
+      "seq": 611046,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "ln -s /data/guardroot/k.txt /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ln: failed to create symbolic link '/data': File exists\n"
+      }
+    },
+    {
+      "id": "guard_root_state_intact",
+      "seq": 611047,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "cat /data/guardroot/k.txt && ls /data/guardroot",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\nk.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

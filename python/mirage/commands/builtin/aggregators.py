@@ -53,7 +53,7 @@ async def wc_aggregate(results: list[tuple[str, bytes]]) -> bytes:
             continue
         counts: list[int] = []
         for token in text.split():
-            if not token.isdigit():
+            if not (token.isascii() and token.isdigit()):
                 break
             counts.append(int(token))
         if not counts:

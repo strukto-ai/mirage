@@ -39,54 +39,75 @@ class _BlobAllocator:
 
 def split_manifest_and_blobs(
         state: dict[str, Any]) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """The state as a JSON-safe manifest plus the bytes it referenced.
+
+    The manifest IS the state, minus the four keys that hold bytes:
+    those are rewritten with blob references and everything else rides
+    through untouched. It is built that way round on purpose. An
+    allowlist of keys silently dropped whatever it forgot from every
+    tar snapshot while leaving in-memory snapshots (which never pass
+    through here) green, which is exactly how installed CLIs went
+    missing.
+
+    Args:
+        state (dict[str, Any]): the workspace state dict.
+    """
     a = _BlobAllocator()
+    manifest: dict[str, Any] = dict(state)
+    cache = state.get(StateKey.CACHE) or {}
 
-    manifest: dict[str, Any] = {
-        StateKey.VERSION: state[StateKey.VERSION],
-        StateKey.MIRAGE_VERSION: state[StateKey.MIRAGE_VERSION],
-        StateKey.DEFAULT_SESSION_ID: state[StateKey.DEFAULT_SESSION_ID],
-        StateKey.DEFAULT_AGENT_ID: state[StateKey.DEFAULT_AGENT_ID],
-        StateKey.CURRENT_AGENT_ID: state[StateKey.CURRENT_AGENT_ID],
-        StateKey.SESSIONS: state[StateKey.SESSIONS],
-        StateKey.HISTORY: _history_to_manifest(state.get(StateKey.HISTORY), a),
-        StateKey.MOUNTS: [],
-        StateKey.CACHE: {
-            CacheKey.LIMIT:
-            state[StateKey.CACHE][CacheKey.LIMIT],
-            CacheKey.MAX_DRAIN_BYTES:
-            state[StateKey.CACHE][CacheKey.MAX_DRAIN_BYTES],
-            CacheKey.ENTRIES: [],
-        },
-        StateKey.JOBS: [],
-        StateKey.FINGERPRINTS: state.get(StateKey.FINGERPRINTS) or [],
-        StateKey.LIVE_ONLY_MOUNTS: state.get(StateKey.LIVE_ONLY_MOUNTS) or [],
-        StateKey.NODES: state.get(StateKey.NODES) or {},
+    manifest[StateKey.HISTORY] = _history_to_manifest(
+        state.get(StateKey.HISTORY), a)
+    manifest[StateKey.MOUNTS] = [
+        _mount_to_manifest(m, a) for m in state.get(StateKey.MOUNTS) or []
+    ]
+    manifest[StateKey.CACHE] = {
+        **cache,
+        CacheKey.ENTRIES: [
+            _cache_entry_to_manifest(e, a)
+            for e in cache.get(CacheKey.ENTRIES) or []
+        ],
     }
-
-    for m in state[StateKey.MOUNTS]:
-        manifest[StateKey.MOUNTS].append(_mount_to_manifest(m, a))
-
-    for entry in state[StateKey.CACHE][CacheKey.ENTRIES]:
-        e = dict(entry)
-        if isinstance(e.get(CacheKey.DATA), bytes):
-            tar_path = "cache/blobs/" + a.alloc("_cache")
-            a.blobs[tar_path] = e[CacheKey.DATA]
-            e[CacheKey.DATA] = {BLOB_REF_KEY: tar_path}
-        manifest[StateKey.CACHE][CacheKey.ENTRIES].append(e)
-
-    for job in state.get(StateKey.JOBS, []):
-        j = dict(job)
-        for f in (JobKey.STDOUT, JobKey.STDERR):
-            data = j.get(f)
-            if isinstance(data, bytes) and data:
-                tar_path = "jobs/blobs/" + a.alloc("_jobs")
-                a.blobs[tar_path] = data
-                j[f] = {BLOB_REF_KEY: tar_path}
-            elif isinstance(data, bytes):
-                j[f] = ""  # empty bytes -> empty string (JSON-safe)
-        manifest[StateKey.JOBS].append(j)
+    manifest[StateKey.JOBS] = [
+        _job_to_manifest(j, a) for j in state.get(StateKey.JOBS) or []
+    ]
 
     return manifest, a.blobs
+
+
+def _cache_entry_to_manifest(entry: dict[str, Any],
+                             a: _BlobAllocator) -> dict[str, Any]:
+    """One cache entry with its data stashed as a blob reference.
+
+    Args:
+        entry (dict[str, Any]): the captured cache entry.
+        a (_BlobAllocator): the run's blob collector.
+    """
+    e = dict(entry)
+    if isinstance(e.get(CacheKey.DATA), bytes):
+        tar_path = "cache/blobs/" + a.alloc("_cache")
+        a.blobs[tar_path] = e[CacheKey.DATA]
+        e[CacheKey.DATA] = {BLOB_REF_KEY: tar_path}
+    return e
+
+
+def _job_to_manifest(job: dict[str, Any], a: _BlobAllocator) -> dict[str, Any]:
+    """One job with its streams stashed as blob references.
+
+    Args:
+        job (dict[str, Any]): the captured job.
+        a (_BlobAllocator): the run's blob collector.
+    """
+    j = dict(job)
+    for f in (JobKey.STDOUT, JobKey.STDERR):
+        data = j.get(f)
+        if isinstance(data, bytes) and data:
+            tar_path = "jobs/blobs/" + a.alloc("_jobs")
+            a.blobs[tar_path] = data
+            j[f] = {BLOB_REF_KEY: tar_path}
+        elif isinstance(data, bytes):
+            j[f] = ""  # empty bytes -> empty string (JSON-safe)
+    return j
 
 
 def _mount_to_manifest(mount: dict[str, Any],

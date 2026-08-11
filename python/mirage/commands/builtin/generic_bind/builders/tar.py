@@ -19,7 +19,10 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tar import tar as generic_tar
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.builtin.generic_bind.archive_io import is_dir_of, walk_of
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 
 
@@ -36,12 +39,15 @@ async def tar(
     j: bool = False,
     J: bool = False,
     v: bool = False,
+    h: bool = False,
     f: PathSpec | None = None,
-    C: PathSpec | None = None,
+    C: list[PathSpec] | None = None,
     strip_components: str | None = None,
     exclude: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    links: LinkView | None = None,
+    mounts: MountView | None = None,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("tar: missing operand")
@@ -53,6 +59,9 @@ async def tar(
                                                  accessor),
                              mkdir_fn=partial(ops.require(Operation.MKDIR),
                                               accessor),
+                             stat=bound_op(ops.stat, accessor, index),
+                             walk=walk_of(ops, accessor, index),
+                             is_dir=is_dir_of(ops, accessor, index),
                              c=c,
                              x=x,
                              t=t,
@@ -60,10 +69,13 @@ async def tar(
                              j=j,
                              J=J,
                              v=v,
+                             h=h,
                              f=f,
                              C=C,
                              strip_components=strip_components,
-                             exclude=exclude)
+                             exclude=exclude,
+                             links=links,
+                             mounts=mounts)
 
 
 BUILDER = Builder('tar',

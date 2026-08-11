@@ -87,6 +87,15 @@ def test_entity_schema_file():
     assert s.file == "schema.json"
 
 
+def test_entity_semantic_file():
+    s = detect_scope(_ps("/public/tables/users/semantic.json"))
+    assert s.level == "entity_semantic"
+    assert s.schema == "public"
+    assert s.kind == "tables"
+    assert s.entity == "users"
+    assert s.file == "semantic.json"
+
+
 def test_entity_rows_file():
     s = detect_scope(_ps("/public/tables/users/rows.jsonl"))
     assert s.level == "entity_rows"

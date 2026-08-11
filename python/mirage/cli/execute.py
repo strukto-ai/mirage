@@ -40,6 +40,15 @@ def execute_cmd(
                                           "--session",
                                           "-s",
                                           help="Session id."),
+    cwd: str | None = typer.Option(
+        None,
+        "--cwd",
+        help="Working directory for this line (a workspace path)."),
+    runtime: str | None = typer.Option(
+        None,
+        "--runtime",
+        help="Workspace runtime entry to place this line's captured "
+        "stages on."),
     background: bool = typer.Option(
         False,
         "--background",
@@ -55,6 +64,10 @@ def execute_cmd(
     payload: dict[str, Any] = {"command": command, "provision": False}
     if session_id:
         payload["session_id"] = session_id
+    if cwd:
+        payload["cwd"] = cwd
+    if runtime:
+        payload["runtime"] = runtime
     path = f"/v1/workspaces/{workspace_id}/execute"
     if background:
         path += "?background=true"

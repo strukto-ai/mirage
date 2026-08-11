@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.files import download_file
 from mirage.core.discord.history import get_history_jsonl
 from mirage.core.discord.members import list_members
 from mirage.core.discord.readdir import readdir as _readdir
+from mirage.core.discord.render import member_json_bytes
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -93,8 +92,7 @@ async def read(
         for m in members:
             user = m.get("user", {})
             if user.get("id") == entry_lookup.entry.id:
-                return json.dumps(m, ensure_ascii=False,
-                                  separators=(",", ":")).encode()
+                return member_json_bytes(m)
         raise enoent(virtual)
 
     raise enoent(virtual)

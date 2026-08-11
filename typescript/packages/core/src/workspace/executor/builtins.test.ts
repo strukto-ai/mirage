@@ -13,10 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { CLISpec } from '../../commands/cli/types.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import { enoent } from '../../utils/errors.ts'
+import { byteChar } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -31,6 +34,7 @@ import {
   handleEval,
   handleExport,
   handleLocal,
+  handleReadonly,
   handleMan,
   handlePrintenv,
   handlePrintf,
@@ -49,7 +53,7 @@ import {
   handleXargs,
 } from './builtins/index.ts'
 import { parseDuration } from './builtins/timeout.ts'
-import { ReturnSignal } from './command.ts'
+import { ReturnSignal } from './control.ts'
 
 function wireMount(mount: MountEntry): void {
   const cmds = mount.resource.commands?.()
@@ -95,11 +99,221 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     expect(s.env.Y).toBe('')
   })
 
+  it('export -p prints declare -x lines', () => {
+    const s = new Session({ sessionId: 'test', env: { ZZZ: '1', AAA: 'a"b' } })
+    const [out, io] = handleExport(['-p'], s)
+    expect(io.exitCode).toBe(0)
+    const text = decode(out as Uint8Array)
+    expect(text).toContain('declare -x AAA="a\\"b"\n')
+    expect(text).toContain('declare -x ZZZ="1"\n')
+    expect(text.indexOf('AAA')).toBeLessThan(text.indexOf('ZZZ'))
+  })
+
+  it('bare export prints like -p', () => {
+    const s = new Session({ sessionId: 'test', env: { FOO: 'bar' } })
+    const [out, io] = handleExport([], s)
+    expect(io.exitCode).toBe(0)
+    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\n')
+  })
+
+  it('export -z is invalid option exit 2', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleExport(['-z'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toContain('invalid option')
+    expect(decode(io.stderr as Uint8Array)).toContain('usage: export')
+  })
+
+  it('export -p with a name does not print', () => {
+    const s = new Session({ sessionId: 'test', env: { KEEP: '1' } })
+    const [out, io] = handleExport(['-p', 'FOO=bar'], s)
+    expect(io.exitCode).toBe(0)
+    expect(out).toBeNull()
+    expect(s.env.FOO).toBe('bar')
+  })
+
+  it('readonly -p prints scalars and arrays', () => {
+    const s = new Session({ sessionId: 'test', env: { VAL: 'x' } })
+    s.readonlyVars.add('VAL')
+    s.readonlyVars.add('ONLY')
+    s.arrays.AR = ['a', 'b c']
+    s.readonlyVars.add('AR')
+    const [out, io] = handleReadonly(['-p'], s)
+    expect(io.exitCode).toBe(0)
+    const text = decode(out as Uint8Array)
+    expect(text).toContain('declare -ar AR=([0]="a" [1]="b c")\n')
+    expect(text).toContain('declare -r ONLY\n')
+    expect(text).toContain('declare -r VAL="x"\n')
+  })
+
+  it('readonly -z is invalid option exit 2', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleReadonly(['-z'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toContain('invalid option')
+  })
+
+  it('export -p quotes control characters like bash', () => {
+    const s = new Session({
+      sessionId: 'test',
+      env: {
+        TAB: 'a\tb',
+        ESC: 'a\x1bb',
+        BEL: 'a\x07b',
+        SOH: 'a\x01b',
+        DEL: 'a\x7fb',
+        UTF: 'café',
+      },
+    })
+    const [out, io] = handleExport(['-p'], s)
+    expect(io.exitCode).toBe(0)
+    const text = decode(out as Uint8Array)
+    // GNU bash uses $'...' for any control character, named escapes where it
+    // has one and three-digit octal otherwise.
+    expect(text).toContain("declare -x TAB=$'a\\tb'\n")
+    expect(text).toContain("declare -x ESC=$'a\\Eb'\n")
+    expect(text).toContain("declare -x BEL=$'a\\ab'\n")
+    expect(text).toContain("declare -x SOH=$'a\\001b'\n")
+    expect(text).toContain("declare -x DEL=$'a\\177b'\n")
+    // Printable non-ASCII stays literal, as bash does in a UTF-8 locale.
+    expect(text).toContain('declare -x UTF="café"\n')
+  })
+
+  it('export -p -- still prints', () => {
+    const s = new Session({ sessionId: 'test', env: { FOO: 'bar' } })
+    const [out, io] = handleExport(['-p', '--'], s)
+    expect(io.exitCode).toBe(0)
+    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\n')
+  })
+
+  it('export -f lists no variables', () => {
+    const s = new Session({ sessionId: 'test', env: { FOO: 'bar' } })
+    const [out, io] = handleExport(['-f'], s)
+    expect(io.exitCode).toBe(0)
+    expect(decode(out as Uint8Array)).toBe('')
+  })
+
+  it('export reports the first invalid option letter', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleExport(['-zq'], s)
+    expect(decode(io.stderr as Uint8Array)).toContain('export: -z: invalid option')
+    expect(decode(io.stderr as Uint8Array)).not.toContain('-q: invalid option')
+  })
+
+  it('readonly -a lists arrays only', () => {
+    const s = new Session({ sessionId: 'test', env: { VAL: 'x' } })
+    s.readonlyVars.add('VAL')
+    s.arrays.AR = ['a']
+    s.readonlyVars.add('AR')
+    const [out, io] = handleReadonly(['-a'], s)
+    expect(io.exitCode).toBe(0)
+    expect(decode(out as Uint8Array)).toBe('declare -ar AR=([0]="a")\n')
+  })
+
+  it('readonly -f and -A list nothing', () => {
+    const s = new Session({ sessionId: 'test', env: { VAL: 'x' } })
+    s.readonlyVars.add('VAL')
+    for (const flag of ['-f', '-A']) {
+      const [out, io] = handleReadonly([flag], s)
+      expect(io.exitCode).toBe(0)
+      expect(decode(out as Uint8Array)).toBe('')
+    }
+  })
+
   it('unset removes keys', () => {
     const s = new Session({ sessionId: 'test', env: { A: '1', B: '2' } })
     handleUnset(['A'], s)
     expect('A' in s.env).toBe(false)
     expect(s.env.B).toBe('2')
+  })
+
+  it('unset -f removes a function but not a same-named variable', () => {
+    const s = new Session({ sessionId: 'test', env: { fn: 'v' } })
+    s.functions.fn = []
+    handleUnset(['-f', 'fn'], s)
+    expect('fn' in s.functions).toBe(false)
+    expect(s.env.fn).toBe('v')
+  })
+
+  it('unset -v removes a variable but not a same-named function', () => {
+    const s = new Session({ sessionId: 'test', env: { fn: 'v' } })
+    s.functions.fn = []
+    handleUnset(['-v', 'fn'], s)
+    expect('fn' in s.functions).toBe(true)
+    expect('fn' in s.env).toBe(false)
+  })
+
+  it('unset bare prefers a variable, else the function', () => {
+    const s = new Session({ sessionId: 'test', env: { a: 'v' } })
+    s.functions.a = []
+    handleUnset(['a'], s)
+    expect('a' in s.env).toBe(false)
+    expect('a' in s.functions).toBe(true)
+    s.functions.b = []
+    handleUnset(['b'], s)
+    expect('b' in s.functions).toBe(false)
+  })
+
+  it('unset removes a whole array and a single element', () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.arr = ['x', 'y', 'z']
+    // An interior element leaves a hole so later indices keep their
+    // positions; a trailing one drops off, as bash does.
+    handleUnset(['arr[1]'], s)
+    expect(s.arrays.arr).toEqual(['x', null, 'z'])
+    handleUnset(['arr[2]'], s)
+    expect(s.arrays.arr).toEqual(['x'])
+    handleUnset(['arr'], s)
+    expect('arr' in s.arrays).toBe(false)
+  })
+
+  it('unset rejects an element of a readonly array', () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.arr = ['x', 'y']
+    s.readonlyVars.add('arr')
+    const [, io] = handleUnset(['arr[1]'], s)
+    expect(io.exitCode).toBe(1)
+    expect(decode(io.stderr as Uint8Array)).toBe(
+      'bash: unset: arr: cannot unset: readonly variable\n',
+    )
+    expect(s.arrays.arr).toEqual(['x', 'y'])
+  })
+
+  it('unset NAME[0] removes a scalar, a non-zero subscript errors', () => {
+    const s = new Session({ sessionId: 'test', env: { Y: 'sc', Z: 'sc' } })
+    const [, io] = handleUnset(['Y[0]'], s)
+    expect(io.exitCode).toBe(0)
+    expect('Y' in s.env).toBe(false)
+    const [, io2] = handleUnset(['Z[1]'], s)
+    expect(io2.exitCode).toBe(1)
+    expect(decode(io2.stderr as Uint8Array)).toBe('bash: unset: Z: not an array variable\n')
+    expect(s.env.Z).toBe('sc')
+  })
+
+  it('unset of a negative element outside the extent errors', () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.arr = ['x']
+    const [, io] = handleUnset(['arr[-2]'], s)
+    expect(io.exitCode).toBe(1)
+    // bash prints only the bracketed part here, not the base name.
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: unset: [-2]: bad array subscript\n')
+    expect(s.arrays.arr).toEqual(['x'])
+    s.arrays.two = ['x', 'y']
+    const [, io2] = handleUnset(['two[-2]'], s)
+    expect(io2.exitCode).toBe(0)
+    expect(s.arrays.two).toEqual([null, 'y'])
+  })
+
+  it('unset of an element of an unset name is a no-op', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleUnset(['GONE[3]'], s)
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('unset -z is an invalid option (exit 2)', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handleUnset(['-z', 'x'], s)
+    expect(io.exitCode).toBe(2)
   })
 
   it('printenv VAR emits value + newline; exit 1 if missing', () => {
@@ -169,11 +383,18 @@ describe('handleEcho', () => {
     const [out] = handleEcho(['-e', 'hi\\cgone'])
     expect(decode(out as Uint8Array)).toBe('hi\n')
   })
+
+  it('-e reads \\xHH and \\0NNN as bytes', () => {
+    const bytes = (args: string[]): number[] => [...(handleEcho(args)[0] as Uint8Array)]
+    expect(bytes(['-ne', '\\xff'])).toEqual([0xff])
+    expect(bytes(['-ne', '\\0377'])).toEqual([0xff])
+    expect(bytes(['-ne', '\\xc3\\xa9'])).toEqual([0xc3, 0xa9])
+  })
 })
 
 describe('handlePrintf', () => {
   const run = (args: string[]): [string, number] => {
-    const [out, io] = handlePrintf(args)
+    const [out, io] = handlePrintf(args, new Session({ sessionId: 'test' }))
     return [decode(out as Uint8Array), io.exitCode]
   }
   const stdout = (args: string[]): string => {
@@ -249,8 +470,26 @@ describe('handlePrintf', () => {
     expect(run(args)).toEqual([expected, code])
   })
 
+  it('reads \\xHH and \\NNN as bytes, \\u as a code point', () => {
+    // bash writes \xff as the byte 0xFF, which is not valid UTF-8 at all,
+    // rather than as the code point U+00FF.
+    const bytes = (args: string[]): number[] => [
+      ...(handlePrintf(args, new Session({ sessionId: 'test' }))[0] as Uint8Array),
+    ]
+    expect(bytes(['\\xff'])).toEqual([0xff])
+    expect(bytes(['\\377'])).toEqual([0xff])
+    expect(bytes(['\\xc3\\xa9'])).toEqual([0xc3, 0xa9])
+    expect(bytes(['\\x41\\x42'])).toEqual([0x41, 0x42])
+    expect(bytes(['%b', '\\xff'])).toEqual([0xff])
+    expect(bytes(['\\u00e9'])).toEqual([0xc3, 0xa9])
+  })
+
+  it('quotes a raw byte as octal', () => {
+    expect(stdout(['%q\n', byteChar(0xff)])).toBe("$'\\377'\n")
+  })
+
   it('empty args → empty output', () => {
-    const [out] = handlePrintf([])
+    const [out] = handlePrintf([], new Session({ sessionId: 'test' }))
     expect((out as Uint8Array).byteLength).toBe(0)
   })
 
@@ -287,6 +526,104 @@ describe('handlePrintf', () => {
     expect(stdout(['%a\n', '0.5'])).toBe('0x1p-1\n')
     expect(stdout(['%a\n', '3.14'])).toBe('0x1.91eb851eb851fp+1\n')
     expect(stdout(['%A\n', '255.5'])).toBe('0X1.FFP+7\n')
+  })
+
+  it('-v assigns to a variable and prints nothing', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [out, io] = handlePrintf(['-v', 'V', 'x=%d', '42'], s)
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(0)
+    expect(s.env.V).toBe('x=42')
+  })
+
+  it('-v targets an array element', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', 'arr[2]', 'hi'], s)
+    expect(io.exitCode).toBe(0)
+    // Indices 0 and 1 are holes, not empty elements.
+    expect(s.arrays.arr).toEqual([null, null, 'hi'])
+  })
+
+  it('-v with an invalid name errors before the format runs', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', '1bad', 'x'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toBe("printf: `1bad': not a valid identifier\n")
+    const [, io2] = handlePrintf(['-v', '1bad', '%d', 'nope'], s)
+    expect(io2.exitCode).toBe(2)
+    expect(decode(io2.stderr as Uint8Array)).toBe("printf: `1bad': not a valid identifier\n")
+  })
+
+  it('-v rejects an empty subscript but allows a blank one', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', 'a[]', 'x'], s)
+    expect(io.exitCode).toBe(2)
+    expect(decode(io.stderr as Uint8Array)).toBe("printf: `a[]': not a valid identifier\n")
+    expect('a' in s.arrays).toBe(false)
+    // `a[ ]` is a valid arithmetic 0, not an empty subscript.
+    const [, io2] = handlePrintf(['-v', 'a[ ]', 'x'], s)
+    expect(io2.exitCode).toBe(0)
+    expect(s.arrays.a).toEqual(['x'])
+  })
+
+  it('-v refuses a readonly scalar and a readonly array element', () => {
+    const s = new Session({ sessionId: 'test', env: { R: 'orig' } })
+    s.readonlyVars.add('R')
+    const [, io] = handlePrintf(['-v', 'R', 'new'], s)
+    expect(io.exitCode).toBe(1)
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: R: readonly variable\n')
+    expect(s.env.R).toBe('orig')
+    s.arrays.A = ['x', 'y']
+    s.readonlyVars.add('A')
+    const [, io2] = handlePrintf(['-v', 'A[0]', '%d', 'nope'], s)
+    expect(io2.exitCode).toBe(1)
+    expect(decode(io2.stderr as Uint8Array)).toBe(
+      'printf: nope: invalid number\nbash: A: readonly variable\n',
+    )
+    expect(s.arrays.A).toEqual(['x', 'y'])
+  })
+
+  it('-v on a bare name keeps the other elements of an existing array', () => {
+    const s = new Session({ sessionId: 'test' })
+    s.arrays.B = ['p', 'q', 'r']
+    const [, io] = handlePrintf(['-v', 'B', 'Q'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.arrays.B).toEqual(['Q', 'q', 'r'])
+    expect('B' in s.env).toBe(false)
+  })
+
+  it('-v with an out-of-range subscript keeps the scalar', () => {
+    const s = new Session({ sessionId: 'test', env: { V: 'orig' } })
+    const [, io] = handlePrintf(['-v', 'V[-2]', 'hi'], s)
+    expect(io.exitCode).toBe(1)
+    expect(decode(io.stderr as Uint8Array)).toBe('bash: V[-2]: bad array subscript\n')
+    expect(s.env.V).toBe('orig')
+    expect('V' in s.arrays).toBe(false)
+  })
+
+  it('-v with a negative subscript wraps over the scalar', () => {
+    const s = new Session({ sessionId: 'test', env: { W: 'orig' } })
+    const [, io] = handlePrintf(['-v', 'W[-1]', 'hi'], s)
+    expect(io.exitCode).toBe(0)
+    expect(s.arrays.W).toEqual(['hi'])
+    expect('W' in s.env).toBe(false)
+  })
+
+  it('-v on __proto__ makes a real variable instead of touching the prototype', () => {
+    const s = new Session({ sessionId: 'test' })
+    expect(handlePrintf(['-v', '__proto__[0]', 'hi'], s)[1].exitCode).toBe(0)
+    expect(Object.hasOwn(s.arrays, '__proto__')).toBe(true)
+    // Session records are null-prototype (ownRecord), so there is no
+    // prototype to corrupt in the first place.
+    expect(Object.getPrototypeOf(s.arrays)).toBe(null)
+    expect(({} as Record<string, unknown>)[0]).toBeUndefined()
+  })
+
+  it('-v keeps exit 1 on a bad number but still assigns', () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = handlePrintf(['-v', 'V', '%d', 'notanum'], s)
+    expect(io.exitCode).toBe(1)
+    expect(s.env.V).toBe('0')
   })
 })
 
@@ -850,12 +1187,42 @@ describe('handleSource', () => {
 
   it('returns exit 1 with stderr on read failure', async () => {
     const s = new Session({ sessionId: 'test', cwd: '/' })
-    const dispatch = vi.fn(() => Promise.reject(new Error('not found'))) as unknown as DispatchFn
+    const dispatch = vi.fn(() => Promise.reject(enoent('/missing.sh'))) as unknown as DispatchFn
     const executeFn = vi.fn(() => Promise.resolve(new IOResult()))
     const [, io] = await handleSource(dispatch, executeFn, '/missing.sh', s)
     expect(io.exitCode).toBe(1)
-    expect(decode(io.stderr instanceof Uint8Array ? io.stderr : null)).toMatch(/missing.sh/)
+    expect(decode(io.stderr instanceof Uint8Array ? io.stderr : null)).toBe(
+      'source: /missing.sh: No such file or directory\n',
+    )
     expect(executeFn).not.toHaveBeenCalled()
+  })
+
+  it('propagates a failure that is not a filesystem error', async () => {
+    const s = new Session({ sessionId: 'test', cwd: '/' })
+    const dispatch = vi.fn(() =>
+      Promise.reject(new Error('token expired')),
+    ) as unknown as DispatchFn
+    const executeFn = vi.fn(() => Promise.resolve(new IOResult()))
+    await expect(handleSource(dispatch, executeFn, '/script.sh', s)).rejects.toThrow(
+      'token expired',
+    )
+    expect(executeFn).not.toHaveBeenCalled()
+  })
+
+  it('sets positional args for the script and restores them after', async () => {
+    const s = new Session({ sessionId: 'test', cwd: '/', positionalArgs: ['P1', 'P2'] })
+    const dispatch = vi.fn(() => {
+      const data = new TextEncoder().encode('echo hi\n')
+      return Promise.resolve([data, new IOResult()] as [Uint8Array, IOResult])
+    }) as unknown as DispatchFn
+    let seen: string[] = []
+    const executeFn = vi.fn((_script: string, _opts: { sessionId: string }) => {
+      seen = [...s.positionalArgs]
+      return Promise.resolve(new IOResult())
+    })
+    await handleSource(dispatch, executeFn, '/script.sh', s, ['AA', 'BB'])
+    expect(seen).toEqual(['AA', 'BB'])
+    expect(s.positionalArgs).toEqual(['P1', 'P2'])
   })
 })
 
@@ -949,6 +1316,72 @@ function fakeShell(exitCodes: number[] = []): {
     },
   }
 }
+
+describe('handleMan for installed CLIs', () => {
+  function cliRegistry(): MountRegistry {
+    const reg = new MountRegistry({ '/ram/': new RAMResource() }, MountMode.WRITE)
+    wireRegistry(reg)
+    reg.clis.install(
+      'linear',
+      new CLISpec({
+        name: 'linear',
+        description: 'Linear API client',
+        subcommands: [
+          new CLISpec({
+            name: 'issue',
+            description: 'Manage issues',
+            aliases: ['i'],
+            subcommands: [
+              new CLISpec({
+                name: 'create',
+                description: 'Create one',
+                fn: () => [null, new IOResult()],
+              }),
+            ],
+          }),
+        ],
+      }),
+    )
+    return reg
+  }
+
+  it('renders an installed CLI', async () => {
+    const [out, io] = handleMan(
+      ['linear'],
+      new Session({ sessionId: 't', cwd: '/' }),
+      cliRegistry(),
+    )
+    expect(io.exitCode).toBe(0)
+    const text = await readBody(out)
+    expect(text).toContain('Usage: linear')
+    expect(text).toContain('issue')
+  })
+
+  it('descends a verb path and resolves aliases', async () => {
+    const reg = cliRegistry()
+    const s = new Session({ sessionId: 't', cwd: '/' })
+    const text = await readBody(handleMan(['linear', 'issue', 'create'], s, reg)[0])
+    expect(text).toContain('Usage: linear issue create')
+    expect(await readBody(handleMan(['linear', 'i', 'create'], s, reg)[0])).toBe(text)
+  })
+
+  it('names the whole line for an unknown verb', () => {
+    const s = new Session({ sessionId: 't', cwd: '/' })
+    const [out, io] = handleMan(['linear', 'bogus'], s, cliRegistry())
+    expect(out).toBeNull()
+    expect(io.exitCode).toBe(1)
+    const errBytes = io.stderr instanceof Uint8Array ? io.stderr : null
+    expect(decode(errBytes)).toBe('man: no entry for linear bogus\n')
+  })
+
+  it('lists installed CLIs in the bare index, before general', async () => {
+    const s = new Session({ sessionId: 't', cwd: '/' })
+    const text = await readBody(handleMan([], s, cliRegistry())[0])
+    expect(text).toContain('# clis')
+    expect(text).toContain('- linear — Linear API client')
+    expect(text.indexOf('# clis')).toBeLessThan(text.indexOf('# general'))
+  })
+})
 
 describe('handleEcho GNU option rules', () => {
   it('trailing -n prints literally', () => {

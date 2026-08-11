@@ -19,9 +19,9 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listChannels, listDms } from './channels.ts'
 import { channelDirname, dmDirname, fileBlobName, userFilename } from './formatters.ts'
-import { fetchMessagesForDay, type SlackMessage } from './history.ts'
+import { fetchMessagesForDay, messagesToJsonl, type SlackMessage } from './history.ts'
 import { detectScope } from './scope.ts'
-import { listUsers } from './users.ts'
+import { listUsers, userJsonBytes } from './users.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -201,6 +201,7 @@ async function readdirUsers(
       name: u.name ?? '',
       resourceType: 'slack/user',
       vfsName: filename,
+      size: userJsonBytes(u).byteLength,
     })
     entries.push([filename, entry])
     names.push(`${prefix}/users/${filename}`)
@@ -286,6 +287,7 @@ async function fetchDay(
     name: 'chat.jsonl',
     resourceType: 'slack/chat_jsonl',
     vfsName: 'chat.jsonl',
+    size: messagesToJsonl(messages).byteLength,
   })
   const filesEntry = new IndexEntry({
     id: `${channelId}:${dateStr}:files`,
@@ -301,9 +303,8 @@ async function fetchDay(
   for (const msg of messages) {
     const files = (msg.files as { id?: string }[] | undefined) ?? []
     for (const fmeta of files) {
-      if (fmeta.id === undefined || fmeta.id === '') continue
       const meta = fmeta as {
-        id: string
+        id?: string
         name?: string
         title?: string
         size?: number
@@ -312,13 +313,19 @@ async function fetchDay(
         url_private_download?: string
         timestamp?: number | string
       }
+      // Tombstoned (deleted) and access-restricted file payloads carry an
+      // id but no download URL and no byte size; read() ENOENTs on them, so
+      // listing them would both surface phantom files and break the
+      // sizesAlwaysKnown contract.
+      if (meta.id === undefined || meta.id === '') continue
+      if (meta.size === undefined || !meta.url_private_download) continue
       const blob = fileBlobName(meta)
       const entry = new IndexEntry({
         id: meta.id,
         name: meta.title ?? meta.name ?? '',
         resourceType: 'slack/file',
         vfsName: blob,
-        size: meta.size ?? null,
+        size: meta.size,
         remoteTime: String(meta.timestamp ?? ''),
         extra: {
           mimetype: meta.mimetype ?? '',
@@ -417,7 +424,9 @@ export async function readdir(
   const scope = detectScope(path)
   const container = scope.container
   const segments = key.split('/')
-  if (container !== 'channels' && container !== 'dms') return []
+  // Same reason as the fallback below: an unknown container is not an empty
+  // directory. Python raises here too.
+  if (container !== 'channels' && container !== 'dms') throw enoent(parts.path)
 
   if (segments.length === 2) {
     return readdirChannelDates(accessor, parts, container, index)
@@ -428,11 +437,7 @@ export async function readdir(
   if (scope.target === 'files' && segments.length === 4) {
     return readdirFilesDir(accessor, parts, container, segments, index)
   }
-  return []
-}
-export function isDirName(child: string): boolean {
-  // Entries are recognized by extension, so classification never needs
-  // the stat fallback.
-  const name = child.split('/').pop() ?? ''
-  return !(name.endsWith('.json') || name.endsWith('.jsonl'))
+  // An unrecognized path is not an empty directory: returning [] made `ls`
+  // and `tree` report a bogus path as a real-but-empty one.
+  throw enoent(parts.path)
 }

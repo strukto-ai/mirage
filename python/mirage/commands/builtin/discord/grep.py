@@ -24,7 +24,7 @@ from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.formatters import format_grep_results
@@ -45,7 +45,7 @@ async def grep_provision(
     accessor: DiscordAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor, paths,
@@ -63,7 +63,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
@@ -82,7 +82,11 @@ async def grep(
                                  stderr=b"grep: root-level search "
                                  b"not yet supported\n")
 
-        if scope.level in ("channel", "guild"):
+        # Provider search matches whole words while grep matches
+        # substrings, and the native path returns search results verbatim
+        # as the output, so a bare literal would under-report. Only -w
+        # makes the two agree; otherwise fall through to the scan.
+        if scope.level in ("channel", "guild") and fl.as_bool("w"):
             try:
                 if scope.guild_id is None:
                     raise RuntimeError("cannot resolve guild ID")

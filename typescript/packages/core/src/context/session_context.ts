@@ -27,14 +27,28 @@ function getCurrentSession(): Session | null {
   return sessionStorage.getStore() ?? null
 }
 
+/**
+ * A session touched a mount outside its allowlist.
+ *
+ * Stamped EACCES + operand so it behaves like python's `PermissionError`
+ * from the same guard, which is a member of `FS_ERRORS`: callers that
+ * handle filesystem errors per-operand (the redirect write pass) render
+ * `<target>: Permission denied` instead of letting the guard's own prose
+ * escape as the whole message. Callers that want the prose still read
+ * `.message`, and the explicit `instanceof` checks in `command.ts` and the
+ * FUSE bridge run before any of that and are unaffected.
+ */
 export class MountNotAllowedError extends Error {
   readonly sessionId: string
   readonly mountPrefix: string
+  readonly code = 'EACCES'
+  readonly virtualPath: string
   constructor(sessionId: string, mountPrefix: string) {
     super(`session '${sessionId}' not allowed to access mount '${mountPrefix}'`)
     this.name = 'MountNotAllowedError'
     this.sessionId = sessionId
     this.mountPrefix = mountPrefix
+    this.virtualPath = mountPrefix
   }
 }
 
@@ -52,6 +66,18 @@ function sessionMode(mountPrefix: string): MountMode | undefined {
   const sess = getCurrentSession()
   if (sess?.mountModes == null) return MountMode.EXEC
   return sess.mountModes.get(normPrefix(mountPrefix))
+}
+
+/**
+ * Whether the current session may touch this mount at all.
+ *
+ * The non-raising twin of `assertMountAllowed`, for enumeration:
+ * structure merges and fan-outs filter names through it, so a scoped
+ * session never learns that an ungranted mount exists. True when no
+ * session is bound or the session is unrestricted.
+ */
+export function mountAllowed(mountPrefix: string): boolean {
+  return sessionMode(mountPrefix) !== undefined
 }
 
 /**

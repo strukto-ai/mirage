@@ -112,7 +112,7 @@ async def yaml_controls_root() -> None:
                     }
                 }
             }})
-        kwargs = cfg.to_workspace_kwargs()
+        kwargs = await cfg.to_workspace_kwargs()
         check("yaml: '/' mount present in resources", "/"
               in kwargs["resources"])
         ws = Workspace(**kwargs)
@@ -124,7 +124,7 @@ async def yaml_controls_root() -> None:
               os.path.exists(os.path.join(tmp, "y.txt")))
         await ws.close()
 
-    ws = Workspace(**load_config({
+    ws = Workspace(**await load_config({
         "mounts": {
             "/data": {
                 "resource": "ram"

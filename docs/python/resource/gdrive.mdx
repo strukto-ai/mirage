@@ -115,6 +115,27 @@ a write mount can still hold items you may not edit. A mutation the
 API denies fails with `EACCES` (Permission denied) on that operand,
 like a real filesystem; the rest of the mount keeps working.
 
+### Writing inside a Shared Drive
+
+A Shared Drive is not a read-only corner of the mount. Every Drive call
+mirage makes carries `supportsAllDrives`, so create, write, rename, copy
+and delete work the same inside a Shared Drive as in My Drive, and the
+commands above behave identically there.
+
+What you may actually do is decided by Drive, not by mirage: a Shared
+Drive has its own role model (`viewer`, `commenter`, `contributor`,
+`content manager`, `manager`), and some organizations restrict deletion
+or moving content out of the drive. mirage does not attempt to predict
+those rules. It issues the operation and reports the answer, so a role
+that forbids the change fails with `EACCES` on that operand, exactly like
+an unwritable item in My Drive.
+
+The practical consequence is that a write mount spanning Shared Drives is
+partly writable, and the boundary follows your roles rather than the
+mount. If you want a mount that cannot write at all, use
+`MountMode.READ`; if you want to scope one to a single drive, set
+`folder_id` to the Shared Drive id.
+
 ## Snapshots
 
 The resource supports workspace snapshots. Recorded reads capture the
@@ -138,6 +159,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 
 load_dotenv(".env.development")
@@ -152,6 +174,7 @@ resource = GoogleDriveResource(config=config)
 
 async def main():
     ws = Workspace({"/gdrive": resource}, mode=MountMode.WRITE)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List root
     r = await ws.execute("ls /gdrive/ | head -n 10")
@@ -274,207 +297,8 @@ grep-parquet "revenue" /gdrive/data/sales.parquet
 wc-parquet /gdrive/data/sales.parquet
 ```
 
-## Resource-Specific Commands
+## Acting on Drive
 
-Google Drive registers the `gws` command family so Google-native
-files can be created and updated from the Drive mount. The syntax
-mirrors the official
-[Google Workspace CLI](https://github.com/googleworkspace/cli):
-
-```bash
-gws <service> <resource> <method> [--params JSON] [--json JSON]   # API passthrough
-gws <service> +<helper> [flags]                                   # ergonomic helper
-```
-
-Passthrough commands call the corresponding API method directly:
-`--params` fills URL path and query parameters, `--json` is the
-request body, and the output is the compact API response JSON.
-Helpers (`+write`, `+read`, `+append`) wrap the common operations
-in plain flags.
-
-### `gws docs documents create`
-
-Create a new Google Doc.
-
-```bash
-gws docs documents create --json '{"title": "My Doc"}'
-```
-
-| Option   | Required | Description                  |
-| -------- | -------- | ---------------------------- |
-| `--json` | yes      | JSON body with `title` field |
-
-Returns the created document JSON.
-
-### `gws docs documents batchUpdate`
-
-Apply batch updates to a Google Doc.
-
-```bash
-gws docs documents batchUpdate \
-  --params '{"documentId": "DOC_ID"}' \
-  --json '{"requests": [...]}'
-```
-
-| Option     | Required | Description                     |
-| ---------- | -------- | ------------------------------- |
-| `--params` | yes      | JSON with `documentId`          |
-| `--json`   | yes      | JSON body with `requests` array |
-
-Returns the batch update response JSON.
-
-### `gws docs +write`
-
-Append text to a Google Doc.
-
-```bash
-gws docs +write --document DOC_ID --text "Hello from MIRAGE"
-```
-
-| Option       | Required | Description    |
-| ------------ | -------- | -------------- |
-| `--document` | yes      | Google Doc ID  |
-| `--text`     | yes      | Text to append |
-
-Returns the update response JSON.
-
-### `gws sheets +read`
-
-Read values from a spreadsheet range.
-
-```bash
-gws sheets +read --spreadsheet SHEET_ID --range "Sheet1!A1:C10"
-```
-
-| Option          | Required | Description       |
-| --------------- | -------- | ----------------- |
-| `--spreadsheet` | yes      | Spreadsheet ID    |
-| `--range`       | yes      | A1 notation range |
-
-Returns the range values.
-
-### `gws sheets +write`
-
-Write values to a spreadsheet range.
-
-```bash
-gws sheets +write --spreadsheet SHEET_ID --range "Sheet1!A1:C3" --values "a,b,c"
-```
-
-| Option          | Required | Description                                    |
-| --------------- | -------- | ---------------------------------------------- |
-| `--spreadsheet` | yes      | Spreadsheet ID                                 |
-| `--range`       | yes      | A1 notation range to overwrite                 |
-| `--values`      | no       | Comma-separated values for a single row        |
-| `--json-values` | no       | JSON array of rows (alternative to `--values`) |
-
-One of `--values` or `--json-values` is required. Returns the
-update response JSON.
-
-### `gws sheets +append`
-
-Append rows to a spreadsheet.
-
-```bash
-gws sheets +append --spreadsheet SHEET_ID --range "Sheet1!A1" --values "a,b,c"
-```
-
-| Option          | Required | Description                                    |
-| --------------- | -------- | ---------------------------------------------- |
-| `--spreadsheet` | yes      | Spreadsheet ID                                 |
-| `--range`       | no       | A1 notation range (defaults to `A1`)           |
-| `--values`      | no       | Comma-separated values for a single row        |
-| `--json-values` | no       | JSON array of rows (alternative to `--values`) |
-
-One of `--values` or `--json-values` is required. Returns the
-append response JSON.
-
-### `gws sheets spreadsheets create`
-
-Create a new spreadsheet.
-
-```bash
-gws sheets spreadsheets create --json '{"properties": {"title": "My Sheet"}}'
-```
-
-| Option   | Required | Description                       |
-| -------- | -------- | --------------------------------- |
-| `--json` | yes      | JSON body with `properties.title` |
-
-Returns the created spreadsheet JSON.
-
-### `gws sheets spreadsheets batchUpdate`
-
-Apply batch updates to a spreadsheet.
-
-```bash
-gws sheets spreadsheets batchUpdate \
-  --params '{"spreadsheetId": "SHEET_ID"}' \
-  --json '{"requests": [...]}'
-```
-
-| Option     | Required | Description                     |
-| ---------- | -------- | ------------------------------- |
-| `--params` | yes      | JSON with `spreadsheetId`       |
-| `--json`   | yes      | JSON body with `requests` array |
-
-Returns the batch update response JSON.
-
-### `gws slides presentations create`
-
-Create a new Google Slides presentation.
-
-```bash
-gws slides presentations create --json '{"title": "My Deck"}'
-```
-
-| Option   | Required | Description                  |
-| -------- | -------- | ---------------------------- |
-| `--json` | yes      | JSON body with `title` field |
-
-Returns the created presentation JSON.
-
-### `gws slides presentations batchUpdate`
-
-Apply batch updates to a presentation.
-
-```bash
-gws slides presentations batchUpdate \
-  --params '{"presentationId": "PRES_ID"}' \
-  --json '{"requests": [...]}'
-```
-
-| Option     | Required | Description                     |
-| ---------- | -------- | ------------------------------- |
-| `--params` | yes      | JSON with `presentationId`      |
-| `--json`   | yes      | JSON body with `requests` array |
-
-Returns the batch update response JSON.
-
-### Drive API Passthroughs
-
-The Drive v3 files and permissions methods are available with the
-same passthrough shape:
-
-| Command                        | Description                                    |
-| ------------------------------ | ---------------------------------------------- |
-| `gws drive files list`         | List files (`--params` supports `q`, `pageSize`) |
-| `gws drive files get`          | Get file metadata by `fileId`                  |
-| `gws drive files create`       | Create a file (`--json` metadata)              |
-| `gws drive files update`       | Update file metadata                           |
-| `gws drive files copy`         | Copy a file                                    |
-| `gws drive files delete`       | Delete a file                                  |
-| `gws drive files export`       | Export a native file (`fileId`, `mimeType`)    |
-| `gws drive permissions create` | Share a file                                   |
-| `gws drive permissions list`   | List a file's permissions                      |
-| `gws drive permissions delete` | Remove a permission                            |
-
-Examples:
-
-```bash
-gws drive files list --params '{"q": "name = '"'"'report.pdf'"'"'"}'
-gws drive files export --params '{"fileId": "DOC_ID", "mimeType": "text/plain"}'
-gws drive permissions create \
-  --params '{"fileId": "FILE_ID"}' \
-  --json '{"role": "reader", "type": "anyone"}'
-```
+Acting on Drive files by id (create, update, copy, delete, share,
+export, plus the Docs/Sheets/Slides helpers) goes through the
+[gws CLI](/python/cli/gws) when installed.

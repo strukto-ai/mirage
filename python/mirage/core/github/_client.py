@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from typing import Any
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 import aiohttp
 from pydantic import SecretStr
@@ -34,29 +31,19 @@ def github_headers(token: SecretStr) -> dict[str, str]:
     }
 
 
-def github_url(path: str, **kwargs: str) -> str:
-    return API_BASE + path.format(**kwargs)
+def github_url(path: str, base_url: str | None = None, **kwargs: str) -> str:
+    return (base_url or API_BASE) + path.format(**kwargs)
 
 
 async def github_get(token: SecretStr,
                      path: str,
                      params: dict[str, Any] | None = None,
+                     *,
+                     base_url: str | None = None,
                      **kwargs: str) -> dict[str, Any]:
-    url = github_url(path, **kwargs)
+    url = github_url(path, base_url, **kwargs)
     headers = github_headers(token)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
             resp.raise_for_status()
             return await resp.json()
-
-
-def github_get_sync(token: SecretStr,
-                    path: str,
-                    params: dict[str, Any] | None = None,
-                    **kwargs: str) -> dict[str, Any]:
-    url = github_url(path, **kwargs)
-    if params:
-        url = f"{url}?{urlencode(params)}"
-    req = Request(url, headers=github_headers(token), method="GET")
-    with urlopen(req) as resp:
-        return json.loads(resp.read())

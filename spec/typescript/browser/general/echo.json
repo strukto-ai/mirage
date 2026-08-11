@@ -1,36 +1,23 @@
 {
   "_meta": {
+    "by_resource": {},
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
     "has_write": false,
     "resources": []
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-n",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-e",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     }
   ],
-  "positional": [],
   "rest": {
-    "kind": "text",
-    "provided_by": []
+    "type": "str"
   }
 }

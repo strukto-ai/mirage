@@ -15,9 +15,20 @@
 import re
 from dataclasses import dataclass
 from functools import cmp_to_key, partial
+from typing import TypeAlias
+
+# One run of a version string: digits rank before non-digits, so the two
+# shapes never compare against each other.
+VersionPart: TypeAlias = tuple[int, int] | tuple[int, str]
+# What one key field collapses to before comparison: a month index, a
+# parsed number, the (rank, value) pair -g uses to order junk before
+# NaN before real numbers, the version run list, or the text itself.
+SortKey: TypeAlias = str | int | float | tuple[int, float] | list[VersionPart]
+# The same keys made hashable for -u, version lists flattened to tuples.
+DedupKey: TypeAlias = tuple[SortKey | tuple[VersionPart, ...], ...]
 
 _HUMAN_SUFFIXES = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15}
-_VERSION_RE = re.compile(r"(\d+)|(\D+)")
+_VERSION_RE = re.compile(r"([0-9]+)|([^0-9]+)")
 _MONTHS = {
     "jan": 1,
     "feb": 2,
@@ -32,7 +43,7 @@ _MONTHS = {
     "nov": 11,
     "dec": 12,
 }
-_KEYDEF_RE = re.compile(r"^(\d+)(?:\.(\d+))?([a-zA-Z]*)$")
+_KEYDEF_RE = re.compile(r"^([0-9]+)(?:\.([0-9]+))?([a-zA-Z]*)$")
 # GNU key modifier letters. n/g map to numeric; h/V/M/f/r/b are honored;
 # d/i/R are recognized so they still suppress global options (per GNU
 # key_init) but are not yet applied as filters.
@@ -252,8 +263,8 @@ def _parse_human(s: str) -> float:
         return 0.0
 
 
-def _version_key(s: str) -> list[object]:
-    parts: list[object] = []
+def _version_key(s: str) -> list[VersionPart]:
+    parts: list[VersionPart] = []
     for m in _VERSION_RE.finditer(s):
         if m.group(1):
             parts.append((0, int(m.group(1))))
@@ -266,7 +277,7 @@ def _leading_number(field: str) -> float:
     field = field.lstrip()
     num_end = 0
     for ch in field:
-        if ch.isdigit() or (ch in ".+-" and num_end == 0):
+        if ch in "0123456789" or (ch in ".+-" and num_end == 0):
             num_end += 1
         else:
             break
@@ -276,7 +287,7 @@ def _leading_number(field: str) -> float:
         return 0.0
 
 
-def _transform(field: str, mods: KeyMods) -> object:
+def _transform(field: str, mods: KeyMods) -> SortKey:
     if mods.dictionary:
         field = "".join(char for char in field
                         if char.isalnum() or char in " \t")
@@ -304,7 +315,7 @@ def _transform(field: str, mods: KeyMods) -> object:
     return field
 
 
-def _cmp(a: object, b: object) -> int:
+def _cmp(a: SortKey | VersionPart, b: SortKey | VersionPart) -> int:
     if isinstance(a, list) and isinstance(b, list):
         for x, y in zip(a, b):
             c = _cmp(x, y)
@@ -333,9 +344,9 @@ def compare_lines(a: str, b: str, cfg: SortConfig) -> int:
     return c
 
 
-def _dedup_key(line: str, cfg: SortConfig) -> tuple[object, ...]:
+def _dedup_key(line: str, cfg: SortConfig) -> DedupKey:
     fields = _compute_fields(line, cfg.field_sep)
-    parts: list[object] = []
+    parts: list[SortKey | tuple[VersionPart, ...]] = []
     for key in cfg.keys:
         value = _transform(_extract(line, fields, key), key.mods)
         parts.append(tuple(value) if isinstance(value, list) else value)

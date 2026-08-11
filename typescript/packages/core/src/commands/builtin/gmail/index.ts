@@ -16,20 +16,16 @@ import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GWS_GMAIL_API_COMMANDS } from '../gws/index.ts'
 import { GMAIL_GREP } from './grep.ts'
-import { GMAIL_GWS_FORWARD } from './gws_gmail_forward.ts'
-import { GMAIL_GWS_READ } from './gws_gmail_read.ts'
-import { GMAIL_GWS_REPLY } from './gws_gmail_reply.ts'
-import { GMAIL_GWS_REPLY_ALL } from './gws_gmail_reply_all.ts'
-import { GMAIL_GWS_SEND } from './gws_gmail_send.ts'
-import { GMAIL_GWS_TRIAGE } from './gws_gmail_triage.ts'
 import { GMAIL_IO } from './io.ts'
 import { metadataProvision } from './provision.ts'
 import { GMAIL_RG } from './rg.ts'
 
 const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
 
+// Gmail verbs and API passthroughs live in the gws CLI
+// (commands/cli/builtin/gws), installed by name; the mount only serves
+// the filesystem surface.
 export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GmailAccessor>(ResourceName.GMAIL, GMAIL_IO, {
     overrides: GMAIL_OVERRIDES,
@@ -39,11 +35,4 @@ export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   }),
   ...GMAIL_GREP,
   ...GMAIL_RG,
-  ...GMAIL_GWS_SEND,
-  ...GMAIL_GWS_REPLY,
-  ...GMAIL_GWS_REPLY_ALL,
-  ...GMAIL_GWS_FORWARD,
-  ...GMAIL_GWS_TRIAGE,
-  ...GMAIL_GWS_READ,
-  ...GWS_GMAIL_API_COMMANDS,
 ]

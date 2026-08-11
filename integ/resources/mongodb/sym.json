@@ -1,0 +1,69 @@
+{
+  "cases": [
+    {
+      "id": "mdb_sym_ln",
+      "seq": 620100,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ln -s /mongodb/mirage_integ/database.json /mongodb/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_sym_readlink",
+      "seq": 620101,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "readlink /mongodb/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mongodb/mirage_integ/database.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_sym_cat",
+      "seq": 620102,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongodb/meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"database\": \"mirage_integ\", \"collections\": [{\"name\": \"authors\", \"document_count\": 3}, {\"name\": \"books\", \"document_count\": 5}, {\"name\": \"system.views\", \"document_count\": 1}], \"views\": [{\"name\": \"recent_books\"}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_sym_ls",
+      "seq": 620103,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "ls -F /mongodb | grep meta_link",
+      "expect": {
+        "exit": 0,
+        "stdout": "meta_link@\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_sym_rm",
+      "seq": 620104,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "rm /mongodb/meta_link && ls /mongodb",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage_integ\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

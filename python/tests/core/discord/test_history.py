@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import get_history_jsonl
-from mirage.resource.discord.config import DiscordConfig
 
 
 @pytest.fixture

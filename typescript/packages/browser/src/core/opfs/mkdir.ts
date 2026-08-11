@@ -12,9 +12,46 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type PathSpec, invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core'
+import {
+  type PathSpec,
+  ancestors,
+  eexist,
+  enotdir,
+  invalidateAfterWrite,
+  invalidateAncestors,
+  mountedPath,
+  norm,
+} from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, resolveDirHandle, resolveParentDirHandle, splitSegments } from './utils.ts'
+import {
+  destError,
+  kindAt,
+  resolveDirHandle,
+  resolveParentDirHandle,
+  splitSegments,
+} from './utils.ts'
+
+// Reject a `mkdir` OPFS cannot satisfy, the way the store backends'
+// checkMkdirTarget does. OPFS has no kernel to consult and raises the same
+// TypeMismatchError whether the chain crossed a plain file or the target
+// itself is one, so the chain is walked to tell GNU's two errnos apart and to
+// name the component `-p` tripped on.
+async function checkMkdirTarget(
+  root: FileSystemDirectoryHandle,
+  spec: PathSpec,
+  key: string,
+  parents: boolean,
+): Promise<void> {
+  if (!parents) {
+    if ((await kindAt(root, key)) !== null) throw eexist(spec)
+    return
+  }
+  for (const component of [...ancestors(key), key]) {
+    if ((await kindAt(root, component)) !== 'file') continue
+    const named = mountedPath(spec, component)
+    throw component === key ? eexist(named) : enotdir(named)
+  }
+}
 
 export async function mkdir(
   accessor: OPFSAccessor,
@@ -25,6 +62,7 @@ export async function mkdir(
   const virtual = path.mountPath
   const segs = splitSegments(virtual)
   if (segs.length === 0) return
+  await checkMkdirTarget(root, path, norm(virtual), parents)
   if (parents) {
     await resolveDirHandle(root, virtual, { create: true })
     await invalidateAfterWrite(path)
@@ -36,21 +74,10 @@ export async function mkdir(
   try {
     ;[parentDir, name] = await resolveParentDirHandle(root, virtual, { create: false })
   } catch (err) {
-    if (isNotFound(err)) {
-      throw new Error(`parent directory does not exist: ${virtual}`)
-    }
-    throw err
-  }
-  try {
-    await parentDir.getDirectoryHandle(name, { create: false })
-    return
-  } catch (err) {
-    if (!isNotFound(err)) {
-      if (err instanceof DOMException && err.name === 'TypeMismatchError') {
-        throw new Error(`path exists and is not a directory: ${virtual}`)
-      }
-      throw err
-    }
+    // A bare Error here would not be classified as a filesystem failure,
+    // so the command layer could not report it with a GNU strerror.
+    throw destError(err, path)
   }
   await parentDir.getDirectoryHandle(name, { create: true })
+  await invalidateAfterWrite(path)
 }

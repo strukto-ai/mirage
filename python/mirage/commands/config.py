@@ -16,23 +16,23 @@ import functools
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
-from mirage.commands.safeguard import CommandSafeguard
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import OperandKind, Option
+from mirage.commands.spec.types import Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
+from mirage.types import Limit
 from mirage.version import __version__
 
-_HELP_OPTION = Option(
+HELP_OPTION = Option(
     long="--help",
-    value_kind=OperandKind.NONE,
+    type="bool",
     description="Show this help and exit",
 )
 
 _VERSION_OPTION = Option(
     long="--version",
-    value_kind=OperandKind.NONE,
+    type="bool",
     description="Show version information and exit",
 )
 
@@ -78,7 +78,7 @@ def _with_help_support(
     """
     extras: list[Option] = []
     if not any(o.long == "--help" for o in spec.options):
-        extras.append(_HELP_OPTION)
+        extras.append(HELP_OPTION)
     if not any(o.long == "--version" for o in spec.options):
         extras.append(_VERSION_OPTION)
     new_spec = (spec if not extras else replace(
@@ -109,7 +109,7 @@ class RegisteredCommand:
     src: str | None = None
     dst: str | None = None
     write: bool = False
-    safeguard: CommandSafeguard | None = None
+    limit: Limit | None = None
 
 
 def command(
@@ -122,7 +122,7 @@ def command(
     dry_run: Callable[..., Any] | None = None,
     aggregate: Callable[..., Any] | None = None,
     write: bool = False,
-    safeguard: CommandSafeguard | None = None,
+    limit: Limit | None = None,
 ) -> Callable[..., Any]:
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -139,7 +139,7 @@ def command(
                 provision_fn=provision or dry_run,
                 aggregate=aggregate,
                 write=write,
-                safeguard=safeguard,
+                limit=limit,
             )
             cmds.append(rc)
         setattr(wrapped_fn, "_registered_commands", cmds)

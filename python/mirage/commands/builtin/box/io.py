@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.box.copy import copy as _copy
 from mirage.core.box.create import create as _create
+from mirage.core.box.du import entries as _du_entries
+from mirage.core.box.du import size as _du_size
 from mirage.core.box.exists import exists as _exists
 from mirage.core.box.mkdir import mkdir as _mkdir
 from mirage.core.box.read import read as _read
 from mirage.core.box.read import stream as _stream
-from mirage.core.box.readdir import is_dir_name as _is_dir_name
 from mirage.core.box.readdir import readdir as _readdir
 from mirage.core.box.rename import rename as _rename
 from mirage.core.box.rmdir import rm_r as _rm_r
@@ -30,17 +31,20 @@ from mirage.core.box.unlink import unlink as _unlink
 from mirage.core.box.write import write_bytes as _write
 
 # Box exposes the full write surface (upload/overwrite, mkdir, unlink, rmdir,
-# mv, cp) alongside reads. du keeps a bespoke wrapper (like onedrive/hf)
-# because box path->id resolution needs the dispatcher-injected index and its
-# du_all follows the flat du_multi contract.
+# mv, cp) alongside reads.
 IO = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
+    read_range=_read,
     read_stream=_stream,
     stat=_stat,
-    is_dir_name=lambda _accessor, child: _is_dir_name(child),
     is_mounted=lambda a: True,
     local=False,
+    # Own the du walk instead of taking the builder's, which is capped at
+    # max_du_entries and reports a partial total past it. A Box tree over
+    # that cap is ordinary, and a silently wrong total is worse than a
+    # slow one; this matches the typescript table.
+    du=DuOps(size=_du_size, entries=_du_entries),
     write=_write,
     exists=_exists,
     mkdir=_mkdir,

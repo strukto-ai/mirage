@@ -99,7 +99,7 @@
       ],
       "command": "ls /slack/channels/product-reply__C6/",
       "expect": {
-        "exit": 1,
+        "exit": 2,
         "stdout": "",
         "stderr": "ls: cannot access '/slack/channels/product-reply__C6': No such file or directory\n"
       }

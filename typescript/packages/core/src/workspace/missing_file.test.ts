@@ -89,10 +89,12 @@ describe('streaming commands on missing files', () => {
     await ws.close()
   })
 
-  it('grep pat /missing.txt returns exit=1 with stderr', async () => {
+  // GNU grep exits 2 for an operand it could not search, unlike the
+  // read commands around it, which exit 1.
+  it('grep pat /missing.txt returns exit=2 with stderr', async () => {
     const { ws } = buildWorkspace()
     const res = await ws.execute('grep foo /ram/missing.txt')
-    expect(res.exitCode).toBe(1)
+    expect(res.exitCode).toBe(2)
     expect(DEC.decode(res.stderr)).toMatch(/missing\.txt/)
     await ws.close()
   })

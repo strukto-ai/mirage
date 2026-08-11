@@ -1,5 +1,109 @@
 {
   "_meta": {
+    "by_resource": {
+      "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "disk": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "dropbox": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "hf_buckets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "hf_datasets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "hf_models": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "hf_spaces": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "nextcloud": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "ram": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "s3": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "sharepoint": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      }
+    },
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": true,
@@ -10,89 +114,57 @@
       "disk",
       "dropbox",
       "gdrive",
+      "gridfs",
       "hf_buckets",
       "hf_datasets",
       "hf_models",
       "hf_spaces",
       "nextcloud",
+      "onedrive",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "ssh"
     ]
   },
-  "description": null,
-  "ignore_tokens": [],
   "options": [
     {
-      "description": null,
       "long": "--directory",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-d",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-p",
-      "value_kind": "path",
-      "value_optional": false
+      "type": "path"
     },
     {
-      "description": null,
       "long": "--tmpdir",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "path",
+      "type": "path",
       "value_optional": true
     },
     {
-      "description": null,
-      "long": null,
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-t",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--dry-run",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-u",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--quiet",
-      "numeric_shorthand": false,
-      "repeatable": false,
       "short": "-q",
-      "value_kind": "none",
-      "value_optional": false
+      "type": "bool"
     },
     {
-      "description": null,
       "long": "--suffix",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "text",
-      "value_optional": false
+      "type": "str"
     }
   ],
   "positional": [
     {
-      "kind": "text",
-      "provided_by": []
+      "type": "str"
     }
-  ],
-  "rest": null
+  ]
 }

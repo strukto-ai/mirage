@@ -1,0 +1,129 @@
+---
+title: ntn
+description: Notion API client following the official Notion CLI grammar.
+icon: terminal
+---
+
+Notion API client following the official Notion CLI grammar. Install it on the workspace and the whole tree is
+discoverable with `ntn --help` or `man ntn`.
+
+## Install
+
+```typescript
+import { NTN } from '@struktoai/mirage-core'
+import { NotionResource, Workspace } from '@struktoai/mirage-node'
+
+const config = { apiKey: 'secret_...' }
+const ws = new Workspace({ '/notion': new NotionResource(config) })
+ws.registerCli('ntn', NTN, config)
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
+
+## Verbs
+
+The grammar matches the official
+[Notion CLI](https://developers.notion.com/cli) verb for verb, and every
+case is gated against the real `ntn` binary in CI, so what is written
+here is what the program does.
+
+**Ids are positional, not flags.** There is no `--page`, `--block` or
+`--datasource`; each verb names its own operand.
+
+```
+ntn api          <PATH>...     Call the public Notion API (beta)
+ntn auth token                 Print the current authentication token
+ntn datasources query    <ID_OR_URL>
+ntn datasources resolve  <ID>
+ntn pages get    <PAGE_ID>     Retrieve a page as Markdown
+ntn pages create               Create a page from Markdown content
+ntn pages edit   <PAGE_ID>     Edit a page's content from Markdown
+ntn pages trash  <PAGE_ID>     Trash a page
+ntn whoami                     Show the authenticated Notion user
+```
+
+There is no `ntn blocks`, `ntn comments` or `ntn search`. Those are
+reached through `ntn api` with the REST API's own paths, exactly as
+upstream reaches them. Upstream's interactive and deploy verbs (`login`,
+`logout`, `update`, `workers`, `notion-as-code`, `doctor`, `files`) are
+out of scope for a virtualized CLI.
+
+### Pages
+
+Page bodies are **Markdown**, not property JSON. `create` takes the body
+on `--content` or from stdin, and the first heading becomes the title.
+
+```bash
+ntn pages get a1b2c3d4-...
+ntn pages get a1b2c3d4-... --json
+
+ntn pages create --content '# Title' --parent page:a1b2c3d4-...
+echo '# Title' | ntn pages create --parent data-source:e5f6a7b8-...
+
+ntn pages edit a1b2c3d4-... --content '# Replaced body'
+ntn pages trash a1b2c3d4-... --yes
+```
+
+| Verb     | Operand     | Options                                | Writes |
+| -------- | ----------- | -------------------------------------- | ------ |
+| `get`    | `<PAGE_ID>` | `--json`                               | no     |
+| `create` | none        | `--content` `--parent` `--json`        | yes    |
+| `edit`   | `<PAGE_ID>` | `--content` `--json`                   | yes    |
+| `trash`  | `<PAGE_ID>` | `--yes`                                | yes    |
+
+`--parent` takes `page:<id>`, `database:<id>` or `data-source:<id>`.
+`edit` replaces the page body wholesale. `trash` refuses without `--yes`
+unless a prompt can be answered, and sets `in_trash`.
+
+To set a row's **property values** rather than its body, use `ntn api`:
+
+```bash
+ntn api v1/pages/<row-id> -X PATCH \
+  -d '{"properties":{"Stage":{"select":{"name":"Draft"}}}}'
+```
+
+### Data sources
+
+Since `2025-09-03` a database is a container of *data sources*, and the
+rows and the column schema live on the data source. `resolve` turns a
+database id into its data source ids; `query` accepts either in the same
+slot.
+
+```bash
+ntn datasources resolve e5f6a7b8-...
+ntn datasources query d5000000-... --limit 10
+ntn datasources query d5000000-... -s 'Priority desc'
+ntn datasources query d5000000-... --filter '{"property":"Stage","select":{"equals":"Done"}}'
+ntn datasources query d5000000-... --json
+```
+
+`query` prints one tab-separated line per row: the page id, then the
+property values in alphabetical order by column name. The columns are the
+ones the returned rows actually carry, so a result set that does not cover
+the whole schema prints narrower.
+
+### Raw API
+
+`ntn api` reaches every route that has no typed verb, including the only
+delete verb the public API has (`DELETE /v1/blocks/{id}`, which trashes a
+block, a page, or a database row).
+
+```bash
+ntn api v1/users/me
+ntn api v1/search -d '{"query":"Roadmap"}'
+ntn api v1/search query=Roadmap
+ntn api v1/blocks/<page-id>/children page_size==10
+ntn api v1/blocks/<block-id> -X DELETE
+ntn api v1/comments -d '{"parent":{"page_id":"a1b2c3d4"},"rich_text":[{"text":{"content":"hi"}}]}'
+printf '{"query":"Roadmap"}' | ntn api v1/search
+```
+
+The body comes from exactly one source: stdin, `--data`/`-d`, or inline
+`path=value` / `path:=json` inputs. Naming two is an error. `name==value`
+stays a query parameter whatever the method is, and `Header:Value` sets a
+header. Any body source makes the call a POST unless `-X`/`--method` says
+otherwise; `GET`, `POST`, `PATCH`, `PUT` and `DELETE` are accepted.
+
+Use the `<page-id>` / `<database-id>` / `<data-source-id>` from a mounted
+path segment as the operand.

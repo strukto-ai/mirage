@@ -225,8 +225,20 @@ async def box_get_bytes(
     tm: BoxTokenManager,
     url: str,
     params: dict[str, Any] | None = None,
+    range_header: str | None = None,
 ) -> bytes:
+    """GET a URL as raw bytes, optionally only a byte range of it.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        url (str): API URL.
+        params (dict | None): query parameters.
+        range_header (str | None): an HTTP ``Range`` value, or None for
+            the whole body.
+    """
     headers = await box_auth_headers(tm)
+    if range_header:
+        headers["Range"] = range_header
     async with aiohttp.ClientSession() as session:
         async with session.get(url,
                                headers=headers,

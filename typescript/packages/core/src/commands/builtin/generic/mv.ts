@@ -15,30 +15,105 @@
 import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, type MoveStrategy, type PrimitiveMove, type StatFn } from '../../../types.ts'
 import {
-  backendKeyDefault,
-  copyTargets,
-  isDirectory,
-  pathExists,
-  type BackendKeyFn,
-} from '../utils/copy.ts'
+  PathSpec,
+  type MoveStrategy,
+  type NativeMove,
+  type PrimitiveMove,
+  type ReaddirFn,
+  type StatFn,
+} from '../../../types.ts'
+import { UsageError } from '../../errors.ts'
+import { DEFAULT_BACKUP_SUFFIX, backupControl, siblingPath } from '../utils/backup.ts'
+import { backendKeyDefault, copyTargets, pathExists, type BackendKeyFn } from '../utils/copy.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { copyEntries, cpWalk } from './cp.ts'
+import {
+  backupDisplaces,
+  backupRaw,
+  copyEntries,
+  cpWalk,
+  entryKind,
+  sourceKind,
+  makeBackup,
+  overwriteGate,
+  overwriteTypeError,
+  splitOperands,
+  suffixFlag,
+  targetDirError,
+  targetFlags,
+  updateMode,
+  wrapTargetDir,
+  type TransferPolicy,
+} from './cp.ts'
+import type { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
+
+// Bound on the --exchange staging-name probe.
+const HOLDING_ATTEMPTS = 100
+
+export interface MvFlags {
+  noClobber: boolean
+  verbose: boolean
+  update: string | null
+  backup: string | null
+  suffix: string
+  targetDir: PathSpec | string | null
+  noTargetDir: boolean
+  exchange: boolean
+  noCopy: boolean
+}
+
+export function mvFlags(init: Partial<MvFlags> = {}): MvFlags {
+  return {
+    noClobber: init.noClobber ?? false,
+    verbose: init.verbose ?? false,
+    update: init.update ?? null,
+    backup: init.backup ?? null,
+    suffix: init.suffix ?? DEFAULT_BACKUP_SUFFIX,
+    targetDir: init.targetDir ?? null,
+    noTargetDir: init.noTargetDir ?? false,
+    exchange: init.exchange ?? false,
+    noCopy: init.noCopy ?? false,
+  }
+}
 
 function isPrimitiveMove(strategy: MoveStrategy): strategy is PrimitiveMove {
   return 'readBytes' in strategy
 }
 
-// Remove copied source entries children first, GNU rm style. A failed
-// removal is reported per entry ('mv: cannot remove ...') and the remaining
-// entries are still attempted; directories with a failed descendant are
-// skipped silently like GNU, which never reports the not-empty ancestors of
-// a file it could not remove. Returns whether the source changed at all and
-// whether it is fully gone.
+// Parse the mv flag bag once into a frozen struct. -f/-i are accepted
+// no-ops (non-interactive control plane: overwrite always proceeds unless
+// -n/--update say otherwise), and --strip-trailing-slashes is a no-op
+// because PathSpec already normalizes trailing slashes.
+export function parseMvFlags(fl: FlagView): MvFlags {
+  const update = updateMode('mv', fl)
+  const suffix = suffixFlag(fl)
+  const control = backupControl('mv', backupRaw(fl), suffix)
+  const noClobber = fl.asBool('no_clobber')
+  const exchange = fl.asBool('exchange')
+  if (control !== null && control !== 'none' && (exchange || noClobber || update === 'none-fail')) {
+    throw new UsageError(
+      'mv: cannot combine --backup with --exchange, -n, or --update=none-fail\n' +
+        "Try 'mv --help' for more information.",
+      1,
+    )
+  }
+  const [targetDir, noTargetDir] = targetFlags('mv', fl)
+  return mvFlags({
+    noClobber,
+    verbose: fl.asBool('verbose'),
+    update,
+    backup: control,
+    suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,
+    targetDir,
+    noTargetDir,
+    exchange,
+    noCopy: fl.asBool('no_copy'),
+  })
+}
+
 // Confirm a failed removal actually left something behind. On dirless
 // object stores a directory vanishes with its last child, so a failed
 // rmdir of a path that no longer exists (or that no longer lists any
@@ -64,6 +139,12 @@ async function entryGone(
   return children.length === 0
 }
 
+// Remove copied source entries children first, GNU rm style. A failed
+// removal is reported per entry ('mv: cannot remove ...') and the remaining
+// entries are still attempted; directories with a failed descendant are
+// skipped silently like GNU, which never reports the not-empty ancestors of
+// a file it could not remove. Returns whether the source changed at all and
+// whether it is fully gone.
 async function removeEntries(
   strategy: PrimitiveMove,
   stat: StatFn,
@@ -100,6 +181,100 @@ async function removeEntries(
   return { removedAny, removedAll: failed.length === 0 }
 }
 
+// An unused sibling of `target` to stage a swap through. The name is probed
+// instead of assumed: renames overwrite on most backends, so a fixed
+// `.~xchg~` would silently destroy a real file of that name. null means no
+// free slot was found.
+async function holdingPath(stat: StatFn, target: PathSpec): Promise<PathSpec | null> {
+  for (let attempt = 0; attempt < HOLDING_ATTEMPTS; attempt += 1) {
+    const tag = attempt === 0 ? '.~xchg~' : `.~xchg${String(attempt)}~`
+    const candidate = siblingPath(target, tag)
+    if (!(await pathExists(stat, candidate))) return candidate
+  }
+  return null
+}
+
+// Put a partially completed swap back the way it was. Returns true when the
+// operands are back in their original places.
+async function undoExchange(
+  strategy: NativeMove,
+  src: PathSpec,
+  target: PathSpec,
+  holding: PathSpec,
+  staged: boolean,
+  swapped: boolean,
+): Promise<boolean> {
+  if (!staged) return true
+  try {
+    if (swapped) await strategy.rename(src, target)
+    await strategy.rename(holding, src)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return false
+  }
+  return true
+}
+
+// Swap two entries through a staging name (--exchange). Both sides must
+// exist. Deliberate divergence: GNU issues one atomic
+// renameat2(RENAME_EXCHANGE), which no backend exposes, so the swap is
+// staged through an unused sibling of the target and is *not* atomic. The
+// staging name is probed for a free slot so an existing `.~xchg~` is never
+// clobbered, and a failure part-way rolls the operands back. Where GNU's
+// renameat2 probe degrades a missing side to 'Unknown error -1', the honest
+// errno text is reported instead. A cross-mount exchange fails like GNU on a
+// cross-device rename.
+async function exchangePair(
+  strategy: MoveStrategy,
+  stat: StatFn,
+  src: PathSpec,
+  target: PathSpec,
+  errors: string[],
+  writes: Record<string, ByteSource>,
+  lines: string[] | undefined,
+): Promise<void> {
+  if (isPrimitiveMove(strategy)) {
+    errors.push(
+      `mv: cannot exchange '${src.virtual}' and '${target.virtual}': Invalid cross-device link`,
+    )
+    return
+  }
+  if (!(await pathExists(stat, src)) || !(await pathExists(stat, target))) {
+    errors.push(
+      `mv: cannot exchange '${src.virtual}' and '${target.virtual}': No such file or directory`,
+    )
+    return
+  }
+  const holding = await holdingPath(stat, target)
+  if (holding === null) {
+    errors.push(`mv: cannot exchange '${src.virtual}' and '${target.virtual}': File exists`)
+    return
+  }
+  let staged = false
+  let swapped = false
+  try {
+    await strategy.rename(src, holding)
+    staged = true
+    await strategy.rename(target, src)
+    swapped = true
+    await strategy.rename(holding, target)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    const restored = await undoExchange(strategy, src, target, holding, staged, swapped)
+    errors.push(
+      `mv: cannot exchange '${src.virtual}' and '${target.virtual}': ${String(fsStrerror(err))}`,
+    )
+    if (!restored) {
+      writes[holding.mountPath] = new Uint8Array()
+      errors.push(`mv: '${src.virtual}' left at '${holding.virtual}' after a failed exchange`)
+    }
+    return
+  }
+  writes[src.mountPath] = new Uint8Array()
+  writes[target.mountPath] = new Uint8Array()
+  if (lines !== undefined) lines.push(`exchanged '${src.virtual}' <-> '${target.virtual}'`)
+}
+
 // Move sources to a destination, fanning out into a directory. NativeMove
 // uses an atomic backend rename. PrimitiveMove handles cross-mount moves by
 // copying the tree (parents first, via cpWalk plus mkdir/write) and then
@@ -107,31 +282,79 @@ async function removeEntries(
 // cross-device move: a copy failure keeps the whole source and skips
 // removal, a removal failure (e.g. a source mount with no unlink) reports
 // 'cannot remove' and leaves the copied destination in place; either way
-// the remaining sources still move.
+// the remaining sources still move. -n/--update/--backup gate whole source
+// operands (rename semantics), never individual entries of a tree.
 export async function mvGeneric(
   paths: PathSpec[],
   stat: StatFn,
   strategy: MoveStrategy,
-  noClobber: boolean,
-  verbose: boolean,
+  flags: MvFlags,
   index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
+  readdir?: ReaddirFn,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
-  const sources = paths.slice(0, -1)
-  const dst = paths[paths.length - 1]
-  if (dst === undefined) return [null, new IOResult()]
-  const dstIsDir = await isDirectory(stat, dst, index)
+  const [sources, dstOperand] = splitOperands('mv', paths, flags.targetDir, flags.noTargetDir)
+  let dst: PathSpec
+  let dstIsDir: boolean
+  let dstExists: boolean
+  if (dstOperand === null) {
+    const firstSource = sources[0]
+    if (firstSource === undefined) return [null, new IOResult()]
+    dst =
+      flags.targetDir instanceof PathSpec
+        ? flags.targetDir
+        : wrapTargetDir(firstSource, String(flags.targetDir))
+    const err = await targetDirError('mv', stat, dst)
+    if (err !== null) {
+      return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
+    }
+    dstIsDir = true
+    dstExists = true
+  } else if (flags.noTargetDir) {
+    dst = dstOperand
+    dstIsDir = false
+    dstExists = true
+  } else {
+    dst = dstOperand
+    const probe = await entryKind(stat, dst)
+    dstExists = probe.exists
+    dstIsDir = probe.isDir
+  }
+  let versionReaddir = readdir
+  if (versionReaddir === undefined && isPrimitiveMove(strategy)) {
+    versionReaddir = strategy.readdir
+  }
+  const policy: TransferPolicy = {
+    cmdName: 'mv',
+    noClobber: flags.noClobber,
+    update: flags.update,
+    backup: flags.backup,
+    suffix: flags.suffix,
+  }
   const writes: Record<string, ByteSource> = {}
   const lines: string[] = []
   const errors: string[] = []
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir)) {
-    if (!(await pathExists(stat, src))) {
-      errors.push(`mv: cannot stat '${src.virtual}': No such file or directory`)
+  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
+    const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
+    if (!srcExists) {
+      errors.push(`mv: cannot stat '${src.virtual}': ${String(srcErr)}`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {
       errors.push(`mv: '${src.virtual}' and '${target.virtual}' are the same file`)
+      continue
+    }
+    if (flags.exchange) {
+      await exchangePair(
+        strategy,
+        stat,
+        src,
+        target,
+        errors,
+        writes,
+        flags.verbose ? lines : undefined,
+      )
       continue
     }
     if (keyOf(target).startsWith(keyOf(src) + '/')) {
@@ -140,7 +363,52 @@ export async function mvGeneric(
       )
       continue
     }
-    if (noClobber && (await pathExists(stat, target))) continue
+    const { exists: targetExists, isDir: targetIsDir } = await entryKind(stat, target)
+    const mismatch = overwriteTypeError('mv', src, srcIsDir, target, targetExists, targetIsDir)
+    if (mismatch !== null) {
+      errors.push(mismatch)
+      continue
+    }
+    if (flags.noCopy && isPrimitiveMove(strategy)) {
+      errors.push(
+        `mv: cannot move '${src.virtual}' to '${target.virtual}': Invalid cross-device link`,
+      )
+      continue
+    }
+    if (!(await overwriteGate(policy, stat, src, target, errors))) continue
+    // GNU refuses to replace a non-empty directory whether the target was
+    // named outright (-T) or mapped under an existing destination
+    // directory, so this cannot be gated on noTargetDir. It runs after the
+    // clobber gate because -n and --update=none skip such a target
+    // silently at exit 0, and a backup renames the target aside first, so
+    // -b installs over it instead (all GNU 9.7).
+    if (srcIsDir && targetIsDir && versionReaddir !== undefined && !backupDisplaces(flags.backup)) {
+      let children: string[]
+      try {
+        children = await versionReaddir(target)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        // Reading it as "empty" would clobber a directory whose contents
+        // could not be verified.
+        errors.push(`mv: cannot overwrite '${target.virtual}': ${String(fsStrerror(err))}`)
+        continue
+      }
+      if (children.length > 0) {
+        errors.push(`mv: cannot overwrite '${target.virtual}': Directory not empty`)
+        continue
+      }
+    }
+    const made = await makeBackup(
+      policy,
+      strategy,
+      stat,
+      versionReaddir,
+      target,
+      writes,
+      errors,
+      index,
+    )
+    if (!made.ok) continue
     if (isPrimitiveMove(strategy)) {
       const entries = await cpWalk(strategy.readdir, stat, src, index)
       const { copiedAll, wroteAny } = await copyEntries(
@@ -163,11 +431,27 @@ export async function mvGeneric(
       // entries it could not remove.
       if (!removedAll) continue
     } else {
-      await strategy.rename(src, target)
+      try {
+        await strategy.rename(src, target)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        // A backend rename that refuses (e.g. a destination whose parent
+        // chain is not all directories) is one failed operand, not an
+        // aborted command: GNU reports it and keeps going with the
+        // remaining sources.
+        errors.push(
+          `mv: cannot move '${src.virtual}' to '${target.virtual}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
       writes[src.mountPath] = new Uint8Array()
       writes[target.mountPath] = new Uint8Array()
     }
-    if (verbose) lines.push(`renamed '${src.virtual}' -> '${target.virtual}'`)
+    if (flags.verbose) {
+      let line = `renamed '${src.virtual}' -> '${target.virtual}'`
+      if (made.backup !== null) line += ` (backup: '${made.backup.virtual}')`
+      lines.push(line)
+    }
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
   const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null

@@ -43,6 +43,10 @@ class OpsTable(Protocol):
         ...
 
     @property
+    def read_range(self) -> OpFn | None:
+        ...
+
+    @property
     def write(self) -> OpFn | None:
         ...
 

@@ -1,0 +1,82 @@
+---
+title: slack
+description: Slack Web API client speaking the OpenClaw Slack action vocabulary.
+icon: terminal
+---
+
+Slack Web API client speaking the OpenClaw Slack action vocabulary. Install it on the workspace and the whole tree is
+discoverable with `slack --help`.
+
+## Install
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.slack import SLACK
+from mirage.core.slack.config import SlackConfig
+from mirage.resource.slack import SlackResource
+
+config = SlackConfig(token="xoxb-...", search_token="xoxp-...")
+ws = Workspace({"/slack": SlackResource(config)})
+ws.register_cli("slack", SLACK, config.model_dump())
+```
+
+Two installs under different names are two accounts. In YAML, the same
+install rides the `clis:` section; see the [CLI overview](/python/cli/index).
+
+## Verbs
+
+The verbs follow the OpenClaw Slack action vocabulary (kebab verbs:
+`send-message`, `read-messages`, `pin-message`, `list-pins`,
+`member-info`, `emoji-list`); `search` and `list-members` are mirage
+extensions. Search needs a user token (`search_token`), the rest run on
+the bot token.
+
+### Messages
+
+```bash
+slack send-message --channel C04KEPWF6V7 --text "Hello from MIRAGE"
+slack send-message --channel C04KEPWF6V7 --thread-ts 1712345678.123456 --text "Thread reply"
+slack read-messages --channel C04KEPWF6V7 --limit 20
+```
+
+| Verb           | Flags                                          | Writes |
+| -------------- | ---------------------------------------------- | ------ |
+| `send-message` | `--channel --text [--thread-ts]`               | yes    |
+| `read-messages`| `--channel [--limit]`                          | no     |
+
+### Reactions and pins
+
+```bash
+slack react --channel C04KEPWF6V7 --ts 1712345678.123456 --emoji thumbsup
+slack reactions --channel C04KEPWF6V7 --ts 1712345678.123456
+slack pin-message --channel C04KEPWF6V7 --ts 1712345678.123456
+slack list-pins --channel C04KEPWF6V7
+slack unpin-message --channel C04KEPWF6V7 --ts 1712345678.123456
+```
+
+| Verb            | Flags                       | Writes |
+| --------------- | --------------------------- | ------ |
+| `react`         | `--channel --ts --emoji`    | yes    |
+| `reactions`     | `--channel --ts`            | no     |
+| `pin-message`   | `--channel --ts`            | yes    |
+| `unpin-message` | `--channel --ts`            | yes    |
+| `list-pins`     | `--channel`                 | no     |
+
+### Members, emoji, search
+
+```bash
+slack member-info --user U04K21SEVR9
+slack list-members --query "alice"
+slack emoji-list
+slack search --query 'from:@priya in:#general launch' --count 20 --page 1
+```
+
+| Verb           | Flags                          | Writes |
+| -------------- | ------------------------------ | ------ |
+| `member-info`  | `--user`                       | no     |
+| `list-members` | `[--query]`                    | no     |
+| `emoji-list`   |                                | no     |
+| `search`       | `--query [--count] [--page]`   | no     |
+
+`search` supports Slack query operators (`from:@user`, `in:#channel`,
+`after:YYYY-MM-DD`).

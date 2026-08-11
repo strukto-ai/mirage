@@ -15,21 +15,8 @@
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchAttachment, fetchMessage } from './_client.ts'
-import { gnuDirname, mountPrefixOf, stripSlash } from '@struktoai/mirage-core'
-
-const ENC = new TextEncoder()
-
-function enoent(p: string): Error {
-  const e = new Error(`ENOENT: ${p}`) as Error & { code: string }
-  e.code = 'ENOENT'
-  return e
-}
-
-function eisdir(p: string): Error {
-  const e = new Error(`EISDIR: ${p}`) as Error & { code: string }
-  e.code = 'EISDIR'
-  return e
-}
+import { messageJsonBytes } from './render.ts'
+import { eisdir, enoent, gnuDirname, mountPrefixOf, stripSlash } from '@struktoai/mirage-core'
 
 export async function read(
   accessor: EmailAccessor,
@@ -64,5 +51,5 @@ export async function read(
   const folder = prefix !== '' ? (parts[1] ?? '') : (parts[0] ?? '')
   const uid = result.entry.id
   const msg = await fetchMessage(accessor, folder, uid)
-  return ENC.encode(JSON.stringify(msg))
+  return messageJsonBytes(msg)
 }

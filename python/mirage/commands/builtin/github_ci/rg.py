@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.github_ci.read import read as ci_read
 from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
@@ -34,7 +35,7 @@ async def rg(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = await resolve_glob(accessor, paths, index) if paths else []
     if any(is_cross_run_root(p) for p in resolved):

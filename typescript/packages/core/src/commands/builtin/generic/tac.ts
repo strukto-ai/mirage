@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -52,10 +54,11 @@ export async function tacGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const separatorValue = opts.flags.s ?? opts.flags.separator
+  const fl = new FlagView(opts.flags, specOf('tac'))
+  const separatorValue = fl.asStr('separator')
   const separator = typeof separatorValue === 'string' ? separatorValue : '\n'
-  const before = opts.flags.b === true || opts.flags.before === true
-  const regex = opts.flags.r === true || opts.flags.regex === true
+  const before = fl.asBool('before')
+  const regex = fl.asBool('regex')
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the remaining operands
     // still reverse (GNU tac).

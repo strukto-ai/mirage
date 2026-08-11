@@ -1,20 +1,23 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.find_eval import (FindArgs, FindEntry,
-                                               args_to_tree, keep,
+from mirage.commands.builtin.find_eval import (FindArgs, FindEntry, PredNode,
+                                               args_to_tree, emit_start_path,
+                                               has_link_children, keep,
                                                prefix_path_nodes,
-                                               tree_has_empty)
+                                               start_basename, tree_has_empty)
 from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
                                                  _parse_size)
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import rebase_raw
+from mirage.utils.path import respell_raw
 
 
 def parse_find_args(
@@ -114,12 +117,223 @@ def apply_mount_prefix(results: list[str], mount_prefix: str) -> list[str]:
     return out
 
 
+def missing_start_line(search_path: PathSpec) -> str:
+    """GNU's stderr line for a start point that does not exist.
+
+    One spelling of the diagnostic, because both find paths emit it: the
+    native-op path and the walk each collect one per operand.
+
+    Args:
+        search_path (PathSpec): the start point, as the operand named it.
+    """
+    label = search_path.raw_path or search_path.virtual
+    return f"find: '{label}': No such file or directory"
+
+
+def is_link(links: LinkView | None, search: PathSpec) -> bool:
+    """Whether a start point is itself a namespace symlink.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        search (PathSpec): the start point.
+    """
+    return links is not None and links.stat_at(search.virtual) is not None
+
+
+@dataclass(frozen=True, slots=True)
+class StartPoint:
+    """What a start point makes ``find`` do with one operand.
+
+    One of three things: the subtree is walked, these rows are the whole
+    answer, or nothing is there and GNU's diagnostic is. ``stat`` carries
+    the start point's own stat when a directory was walked, which is what
+    lets the caller report the root itself without statting it twice.
+    """
+
+    walk: bool
+    results: list[str]
+    missing: bool = False
+    stat: FileStat | None = None
+
+
+WALK_START = StartPoint(walk=True, results=[])
+MISSING_START = StartPoint(walk=False, results=[], missing=True)
+
+
+async def resolve_start(
+    search: PathSpec,
+    args: FindArgs,
+    stat_path: StatPath | None,
+    *,
+    is_link: bool = False,
+) -> StartPoint:
+    """Decide what one start point contributes, before any walk.
+
+    The single place ``find`` classifies a start point, so the answer
+    cannot depend on whether the mounted backend ships a native find op
+    or is walked through readdir. GNU stats every start point for the
+    same reason: only a directory has a subtree, anything else is
+    reported as itself, and nothing at all is a diagnostic.
+
+    ``stat_path`` asks both channels a backend can answer on, so a
+    directory that exists only as its children still reports as one and
+    None means nothing is there (see ``resolve_path_stat``). That is what
+    makes the missing case answerable above every backend rather than
+    only where one wires a stat.
+
+    A symlink start point is left to the caller, which merges namespace
+    links separately; it has no backend inode to stat.
+
+    Args:
+        search (PathSpec): the start point, as the operand named it.
+        args (FindArgs): parsed find expression.
+        stat_path (StatPath | None): dispatcher-backed stat, None when the
+            command runs outside a workspace (the walk then decides).
+        is_link (bool): whether the start point is itself a namespace link.
+    """
+    if stat_path is None or is_link:
+        return WALK_START
+    start = await stat_path(search.virtual)
+    if start is None:
+        return MISSING_START
+    if start.type == FileType.DIRECTORY:
+        return StartPoint(walk=True, results=[], stat=start)
+    prefix = mount_prefix_of(search.virtual, search.resource_path)
+    # `-path` matches the display path, so Path nodes carry the mount
+    # prefix. Built here rather than read off args.tree: only the
+    # native-op path stamps that, the walk stamps inside walk_find.
+    tree = prefix_path_nodes(args_to_tree(args), prefix)
+    rows = apply_mount_prefix(start_point_results(search, start, args, tree),
+                              prefix)
+    return StartPoint(walk=False,
+                      results=respell_raw(rows, search.virtual,
+                                          search.raw_path))
+
+
+def start_point_results(
+    search_path: PathSpec,
+    start: FileStat,
+    args: FindArgs,
+    tree: PredNode,
+) -> list[str]:
+    """Results for a start point that is not a directory.
+
+    GNU reports a non-directory start point when it matches the
+    expression and walks nothing, because there is no subtree to
+    descend. The entry sits at depth 0 and tests as ``f``, offering its
+    own size and mtime to ``-size``, ``-mtime`` and ``-empty``.
+
+    Asking a backend to walk one instead is what this replaces, and
+    every backend answered differently: an object store listed the key
+    as a prefix and returned nothing, Graph 404'd on the children of a
+    file, and Box raised ENOTDIR.
+
+    Args:
+        search_path (PathSpec): the start point, as the operand named it.
+        start (FileStat): the start point's own stat.
+        args (FindArgs): parsed find expression.
+        tree (PredNode): the prefix-stamped predicate tree.
+    """
+    results: list[str] = []
+    if args.mtime_min is not None or args.mtime_max is not None:
+        ts = _modified_ts(start.modified)
+        if ts is None:
+            return results
+        if args.mtime_min is not None and ts < args.mtime_min:
+            return results
+        if args.mtime_max is not None and ts > args.mtime_max:
+            return results
+    emit_start_path(results,
+                    search_path.mount_path,
+                    start_basename(search_path),
+                    kind="f",
+                    is_empty=(start.size or 0) == 0 if args.empty else None,
+                    exists=True,
+                    tree=tree,
+                    maxdepth=args.maxdepth,
+                    mindepth=args.mindepth,
+                    size=start.size,
+                    min_size=args.min_size,
+                    max_size=args.max_size)
+    return results
+
+
+def root_dir_results(
+    search_path: PathSpec,
+    args: FindArgs,
+    tree: PredNode,
+    *,
+    is_empty: bool | None,
+) -> list[str]:
+    """Results for the directory start point itself, at depth 0.
+
+    GNU lists a directory start point before descending into it, so
+    ``find <dir>`` names the directory even when it holds nothing. The
+    generic already statted the start point to get here, so it decides
+    this row and the backend only has to answer for descendants (see
+    ``with_root_row`` for why the backend's own row is dropped).
+
+    ``-mtime`` is deliberately not applied here: the caller either
+    filters every row against namespace-aware times afterwards, or
+    pushed the window into the backend, and re-testing it against the
+    probe's own stat would drop rows a ``touch`` had just matched.
+
+    Args:
+        search_path (PathSpec): the start point, as the operand named it.
+        args (FindArgs): parsed find expression.
+        tree (PredNode): the prefix-stamped predicate tree.
+        is_empty (bool | None): whether the directory holds nothing, None
+            when no listing was taken (``-empty`` then cannot match it).
+    """
+    results: list[str] = []
+    emit_start_path(results,
+                    search_path.mount_path,
+                    start_basename(search_path),
+                    kind="d",
+                    is_empty=is_empty,
+                    exists=True,
+                    tree=tree,
+                    maxdepth=args.maxdepth,
+                    mindepth=args.mindepth,
+                    min_size=args.min_size,
+                    max_size=args.max_size)
+    return results
+
+
+def with_root_row(results: list[str], search_path: PathSpec,
+                  root: list[str]) -> list[str]:
+    """Replace the backend's row for the start point with the generic's.
+
+    Most native find ops emit the start path themselves, and each judged
+    it on the only facts it had: ssh calls every directory non-empty, an
+    object store calls one empty only when its own listing was empty, and
+    a store holding no directory marker reported nothing at all for a
+    directory that ``test -d`` and ``tree`` both saw. Merging instead of
+    replacing would keep whichever of those a backend happened to say, so
+    the row is dropped and the generic's takes its place. Descendants are
+    still entirely the backend's answer.
+
+    Compared with trailing slashes stripped, because a directory key is
+    spelled both ways across backends.
+
+    Args:
+        results (list[str]): mount-relative rows the backend returned.
+        search_path (PathSpec): the start point, as the operand named it.
+        root (list[str]): the generic's row for the start point, empty if
+            it did not match the expression.
+    """
+    key = search_path.mount_path.rstrip("/") or "/"
+    return [r for r in results if (r.rstrip("/") or "/") != key] + root
+
+
 async def find(
     paths: list[PathSpec],
     texts: tuple[str, ...],
     *,
     find_core: Callable[..., Awaitable[list[str]]],
+    stat_path: StatPath | None = None,
     stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
+    dir_empty: Callable[[PathSpec], Awaitable[bool]] | None = None,
     name: str | None = None,
     type: str | None = None,
     size: str | None = None,
@@ -129,8 +343,9 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     empty: bool = False,
+    links: LinkView | None = None,
+    follow: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    search_path = paths[0]
     args = parse_find_args(texts,
                            name=name,
                            type=type,
@@ -141,19 +356,99 @@ async def find(
                            path=path,
                            mindepth=mindepth,
                            empty=empty)
-    if stat is not None:
+    searches = paths if paths else [
+        PathSpec(virtual="/", directory="/", resource_path="")
+    ]
+    # GNU find walks every start point in operand order — duplicates and
+    # all — names each one it cannot stat, keeps going with the rest, and
+    # exits 1; the rows already found still print.
+    results: list[str] = []
+    missing: list[str] = []
+    for search_path in searches:
+        rows = await _find_root(search_path,
+                                args,
+                                find_core=find_core,
+                                stat_path=stat_path,
+                                stat=stat,
+                                dir_empty=dir_empty,
+                                links=links,
+                                follow=follow)
+        if rows is None:
+            missing.append(missing_start_line(search_path))
+            continue
+        results.extend(rows)
+    if missing:
+        return format_records(results), IOResult(stderr=("\n".join(missing) +
+                                                         "\n").encode(),
+                                                 exit_code=1)
+    return format_records(results), IOResult()
+
+
+async def _find_root(
+    search_path: PathSpec,
+    args: FindArgs,
+    *,
+    find_core: Callable[..., Awaitable[list[str]]],
+    stat_path: StatPath | None,
+    stat: Callable[[PathSpec], Awaitable[FileStat]] | None,
+    dir_empty: Callable[[PathSpec], Awaitable[bool]] | None,
+    links: LinkView | None,
+    follow: bool,
+) -> list[str] | None:
+    """One start point's rows on the native-op path, None when missing.
+
+    Args:
+        search_path (PathSpec): the start point, as the operand named it.
+        args (FindArgs): parsed find expression, shared across operands.
+        find_core (Callable): the backend's native find op.
+        stat_path (StatPath | None): dispatcher-backed stat probe.
+        stat (Callable | None): overlay-aware stat for the mtime filter.
+        dir_empty (Callable | None): emptiness probe for ``-empty``.
+        links (LinkView | None): the namespace's symlink facts.
+        follow (bool): whether ``-L`` follows namespace links.
+    """
+    # A start point that is itself a symlink has no backend inode, so
+    # neither the existence guard nor the backend walk can see it. GNU's
+    # default -P reports the link and stops there, which is exactly what
+    # link_results emits below.
+    root_is_link = (links is not None
+                    and links.stat_at(search_path.virtual) is not None)
+    # Fallback existence guard for a caller with no dispatcher probe (a
+    # unit test, or a command run outside a workspace). With stat_path
+    # wired, resolve_start below answers absence for every backend, so
+    # spending a second stat here would only duplicate it.
+    if stat_path is None and stat is not None and not root_is_link:
         try:
             await stat(search_path)
-        except (FileNotFoundError, ValueError) as exc:
-            stderr = f"find: '{search_path.raw_path}': {exc}".encode()
-            return b"", IOResult(stderr=stderr, exit_code=1)
+        except (FileNotFoundError, ValueError):
+            return None
     root_prefix = mount_prefix_of(search_path.virtual,
                                   search_path.resource_path)
     # `-path` matches the display path as printed; stamp the mount
     # prefix onto Path nodes before the backend walks mount-relative
-    # keys (#396).
-    args.tree = prefix_path_nodes(args_to_tree(args), root_prefix)
-    results = await find_core(
+    # keys (#396). Stamped into a per-operand tree — args is shared by
+    # every start point and must stay unprefixed.
+    tree = prefix_path_nodes(args_to_tree(args), root_prefix)
+    # With a stat wired, the mtime window is applied by the overlay-
+    # aware post-filter below, not pushed into the core: backend cores
+    # only see native times and would drop files whose mtime lives in
+    # the namespace (touch results, observed writes).
+    push_mtime = stat is None
+    # What the start point is decides which walk is even possible, so it
+    # is resolved once, ahead of all of them: a symlink has no backend
+    # inode (link_results reports it), a non-directory has no subtree,
+    # and nothing at all is GNU's diagnostic. Statted through the
+    # dispatcher, so a start point the router already resolved into
+    # another mount answers there rather than on this command's mount.
+    start = await resolve_start(search_path,
+                                args,
+                                stat_path,
+                                is_link=root_is_link)
+    if start.missing:
+        return None
+    if not start.walk and not root_is_link:
+        return start.results
+    results: list[str] = [] if root_is_link else await find_core(
         search_path,
         name=args.name,
         type=args.type,
@@ -163,13 +458,37 @@ async def find(
         mindepth=args.mindepth,
         name_exclude=args.name_exclude,
         or_names=args.or_names,
-        mtime_min=args.mtime_min,
-        mtime_max=args.mtime_max,
+        mtime_min=args.mtime_min if push_mtime else None,
+        mtime_max=args.mtime_max if push_mtime else None,
         iname=args.iname,
         path_pattern=args.path_pattern,
         empty=args.empty,
-        tree=args.tree,
+        tree=tree,
     )
+    # GNU lists a directory start point itself before descending into it,
+    # so it is named even when it holds nothing. Decided here rather than
+    # by each native find op, which read existence off its own listing and
+    # so said nothing at all for an empty directory that `test -d` and
+    # `tree` both saw. A pushed-down mtime window is the one case left to
+    # the backend: this row never passed through it.
+    mtime_pushed = push_mtime and (args.mtime_min is not None
+                                   or args.mtime_max is not None)
+    # Emptiness is the one fact this row needs that a caller can decline to
+    # offer (a bespoke wrapper wires no readdir), and that caller's core may
+    # know it. Left alone in that case, so a backend's answer is never
+    # traded for "unknown".
+    can_probe = dir_empty is not None or not args.empty
+    if start.stat is not None and not mtime_pushed and can_probe:
+        root_empty = (await dir_empty(search_path)
+                      if args.empty and dir_empty is not None else None)
+        if root_empty:
+            # A symlink is namespace state no backend readdir can see, so a
+            # directory holding only one would read as empty. GNU counts the
+            # link as an entry.
+            root_empty = not has_link_children(links, search_path.virtual)
+        results = with_root_row(
+            results, search_path,
+            root_dir_results(search_path, args, tree, is_empty=root_empty))
     if stat is not None:
         results = await apply_mtime_filter(results,
                                            mtime_min=args.mtime_min,
@@ -177,8 +496,17 @@ async def find(
                                            stat=stat,
                                            mount_prefix=root_prefix)
     results = apply_mount_prefix(results, root_prefix)
-    results = rebase_raw(results, search_path.virtual, search_path.raw_path)
-    return format_records(results), IOResult()
+    root_path = (search_path.virtual.rstrip("/")
+                 if search_path.virtual != "/" else "/")
+    results = sorted(results +
+                     await link_results(links,
+                                        root_path,
+                                        root_prefix,
+                                        search_path.mount_path.strip("/"),
+                                        args,
+                                        tree,
+                                        follow=follow))
+    return respell_raw(results, search_path.virtual, search_path.raw_path)
 
 
 def _modified_ts(modified: str | None) -> float | None:
@@ -213,8 +541,11 @@ async def _is_empty_entry(
     is_dir: bool,
     prefix: str,
     index: IndexCacheStore,
+    links: LinkView | None = None,
 ) -> bool:
     if is_dir:
+        if has_link_children(links, path):
+            return False
         spec = PathSpec(virtual=path,
                         directory=path,
                         resolved=False,
@@ -231,12 +562,11 @@ async def _walk_collect(
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
     stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    is_dir_name: Callable[[str], bool | None],
     spec: PathSpec,
     index: IndexCacheStore,
     maxdepth: int | None,
     depth: int,
-    acc: list[tuple[str, bool]],
+    acc: list[tuple[str, str]],
 ) -> None:
     if maxdepth is not None and depth > maxdepth:
         return
@@ -248,21 +578,114 @@ async def _walk_collect(
         return
     prefix = mount_prefix_of(spec.virtual, spec.resource_path)
     for child in children:
-        hint = is_dir_name(child)
-        trimmed = child.rstrip("/") if child.endswith("/") else child
-        if hint is None:
+        # Classification is stat's job (an index lookup right after the
+        # readdir that populated it). The one in-band proof is a trailing
+        # slash on a cold listing: no backend renders a file with one.
+        # Name heuristics beyond that guessed wrong (attachments and
+        # uploads carry whatever name the sender gave them) and are gone.
+        if child.endswith("/"):
+            trimmed = child.rstrip("/")
+            is_dir = True
+        else:
+            trimmed = child
             st = await _stat_entry(stat, trimmed, prefix, index)
             is_dir = st is not None and st.type == FileType.DIRECTORY
-        else:
-            is_dir = hint
-        acc.append((trimmed, is_dir))
+        acc.append((trimmed, "d" if is_dir else "f"))
         if is_dir:
             child_spec = PathSpec(virtual=trimmed,
                                   directory=trimmed,
                                   resolved=False,
                                   resource_path=mount_key(trimmed, prefix))
-            await _walk_collect(readdir, stat, is_dir_name, child_spec, index,
-                                maxdepth, depth + 1, acc)
+            await _walk_collect(readdir, stat, child_spec, index, maxdepth,
+                                depth + 1, acc)
+
+
+async def link_results(
+    links: LinkView | None,
+    search_root: str,
+    prefix: str,
+    search_key: str,
+    args: FindArgs,
+    tree: PredNode,
+    follow: bool = False,
+) -> list[str]:
+    """Namespace symlinks under the search root that match the expression.
+
+    Symlinks live in the namespace, not in any backend, so neither a
+    readdir walk nor a backend`s native find op can see them. Both find
+    paths merge them through here so one implementation decides what a
+    link matches.
+
+    GNU find without -L reports the link itself and never walks through
+    it, so a link is kind ``l`` (never ``f``/``d``). Its size is the
+    target string`s length, which is what ``-size`` compares, and it
+    carries the link`s own mtime.
+
+    Under ``-L`` a link is classified by what it points at instead: a
+    link to a file tests as ``f``, a link to a directory as ``d``, and
+    only a dangling link stays ``l`` (GNU reports the link itself when
+    the target cannot be stat'd). ``-size`` and ``-mtime`` then compare
+    the target's stat, since that is the file being reported.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        search_root (str): absolute virtual path of the search root.
+        prefix (str): mount prefix the backend keys are relative to.
+        search_key (str): mount-relative key of the search root.
+        args (FindArgs): parsed find expression.
+        tree (PredNode): the prefix-stamped predicate tree.
+        follow (bool): whether -L asked for the target's identity.
+    """
+    if links is None:
+        return []
+    out: list[str] = []
+    # GNU find's default is -P: a start point that is itself a symlink is
+    # reported as the link and never walked through. The backend cannot
+    # see it at all, so the subtree scan below (which only covers
+    # entries *under* the root) would miss it.
+    entries = list(links.subtree(search_root))
+    own = links.stat_at(search_root)
+    if own is not None:
+        entries.append((search_root, own))
+    for path, st in entries:
+        kind = "l"
+        if follow:
+            target = await links.target_stat(path)
+            if target is not None:
+                kind = ("d" if target.type == FileType.DIRECTORY else "f")
+                st = target
+        key = path[len(prefix
+                       ):] if prefix and path.startswith(prefix) else path
+        rel = key.strip("/")
+        if search_key:
+            depth = 0 if rel == search_key else rel.count(
+                "/") - search_key.count("/")
+        else:
+            depth = 0 if rel == "" else rel.count("/") + 1
+        if args.maxdepth is not None and depth > args.maxdepth:
+            continue
+        entry = FindEntry(key=key,
+                          name=path.rsplit("/", 1)[-1],
+                          kind=kind,
+                          depth=depth,
+                          is_empty=None)
+        if not keep(entry, tree, args.mindepth):
+            continue
+        size = st.size or 0
+        if args.min_size is not None and size < args.min_size:
+            continue
+        if args.max_size is not None and size > args.max_size:
+            continue
+        if args.mtime_min is not None or args.mtime_max is not None:
+            ts = _modified_ts(st.modified)
+            if ts is None:
+                continue
+            if args.mtime_min is not None and ts < args.mtime_min:
+                continue
+            if args.mtime_max is not None and ts > args.mtime_max:
+                continue
+        out.append(path)
+    return out
 
 
 async def walk_find(
@@ -271,26 +694,32 @@ async def walk_find(
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
     stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    is_dir_name: Callable[[str], bool | None],
     index: IndexCacheStore,
     args: FindArgs,
+    links: LinkView | None = None,
+    follow: bool = False,
 ) -> list[str]:
-    collected: list[tuple[str, bool]] = []
+    collected: list[tuple[str, str]] = []
     prefix = mount_prefix_of(search_path.virtual, search_path.resource_path)
     search_key = search_path.mount_path.strip("/")
     root_path = (search_path.virtual.rstrip("/")
                  if search_path.virtual != "/" else "/")
     root_stat = await _stat_entry(stat, root_path, prefix, index)
     if root_stat is not None:
-        collected.append((root_path, root_stat.type == FileType.DIRECTORY))
+        collected.append(
+            (root_path, "d" if root_stat.type == FileType.DIRECTORY else "f"))
     # GNU depth convention: the search root is depth 0, its children are
-    # depth 1.
-    await _walk_collect(readdir, stat, is_dir_name, search_path, index,
-                        args.maxdepth, 1, collected)
+    # depth 1. A start point that is not a directory has no children, so
+    # readdir on it is either an error the walk would have to swallow
+    # (Box answers ENOTDIR) or a wasted round trip everywhere else.
+    if root_stat is None or root_stat.type == FileType.DIRECTORY:
+        await _walk_collect(readdir, stat, search_path, index, args.maxdepth,
+                            1, collected)
     tree = prefix_path_nodes(args_to_tree(args), prefix)
     need_empty = tree_has_empty(tree)
     results: list[str] = []
-    for p, is_dir in sorted(collected):
+    for p, kind in sorted(collected):
+        is_dir = kind == "d"
         entry_name = p.rsplit("/", 1)[-1]
         key = p[len(prefix):] if prefix and p.startswith(prefix) else p
         rel = key.strip("/")
@@ -302,10 +731,10 @@ async def walk_find(
         is_empty = None
         if need_empty:
             is_empty = await _is_empty_entry(readdir, stat, p, is_dir, prefix,
-                                             index)
+                                             index, links)
         entry = FindEntry(key=key,
                           name=entry_name,
-                          kind="d" if is_dir else "f",
+                          kind=kind,
                           depth=depth,
                           is_empty=is_empty)
         if not keep(entry, tree, args.mindepth):
@@ -334,4 +763,11 @@ async def walk_find(
             if args.mtime_max is not None and ts > args.mtime_max:
                 continue
         results.append(p)
-    return results
+    results.extend(await link_results(links,
+                                      root_path,
+                                      prefix,
+                                      search_key,
+                                      args,
+                                      tree,
+                                      follow=follow))
+    return sorted(results)

@@ -19,13 +19,6 @@ from tests.core.databricks_volume.conftest import (FakeClient, FakeFiles,
 
 MODIFIED_MS = 1_700_000_000_000
 
-
-def is_dir_name(_child: str) -> bool | None:
-    # Databricks readdir returns slash-less paths, so classification always
-    # falls back to stat.
-    return None
-
-
 FROZEN_NOW_S = 1_700_000_000
 DAY_S = 86_400
 AGES_DAYS = (1, 2, 3, 10, 20)
@@ -138,7 +131,6 @@ async def _run_find(accessor, index, *, type=None, size=None, mtime=None):
     return await walk_find(path,
                            readdir=_ls_readdir(accessor),
                            stat=_ls_stat(accessor),
-                           is_dir_name=is_dir_name,
                            index=index,
                            args=args)
 

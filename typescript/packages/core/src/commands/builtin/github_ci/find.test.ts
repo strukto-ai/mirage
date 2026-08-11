@@ -18,15 +18,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../../core/github_ci/readdir.ts', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   readdir: vi.fn(),
-  isDirName: (child: string) => {
-    const name = child.split('/').pop() ?? ''
-    return !(
-      name.endsWith('.json') ||
-      name.endsWith('.jsonl') ||
-      name.endsWith('.log') ||
-      name.endsWith('.zip')
-    )
-  },
 }))
 vi.mock('../../../core/github_ci/stat.ts', () => ({ stat: vi.fn() }))
 
@@ -86,7 +77,7 @@ function fakeStat(_acc: unknown, p: PathSpec | string): FileStat {
 
 async function runFind(
   paths: PathSpec[],
-  flags: Record<string, string | boolean | string[]> = {},
+  flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = GITHUB_CI_FIND[0]
   if (cmd === undefined) throw new Error('find not registered')

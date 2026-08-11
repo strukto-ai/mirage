@@ -12,15 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import os
 import posixpath
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
-
-import mirage.core.onedrive._client as onedrive_client
-import mirage.core.sharepoint._client as sharepoint_client
-import mirage.core.sharepoint._resolver as sharepoint_resolver
 
 # Anchored at run time, mirroring moto (the s3 fake) and real Graph, which
 # stamp lastModifiedDateTime at write time. A fixed past date would make the
@@ -614,7 +612,24 @@ async def start_fake_graph() -> tuple[FakeGraph, "GraphServer", web.AppRunner]:
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
     state.base = f"http://127.0.0.1:{port}"
-    onedrive_client.GRAPH_API = state.base
-    sharepoint_client.GRAPH_API = state.base
-    sharepoint_resolver.GRAPH_API = state.base
+    # The mount reaches this server by config (`graph_base_url`), not by
+    # rebinding a module global: there is no global left to rebind, and
+    # patching one module per URL builder is how a fake ends up covering
+    # some code paths and silently missing others.
     return state, server, runner
+
+
+async def serve_forever() -> None:
+    state, server, runner = await start_fake_graph()
+    for drive in os.environ.get("MIRAGE_GRAPH_DRIVES", "").split(","):
+        if drive and drive not in server.drives:
+            server.add_drive(drive)
+    print(state.base, flush=True)
+    try:
+        await asyncio.Future()
+    finally:
+        await runner.cleanup()
+
+
+if __name__ == "__main__":
+    asyncio.run(serve_forever())

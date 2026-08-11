@@ -9,7 +9,7 @@ MIRAGE ships `DiscordResource` in **two runtimes**:
 - `@struktoai/mirage-node`, talks to `https://discord.com/api/v10/*` directly using a bot token.
 - `@struktoai/mirage-browser`, stays secret-free: a small proxy server on your backend holds the token and forwards `/api/discord/*` to `https://discord.com/api/v10/*`. The browser only ever sees the proxy URL.
 
-Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<channel>/<date>/{chat.jsonl,files/}`, `/discord/<guild>/members/`) and the same shell commands (`discord-send-message`, `discord-add-reaction`, etc.).
+Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<channel>/<date>/{chat.jsonl,files/}`, `/discord/<guild>/members/`) and the same shell commands, and both pair with the [discord CLI](/typescript/cli/discord) for acting on the server.
 
 ## Get a bot token
 
@@ -21,8 +21,8 @@ Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<chan
 4. Under **OAuth2 → URL Generator**, select the `bot` scope and the following bot permissions:
    - `Read Messages/View Channels`
    - `Read Message History`
-   - `Send Messages` (only if you'll use `discord-send-message`)
-   - `Add Reactions` (only if you'll use `discord-add-reaction`)
+   - `Send Messages` (only if you'll use `discord send`)
+   - `Add Reactions` (only if you'll use `discord react`)
 5. Open the generated URL in a browser and invite the bot to your guild.
 
 ```bash
@@ -158,63 +158,16 @@ Every standard MIRAGE shell command works on the mounted Discord tree:
 | `pwd` / `cd`    | Navigate the virtual tree                                        |
 | `echo` (glob)   | Glob expansion via `resolve_glob`                                |
 
-Resource-specific commands:
-
-### `discord-send-message`
-
-```bash
-discord-send-message --channel_id 1256522563555819574 --text "Hello from MIRAGE"
-discord-send-message --channel_id 1256522563555819574 --text "Reply" --message_id 1489887688978075769
-```
-
-| Option         | Required | Description                  |
-| -------------- | -------- | ---------------------------- |
-| `--channel_id` | yes      | Discord channel snowflake ID |
-| `--text`       | yes      | Message text to send         |
-| `--message_id` | no       | Message ID to reply to       |
-
-### `discord-add-reaction`
-
-```bash
-discord-add-reaction --channel_id 1256522563555819574 --message_id 1489887688978075769 --reaction 👍
-```
-
-| Option         | Required | Description                  |
-| -------------- | -------- | ---------------------------- |
-| `--channel_id` | yes      | Discord channel snowflake ID |
-| `--message_id` | yes      | Message snowflake ID         |
-| `--reaction`   | yes      | Emoji (unicode or name)      |
-
-### `discord-list-members`
-
-```bash
-discord-list-members --guild_id 1256522563555819574 --query "alice"
-```
-
-| Option       | Required | Description             |
-| ------------ | -------- | ----------------------- |
-| `--guild_id` | yes      | Discord guild snowflake |
-| `--query`    | yes      | Username search query   |
-
-Returns matching members as a JSON array. Requires the **Server Members Intent** to be enabled on the bot.
-
-### `discord-get-server-info`
-
-```bash
-discord-get-server-info --guild_id 1256522563555819574
-```
-
-| Option       | Required | Description             |
-| ------------ | -------- | ----------------------- |
-| `--guild_id` | yes      | Discord guild snowflake |
-
-Returns the guild object JSON (name, icon, member count, etc.).
+Acting on Discord (sending, editing, reactions, threads, polls,
+member and guild info, search) goes through the
+[discord CLI](/typescript/cli/discord) when installed; the mounted
+tree stays read-oriented.
 
 ## Troubleshooting
 
 <AccordionGroup>
   <Accordion title="Empty `/discord/<guild>/members/` listing">
-    Listing members requires the **Server Members Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, `members/` returns an empty directory and `discord-list-members` fails.
+    Listing members requires the **Server Members Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, `members/` returns an empty directory and `discord members` fails.
   </Accordion>
   <Accordion title="Empty `content` field in JSONL messages">
     Reading message text requires the **Message Content Intent**. Enable it in the Discord Developer Portal under **Bot → Privileged Gateway Intents**. Without it, the `content` field on every message is empty.

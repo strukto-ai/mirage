@@ -12,23 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from datetime import datetime, timezone
 
-from mirage.types import FileStat, FileType
-
-_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
-           "Oct", "Nov", "Dec")
-
-EPOCH_LS_TIME = "Jan  1 00:00"
-
-_SIZE_UNITS = {
-    "B": 1,
-    "K": 1024,
-    "M": 1024**2,
-    "G": 1024**3,
-    "T": 1024**4,
-}
+from mirage.commands.builtin.utils.constants import (DEFAULT_MODES,
+                                                     EPOCH_LS_TIME, MONTHS,
+                                                     NUMERIC_PREFIX,
+                                                     TYPE_CHARS)
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType
 
 
 def _human_size(n: int) -> str:
@@ -50,21 +40,10 @@ def _perm_triplet(bits: int, special: str | None = None) -> str:
     return ("r" if bits & 4 else "-") + ("w" if bits & 2 else "-") + execbit
 
 
-def parse_size(text: str) -> int:
-    """Invert ``_human_size``: ``4.0K`` -> 4096, plain digits pass through.
-
-    Args:
-        text (str): size text, optionally suffixed with B/K/M/G/T.
-    """
-    if text and text[-1] in _SIZE_UNITS:
-        return round(float(text[:-1]) * _SIZE_UNITS[text[-1]])
-    return int(text)
-
-
 def _ls_mode_string(s: FileStat) -> str:
-    is_dir = s.type == FileType.DIRECTORY
-    type_char = "d" if is_dir else "-"
-    mode = s.mode if s.mode is not None else (0o755 if is_dir else 0o644)
+    type_char = TYPE_CHARS.get(s.type, "-") if s.type is not None else "-"
+    default = DEFAULT_MODES.get(s.type, 0o644) if s.type is not None else 0o644
+    mode = s.mode if s.mode is not None else default
     perms = (_perm_triplet(mode >> 6, "s" if mode & 0o4000 else None) +
              _perm_triplet(mode >> 3, "s" if mode & 0o2000 else None) +
              _perm_triplet(mode, "t" if mode & 0o1000 else None))
@@ -79,9 +58,21 @@ def _ls_time_string(modified: str | None) -> str:
         dt = datetime.fromisoformat(text).astimezone(timezone.utc)
     except (ValueError, TypeError):
         return EPOCH_LS_TIME
-    month = _MONTHS[dt.month - 1]
+    month = MONTHS[dt.month - 1]
     day = f"{dt.day:>2}"
     return f"{month} {day} {dt.hour:02d}:{dt.minute:02d}"
+
+
+def _ls_name(s: FileStat) -> str:
+    """The name column: GNU appends ``-> target`` for a symlink row.
+
+    Args:
+        s (FileStat): the row being rendered.
+    """
+    if s.type != FileType.SYMLINK:
+        return s.name
+    target = s.extra.get(LINK_TARGET_KEY)
+    return f"{s.name} -> {target}" if target else s.name
 
 
 def format_ls_long(
@@ -101,18 +92,15 @@ def format_ls_long(
     for s, raw_size in zip(stats, sizes):
         if s.size is None and s.modified is None:
             mode = _ls_mode_string(s)
-            out.append(f"{mode}\t-\t-\t{s.name}")
+            out.append(f"{mode}\t-\t-\t{_ls_name(s)}")
             continue
         mode = _ls_mode_string(s)
         size = raw_size.rjust(width)
         time = _ls_time_string(s.modified)
         who = str(s.uid) if s.uid is not None else owner
         grp = str(s.gid) if s.gid is not None else group
-        out.append(f"{mode} 1 {who} {grp} {size} {time} {s.name}")
+        out.append(f"{mode} 1 {who} {grp} {size} {time} {_ls_name(s)}")
     return out
-
-
-NUMERIC_PREFIX = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
 
 
 def to_number(val: str) -> float:

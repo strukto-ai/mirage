@@ -16,22 +16,19 @@ import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GDOCS_GWS_WRITE } from './gws_docs_write.ts'
 import { GDOCS_IO } from './io.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
+import { fileReadProvision } from './provision.ts'
 import { GDOCS_RM } from './rm.ts'
-import { GWS_DOCS_API_COMMANDS } from '../gws/index.ts'
 
+// Docs verbs and API passthroughs live in the gws CLI
+// (commands/cli/builtin/gws), installed by name; the mount only serves
+// the filesystem surface.
 export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GDocsAccessor>(ResourceName.GDOCS, GDOCS_IO, {
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-      find: metadataProvision as ProvisionFn,
     },
   }),
   ...GDOCS_RM,
-  ...GDOCS_GWS_WRITE,
-  ...GWS_DOCS_API_COMMANDS,
 ]

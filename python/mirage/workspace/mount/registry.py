@@ -18,10 +18,14 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.ops.config import OpsMount
+from mirage.policy import MountRootPolicy, OutputCapPolicy, Policies
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
-from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.runtime.table import VFSRuntime
+from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
+from mirage.utils.path import owner_prefix
+from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 
 DEV_PREFIX = "/dev/"
@@ -74,7 +78,36 @@ class MountRegistry:
         # The world's vfs runtime, set by Workspace after construction.
         # Catch-all when its captures are empty; explicit captures make
         # unclaimed commands an admission failure (126).
-        self.vfs_runtime: Runtime | None = None
+        self.vfs_runtime: VFSRuntime | None = None
+        # The ordered runtime world, set by Workspace after
+        # construction and refreshed on add(). The CLI script arm
+        # selects an interpreter from it (a runtime: pin or the
+        # script's language), which the bindings dict cannot answer:
+        # an entry behind another capturer never binds a command.
+        self.runtime_entries: list[Runtime] = []
+        # Why a command that SOME runtime class captures has no live
+        # binding: default-world entries that failed to build (missing
+        # extra) record their construction error per captured command,
+        # so the refusal at dispatch carries the install hint without
+        # any command naming a runtime class.
+        self.runtime_unavailable: dict[str, str] = {}
+        # Command admission policies. Policies itself is a bare
+        # mechanism; the registry seeds the POSIX mount-root rule
+        # (mount-root semantics are mount semantics) and the built-in
+        # output cap (fed the per-mount overrides), and user policies
+        # follow them (Workspace guards= / policies= / yaml guards:).
+        # Registry-hosted like runtime_bindings so the executor reaches
+        # them without new parameter threading.
+        self.policies = Policies(
+            [MountRootPolicy(),
+             OutputCapPolicy(self.limit_override)])
+
+        # Installed CLIs. Not mount state: CLIs are fully separate from
+        # mounts (a CLI exists because it was installed, never because
+        # storage was mounted). The registry object is just the vehicle
+        # that already reaches every dispatch site, same as the
+        # runtime fields above.
+        self.clis = CLIRegistry()
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None
@@ -160,21 +193,35 @@ class MountRegistry:
         path: str,
     ) -> tuple[BaseResource, str, MountMode]:
         """Returns (resource, resource_path, mode)."""
+        m = self.mount_for(path)
         had_trailing = path.endswith("/")
         norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if (norm == m.prefix.rstrip("/") or norm.startswith(m.prefix)):
-                resource_path = "/" + norm[len(m.prefix):]
-                if (had_trailing and not resource_path.endswith("/")):
-                    resource_path += "/"
-                return m.resource, resource_path, m.mode
-        raise ValueError(f"no mount matches path: {path!r}")
+        resource_path = "/" + norm[len(m.prefix):]
+        if had_trailing and not resource_path.endswith("/"):
+            resource_path += "/"
+        return m.resource, resource_path, m.mode
 
     def mount_for_prefix(self, prefix: str) -> MountEntry:
         for m in self._mounts:
             if m.prefix == prefix:
                 return m
         raise ValueError(f"no mount with prefix {prefix!r}")
+
+    def limit_override(self, prefix: str, name: str) -> Limit | None:
+        """One mount's configured cap for a command or op name.
+
+        The lookup OutputCapPolicy is seeded with; tolerant of a
+        prefix that matches no mount (unmounted between stamp and
+        boundary) by answering None.
+
+        Args:
+            prefix (str): the mount prefix as stamped at dispatch.
+            name (str): command or op name.
+        """
+        for m in self._mounts:
+            if m.prefix == prefix or m.prefix.rstrip("/") == prefix:
+                return m.command_limits.get(name)
+        return None
 
     def is_mount_root(self, path: str) -> bool:
         stripped = path.strip("/")
@@ -203,47 +250,12 @@ class MountRegistry:
         out.sort(key=lambda m: m.prefix)
         return out
 
-    def child_mount_names(
-        self,
-        parent_path: str,
-        include_hidden: bool = False,
-    ) -> list[str]:
-        """Names of immediate child mounts under parent_path.
-
-        Args:
-            parent_path (str): directory whose child mounts to enumerate.
-            include_hidden (bool): include names starting with '.'.
-        """
-        stripped = parent_path.strip("/")
-        norm = "/" + stripped + "/" if stripped else "/"
-        seen: set[str] = set()
-        out: list[str] = []
-        for m in self._mounts:
-            if m.prefix == norm:
-                continue
-            if not m.prefix.startswith(norm):
-                continue
-            rest = m.prefix[len(norm):]
-            slash = rest.find("/")
-            name = rest if slash == -1 else rest[:slash]
-            if name == "":
-                continue
-            if not include_hidden and name.startswith("."):
-                continue
-            if name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
-        out.sort()
-        return out
-
     def mount_for(self, path: str) -> MountEntry:
         """Find the mount that handles this path."""
-        norm = "/" + path.strip("/")
-        for m in self._mounts:
-            if (norm == m.prefix.rstrip("/") or norm.startswith(m.prefix)):
-                return m
-        raise ValueError(f"no mount matches path: {path!r}")
+        owner = owner_prefix((m.prefix for m in self._mounts), path)
+        if owner is None:
+            raise ValueError(f"no mount matches path: {path!r}")
+        return self.mount_for_prefix(owner)
 
     def is_exec_allowed(self) -> bool:
         for m in self._mounts:
@@ -280,6 +292,12 @@ class MountRegistry:
         """
         if not words:
             return 0
+        # An installed CLI head wins over any multiword mount command
+        # under the same first word (`himalaya message send`): dispatch
+        # is by name and the subcommand words belong to the tree walk,
+        # so the head alone is the command name.
+        if self.clis.get(words[0]) is not None:
+            return 1
         best = 1
         candidates = list(self._mounts)
         if self._root is not None:
@@ -367,6 +385,7 @@ class MountRegistry:
                 index=m.resource.index,
                 mode=m.mode,
                 ops=m.resource.ops_list(),
+                sizes_always_known=m.resource.SIZES_ALWAYS_KNOWN,
             ) for m in self._mounts
         ]
 

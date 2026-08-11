@@ -20,7 +20,8 @@ from mirage.commands.builtin.s3 import COMMANDS as S3_COMMANDS
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy
 from mirage.core.s3.create import create
-from mirage.core.s3.du import du, du_all
+from mirage.core.s3.du import entries as du_entries
+from mirage.core.s3.du import size as du_size
 from mirage.core.s3.exists import exists
 from mirage.core.s3.find import find
 from mirage.core.s3.mkdir import mkdir
@@ -56,8 +57,8 @@ _S3_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "rm_recursive": rm_r,
-    "du_total": du,
-    "du_all": du_all,
+    "du_size": du_size,
+    "du_entries": du_entries,
     "create": create,
     "truncate": truncate,
     "exists": exists,
@@ -69,6 +70,8 @@ class S3Resource(BaseResource):
 
     accessor: S3Accessor
     name: str = ResourceName.S3
+    # byte store: stat() sizes every file from metadata
+    SIZES_ALWAYS_KNOWN: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _S3_OPS
     PROMPT: str = PROMPT
@@ -80,8 +83,19 @@ class S3Resource(BaseResource):
         self.accessor = S3Accessor(self.config)
         for fn in S3_COMMANDS:
             self.register(fn)
-        for fn in S3_OPS:
-            self.register_op(fn)
+        for op in S3_OPS:
+            self.register_op(op)
+
+    def storage_id(self) -> str:
+        # Endpoint, bucket and key prefix pin the object namespace. The
+        # endpoint matters because the same bucket name on two providers
+        # (AWS vs MinIO vs R2) is two different stores. The prefix joins
+        # path-like so two mounts whose prefixes nest still resolve to
+        # one key once the mount-relative path is appended.
+        cfg = self.config
+        prefix = (cfg.key_prefix or "").strip("/")
+        base = f"{self.name}:{cfg.endpoint_url or 'aws'}:{cfg.bucket}"
+        return f"{base}/{prefix}" if prefix else base
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

@@ -16,11 +16,11 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic.cat import needs_display
-from mirage.commands.builtin.mongodb._provision import file_read_provision
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
@@ -31,17 +31,14 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("cat",
-         resource="mongodb",
-         spec=SPECS["cat"],
-         provision=file_read_provision)
+@command("cat", resource="mongodb", spec=SPECS["cat"])
 async def cat(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)

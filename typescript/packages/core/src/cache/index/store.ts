@@ -25,4 +25,17 @@ export abstract class IndexCacheStore {
   ): Promise<void>
   abstract invalidateDir(resourcePath: string): Promise<void>
   abstract clear(): Promise<void>
+
+  /**
+   * Release whatever the store holds open. The default is a no-op:
+   * an in-memory index owns nothing. A store backed by a connection
+   * (redis) overrides this and must be idempotent — `close()` is
+   * called once per owning resource, and a resource shared between
+   * workspaces is closed by whichever one owns it.
+   *
+   * Mirrors Python `IndexCacheStore.close` (`cache/index/store.py`).
+   */
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
 }

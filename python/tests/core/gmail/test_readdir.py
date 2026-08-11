@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.gmail.messages import message_json_bytes
 from mirage.core.gmail.readdir import (_date_from_internal, _msg_filename,
                                        _sanitize, readdir)
 from mirage.types import PathSpec
@@ -404,7 +405,7 @@ async def test_readdir_date_dir_without_attachments_omits_dir(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_message_entry_size_none_estimate_in_extra(
+async def test_readdir_message_entry_rendered_size_estimate_in_extra(
         accessor, index):
     raw = _msg_stub("m1", "Sized", 1777291200000)
     raw["sizeEstimate"] = 54321
@@ -439,7 +440,7 @@ async def test_readdir_message_entry_size_none_estimate_in_extra(
 
     result = await index.get("/gmail/INBOX/2026-04-27/Sized__m1.gmail.json")
     assert result.entry is not None
-    # sizeEstimate is the source message size, not the rendered
-    # .gmail.json length: it must land in extra, never in size.
-    assert result.entry.size is None
+    # size is the rendered .gmail.json byte length; sizeEstimate is the
+    # source message size and lands in extra, never in size.
+    assert result.entry.size == len(message_json_bytes(raw))
     assert result.entry.extra["size_estimate"] == 54321

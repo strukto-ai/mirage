@@ -16,6 +16,20 @@ from mirage.types import PathSpec
 from mirage.utils.path import resolve_path
 
 
+def has_unresolved_glob(paths: list[PathSpec]) -> bool:
+    """True when any operand still carries a glob to expand.
+
+    Backend push-down branches read ``paths[0]`` directly to build SQL, so
+    they must not run before glob expansion: a pattern segment would be
+    taken for a literal entity name, and ``tables/*/rows.jsonl`` would
+    query a relation actually called ``*``.
+
+    Args:
+        paths (list[PathSpec]): operands as parsed.
+    """
+    return any(p.pattern for p in paths)
+
+
 def resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
     """Resolve a script operand to a fully-resolved PathSpec.
 

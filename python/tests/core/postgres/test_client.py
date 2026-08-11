@@ -28,6 +28,64 @@ def mock_conn():
     return conn
 
 
+def test_quote_ident_escapes_embedded_quotes():
+    assert _client.quote_ident("users") == '"users"'
+    assert _client.quote_ident('a"b') == '"a""b"'
+
+
+def test_qualified_composes_both_parts():
+    assert _client.qualified("public", "users") == '"public"."users"'
+
+
+def test_quote_ident_neutralizes_injection():
+    payload = 'books" CROSS JOIN secret AS "s'
+    quoted = _client.quote_ident(payload)
+    # Every embedded quote is doubled, so the payload cannot terminate the
+    # identifier and become executable SQL: it stays one (nonexistent) name.
+    assert quoted == '"books"" CROSS JOIN secret AS ""s"'
+    # After stripping the outer wrapper and collapsing every doubled-quote
+    # pair, no lone quote survives to break out of the identifier.
+    assert '"' not in quoted[1:-1].replace('""', "")
+
+
+def test_canonicalize_value_drops_trailing_zero_on_whole_floats():
+    # Postgres renders a whole-valued double as `5` (to_jsonb), and node-pg
+    # gives JS number 5; asyncpg gives Python float 5.0 which orjson would
+    # print as `5.0`. Canonicalizing to int keeps py rows.jsonl byte-identical
+    # to ts (and to Postgres canonical JSON).
+    assert _client.canonicalize_value(5.0) == 5
+    assert isinstance(_client.canonicalize_value(5.0), int)
+    assert _client.canonicalize_value(4.5) == 4.5
+    assert isinstance(_client.canonicalize_value(4.5), float)
+
+
+def test_canonicalize_value_leaves_non_floats_and_specials():
+    assert _client.canonicalize_value(True) is True
+    assert _client.canonicalize_value("5.0") == "5.0"
+    assert _client.canonicalize_value(float("inf")) == float("inf")
+
+
+def test_canonicalize_row_recurses_into_nested_structures():
+    row = {"r": 5.0, "tags": [1.0, 2.5], "meta": {"n": 3.0}}
+    assert _client.canonicalize_row(row) == {
+        "r": 5,
+        "tags": [1, 2.5],
+        "meta": {
+            "n": 3
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_count_rows_quotes_a_malicious_name(mock_conn):
+    mock_conn.fetchval.return_value = 0
+    await _client.count_rows(mock_conn, "public",
+                             'books" CROSS JOIN secret AS "s')
+    sql = mock_conn.fetchval.call_args.args[0]
+    assert '"books"" CROSS JOIN secret AS ""s"' in sql
+    assert 'FROM "public"."books" CROSS JOIN secret' not in sql
+
+
 @pytest.mark.asyncio
 async def test_list_schemas(mock_conn):
     mock_conn.fetch.return_value = [

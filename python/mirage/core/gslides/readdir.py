@@ -15,18 +15,13 @@
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.google.date_glob import glob_to_modified_range
-from mirage.core.google.drive import GoogleFileSuffix, list_all_files
+from mirage.core.google.drive import list_all_files
 from mirage.resource.gslides.slide_entry import make_filename
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 MIME = "application/vnd.google-apps.presentation"
-
-
-def is_dir_name(child: str) -> bool:
-    # readdir emits only folders and rendered *.gslide.json files.
-    return not child.endswith(GoogleFileSuffix.GSLIDE.value)
 
 
 async def readdir(
@@ -58,7 +53,7 @@ async def readdir(
         if cached.entries is not None:
             return cached.entries
 
-    files = await list_all_files(
+    files, complete = await list_all_files(
         accessor.token_manager,
         mime_type=MIME,
         modified_after=modified_range[0] if modified_range else None,
@@ -87,7 +82,13 @@ async def readdir(
         )
         entries.append((filename, entry))
 
-    if modified_range:
+    if modified_range or not complete:
+        # A modified-range listing is a filtered view rather than the
+        # directory, and an incomplete all-corpora search is a directory
+        # Drive could not finish reading. Neither may stand in for the
+        # directory: caching one would pin a short listing until it expires.
+        # The entries are real either way, so cache those and let the next
+        # readdir re-list.
         for name, entry in entries:
             await index.put(f"{virtual_key}/{name}", entry)
     else:

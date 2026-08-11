@@ -18,6 +18,8 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import {
+  getIssue,
+  listIssueComments,
   listTeamCycles,
   listTeamDocuments,
   listTeamIssues,
@@ -25,6 +27,19 @@ import {
   listTeamProjects,
   listTeams,
 } from './_client.ts'
+import {
+  buildProjectIssue,
+  normalizeComment,
+  normalizeCycle,
+  normalizeDocument,
+  normalizeIssue,
+  normalizeProject,
+  normalizeTeam,
+  normalizeUser,
+  toJsonBytes,
+  toJsonlBytes,
+  type NormalizedProjectIssue,
+} from './normalize.ts'
 import {
   cycleFilename,
   documentFilename,
@@ -57,7 +72,7 @@ async function ensureLookup(
   prefix: string,
   parentKey: string,
   virtualKey: string,
-): Promise<{ id: string }> {
+): Promise<IndexEntry> {
   let lookup = await index.get(virtualKey)
   if (lookup.entry === undefined || lookup.entry === null) {
     const parentPath = `${prefix}/${parentKey}`
@@ -76,7 +91,59 @@ async function ensureLookup(
   if (lookup.entry === undefined || lookup.entry === null) {
     throw enoent(virtualKey)
   }
-  return { id: lookup.entry.id }
+  return lookup.entry
+}
+
+// issue.json is sized from the payload the issues listing already fetched
+// (stored on the issue entry by the parent readdir); comments.jsonl costs the
+// one bounded comments call, paid only when this directory is entered.
+async function sizeIssueFiles(
+  accessor: LinearAccessor,
+  index: IndexCacheStore,
+  virtualKey: string,
+  entry: IndexEntry,
+): Promise<void> {
+  const issueId = entry.id
+  let issueJsonSize =
+    typeof entry.extra.issue_json_size === 'number' ? entry.extra.issue_json_size : null
+  let issueKey = typeof entry.extra.issue_key === 'string' ? entry.extra.issue_key : null
+  if (issueJsonSize === null) {
+    const issue = await getIssue(accessor.transport, issueId)
+    const normalized = normalizeIssue(issue)
+    issueJsonSize = toJsonBytes(normalized).length
+    issueKey = normalized.issue_key
+  }
+  const comments = await listIssueComments(accessor.transport, issueId)
+  const rows = comments.map((c) => normalizeComment(c, issueId, issueKey))
+  let commentsTime = ''
+  for (const row of rows) {
+    const updated = typeof row.updated_at === 'string' ? row.updated_at : ''
+    if (updated > commentsTime) commentsTime = updated
+  }
+  await index.setDir(virtualKey, [
+    [
+      'issue.json',
+      new IndexEntry({
+        id: issueId,
+        name: 'issue.json',
+        resourceType: 'linear/issue_json',
+        remoteTime: entry.remoteTime,
+        vfsName: 'issue.json',
+        size: issueJsonSize,
+      }),
+    ],
+    [
+      'comments.jsonl',
+      new IndexEntry({
+        id: issueId,
+        name: 'comments.jsonl',
+        resourceType: 'linear/comments',
+        remoteTime: commentsTime || entry.remoteTime,
+        vfsName: 'comments.jsonl',
+        size: toJsonlBytes(rows).length,
+      }),
+    ],
+  ])
 }
 
 export async function readdir(
@@ -121,6 +188,11 @@ export async function readdir(
           resourceType: 'linear/team',
           remoteTime: pickString(team, 'updatedAt'),
           vfsName: dirname,
+          extra: {
+            team_key: typeof team.key === 'string' ? team.key : null,
+            team_name: typeof team.name === 'string' ? team.name : null,
+            team_json_size: toJsonBytes(normalizeTeam(team)).length,
+          },
         }),
       ])
       names.push(`${prefix}/teams/${dirname}`)
@@ -167,6 +239,7 @@ export async function readdir(
           resourceType: 'linear/user',
           remoteTime: pickString(user, 'updatedAt'),
           vfsName: filename,
+          size: toJsonBytes(normalizeUser(user)).length,
         }),
       ])
       names.push(`${prefix}/${key}/${filename}`)
@@ -196,6 +269,10 @@ export async function readdir(
           resourceType: 'linear/issue',
           remoteTime: pickString(issue, 'updatedAt'),
           vfsName: dirname,
+          extra: {
+            issue_key: typeof issue.identifier === 'string' ? issue.identifier : null,
+            issue_json_size: toJsonBytes(normalizeIssue(issue)).length,
+          },
         }),
       ])
       names.push(`${prefix}/${key}/${dirname}`)
@@ -207,7 +284,11 @@ export async function readdir(
   if (parts.length === 4 && parts[0] === 'teams' && parts[2] === 'issues') {
     if (index !== undefined) {
       const parentKey = parts.slice(0, 3).join('/')
-      await ensureLookup(accessor, index, filter, prefix, parentKey, virtualKey)
+      const entry = await ensureLookup(accessor, index, filter, prefix, parentKey, virtualKey)
+      const listing = await index.listDir(virtualKey)
+      if (listing.entries === undefined || listing.entries === null) {
+        await sizeIssueFiles(accessor, index, virtualKey, entry)
+      }
     }
     return [`${prefix}/${key}/issue.json`, `${prefix}/${key}/comments.jsonl`]
   }
@@ -221,18 +302,45 @@ export async function readdir(
       return listing.entries
     }
     const projects = await listTeamProjects(accessor.transport, team.id)
+    let teamKeyName = typeof team.extra.team_key === 'string' ? team.extra.team_key : null
+    let teamName = typeof team.extra.team_name === 'string' ? team.extra.team_name : null
+    if (!('team_key' in team.extra)) {
+      const teams = await listTeams(accessor.transport)
+      const teamNode = teams.find((t) => t.id === team.id) ?? {}
+      teamKeyName = typeof teamNode.key === 'string' ? teamNode.key : null
+      teamName = typeof teamNode.name === 'string' ? teamNode.name : null
+    }
+    const teamIssues = await listTeamIssues(accessor.transport, team.id)
     const entries: [string, IndexEntry][] = []
     const names: string[] = []
     for (const project of projects) {
+      const projectId = pickString(project, 'id')
+      const projectIssues: NormalizedProjectIssue[] = []
+      for (const issue of teamIssues) {
+        const projField = issue.project
+        const projObj =
+          projField !== null && typeof projField === 'object'
+            ? (projField as Record<string, unknown>)
+            : {}
+        if (projObj.id !== projectId) continue
+        projectIssues.push(buildProjectIssue(issue))
+      }
+      const rendered = normalizeProject(project, {
+        teamId: team.id,
+        teamKey: teamKeyName,
+        teamName: teamName,
+        issues: projectIssues,
+      })
       const filename = projectFilename(project)
       entries.push([
         filename,
         new IndexEntry({
-          id: pickString(project, 'id'),
-          name: pickString(project, 'name') || pickString(project, 'id'),
+          id: projectId,
+          name: pickString(project, 'name') || projectId,
           resourceType: 'linear/project',
           remoteTime: pickString(project, 'updatedAt'),
           vfsName: filename,
+          size: toJsonBytes(rendered).length,
         }),
       ])
       names.push(`${prefix}/${key}/${filename}`)
@@ -262,6 +370,7 @@ export async function readdir(
           resourceType: 'linear/cycle',
           remoteTime: pickString(cycle, 'updatedAt'),
           vfsName: filename,
+          size: toJsonBytes(normalizeCycle(cycle, team.id)).length,
         }),
       ])
       names.push(`${prefix}/${key}/${filename}`)
@@ -291,6 +400,7 @@ export async function readdir(
           resourceType: 'linear/document',
           remoteTime: pickString(document, 'updatedAt'),
           vfsName: filename,
+          size: toJsonBytes(normalizeDocument(document)).length,
         }),
       ])
       names.push(`${prefix}/${key}/${filename}`)
@@ -299,5 +409,8 @@ export async function readdir(
     return names
   }
 
-  return []
+  // An unrecognized path is not an empty directory: returning [] made `ls` and
+  // `tree` report a bogus path as a real-but-empty one, and left `rg` without a
+  // message.
+  throw enoent(virtualKey)
 }

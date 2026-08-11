@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FlagView,
   IOResult,
   ResourceName,
   command,
@@ -64,15 +65,18 @@ async function rgCommand(
       new IOResult({ exitCode: 2, stderr: ENC.encode('rg: usage: rg [flags] pattern [path]\n') }),
     ]
   }
-  const ignoreCase = opts.flags.i === true
-  const invert = opts.flags.v === true
-  const lineNumbers = opts.flags.n === true
-  const countOnly = opts.flags.c === true
-  const filesOnly = opts.flags.args_l === true || opts.flags.l === true
-  const wholeWord = opts.flags.w === true
-  const fixedString = opts.flags.F === true
-  const onlyMatching = opts.flags.o === true
-  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  const fl = new FlagView(opts.flags, specOf('rg'))
+  const ignoreCase = fl.asBool('i')
+  const invert = fl.asBool('v')
+  const lineNumbers = fl.asBool('n')
+  const countOnly = fl.asBool('c')
+  // -l is short-only, so it lands on the disambiguated `args_l` dest
+  // (`AMBIGUOUS_NAMES`); a plain `l` key is one the parser never emits.
+  const filesOnly = fl.asBool('args_l')
+  const wholeWord = fl.asBool('w')
+  const fixedString = fl.asBool('F')
+  const onlyMatching = fl.asBool('o')
+  const maxCount = fl.asInt('m') ?? null
   const pat = compilePattern(pattern, ignoreCase, fixedString, wholeWord)
 
   const lineOpts: GrepLinesOptions = {

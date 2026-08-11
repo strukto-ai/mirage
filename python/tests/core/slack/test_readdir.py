@@ -19,8 +19,8 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.readdir import _date_range, readdir
-from mirage.resource.slack.config import SlackConfig
 from mirage.types import PathSpec
 
 
@@ -272,3 +272,72 @@ async def test_readdir_date_dir_returns_chat_and_files(accessor, index):
         "/channels/general__C001/2026-04-10/chat.jsonl",
         "/channels/general__C001/2026-04-10/files",
     ]
+
+
+@pytest.mark.asyncio
+async def test_readdir_skips_unreadable_file_payloads(accessor, index):
+    # Tombstoned and access-restricted file payloads carry an id but no
+    # download URL and no size; they must not be listed, or SIZES_ALWAYS_KNOWN
+    # would be false and read() would ENOENT on a listed file.
+    await index.set_dir("/channels", [
+        (
+            "general__C001",
+            IndexEntry(
+                id="C001",
+                name="general",
+                resource_type="slack/channel",
+                vfs_name="general__C001",
+                remote_time="1700000000",
+            ),
+        ),
+    ])
+    await index.set_dir("/channels/general__C001", [
+        (
+            "2026-04-10",
+            IndexEntry(
+                id="C001:2026-04-10",
+                name="2026-04-10",
+                resource_type="slack/date_dir",
+                vfs_name="2026-04-10",
+            ),
+        ),
+    ])
+    messages = [{
+        "ts":
+        "1775000000.000100",
+        "files": [
+            {
+                "id": "F1",
+                "name": "report.pdf",
+                "size": 12,
+                "url_private_download": "https://files.slack.test/F1",
+            },
+            {
+                "id": "F2",
+                "mode": "tombstone",
+            },
+            {
+                "id": "F3",
+                "name": "restricted.docx",
+                "file_access": "check_file_info",
+            },
+        ],
+    }]
+    with patch("mirage.core.slack.readdir.fetch_messages_for_day",
+               new_callable=AsyncMock,
+               return_value=messages):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="channels/general__C001/2026-04-10",
+                     virtual="/channels/general__C001/2026-04-10",
+                     directory="/channels/general__C001/2026-04-10"),
+            index=index,
+        )
+    listing = await index.list_dir("/channels/general__C001/2026-04-10/files")
+    assert listing.entries == [
+        "/channels/general__C001/2026-04-10/files/report__F1.pdf"
+    ]
+    lookup = await index.get(
+        "/channels/general__C001/2026-04-10/files/report__F1.pdf")
+    assert lookup.entry is not None
+    assert lookup.entry.size == 12

@@ -18,7 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent, isMissingPath } from '../../utils/errors.ts'
 
 const VIRTUAL_DIRS = new Set(['workflows', 'runs', 'jobs', 'artifacts'])
 
@@ -44,8 +44,11 @@ async function lookupWithFallback(
       }),
       index,
     )
-  } catch {
-    // parent listing failed — fall through
+  } catch (err) {
+    // Only a genuinely absent parent falls through to not-found. Auth,
+    // rate-limit and transport failures must propagate instead of reading
+    // back as ENOENT, which is what the Python side catches too.
+    if (!isMissingPath(err)) throw err
   }
   return await index.get(virtualKey)
 }
@@ -87,6 +90,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.JSON,
+      size: lookup.entry.size,
       modified: lookup.entry.remoteTime,
       extra: { workflow_id: lookup.entry.id },
     })
@@ -114,11 +118,28 @@ export async function stat(
   }
 
   if (parts.length === 3 && parts[0] === 'runs' && parts[2] === 'run.json') {
-    return new FileStat({ name: 'run.json', type: FileType.JSON })
+    if (index === undefined) throw enoent(path.virtual)
+    const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    if (lookup.entry === undefined || lookup.entry === null) throw enoent(path.virtual)
+    return new FileStat({
+      name: 'run.json',
+      type: FileType.JSON,
+      size: lookup.entry.size,
+      modified: lookup.entry.remoteTime,
+      extra: { run_id: lookup.entry.id },
+    })
   }
 
   if (parts.length === 3 && parts[0] === 'runs' && parts[2] === 'annotations.jsonl') {
-    return new FileStat({ name: 'annotations.jsonl', type: FileType.TEXT })
+    if (index === undefined) throw enoent(path.virtual)
+    const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    if (lookup.entry === undefined || lookup.entry === null) throw enoent(path.virtual)
+    return new FileStat({
+      name: 'annotations.jsonl',
+      type: FileType.TEXT,
+      modified: lookup.entry.remoteTime,
+      extra: { run_id: lookup.entry.id },
+    })
   }
 
   if (
@@ -133,6 +154,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.JSON,
+      size: lookup.entry.size,
       modified: lookup.entry.remoteTime,
       extra: { job_id: lookup.entry.id },
     })

@@ -19,6 +19,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError } from '../tail_helper.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -32,16 +33,12 @@ interface HeadFlags {
   zeroTerminated: boolean
 }
 
-function flagString(
-  flags: Record<string, string | boolean | string[]>,
-  short: string,
-  long: string,
-): string | null {
+function flagString(flags: Record<string, FlagValue>, short: string, long: string): string | null {
   const value = typeof flags[short] === 'string' ? flags[short] : flags[long]
   return typeof value === 'string' ? value : null
 }
 
-function parseFlags(flags: Record<string, string | boolean | string[]>): HeadFlags | string {
+function parseFlags(flags: Record<string, FlagValue>): HeadFlags | string {
   const nRaw = flagString(flags, 'n', 'lines')
   const cRaw = flagString(flags, 'c', 'bytes')
   const numErr = numberFlagError('head', nRaw, cRaw)
@@ -49,9 +46,9 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): HeadFla
   return {
     lines: nRaw !== null ? Number.parseInt(nRaw, 10) : 10,
     bytesMode: cRaw !== null ? Number.parseInt(cRaw, 10) : null,
-    quiet: flags.q === true || flags.quiet === true || flags.silent === true,
-    verbose: flags.v === true || flags.verbose === true,
-    zeroTerminated: flags.z === true || flags.zero_terminated === true,
+    quiet: flags.quiet === true || flags.silent === true,
+    verbose: flags.verbose === true,
+    zeroTerminated: flags.zero_terminated === true,
   }
 }
 

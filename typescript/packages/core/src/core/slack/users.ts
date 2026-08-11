@@ -55,6 +55,19 @@ export async function listUsers(
   return out
 }
 
+// The single renderer behind both read and the readdir-time size.
+// readdir sizes a user from the users.list member; read renders the
+// users.info response. Sizing is exact only while those two payloads encode
+// identically, which was verified live on 2026-08-01: every real user in a
+// live workspace matched byte for byte, key order included.
+//
+// The integ battery cannot catch a regression here. The fake server builds
+// users.list and users.info from one row through one helper, so they agree
+// by construction; only a live call tests the assumption.
+export function userJsonBytes(user: SlackUser | Record<string, never>): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(user))
+}
+
 export async function getUserProfile(
   accessor: SlackAccessor,
   userId: string,

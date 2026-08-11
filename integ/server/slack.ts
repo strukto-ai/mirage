@@ -18,6 +18,13 @@
 // response is byte-identical across hosts by construction. Search endpoints
 // (search.messages / search.files) are mocked so the grep/rg push-down runs
 // live; they require a user token (xoxp-) exactly like real Slack.
+//
+// Mutations land in the store. chat.postMessage inserts, reactions.add and
+// reactions.remove rewrite the message's reactions, and pins live in the Pin
+// table, so a read after a write sees the write. That costs golden stability:
+// a case that lists after posting sees the posted row, which is the point.
+// /reset restores the fixture, and every target run resets before its first
+// case, so scenarios stay isolated from each other.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -103,13 +110,14 @@ function loadFixture(): Fixture {
 function pushSchema(dbUrl: string): void {
   const prismaBin = createRequire(import.meta.url).resolve('prisma/build/index.js')
   execFileSync('node', [prismaBin, 'db', 'push', '--schema', SCHEMA, '--skip-generate'], {
-    env: { ...process.env, SLACK_DB_URL: dbUrl },
+    env: { ...process.env, INTEG_DB_URL: dbUrl },
     stdio: 'ignore',
   })
 }
 
 async function seed(db: PrismaClient, fx: Fixture): Promise<void> {
   postSeq = 0
+  await db.pin.deleteMany({})
   await db.slackFile.deleteMany({})
   await db.message.deleteMany({})
   await db.channel.deleteMany({})
@@ -364,6 +372,11 @@ function bearer(req: http.IncomingMessage): string {
 
 type Reply = { status: number; json?: unknown; buffer?: Buffer; contentType?: string }
 
+const CUSTOM_EMOJI: Record<string, string> = {
+  shipit: 'https://emoji.example/shipit.png',
+  partyparrot: 'alias:parrot',
+}
+
 async function handle(
   db: PrismaClient,
   req: http.IncomingMessage,
@@ -385,12 +398,19 @@ async function handle(
     const channel = typeof payload.channel === 'string' ? payload.channel : ''
     const text = typeof payload.text === 'string' ? payload.text : ''
     if (channel === '') return { status: 200, json: { ok: false, error: 'channel_not_found' } }
+    // The row has to land somewhere real, so an unknown channel is rejected
+    // rather than left as an orphan message no listing can reach.
+    const target = await db.channel.findUnique({ where: { id: channel } })
+    if (target === null) return { status: 200, json: { ok: false, error: 'channel_not_found' } }
     postSeq += 1
     const ts = `${String(POST_TS_BASE)}.${String(postSeq).padStart(6, '0')}`
+    const threadTs =
+      typeof payload.thread_ts === 'string' && payload.thread_ts !== '' ? payload.thread_ts : null
+    await db.message.create({
+      data: { channelId: channel, ts, userId: BOT_USER_ID, text, threadTs, reactionsJson: null },
+    })
     const message: Record<string, unknown> = { type: 'message', user: BOT_USER_ID, text, ts }
-    if (typeof payload.thread_ts === 'string' && payload.thread_ts !== '') {
-      message.thread_ts = payload.thread_ts
-    }
+    if (threadTs !== null) message.thread_ts = threadTs
     return { status: 200, json: { ok: true, channel, ts, message } }
   }
 
@@ -399,9 +419,107 @@ async function handle(
     const payload = parseJsonBody(body)
     const channel = typeof payload.channel === 'string' ? payload.channel : ''
     const timestamp = typeof payload.timestamp === 'string' ? payload.timestamp : ''
+    const name = typeof payload.name === 'string' ? payload.name : ''
+    const msg = (await db.message.findFirst({
+      where: { channelId: channel, ts: timestamp },
+    })) as { pk: number; reactionsJson: string | null } | null
+    if (msg === null) return { status: 200, json: { ok: false, error: 'message_not_found' } }
+    const reactions =
+      msg.reactionsJson !== null && msg.reactionsJson !== ''
+        ? (JSON.parse(msg.reactionsJson) as Reaction[])
+        : []
+    const existing = reactions.find((r) => r.name === name)
+    if (existing !== undefined && existing.users.includes(BOT_USER_ID)) {
+      return { status: 200, json: { ok: false, error: 'already_reacted' } }
+    }
+    if (existing === undefined) reactions.push({ name, users: [BOT_USER_ID], count: 1 })
+    else {
+      existing.users.push(BOT_USER_ID)
+      existing.count = existing.users.length
+    }
+    await db.message.update({
+      where: { pk: msg.pk },
+      data: { reactionsJson: JSON.stringify(reactions) },
+    })
+    return { status: 200, json: { ok: true } }
+  }
+
+  if (req.method === 'POST' && (path === '/api/pins.add' || path === '/api/pins.remove')) {
+    if (bearer(req) === '') return { status: 200, json: { ok: false, error: 'not_authed' } }
+    const payload = parseJsonBody(body)
+    const channel = typeof payload.channel === 'string' ? payload.channel : ''
+    const timestamp = typeof payload.timestamp === 'string' ? payload.timestamp : ''
     const msg = await db.message.findFirst({ where: { channelId: channel, ts: timestamp } })
     if (msg === null) return { status: 200, json: { ok: false, error: 'message_not_found' } }
+    const key = { channelId_ts: { channelId: channel, ts: timestamp } }
+    const pinned = await db.pin.findUnique({ where: key })
+    if (path === '/api/pins.add') {
+      if (pinned !== null) return { status: 200, json: { ok: false, error: 'already_pinned' } }
+      await db.pin.create({
+        data: {
+          channelId: channel,
+          ts: timestamp,
+          createdBy: BOT_USER_ID,
+          created: Math.floor(Number(timestamp)),
+        },
+      })
+      return { status: 200, json: { ok: true } }
+    }
+    if (pinned === null) return { status: 200, json: { ok: false, error: 'no_pin' } }
+    await db.pin.delete({ where: key })
     return { status: 200, json: { ok: true } }
+  }
+
+  if (path === '/api/pins.list') {
+    const channel = q.get('channel') ?? ''
+    const pinned = (await db.pin.findMany({
+      where: { channelId: channel },
+      orderBy: { ts: 'asc' },
+    })) as { ts: string }[]
+    const items = []
+    for (const pin of pinned) {
+      const m = (await db.message.findFirst({ where: { channelId: channel, ts: pin.ts } })) as {
+        ts: string
+        userId: string
+        text: string
+        type: string
+      } | null
+      if (m === null) continue
+      items.push({
+        type: 'message',
+        channel,
+        message: { type: m.type, user: m.userId, text: m.text, ts: m.ts },
+      })
+    }
+    return { status: 200, json: { ok: true, items } }
+  }
+
+  if (path === '/api/reactions.get') {
+    const channel = q.get('channel') ?? ''
+    const timestamp = q.get('timestamp') ?? ''
+    const m = (await db.message.findFirst({ where: { channelId: channel, ts: timestamp } })) as {
+      ts: string
+      userId: string
+      text: string
+      type: string
+      reactionsJson: string | null
+    } | null
+    if (m === null) return { status: 200, json: { ok: false, error: 'message_not_found' } }
+    const message: Record<string, unknown> = {
+      type: m.type,
+      user: m.userId,
+      text: m.text,
+      ts: m.ts,
+    }
+    if (m.reactionsJson !== null && m.reactionsJson !== '') {
+      const rs = JSON.parse(m.reactionsJson) as Reaction[]
+      message.reactions = rs.map((r) => ({ name: r.name, users: r.users, count: r.count }))
+    }
+    return { status: 200, json: { ok: true, message, type: 'message', channel } }
+  }
+
+  if (path === '/api/emoji.list') {
+    return { status: 200, json: { ok: true, emoji: CUSTOM_EMOJI } }
   }
 
   if (path.startsWith('/files/download/')) {
@@ -602,7 +720,7 @@ async function handle(
 
 export async function startServer(port: number): Promise<http.Server> {
   const dbUrl = `file:${join(tmpdir(), `mirage-slack-${String(process.pid)}-${String(port)}.db`)}`
-  process.env.SLACK_DB_URL = dbUrl
+  process.env.INTEG_DB_URL = dbUrl
   pushSchema(dbUrl)
   const db = new PrismaClient()
   await seed(db, loadFixture())

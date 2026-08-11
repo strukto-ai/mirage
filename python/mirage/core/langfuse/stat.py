@@ -14,11 +14,71 @@
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.langfuse.readdir import readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 TOP_LEVEL_DIRS = {"traces", "sessions", "prompts", "datasets"}
+
+
+def basename_of(entry: str) -> str:
+    return entry.rstrip("/").rsplit("/", 1)[-1]
+
+
+async def assert_listed(
+    accessor: LangfuseAccessor,
+    path: PathSpec,
+    prefix: str,
+    index: IndexCacheStore,
+) -> None:
+    """Raise ENOENT unless the path appears in its parent's listing.
+
+    Every path shape langfuse serves is recognizable from the path text alone,
+    but a recognizable shape is not evidence that the trace, prompt, dataset or
+    run behind it exists. The parent listing is index-cached, so validating
+    costs one listing per directory rather than one API call per stat.
+
+    Args:
+        accessor (LangfuseAccessor): langfuse accessor.
+        path (PathSpec): resource-relative path being stat'd.
+        prefix (str): mount prefix for virtual index keys.
+        index (IndexCacheStore): index cache.
+
+    Raises:
+        FileNotFoundError: the entry is absent from its parent listing.
+    """
+    parent_virtual = path.virtual.rstrip("/").rsplit("/", 1)[0] or "/"
+    entries = await readdir(
+        accessor,
+        PathSpec(virtual=parent_virtual,
+                 directory=parent_virtual,
+                 resource_path=mount_key(parent_virtual, prefix)),
+        index,
+    )
+    if basename_of(path.resource_path) not in {
+            basename_of(entry)
+            for entry in entries
+    }:
+        raise enoent(path.virtual)
+
+
+async def listed_size(
+    index: IndexCacheStore,
+    path: PathSpec,
+    prefix: str,
+) -> int | None:
+    """Return the size the parent listing recorded for this path.
+
+    Args:
+        index (IndexCacheStore): index cache.
+        path (PathSpec): resource-relative path being stat'd.
+        prefix (str): mount prefix for virtual index keys.
+    """
+    # assert_listed has just populated the parent directory, so any size the
+    # listing computed is already in the index.
+    lookup = await index.get(prefix + "/" + path.resource_path)
+    return lookup.entry.size if lookup.entry is not None else None
 
 
 async def stat(
@@ -35,7 +95,7 @@ async def stat(
         prefix (str): mount prefix for virtual index keys.
     """
     virtual = path.virtual
-    mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
 
     if not key:
@@ -50,9 +110,11 @@ async def stat(
         return FileStat(name=parts[0], type=FileType.DIRECTORY)
 
     if parts[0] == "traces" and len(parts) == 2 and parts[1].endswith(".json"):
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(name=parts[1], type=FileType.JSON)
 
     if parts[0] == "sessions" and len(parts) == 2:
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(
             name=parts[1],
             type=FileType.DIRECTORY,
@@ -61,9 +123,11 @@ async def stat(
 
     if (parts[0] == "sessions" and len(parts) == 3
             and parts[2].endswith(".json")):
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(name=parts[2], type=FileType.JSON)
 
     if parts[0] == "prompts" and len(parts) == 2:
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(
             name=parts[1],
             type=FileType.DIRECTORY,
@@ -72,9 +136,11 @@ async def stat(
 
     if (parts[0] == "prompts" and len(parts) == 3
             and parts[2].endswith(".json")):
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(name=parts[2], type=FileType.JSON)
 
     if parts[0] == "datasets" and len(parts) == 2:
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(
             name=parts[1],
             type=FileType.DIRECTORY,
@@ -83,13 +149,24 @@ async def stat(
 
     if (parts[0] == "datasets" and len(parts) == 3
             and parts[2] == "items.jsonl"):
-        return FileStat(name="items.jsonl", type=FileType.TEXT)
+        await assert_listed(accessor, path, prefix, index)
+        return FileStat(
+            name="items.jsonl",
+            size=await listed_size(index, path, prefix),
+            type=FileType.TEXT,
+        )
 
     if parts[0] == "datasets" and len(parts) == 3 and parts[2] == "runs":
+        await assert_listed(accessor, path, prefix, index)
         return FileStat(name="runs", type=FileType.DIRECTORY)
 
     if (parts[0] == "datasets" and len(parts) == 4 and parts[2] == "runs"
             and parts[3].endswith(".jsonl")):
-        return FileStat(name=parts[3], type=FileType.TEXT)
+        await assert_listed(accessor, path, prefix, index)
+        return FileStat(
+            name=parts[3],
+            size=await listed_size(index, path, prefix),
+            type=FileType.TEXT,
+        )
 
     raise enoent(virtual)

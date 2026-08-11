@@ -55,7 +55,7 @@ function buildConfig(): BoxConfig {
 async function main(): Promise<void> {
   const resource = new BoxResource(buildConfig());
   const ws = new Workspace({
-    "/box": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+    "/box": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

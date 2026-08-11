@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "curl_body_to_stdout",
+      "seq": 330000,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_json_piped_to_jq",
+      "seq": 330001,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s {http}/data.json | jq -r .name",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_no_follow_without_L",
+      "seq": 330002,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s {http}/redirect",
+      "expect": {
+        "exit": 0,
+        "stdout": "302: Found",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_follow_redirect",
+      "seq": 330003,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sL {http}/redirect",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_method_and_header",
+      "seq": 330004,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -X PUT -H 'X-Mirage-Test: yes' {http}/echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=PUT\nheader=yes\nbody=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_post_body",
+      "seq": 330005,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -X POST -d 'payload=42' {http}/echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=POST\nheader=-\nbody=payload=42\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_form_field",
+      "seq": 330006,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -F 'field=value' {http}/form",
+      "expect": {
+        "exit": 0,
+        "stdout": "form field=value\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

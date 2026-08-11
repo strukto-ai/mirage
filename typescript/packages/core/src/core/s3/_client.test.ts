@@ -69,6 +69,28 @@ describe('S3 client', () => {
     b.destroy()
   })
 
+  // A named profile that never reaches the client is worse than one that
+  // errors: the default chain quietly signs with whatever credentials it
+  // finds, so reads can hit the wrong account. Python honours it through
+  // `aioboto3.Session(profile_name=...)`.
+  it('forwards a named profile to the credential chain', async () => {
+    const client = await createS3Client({ bucket: 'b', profile: 'staging' })
+    expect(client.config.profile).toBe('staging')
+    client.destroy()
+  })
+
+  it('lets explicit keys win over a profile, as Python does', async () => {
+    const client = await createS3Client({
+      bucket: 'b',
+      profile: 'staging',
+      accessKeyId: 'AKIA',
+      secretAccessKey: 'SECRET',
+    })
+    const creds = await client.config.credentials()
+    expect(creds.accessKeyId).toBe('AKIA')
+    client.destroy()
+  })
+
   it('keeps timeouts alongside provided agents', async () => {
     const agents = makeAgents()
     const client = await createS3Client({

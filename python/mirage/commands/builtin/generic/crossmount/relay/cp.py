@@ -15,16 +15,20 @@
 from typing import Any, Callable
 
 from mirage.commands.builtin.generic.cp import cp as generic_cp
+from mirage.commands.builtin.generic.cp import parse_cp_flags
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes, transfer_primitives)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec, PrimitiveCopy
 
 
-async def run_cp(scopes: list[PathSpec], flag_kwargs: dict[str, object],
-                 dispatch: Callable[..., Any]) -> CrossResult:
+async def run_cp(
+        scopes: list[PathSpec],
+        flag_kwargs: dict[str, FlagValue],
+        dispatch: Callable[..., Any],
+        storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.
 
     Pure wiring: the generic runs in its primitive mode (no native copy),
@@ -35,16 +39,17 @@ async def run_cp(scopes: list[PathSpec], flag_kwargs: dict[str, object],
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared cp spec.
         dispatch (Callable): Workspace operation dispatcher.
+        storage_key (Callable | None): Maps an operand to its storage
+            identity so two prefixes over one store compare equal.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cp"])
     primitives = transfer_primitives(dispatch)
-    return await generic_cp(
-        flat_scopes(scopes),
-        stat=primitives["stat"],
-        strategy=PrimitiveCopy(read_bytes=primitives["read_bytes"],
-                               write=primitives["write"],
-                               mkdir=primitives["mkdir"],
-                               readdir=primitives["readdir"]),
-        recursive=fl.as_bool("r") or fl.as_bool("R") or fl.as_bool("a"),
-        n=fl.as_bool("n"),
-        v=fl.as_bool("v"))
+    return await generic_cp(flat_scopes(scopes),
+                            stat=primitives["stat"],
+                            strategy=PrimitiveCopy(
+                                read_bytes=primitives["read_bytes"],
+                                write=primitives["write"],
+                                mkdir=primitives["mkdir"],
+                                readdir=primitives["readdir"]),
+                            flags=parse_cp_flags(fl),
+                            backend_key=storage_key)

@@ -1,4 +1,36 @@
 {
+  "services": {
+    "box": { "python": [], "typescript": ["BOX_ENDPOINT"] },
+    "chroma": { "python": ["CHROMA_HOST"], "typescript": ["CHROMA_HOST"] },
+    "databricks": { "python": [], "typescript": ["DATABRICKS_ENDPOINT"] },
+    "dify": { "python": [], "typescript": ["DIFY_ENDPOINT"] },
+    "discord": { "python": [], "typescript": ["DISCORD_ENDPOINT"] },
+    "dropbox": { "python": [], "typescript": [] },
+    "email": { "python": ["EMAIL_HOST"], "typescript": ["EMAIL_HOST"] },
+    "github": { "python": ["GITHUB_URL"], "typescript": ["GITHUB_URL"] },
+    "github_ci": { "python": ["GITHUB_URL"], "typescript": ["GITHUB_URL"] },
+    "gridfs": { "python": [], "typescript": [] },
+    "gws": { "python": ["GWS_URL"], "typescript": ["GWS_URL"] },
+    "hf": { "python": [], "typescript": ["HF_ENDPOINT"] },
+    "http": { "python": [], "typescript": [] },
+    "jaeger": { "python": ["JAEGER_URL"], "typescript": ["JAEGER_URL"] },
+    "lancedb": { "python": ["LANCEDB_ENABLED"], "typescript": ["LANCEDB_ENABLED"] },
+    "langfuse": { "python": ["LANGFUSE_URL"], "typescript": ["LANGFUSE_URL"] },
+    "linear": { "python": [], "typescript": ["LINEAR_ENDPOINT"] },
+    "mem0": { "python": [], "typescript": [] },
+    "mongodb": { "python": ["MONGODB_URI"], "typescript": ["MONGODB_URI"] },
+    "nextcloud": { "python": ["NEXTCLOUD_URL"], "typescript": ["NEXTCLOUD_URL"] },
+    "notion": { "python": ["NOTION_ENABLED"], "typescript": ["NOTION_ENABLED"] },
+    "onedrive": { "python": [], "typescript": [] },
+    "postgres": { "python": ["POSTGRES_DSN"], "typescript": ["POSTGRES_DSN"] },
+    "qdrant": { "python": ["QDRANT_HOST"], "typescript": ["QDRANT_HOST"] },
+    "redis": { "python": [], "typescript": [] },
+    "s3": { "python": [], "typescript": ["S3_ENDPOINT"] },
+    "sharepoint": { "python": [], "typescript": [] },
+    "slack": { "python": ["SLACK_URL"], "typescript": ["SLACK_URL"] },
+    "ssh": { "python": [], "typescript": ["SSH_HOST"] },
+    "trello": { "python": ["TRELLO_ENDPOINT"], "typescript": ["TRELLO_ENDPOINT"] }
+  },
   "targets": [
     {
       "id": "ram",
@@ -27,6 +59,131 @@
         {
           "path": "/ro",
           "resource": "ram",
+          "backend": "memory",
+          "mode": "read"
+        }
+      ],
+      "sessions": {
+        "reader": {
+          "/data": "read"
+        },
+        "writer": {
+          "/data": "write"
+        },
+        "lister": [
+          "/data"
+        ],
+        "capped": {
+          "/ro": "write"
+        }
+      }
+    },
+    {
+      "id": "ram-root",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ],
+      "sessions": {
+        "no_root": {
+          "/data": "write"
+        },
+        "root_ro": {
+          "/data": "write",
+          "/": "read"
+        }
+      }
+    },
+    {
+      "id": "ram-alias",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/alias",
+          "resource": "ram",
+          "backend": "memory",
+          "alias_of": "/data"
+        }
+      ]
+    },
+    {
+      "id": "ram-nested",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/data/inner",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/ghost/deep",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "ram-history",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ],
+      "sessions": {
+        "s2": null
+      }
+    },
+    {
+      "id": "http-ram",
+      "facet": "http",
+      "service": "http",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "http_fixture",
+          "backend": "memory"
+        },
+        {
+          "path": "/ro",
+          "resource": "http_fixture",
           "backend": "memory",
           "mode": "read"
         }
@@ -62,7 +219,21 @@
           "backend": "tmpdir",
           "mode": "read"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "/data": "read"
+        },
+        "writer": {
+          "/data": "write"
+        },
+        "lister": [
+          "/data"
+        ],
+        "capped": {
+          "/ro": "write"
+        }
+      }
     },
     {
       "id": "redis",
@@ -453,6 +624,13 @@
           "backend": "dropbox",
           "bucket": "res",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/search",
+          "resource": "dropbox",
+          "backend": "dropbox",
+          "bucket": "search",
+          "fixture": "search/v1"
         }
       ]
     },
@@ -477,7 +655,8 @@
           "resource": "dropbox",
           "backend": "dropbox",
           "bucket": "shared",
-          "root": "team/reports/data2"
+          "root": "team/reports/data2",
+          "seed_root": true
         },
         {
           "path": "/res",
@@ -492,7 +671,8 @@
     {
       "id": "onedrive",
       "hosts": [
-        "python"
+        "python",
+        "typescript-node"
       ],
       "service": "onedrive",
       "mounts": [
@@ -507,7 +687,8 @@
           "path": "/data2",
           "resource": "onedrive",
           "backend": "onedrive",
-          "prefix": "xm2"
+          "prefix": "xm2",
+          "seed_root": true
         },
         {
           "path": "/res",
@@ -545,6 +726,12 @@
           "backend": "ssh",
           "root": "res",
           "fixture": "columnar/v1"
+        },
+        {
+          "path": "/links",
+          "resource": "ssh",
+          "backend": "ssh",
+          "root": "links"
         }
       ]
     },
@@ -581,7 +768,8 @@
     {
       "id": "sharepoint",
       "hosts": [
-        "python"
+        "python",
+        "typescript-node"
       ],
       "service": "sharepoint",
       "mounts": [
@@ -610,7 +798,8 @@
     {
       "id": "sharepoint-prefix",
       "hosts": [
-        "python"
+        "python",
+        "typescript-node"
       ],
       "service": "sharepoint",
       "mounts": [
@@ -627,7 +816,8 @@
           "resource": "sharepoint",
           "backend": "sharepoint",
           "drive": "shared",
-          "prefix": "team/reports/data2"
+          "prefix": "team/reports/data2",
+          "seed_root": true
         },
         {
           "path": "/res",
@@ -636,6 +826,119 @@
           "drive": "shared",
           "prefix": "team/reports/res",
           "fixture": "columnar/v1"
+        }
+      ]
+    },
+    {
+      "id": "mem0",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "mem0",
+      "facet": "mem0",
+      "mounts": [
+        {
+          "path": "/memories",
+          "resource": "mem0",
+          "backend": "mem0",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "postgres",
+      "mounts": [
+        {
+          "path": "/pg",
+          "resource": "postgres",
+          "backend": "postgres",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "mongodb",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "mongodb",
+      "mounts": [
+        {
+          "path": "/mongodb",
+          "resource": "mongodb",
+          "backend": "mongodb",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "chroma",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "chroma",
+      "mounts": [
+        {
+          "path": "/knowledge",
+          "resource": "chroma",
+          "backend": "chroma",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "qdrant",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "qdrant",
+      "mounts": [
+        {
+          "path": "/db",
+          "resource": "qdrant",
+          "backend": "qdrant",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "lancedb",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "lancedb",
+      "mounts": [
+        {
+          "path": "/db",
+          "resource": "lancedb",
+          "backend": "lancedb",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "notion",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "notion",
+      "mounts": [
+        {
+          "path": "/notion",
+          "resource": "notion",
+          "backend": "notion",
+          "mode": "read"
         }
       ]
     },
@@ -696,6 +999,54 @@
           "backend": "box",
           "folder": "res",
           "seed": "columnar/v1"
+        },
+        {
+          "path": "/search",
+          "resource": "box",
+          "backend": "box",
+          "folder": "search",
+          "seed": "search/v1"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github",
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-v1",
+          "mode": "read"
+        },
+        {
+          "path": "/trunc",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-trunc",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "github_ci",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github_ci",
+      "mounts": [
+        {
+          "path": "/ci",
+          "resource": "github_ci",
+          "backend": "github_ci",
+          "repo": "integ/repo-v1",
+          "mode": "read"
         }
       ]
     },
@@ -760,6 +1111,9 @@
           "root": "res",
           "fixture": "columnar/v1"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -814,6 +1168,9 @@
           "drive": "eng",
           "root": "team/data2"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -846,6 +1203,35 @@
           "resource": "ram",
           "backend": "memory"
         }
+      ],
+      "clis": [
+        "gws"
+      ]
+    },
+    {
+      "id": "gcal",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "epoch": "2026-02-01T00:00:00Z",
+      "calendar": "calendar/v1",
+      "mounts": [
+        {
+          "path": "/cal",
+          "resource": "gcal",
+          "backend": "gcal"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -855,6 +1241,7 @@
         "typescript-node"
       ],
       "service": "gws",
+      "facet": "email",
       "epoch": "2026-02-01T00:00:00Z",
       "mail": "gmail/v1",
       "mounts": [
@@ -868,6 +1255,9 @@
           "resource": "ram",
           "backend": "ram"
         }
+      ],
+      "clis": [
+        "gws"
       ]
     },
     {
@@ -877,7 +1267,11 @@
         "typescript-node"
       ],
       "service": "email",
+      "facet": "email",
       "mail": "email/v1",
+      "clis": [
+        "himalaya"
+      ],
       "mounts": [
         {
           "path": "/mail",
@@ -892,17 +1286,209 @@
       ]
     },
     {
+      "id": "cli-himalaya",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "email",
+      "facet": "cli",
+      "mail": "email/v1",
+      "clis": [
+        "himalaya"
+      ],
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "email",
+          "backend": "email"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "cli-gws",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "epoch": "2026-02-01T00:00:00Z",
+      "apps": "google-apps/v1",
+      "mail": "gmail/v1",
+      "calendar": "calendar/v1",
+      "forms": "forms/v1",
+      "clis": [
+        "gws"
+      ],
+      "mounts": [
+        {
+          "path": "/mail",
+          "resource": "gmail",
+          "backend": "gmail"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ]
+    },
+    {
+      "id": "cli-gws-scoped",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "clis": [
+        "gws"
+      ],
+      "cli_scope": "/data",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "gdrive",
+          "backend": "gdrive",
+          "root": "team/scope"
+        }
+      ]
+    },
+    {
+      "id": "cli-slack",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "slack",
+      "facet": "cli",
+      "clis": [
+        "slack"
+      ],
+      "mounts": [
+        {
+          "path": "/slack",
+          "resource": "slack"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "cli-discord",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "discord",
+      "facet": "cli",
+      "clis": [
+        "discord"
+      ],
+      "mounts": [
+        {
+          "path": "/discord",
+          "resource": "discord"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "cli-ntn",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "notion",
+      "facet": "cli",
+      "clis": [
+        "ntn"
+      ],
+      "mounts": [
+        {
+          "path": "/notion",
+          "resource": "notion"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ],
+      "env": {
+        "NOTION_API_VERSION": "2025-09-03"
+      }
+    },
+    {
+      "id": "cli-linear",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "linear",
+      "facet": "cli",
+      "clis": [
+        "linear"
+      ],
+      "mounts": [
+        {
+          "path": "/issues",
+          "resource": "linear"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "slack",
       "hosts": [
         "python",
         "typescript-node"
       ],
       "service": "slack",
+      "facet": "chat",
       "mounts": [
         {
           "path": "/slack",
           "resource": "slack",
           "backend": "slack"
+        }
+      ]
+    },
+    {
+      "id": "discord",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "discord",
+      "facet": "chat",
+      "mounts": [
+        {
+          "path": "/discord",
+          "resource": "discord",
+          "backend": "discord"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
         }
       ]
     },
@@ -913,6 +1499,7 @@
         "typescript-node"
       ],
       "service": "trello",
+      "facet": "project",
       "mounts": [
         {
           "path": "/board",
@@ -933,6 +1520,7 @@
         "typescript-node"
       ],
       "service": "linear",
+      "facet": "project",
       "mounts": [
         {
           "path": "/issues",
@@ -953,12 +1541,45 @@
         "typescript-node"
       ],
       "service": "dify",
+      "facet": "dify",
       "dataset": "kb-7f3a",
       "mounts": [
         {
           "path": "/knowledge",
           "resource": "dify",
           "backend": "dify"
+        }
+      ]
+    },
+    {
+      "id": "jaeger",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "jaeger",
+      "facet": "observability",
+      "mounts": [
+        {
+          "path": "/j",
+          "resource": "jaeger",
+          "backend": "jaeger"
+        }
+      ]
+    },
+    {
+      "id": "langfuse",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "langfuse",
+      "facet": "observability",
+      "mounts": [
+        {
+          "path": "/lf",
+          "resource": "langfuse",
+          "backend": "langfuse"
         }
       ]
     },
@@ -975,6 +1596,298 @@
           "resource": "ram",
           "backend": "memory",
           "fixture": "statvfs/v1"
+        }
+      ]
+    },
+    {
+      "id": "argerr-databricks",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/databricks",
+          "resource": "arg_error",
+          "backend": "databricks",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-discord",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/discord",
+          "resource": "arg_error",
+          "backend": "discord",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-email",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/email",
+          "resource": "arg_error",
+          "backend": "email",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gdocs",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gdocs",
+          "resource": "arg_error",
+          "backend": "gdocs",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gdrive",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gdrive",
+          "resource": "arg_error",
+          "backend": "gdrive",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-github_ci",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/github_ci",
+          "resource": "arg_error",
+          "backend": "github_ci",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gmail",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gmail",
+          "resource": "arg_error",
+          "backend": "gmail",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gsheets",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gsheets",
+          "resource": "arg_error",
+          "backend": "gsheets",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-gslides",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/gslides",
+          "resource": "arg_error",
+          "backend": "gslides",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-langfuse",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/langfuse",
+          "resource": "arg_error",
+          "backend": "langfuse",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-linear",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/linear",
+          "resource": "arg_error",
+          "backend": "linear",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-mem0",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/mem0",
+          "resource": "arg_error",
+          "backend": "mem0",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-onedrive",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/onedrive",
+          "resource": "arg_error",
+          "backend": "onedrive",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-sharepoint",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/sharepoint",
+          "resource": "arg_error",
+          "backend": "sharepoint",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-slack",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/slack",
+          "resource": "arg_error",
+          "backend": "slack",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "argerr-trello",
+      "facet": "argerr",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/trello",
+          "resource": "arg_error",
+          "backend": "trello",
+          "mode": "read"
+        }
+      ]
+    },
+    {
+      "id": "git-disk",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "git"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "disk",
+          "backend": "tmpdir",
+          "fixture": "git"
+        }
+      ]
+    },
+    {
+      "id": "git-ram",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "clis": [
+        "git"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "ram",
+          "backend": "memory",
+          "fixture": "git"
         }
       ]
     }

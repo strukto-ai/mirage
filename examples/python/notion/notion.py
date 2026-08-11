@@ -18,6 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.ntn import NTN
 from mirage.resource.notion import NotionConfig, NotionResource
 from mirage.types import PathSpec
 
@@ -45,6 +46,15 @@ async def first_entry(ws: Workspace, path: str) -> str:
     if not out:
         return ""
     return os.path.basename(out.splitlines()[0].rstrip("/"))
+
+
+async def pick_child(ws: Workspace, path: str, skip: str) -> str:
+    result = await ws.execute(f"ls {path}/")
+    for line in (await result.stdout_str()).strip().splitlines():
+        name = os.path.basename(line.rstrip("/"))
+        if name != skip:
+            return name
+    return ""
 
 
 async def explore_pages(ws: Workspace) -> None:
@@ -102,46 +112,58 @@ async def explore_databases(ws: Workspace) -> None:
     await run(ws, f"cat {base}/database.json", limit=1500)
     await run(ws, f'jq ".database_id" {base}/database.json')
     await run(ws, f'jq ".title" {base}/database.json')
-    await run(ws, f'jq ".properties | keys" {base}/database.json')
+    # The container carries data source stubs, not a column schema: since
+    # 2025-09-03 `properties` lives on the data source one level down.
+    await run(ws, f'jq ".data_sources" {base}/database.json')
     await run(ws, f"wc -l {base}/database.json")
     await run(ws, f"head -n 8 {base}/database.json")
     await run(ws, f"tail -n 5 {base}/database.json")
     await run(ws, f"basename {base}/database.json")
     await run(ws, f"dirname {base}/database.json")
-    await run(ws, f"tree -L 1 {base}/")
+    await run(ws, f"tree -L 2 {base}/")
     await run(ws, f'find {base}/ -name "database.json"')
     await run(ws, f"echo {base}/*")
 
-    row = ""
-    result = await ws.execute(f"ls {base}/")
-    for line in (await result.stdout_str()).strip().splitlines():
-        name = os.path.basename(line.rstrip("/"))
-        if name != "database.json":
-            row = name
-            break
-    if not row:
-        print("Database has no row pages\n")
+    source = await pick_child(ws, base, "database.json")
+    if not source:
+        print("Database has no data sources\n")
         return
-    row_base = f"{base}/{row}"
+    source_base = f"{base}/{source}"
+    print(f"--- data source: {source} ---\n")
+    await run(ws, f"ls {source_base}/")
+    await run(ws, f"cat {source_base}/data_source.json", limit=1500)
+    await run(ws, f'jq ".properties | keys" {source_base}/data_source.json')
+
+    row = await pick_child(ws, source_base, "data_source.json")
+    if not row:
+        print("Data source has no row pages\n")
+        return
+    row_base = f"{source_base}/{row}"
     print(f"--- row page: {row} ---\n")
     await run(ws, f"ls {row_base}/")
     await run(ws, f"stat {row_base}/page.json")
     await run(ws, f"cat {row_base}/page.json", limit=1200)
     await run(ws, f'jq ".parent_type" {row_base}/page.json')
     await run(ws, f'jq ".parent_id" {row_base}/page.json')
+    # A row's cells ride in the file, as Notion's own property objects,
+    # answering to the schema in the data_source.json above.
+    await run(ws, f'jq ".properties | keys" {row_base}/page.json')
 
 
 async def explore_cross_cutting(ws: Workspace) -> None:
     print("\n########## CROSS-CUTTING ##########\n")
     await run(ws, "ls /notion/")
     await run(ws, "tree -L 2 /notion/")
-    await run(ws, "notion-search --query a", limit=800)
+    # There is no `ntn search`: /search is reached through `ntn api`,
+    # exactly as the official CLI reaches it.
+    await run(ws, 'ntn api v1/search -d \'{"query":"a"}\'', limit=800)
     await run(ws, 'grep -rl "page_id" /notion/pages/', limit=800)
     await run(ws, 'rg -c "title" /notion/databases/', limit=800)
 
 
 async def main() -> None:
     ws = Workspace({"/notion": resource}, mode=MountMode.READ)
+    ws.register_cli("ntn", NTN, config.model_dump())
     await explore_pages(ws)
     await explore_databases(ws)
     await explore_cross_cutting(ws)
