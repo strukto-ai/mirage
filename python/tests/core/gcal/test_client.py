@@ -33,8 +33,7 @@ def token_manager():
     return TokenManager(GCalConfig(client_id="cid", refresh_token="rt"))
 
 
-async def test_list_events_encodes_the_calendar_id(monkeypatch,
-                                                   token_manager):
+async def test_list_events_encodes_the_calendar_id(monkeypatch, token_manager):
     seen: list[str] = []
 
     async def fake_get(tm, url, params=None):
@@ -50,8 +49,8 @@ async def test_list_events_encodes_the_calendar_id(monkeypatch,
     assert parsed.path.endswith(f"/calendars/{HOLIDAY}/events")
 
 
-async def test_delete_event_encodes_both_path_segments(
-        monkeypatch, token_manager):
+async def test_delete_event_encodes_both_path_segments(monkeypatch,
+                                                       token_manager):
     seen: list[str] = []
 
     async def fake_delete(tm, url):

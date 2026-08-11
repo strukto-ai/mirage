@@ -36,15 +36,16 @@ export async function unlink(
 ): Promise<void> {
   const [, key, virtualKey] = normalize(path)
   const parts = key === '' ? [] : key.split('/')
+  const [calName = '', , file = ''] = parts
   if (parts.length !== 3) throw eisdir(path.virtual)
   const calendars = await calendarIndex(accessor)
-  const entry = calendars.get(parts[0] as string)
+  const entry = calendars.get(calName)
   if (entry === undefined) throw enoent(path.virtual)
   const role = entry.accessRole
   if (typeof role !== 'string' || !WRITABLE_ROLES.has(role)) throw eacces(path.virtual)
   const calId = entry.id
   if (typeof calId !== 'string') throw enoent(path.virtual)
-  const [eventId] = parseEventFilename(parts[2] as string)
+  const [eventId] = parseEventFilename(file)
   await deleteEvent(accessor.tokenManager, calId, eventId)
   const parentDir = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
   if (index !== undefined) await index.invalidateDir(parentDir)

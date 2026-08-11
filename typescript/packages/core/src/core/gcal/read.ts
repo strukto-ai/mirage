@@ -37,20 +37,21 @@ export async function read(
 ): Promise<Uint8Array> {
   const [, key] = normalize(path)
   const parts = key === '' ? [] : key.split('/')
+  const [calName = '', day = '', file = ''] = parts
   if (parts.length < 2) throw eisdir(path.virtual)
 
   const calendars = await calendarIndex(accessor)
-  const entry = calendars.get(parts[0] as string)
+  const entry = calendars.get(calName)
   if (entry === undefined) throw enoent(path.virtual)
   const tz = bucketZone(accessor, calendars)
 
-  if (parts.length === 2 && parts[1] === CALENDAR_FILE) return calendarPayload(entry, tz)
+  if (parts.length === 2 && day === CALENDAR_FILE) return calendarPayload(entry, tz)
   if (parts.length !== 3) throw enoent(path.virtual)
 
   const calId = entry.id
   if (typeof calId !== 'string') throw enoent(path.virtual)
-  const [eventId] = parseEventFilename(parts[2] as string)
-  const [timeMin, timeMax] = dayBounds(parts[1] as string, tz)
+  const [eventId] = parseEventFilename(file)
+  const [timeMin, timeMax] = dayBounds(day, tz)
   for (const event of await listEvents(accessor.tokenManager, calId, timeMin, timeMax, tz)) {
     if (event.id === eventId) return ENC.encode(JSON.stringify(event))
   }

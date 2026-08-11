@@ -14,10 +14,15 @@
 
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec, ResourceNameValue } from '../../../types.ts'
+import type { PathSpec, ResourceName } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
-import { command, type CommandFnResult, type CommandOpts, type RegisteredCommand } from '../../config.ts'
+import {
+  command,
+  type CommandFnResult,
+  type CommandOpts,
+  type RegisteredCommand,
+} from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
@@ -34,7 +39,7 @@ type UnlinkFn<A> = (accessor: A, path: PathSpec, index?: IndexCacheStore) => Pro
  * it could not remove, keep removing the rest, and exit 1 if any failed.
  */
 export function makeRm<A extends Accessor>(
-  resource: ResourceNameValue,
+  resource: ResourceName,
   io: CommandIO<A>,
   unlink: UnlinkFn<A>,
 ): RegisteredCommand[] {

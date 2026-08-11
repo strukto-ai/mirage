@@ -199,7 +199,8 @@ export async function readdir(
   }
 
   const parts = key.split('/')
-  const entry = calendars.get(parts[0] as string)
+  const [calName = '', day = ''] = parts
+  const entry = calendars.get(calName)
   if (entry === undefined || parts.length > 2) throw enoent(path.virtual)
   const calId = entry.id
   if (typeof calId !== 'string') throw enoent(path.virtual)
@@ -251,7 +252,6 @@ export async function readdir(
     return rows.map(([name]) => `${prefix}/${key}/${name}`)
   }
 
-  const day = parts[1] as string
   if (!validDay(day)) throw enoent(path.virtual)
   const [timeMin, timeMax] = dayBounds(day, tz)
   const events = await listEvents(accessor.tokenManager, calId, timeMin, timeMax, tz)

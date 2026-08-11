@@ -201,10 +201,7 @@ export function slotInstant(slot: Record<string, JsonValue>, tz: string): number
  * day. That is the same convention the instant carries, so no adjustment is
  * applied here.
  */
-export function eventSpan(
-  event: Record<string, JsonValue>,
-  tz: string,
-): [number, number] | null {
+export function eventSpan(event: Record<string, JsonValue>, tz: string): [number, number] | null {
   const startSlot = event.start
   const endSlot = event.end
   if (typeof startSlot !== 'object' || startSlot === null || Array.isArray(startSlot)) return null

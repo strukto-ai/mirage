@@ -38,6 +38,12 @@ function allDay(start: string, end: string): Record<string, JsonValue> {
   return { start: { date: start }, end: { date: end } }
 }
 
+function spanOf(event: Record<string, JsonValue>, tz: string): [number, number] {
+  const span = eventSpan(event, tz)
+  if (span === null) throw new Error('expected a parseable span')
+  return span
+}
+
 describe('gcal day bucketing', () => {
   it('falls back to UTC for an unknown zone', () => {
     expect(zone('Not/AZone').resolvedOptions().timeZone).toBe('UTC')
@@ -104,62 +110,53 @@ describe('gcal day bucketing', () => {
   it('covers one day only for a single-day all-day event', () => {
     // end.date is EXCLUSIVE, so start=D end=D+1 is a one-day event and must
     // not leak into D+1's directory.
-    const span = eventSpan(allDay('2026-08-11', '2026-08-12'), HK)
-    expect(daysCovered(span as [number, number], HK)).toEqual(['2026-08-11'])
+    const span = spanOf(allDay('2026-08-11', '2026-08-12'), HK)
+    expect(daysCovered(span, HK)).toEqual(['2026-08-11'])
   })
 
   it('covers each day of a multi-day all-day event', () => {
-    const span = eventSpan(allDay('2026-08-11', '2026-08-14'), HK)
-    expect(daysCovered(span as [number, number], HK)).toEqual([
-      '2026-08-11',
-      '2026-08-12',
-      '2026-08-13',
-    ])
+    const span = spanOf(allDay('2026-08-11', '2026-08-14'), HK)
+    expect(daysCovered(span, HK)).toEqual(['2026-08-11', '2026-08-12', '2026-08-13'])
   })
 
   it('covers every day a timed event spans', () => {
-    const span = eventSpan(timed('2026-08-10T09:00:00+08:00', '2026-08-13T17:00:00+08:00'), HK)
-    expect(daysCovered(span as [number, number], HK)).toEqual([
-      '2026-08-10',
-      '2026-08-11',
-      '2026-08-12',
-      '2026-08-13',
-    ])
+    const span = spanOf(timed('2026-08-10T09:00:00+08:00', '2026-08-13T17:00:00+08:00'), HK)
+    expect(daysCovered(span, HK)).toEqual(['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13'])
   })
 
   it('stops at the starting day when it ends exactly at midnight', () => {
-    const span = eventSpan(timed('2026-08-11T23:00:00+08:00', '2026-08-12T00:00:00+08:00'), HK)
-    expect(daysCovered(span as [number, number], HK)).toEqual(['2026-08-11'])
+    const span = spanOf(timed('2026-08-11T23:00:00+08:00', '2026-08-12T00:00:00+08:00'), HK)
+    expect(daysCovered(span, HK)).toEqual(['2026-08-11'])
   })
 
   it('still occupies a day for a zero-length event', () => {
-    const span = eventSpan(timed('2026-08-11T09:00:00+08:00', '2026-08-11T09:00:00+08:00'), HK)
-    expect(daysCovered(span as [number, number], HK)).toEqual(['2026-08-11'])
+    const span = spanOf(timed('2026-08-11T09:00:00+08:00', '2026-08-11T09:00:00+08:00'), HK)
+    expect(daysCovered(span, HK)).toEqual(['2026-08-11'])
   })
 
   it('lets the bucketing zone decide the day', () => {
     // 20:00 in Los Angeles on Aug 11 is 03:00Z on Aug 12: bucketed in the
     // calendar's zone it is Aug 11, in UTC it would be Aug 12.
-    const span = eventSpan(timed('2026-08-11T20:00:00-07:00', '2026-08-11T21:00:00-07:00'), LA)
-    expect(daysCovered(span as [number, number], LA)).toEqual(['2026-08-11'])
-    expect(daysCovered(span as [number, number], 'UTC')).toEqual(['2026-08-12'])
+    const span = spanOf(timed('2026-08-11T20:00:00-07:00', '2026-08-11T21:00:00-07:00'), LA)
+    expect(daysCovered(span, LA)).toEqual(['2026-08-11'])
+    expect(daysCovered(span, 'UTC')).toEqual(['2026-08-12'])
   })
 
   it('reports local times in the HHMM label', () => {
-    const span = eventSpan(timed('2026-08-11T09:00:00+08:00', '2026-08-11T10:30:00+08:00'), HK)
-    expect(clampedHhmm(span as [number, number], '2026-08-11', HK)).toBe('0900-1030')
+    const span = spanOf(timed('2026-08-11T09:00:00+08:00', '2026-08-11T10:30:00+08:00'), HK)
+    expect(clampedHhmm(span, '2026-08-11', HK)).toBe('0900-1030')
   })
 
   it('clamps a spanning event to the whole day', () => {
-    const span = eventSpan(timed('2026-08-10T09:00:00+08:00', '2026-08-13T17:00:00+08:00'), HK)
-    expect(clampedHhmm(span as [number, number], '2026-08-10', HK)).toBe('0900-2400')
-    expect(clampedHhmm(span as [number, number], '2026-08-11', HK)).toBe('0000-2400')
-    expect(clampedHhmm(span as [number, number], '2026-08-13', HK)).toBe('0000-1700')
+    const span = spanOf(timed('2026-08-10T09:00:00+08:00', '2026-08-13T17:00:00+08:00'), HK)
+    expect(clampedHhmm(span, '2026-08-10', HK)).toBe('0900-2400')
+    expect(clampedHhmm(span, '2026-08-11', HK)).toBe('0000-2400')
+    expect(clampedHhmm(span, '2026-08-13', HK)).toBe('0000-1700')
   })
 
   it('spells an all-day event as the full day', () => {
-    const span = eventSpan(allDay('2026-08-11', '2026-08-12'), HK)
-    expect(clampedHhmm(span as [number, number], '2026-08-11', HK)).toBe('0000-2400')
+    const span = spanOf(allDay('2026-08-11', '2026-08-12'), HK)
+    expect(clampedHhmm(span, '2026-08-11', HK)).toBe('0000-2400')
   })
 
   it('rejects a date-shaped non-date', () => {

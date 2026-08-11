@@ -59,14 +59,15 @@ export async function stat(
 
   if (entry === null || entry === undefined) {
     const parts = key.split('/')
-    if (parts.length === 2 && validDay(parts[1] as string)) {
+    const [calName = '', day = ''] = parts
+    if (parts.length === 2 && validDay(day)) {
       // Outside the default window, or a day with nothing on it. Ask the
       // calendar list rather than the index: the index only knows the
       // calendar once the ROOT has been listed, which a stat of a day two
       // levels down never triggers.
       const calendars = await calendarIndex(accessor)
-      if (!calendars.has(parts[0] as string)) throw enoent(path.virtual)
-      return new FileStat({ name: parts[1] as string, type: FileType.DIRECTORY })
+      if (!calendars.has(calName)) throw enoent(path.virtual)
+      return new FileStat({ name: day, type: FileType.DIRECTORY })
     }
     throw enoent(path.virtual)
   }

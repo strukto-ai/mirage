@@ -14,7 +14,12 @@
 
 import { enoent } from '../../utils/errors.ts'
 import { makeIdName } from '../../utils/naming.ts'
-import { NAME_MAX_BYTES, sanitizeName, truncateBytes } from '../../utils/sanitize.ts'
+import {
+  NAME_MAX_BYTES,
+  sanitizeName,
+  stripTrailingUnderscores,
+  truncateBytes,
+} from '../../utils/sanitize.ts'
 
 const EVENT_SUFFIX = '.gcal.json'
 export const CALENDAR_FILE = 'calendar.json'
@@ -44,7 +49,7 @@ export function eventTitle(summary: string | null, freeBusy = false): string {
  */
 export function makeEventFilename(eventId: string, hhmm: string, title: string): string {
   const fixed = UTF8.encode(eventId).length + 2 + hhmm.length + 1 + EVENT_SUFFIX.length
-  const trimmed = truncateBytes(title, NAME_MAX_BYTES - fixed).replace(/_+$/u, '')
+  const trimmed = stripTrailingUnderscores(truncateBytes(title, NAME_MAX_BYTES - fixed))
   if (trimmed === '') {
     // The title is what gives, never the id: trimming the id would make the
     // name stop addressing the event, which is the whole reason it leads. An

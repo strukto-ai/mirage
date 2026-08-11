@@ -41,12 +41,7 @@ const SHARED = {
   accessRole: 'freeBusyReader',
 }
 
-function timed(
-  id: string,
-  summary: string,
-  start: string,
-  end: string,
-): Record<string, JsonValue> {
+function timed(id: string, summary: string, start: string, end: string): Record<string, JsonValue> {
   return {
     id,
     status: 'confirmed',
@@ -110,7 +105,10 @@ vi.mock('./client.ts', () => ({
       if (freeBusy) {
         // What Google actually returns for a freeBusyReader role:
         // availability with no summary, description or location.
-        const { summary: _s, description: _d, location: _l, ...rest } = event
+        const rest: Record<string, JsonValue> = {}
+        for (const [k, v] of Object.entries(event)) {
+          if (k !== 'summary' && k !== 'description' && k !== 'location') rest[k] = v
+        }
         out.push(rest)
         continue
       }
@@ -130,13 +128,20 @@ const { read } = await import('./read.ts')
 const { unlink } = await import('./unlink.ts')
 
 function spec(virtual: string, pattern?: string): PathSpec {
-  const directory = pattern !== undefined ? virtual.slice(0, virtual.lastIndexOf('/')) || '/' : virtual
+  const directory =
+    pattern !== undefined ? virtual.slice(0, virtual.lastIndexOf('/')) || '/' : virtual
   return new PathSpec({
     virtual,
     directory,
     resourcePath: virtual.replace(/^\//, ''),
     ...(pattern !== undefined ? { pattern } : {}),
   })
+}
+
+function lastListed(): [string, string, string] {
+  const last = listed[listed.length - 1]
+  if (last === undefined) throw new Error('no events.list call was made')
+  return last
 }
 
 function names(paths: string[]): string[] {
@@ -208,7 +213,7 @@ describe('gcal readdir', () => {
   it('escapes the default window with a date glob', async () => {
     const out = names(await readdir(accessor, spec('/primary/2025-01-*', '2025-01-*'), index))
     expect(out).toContain('2025-01-05')
-    const last = listed[listed.length - 1] as [string, string, string]
+    const last = lastListed()
     expect(last[1].startsWith('2025-01-01')).toBe(true)
     expect(last[2].startsWith('2025-02-01')).toBe(true)
   })
@@ -261,7 +266,7 @@ describe('gcal readdir', () => {
 
   it('centres the window in the bucket zone', async () => {
     await readdir(accessor, spec('/primary'), index)
-    const last = listed[listed.length - 1] as [string, string, string]
+    const last = lastListed()
     expect(last[1].endsWith('+08:00')).toBe(true)
     expect(last[2].endsWith('+08:00')).toBe(true)
   })
@@ -271,9 +276,7 @@ describe('gcal stat', () => {
   it('reports directories and event files', async () => {
     expect((await stat(accessor, spec('/'), index)).type).toBe(FileType.DIRECTORY)
     expect((await stat(accessor, spec('/primary'), index)).type).toBe(FileType.DIRECTORY)
-    expect((await stat(accessor, spec('/primary/2026-08-11'), index)).type).toBe(
-      FileType.DIRECTORY,
-    )
+    expect((await stat(accessor, spec('/primary/2026-08-11'), index)).type).toBe(FileType.DIRECTORY)
     const row = await stat(
       accessor,
       spec('/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json'),
@@ -337,7 +340,9 @@ describe('gcal unlink', () => {
     await expect(
       unlink(
         accessor,
-        spec('/Engineering__team@group.calendar.google.com/2026-08-11/aaaa1__0900-1030_X.gcal.json'),
+        spec(
+          '/Engineering__team@group.calendar.google.com/2026-08-11/aaaa1__0900-1030_X.gcal.json',
+        ),
         index,
       ),
     ).rejects.toThrow()
