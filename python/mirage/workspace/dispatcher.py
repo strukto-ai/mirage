@@ -24,7 +24,7 @@ from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
                                        namespace_stat)
-from mirage.policy import post_ops_gate, pre_ops_gate
+from mirage.policy import PolicyDenied, post_ops_gate, pre_ops_gate
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import slice_window
@@ -178,11 +178,21 @@ class Dispatcher:
                 # op falls back to, so warm and cold agree.
                 offset, size = _window(kwargs)
                 served = slice_window(cached, offset, size)
-                bound = await post_ops_gate(policies, op, path, write,
-                                            mount.prefix, served)
+                try:
+                    bound = await post_ops_gate(policies, op, path, write,
+                                                mount.prefix, served)
+                except PolicyDenied as denied:
+                    # Nothing crossed the network, and the caller cannot
+                    # tell from the exception alone: without this a
+                    # denied warm read is recorded against the backend
+                    # and counted as traffic that never happened.
+                    denied.from_cache = True
+                    raise
+                moved: int | None = len(served)
                 if bound is not None:
                     served = await apply_op_limit(served, bound)
-                return served, IOResult(reads={path.virtual: served})
+                return served, IOResult(reads={path.virtual: served},
+                                        op_bytes=moved)
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's
@@ -215,9 +225,13 @@ class Dispatcher:
                 await self.invalidate_after_write(mount, kwargs["dst"])
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,
                                     result)
-        if bound is not None:
-            result = await apply_op_limit(result, bound)
-        return result, IOResult()
+        if bound is None:
+            return result, IOResult()
+        # The transfer already happened, so the limit changes what the
+        # caller receives, not what the backend moved. Report both.
+        moved = len(result) if isinstance(result, (bytes, bytearray)) else None
+        result = await apply_op_limit(result, bound)
+        return result, IOResult(op_bytes=moved)
 
     async def stat(self, path: str) -> FileStat:
         scope = PathSpec(virtual=path,

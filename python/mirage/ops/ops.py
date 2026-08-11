@@ -202,14 +202,18 @@ class Ops:
             if denied.completed and owner is not None:
                 nbytes = (denied.completed_bytes
                           or self._payload_bytes(None, kwargs))
-                self._record(op, path, owner.resource_type, nbytes, start)
+                source = "ram" if denied.from_cache else owner.resource_type
+                self._record(op, path, source, nbytes, start)
             raise
         if owner is not None:
             # A cache-served read moved no bytes over the network;
-            # "ram" is what OpRecord.is_cache reads.
+            # "ram" is what OpRecord.is_cache reads. The door reports
+            # op_bytes when a post_ops limit truncated the result, since
+            # the transfer had already happened by then.
             source = "ram" if io.reads else owner.resource_type
-            self._record(op, path, source, self._payload_bytes(result, kwargs),
-                         start)
+            nbytes = (io.op_bytes if io.op_bytes is not None else
+                      self._payload_bytes(result, kwargs))
+            self._record(op, path, source, nbytes, start)
         return result
 
     async def read(self,

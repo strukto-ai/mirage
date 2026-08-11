@@ -17,6 +17,7 @@ import errno
 import pytest
 
 from mirage import Action, CommandContext, Deny, GuardSpec, Policy, Workspace
+from mirage.io import IOResult
 from mirage.policy import ExecuteResultContext, OpsContext, OpsResultContext
 from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountMode, OnExceed
@@ -225,6 +226,61 @@ async def test_post_ops_deny_records_the_bytes_a_denied_read_moved():
         reads = [r for r in ws.ops.records if r.op == "read"]
         assert len(reads) == 1
         assert reads[0].bytes == 10
+    finally:
+        await ws.close()
+
+
+class CapProdReads(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
+            return Limit(max_bytes=3)
+        return None
+
+
+class CachingRAM(RAMResource):
+    caches_reads = True
+    name = "s3"
+
+
+@pytest.mark.asyncio
+async def test_a_capped_read_records_what_the_backend_moved():
+    # A post_ops Limit truncates what the caller receives; the transfer
+    # already happened, so recording the capped length would under-report
+    # network_bytes by whatever the cap removed.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        ws.ops.records.clear()
+        ws.policies.add(CapProdReads())
+        assert await ws.ops.read("/data/prod/x.txt") == b"012"
+        reads = [r for r in ws.ops.records if r.op == "read"]
+        assert [r.bytes for r in reads] == [10]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
+    # The deny suppresses a result the cache produced, so nothing
+    # crossed the network; recording it against the backend would count
+    # traffic that never happened.
+    ws = Workspace({"/data/": CachingRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        await ws.apply_io(
+            IOResult(reads={"/data/prod/x.txt": b"0123456789"},
+                     cache=["/data/prod/x.txt"]))
+        ws.ops.records.clear()
+        ws.policies.add(SuppressProdReads())
+        with pytest.raises(PermissionError):
+            await ws.ops.read("/data/prod/x.txt")
+        rec = ws.ops.records[-1]
+        assert rec.source == "ram"
+        assert rec.is_cache is True
+        assert ws.ops.network_bytes == 0
     finally:
         await ws.close()
 

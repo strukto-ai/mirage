@@ -112,10 +112,12 @@ export class WorkspaceFS {
     const owner = this.ownerOf(followed)
     let result: unknown
     let cached = false
+    let moved: number | null = null
     try {
       const [value, io] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs)
       result = value
       cached = Object.keys(io.reads).length > 0
+      moved = io.opBytes
     } catch (err) {
       // A postOps deny suppresses the result, not the effect: the
       // backend already ran, so observation must reflect the op before
@@ -124,15 +126,19 @@ export class WorkspaceFS {
       // own arguments.
       if (err instanceof PolicyDenied && err.completed && owner !== null) {
         const nbytes = err.completedBytes || payloadBytes(null, args)
-        await this.record(op, followed, owner.kind, nbytes, start)
+        const source = err.fromCache ? ResourceName.RAM : owner.kind
+        await this.record(op, followed, source, nbytes, start)
       }
       throw err
     }
     if (owner !== null) {
       // A cache-served read moved no bytes over the network; 'ram' is
-      // what OpRecord.isCache reads.
+      // what OpRecord.isCache reads. The door reports opBytes when a
+      // postOps limit truncated the result, since the transfer had
+      // already happened by then.
       const source = cached ? ResourceName.RAM : owner.kind
-      await this.record(op, followed, source, payloadBytes(result, args), start)
+      const nbytes = moved ?? payloadBytes(result, args)
+      await this.record(op, followed, source, nbytes, start)
     }
     return result
   }

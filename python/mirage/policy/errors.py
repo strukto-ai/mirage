@@ -37,6 +37,11 @@ class PolicyDenied(PermissionError):
     so the door's caller must still account for the op (the ops facade
     records it). A pre_ops deny leaves it False, the class default.
 
+    ``from_cache`` says the completed op was answered from the file
+    cache, because the caller cannot tell afterwards: without it a
+    denied warm read is recorded against the backend and counted as
+    network traffic that never happened.
+
     ``completed_bytes`` carries how many bytes that completed op moved,
     because the caller cannot recover it: the result is suppressed, and
     a read's byte count lives nowhere else (a write's is still in its
@@ -46,3 +51,4 @@ class PolicyDenied(PermissionError):
 
     completed = False
     completed_bytes = 0
+    from_cache = False

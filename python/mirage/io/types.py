@@ -47,6 +47,14 @@ class IOResult:
         reads (dict[str, ByteSource]): Paths read with content or streams.
         writes (dict[str, ByteSource]): Paths written with content or streams.
         cache (list[str]): Paths worth caching (from reads or writes).
+        op_bytes (int | None): bytes the backend moved for a single VFS
+            op, when that differs from what the caller receives. Only
+            the op door sets it, and only when a post_ops Limit
+            truncated the result: the transfer already happened, so an
+            accounting caller that measured the delivered bytes would
+            under-report it. None everywhere else, which means "the
+            result is the measure". Facts ride the envelope, so this is
+            a fact about the transfer, never a decision about it.
         producer (Producer | None): provenance of this result (which
             command, spanning which mounts); merge keeps the rightmost
             producer, mirroring whose stream the shell shows. The
@@ -79,6 +87,7 @@ class IOResult:
     reads: dict[str, ByteSource] = field(default_factory=dict)
     writes: dict[str, ByteSource] = field(default_factory=dict)
     cache: list[str] = field(default_factory=list)
+    op_bytes: int | None = None
     producer: Producer | None = None
     _stream_source: "IOResult | None" = field(default=None, repr=False)
 
@@ -142,6 +151,8 @@ class IOResult:
                 **other.writes
             },
             cache=self.cache + other.cache,
+            op_bytes=(other.op_bytes
+                      if other.op_bytes is not None else self.op_bytes),
             producer=other.producer,
         )
         result._stream_source = other

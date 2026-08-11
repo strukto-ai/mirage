@@ -38,6 +38,11 @@ export class PolicyError extends Error {
  * the door's caller must still account for the op (the fs facade
  * records it). A preOps deny leaves it false, the constructed default.
  *
+ * `fromCache` says the completed op was answered from the file cache,
+ * because the caller cannot tell afterwards: without it a denied warm
+ * read is recorded against the backend and counted as network traffic
+ * that never happened.
+ *
  * `completedBytes` carries how many bytes that completed op moved,
  * because the caller cannot recover it: the result is suppressed, and
  * a read's byte count lives nowhere else (a write's is still in its
@@ -49,6 +54,7 @@ export class PolicyDenied extends Error {
   readonly virtualPath: string
   completed = false
   completedBytes = 0
+  fromCache = false
 
   constructor(message: string, virtualPath: string) {
     super(message)

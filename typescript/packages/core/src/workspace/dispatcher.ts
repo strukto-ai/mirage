@@ -19,7 +19,7 @@ import { applyOpLimit, runWithTimeout } from '../commands/builtin/utils/limit.ts
 import { getExtension } from '../commands/resolve.ts'
 import { IOResult } from '../io/types.ts'
 import { eaccesReadOnly } from '../utils/errors.ts'
-import { Policies, postOpsGate, preOpsGate } from '../policy/index.ts'
+import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../policy/index.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { runWithMountPrefix, runWithRevisions } from '../observe/context.ts'
@@ -162,10 +162,21 @@ export class Dispatcher {
         // agree. Mirrors Python's Dispatcher.dispatch.
         const [offset, size] = readWindow(kwargs)
         const window = sliceWindow(cached, offset, size)
-        const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
+        let warmBound
+        try {
+          warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
+        } catch (err) {
+          // Nothing crossed the network, and the caller cannot tell from
+          // the exception alone: without this a denied warm read is
+          // recorded against the backend and counted as traffic that
+          // never happened.
+          if (err instanceof PolicyDenied) err.fromCache = true
+          throw err
+        }
+        const moved = window.byteLength
         const served =
           warmBound !== null ? ((await applyOpLimit(window, warmBound)) as Uint8Array) : window
-        return [served, new IOResult({ reads: { [p.virtual]: served } })]
+        return [served, new IOResult({ reads: { [p.virtual]: served }, opBytes: moved })]
       }
     }
     if (
@@ -255,10 +266,12 @@ export class Dispatcher {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
     }
     const bound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
-    if (bound !== null) {
-      result = await applyOpLimit(result, bound)
-    }
-    return [result, new IOResult()]
+    if (bound === null) return [result, new IOResult()]
+    // The transfer already happened, so the limit changes what the
+    // caller receives, not what the backend moved. Report both.
+    const moved = result instanceof Uint8Array ? result.byteLength : null
+    result = await applyOpLimit(result, bound)
+    return [result, new IOResult({ opBytes: moved })]
   }
 
   /** Drop the whole file cache (post-remote-line invalidation). */

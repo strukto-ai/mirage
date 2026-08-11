@@ -322,6 +322,13 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     }
   }
 
+  class CapReadsTo3 implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read') return new Limit({ maxBytes: 3 })
+      return null
+    }
+  }
+
   class SealReads implements Policy {
     preOps(ctx: OpsContext): Action | null {
       if (ctx.op === 'read') return { kind: 'deny', message: 'sealed\n' }
@@ -341,6 +348,37 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     await ws.fs.writeFile('/data/a.txt', 'hello')
     await expect(ws.fs.readFile('/data/a.txt')).rejects.toThrow(PolicyDenied)
     expect(ws.records.map((r) => r.op)).toEqual(['write', 'read'])
+  })
+
+  it('records a capped read against what the backend moved', async () => {
+    // A postOps Limit truncates what the caller receives; the transfer
+    // already happened, so recording the capped length would
+    // under-report networkBytes by whatever the cap removed.
+    const ws = mkWs(new CapReadsTo3())
+    await ws.fs.writeFile('/data/a.txt', '0123456789')
+    expect(DEC.decode(await ws.fs.readFile('/data/a.txt'))).toBe('012')
+    expect(ws.records.find((r) => r.op === 'read')?.bytes).toBe(10)
+  })
+
+  it('does not count a denied warm read as network traffic', async () => {
+    // The deny suppresses a result the cache produced, so nothing
+    // crossed the network; recording it against the backend would count
+    // traffic that never happened.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true, kind: 's3' })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace(
+      { '/m': resource },
+      { mode: MountMode.WRITE, ops, policies: [new DenyBigReads()] },
+    )
+    await ws.cache.set('/m/a.txt', new TextEncoder().encode('0123456789'))
+    ws.records.length = 0
+    await expect(ws.fs.readFile('/m/a.txt')).rejects.toThrow(PolicyDenied)
+    const read = ws.records.find((r) => r.op === 'read')
+    expect(read?.source).toBe('ram')
+    expect(read?.isCache).toBe(true)
+    expect(ws.networkBytes).toBe(0)
   })
 
   it('records the bytes a post-denied read moved', async () => {

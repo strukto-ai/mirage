@@ -33,6 +33,7 @@ export interface IOResultInit {
   reads?: Record<string, ByteSource>
   writes?: Record<string, ByteSource>
   cache?: string[]
+  opBytes?: number | null
   producer?: Producer | null
 }
 
@@ -43,6 +44,13 @@ export class IOResult {
   reads: Record<string, ByteSource>
   writes: Record<string, ByteSource>
   cache: string[]
+  // Bytes the backend moved for a single VFS op, when that differs
+  // from what the caller receives. Only the op door sets it, and only
+  // when a postOps Limit truncated the result: the transfer already
+  // happened, so an accounting caller that measured the delivered
+  // bytes would under-report it. Null everywhere else, which means
+  // "the result is the measure".
+  opBytes: number | null
   // Provenance of this result (which command, spanning which
   // mounts); merge keeps the rightmost producer, mirroring whose
   // stream the shell shows. The workspace boundary hands it to the
@@ -58,6 +66,7 @@ export class IOResult {
     this.reads = init.reads ?? {}
     this.writes = init.writes ?? {}
     this.cache = init.cache ?? []
+    this.opBytes = init.opBytes ?? null
     this.producer = init.producer ?? null
     this.streamSource = null
   }
@@ -116,6 +125,7 @@ export class IOResult {
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },
       cache: [...this.cache, ...other.cache],
+      opBytes: other.opBytes ?? this.opBytes,
       producer: other.producer,
     })
     result.streamSource = other
