@@ -47,3 +47,26 @@ describe('BaseResource index', () => {
     expect(r.index).toBeInstanceOf(RedisIndexCacheStore)
   })
 })
+
+describe('BaseResource close', () => {
+  it('closes the index, once', async () => {
+    const r = new Probe()
+    let closes = 0
+    const index = r.index as RAMIndexCacheStore & { close: () => Promise<void> }
+    index.close = () => {
+      closes++
+      return Promise.resolve()
+    }
+    await r.close()
+    await r.close()
+    // Without this the redis client behind `index: {type: redis}` stays
+    // connected past closeWorkspace and the Node process never exits.
+    expect(closes).toBe(1)
+  })
+
+  it('does not build an index for a resource that never used one', async () => {
+    const r = new Probe()
+    await r.close()
+    expect((r as unknown as { _index?: unknown })._index).toBeUndefined()
+  })
+})

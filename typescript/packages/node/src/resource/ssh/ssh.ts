@@ -98,8 +98,9 @@ export class SSHResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return this.accessor.close()
+  override async close(): Promise<void> {
+    await this.accessor.close()
+    await super.close()
   }
 
   ops(): readonly RegisteredOp[] {

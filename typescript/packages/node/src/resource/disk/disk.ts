@@ -130,10 +130,6 @@ export class DiskResource extends BaseResource implements Resource {
     await mkdir(this.root, { recursive: true })
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   // A real filesystem reports real numbers (QUOTA). GNU df: used counts
   // reserved blocks (blocks - bfree), available excludes them (bavail).
   override async statfs(): Promise<CapacityResult> {

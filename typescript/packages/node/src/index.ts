@@ -96,6 +96,7 @@ export {
   type DatabricksProfile,
 } from './resource/databricks_volume/profile.ts'
 export {
+  normalizeS3Config,
   redactConfig as redactS3Config,
   type S3Config,
   type S3ConfigRedacted,

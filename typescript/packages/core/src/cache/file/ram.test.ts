@@ -129,4 +129,16 @@ describe('RAMFileCacheStore', () => {
     expect(c.cacheSize).toBe(2)
     expect(c.cacheEntries).toBe(1)
   })
+
+  it('evictPaths drops the named keys synchronously', async () => {
+    const c = new RAMFileCacheStore({ limit: 1024 })
+    await c.set('/d/a.txt', encode('12345'))
+    await c.set('/d/b.txt', encode('xy'))
+    // No await on the eviction itself: the snapshot load path is sync,
+    // which is the whole reason this seam exists beside remove().
+    c.evictPaths(['/d/a.txt', '/d/missing.txt'])
+    expect(c.cacheSize).toBe(2)
+    expect(c.cacheEntries).toBe(1)
+    expect(await c.get('/d/a.txt')).toBeNull()
+  })
 })

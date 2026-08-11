@@ -34,6 +34,14 @@ describe('resolveControlStores', () => {
     expect(stores.owned).toBe(false)
   })
 
+  it('claims a passed provider when told it owns it', () => {
+    // What the config loader and the daemon pass: a store built for
+    // this workspace alone, whose client nothing else would release.
+    const provider = new RAMWorkspaceStateStore()
+    const stores = resolveControlStores('ws1', { store: provider, ownsStore: true })
+    expect(stores.owned).toBe(true)
+  })
+
   it('lets plane overrides win over the provider', () => {
     const provider = new RAMWorkspaceStateStore()
     const observe = provider.observer('other')

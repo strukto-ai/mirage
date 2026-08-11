@@ -72,10 +72,6 @@ export abstract class HfResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   commands(): readonly RegisteredCommand[] {
     return HF_COMMANDS
   }

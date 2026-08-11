@@ -131,8 +131,9 @@ export class RedisResource extends BaseResource implements Resource {
     await this.store.client()
   }
 
-  close(): Promise<void> {
-    return this.store.close()
+  override async close(): Promise<void> {
+    await this.store.close()
+    await super.close()
   }
 
   client(): Promise<RedisClientType> {

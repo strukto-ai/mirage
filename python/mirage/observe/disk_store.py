@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import stat
 
 import aiofiles
 import aiofiles.os
@@ -85,6 +86,22 @@ class DiskObserverStore(ObserverStoreBase):
         for d in reversed(dirs):
             await aiofiles.os.rmdir(d)
 
+    async def _root_is_dir(self) -> bool:
+        """Whether the recorder's directory exists.
+
+        ``os.path.isdir`` would answer False for an unreadable root as
+        well as a missing one, and an unreadable root must not read as
+        an empty recording; only "nothing written yet" does.
+
+        Returns:
+            bool: True when root exists and is a directory.
+        """
+        try:
+            st = await aiofiles.os.stat(self._root)
+        except FileNotFoundError:
+            return False
+        return stat.S_ISDIR(st.st_mode)
+
     async def _walk(self) -> tuple[list[str], list[str]]:
         """List all file paths and directories under root.
 
@@ -94,7 +111,7 @@ class DiskObserverStore(ObserverStoreBase):
         """
         files: list[str] = []
         dirs: list[str] = []
-        if not await aiofiles.os.path.isdir(self._root):
+        if not await self._root_is_dir():
             return files, dirs
         stack = [self._root]
         while stack:

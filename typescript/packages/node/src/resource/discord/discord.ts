@@ -69,10 +69,6 @@ export class DiscordResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   commands(): readonly RegisteredCommand[] {
     return DISCORD_COMMANDS
   }

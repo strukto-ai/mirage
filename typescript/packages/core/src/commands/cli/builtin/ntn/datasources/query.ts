@@ -14,6 +14,7 @@
 
 import { FlagView } from '../../../../spec/types.ts'
 import { NotionAPIError, type NotionTransport } from '../../../../../core/notion/_client.ts'
+import { HintedAPIError, sourceHint } from '../failure.ts'
 import {
   getDataSource,
   getDatabase,
@@ -76,12 +77,24 @@ async function resolveSource(
   transport: NotionTransport,
   ref: string,
 ): Promise<Record<string, unknown>> {
+  let first: NotionAPIError
   try {
     return await getDataSource(transport, ref)
   } catch (err) {
     if (!(err instanceof NotionAPIError) || err.status !== 404) throw err
+    first = err
   }
-  const database = await getDatabase(transport, ref)
+  // The database endpoint is a fallback, so its own 404 is not the answer to
+  // report: upstream names the *data source* the operand failed to be and adds
+  // one hint covering both, where reporting the second miss would tell the user
+  // their data source id is not a database id, which they never claimed it was.
+  let database: Record<string, unknown>
+  try {
+    database = await getDatabase(transport, ref)
+  } catch (err) {
+    if (!(err instanceof NotionAPIError) || err.status !== 404) throw err
+    throw new HintedAPIError(first, sourceHint(ref))
+  }
   const stubs: unknown[] = Array.isArray(database.data_sources) ? database.data_sources : []
   const head = stubs[0]
   if (head === undefined) throw new Error(`database ${ref} has no data sources`)

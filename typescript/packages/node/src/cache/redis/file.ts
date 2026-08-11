@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  CacheType,
   type FileCache,
   defaultFingerprint,
   globEscape,
   parseLimit,
   type PathSpec,
+  registerFileCacheStore,
   validateMaxDrainBytes,
 } from '@struktoai/mirage-core'
 import type { RedisClientType } from 'redis'
@@ -158,6 +160,14 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     }
   }
 
+  evictPaths(_paths: Iterable<string>): void {
+    // No-op: the redis cache holds nothing restored from a snapshot
+    // (only RAM caches are repopulated at load), and the load path is
+    // sync so a redis delete cannot be awaited here. To drop live
+    // redis-cached entries, call `remove(key)` per path from an async
+    // context. Mirrors Python `RedisFileCacheStore.evict_paths`.
+  }
+
   async clear(): Promise<void> {
     this.drainTasks.clear()
     const c = await this.cacheClient()
@@ -184,3 +194,15 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     return out
   }
 }
+
+// Registered on import so a declarative `cache: {type: redis}` resolves
+// here: core owns buildFileCache but cannot import this package. Same
+// seam the runtimes use (`registerRuntime`).
+registerFileCacheStore(CacheType.REDIS, (config) => {
+  return new RedisFileCacheStore({
+    ...(config.limit !== undefined ? { cacheLimit: config.limit } : {}),
+    ...(config.maxDrainBytes !== undefined ? { maxDrainBytes: config.maxDrainBytes } : {}),
+    ...(config.url !== undefined ? { url: config.url } : {}),
+    ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
+  })
+})

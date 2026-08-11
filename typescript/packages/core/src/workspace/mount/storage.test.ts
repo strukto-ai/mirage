@@ -23,9 +23,6 @@ class StoreResource extends BaseResource implements Resource {
   open(): Promise<void> {
     return Promise.resolve()
   }
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
 }
 
 // A resource pinned by config, the way disk/s3/redis are: two instances
@@ -39,9 +36,6 @@ class RootedResource extends BaseResource implements Resource {
     return `${this.kind}:${this.root}`
   }
   open(): Promise<void> {
-    return Promise.resolve()
-  }
-  close(): Promise<void> {
     return Promise.resolve()
   }
 }

@@ -137,6 +137,7 @@ export abstract class BaseResource {
   // each instance a serial number the first time it is asked.
   static #storageCounter = 0
   #storageSeq?: number
+  #closed = false
 
   get index(): IndexCacheStore {
     let store = this._index
@@ -184,5 +185,26 @@ export abstract class BaseResource {
   // truthfully — a real filesystem, or a provider quota — override this.
   statfs(): Promise<CapacityResult> {
     return Promise.resolve({ state: CapacityState.UNKNOWN })
+  }
+
+  /**
+   * Release what this resource owns, exactly once. The base teardown is
+   * the index store: a mount configured `index: {type: redis}` holds a
+   * client that nothing else closes, so without this a Node process
+   * stays alive after `closeWorkspace`.
+   *
+   * A backend with its own handles (a db pool, an ssh channel) overrides
+   * this and calls `super.close()` — its accessor is its own to close,
+   * since the Accessor seam carries no lifecycle of its own.
+   *
+   * Mirrors Python `BaseResource.close` (`resource/base.py`).
+   */
+  async close(): Promise<void> {
+    if (this.#closed) return
+    this.#closed = true
+    // Deliberately `_index`, not the `index` getter: reading the getter
+    // would build a store for a resource that never used one, only to
+    // close it.
+    await this._index?.close()
   }
 }

@@ -104,8 +104,9 @@ export class GridFSResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     await this.accessor.close()
+    await super.close()
   }
 
   commands(): readonly RegisteredCommand[] {

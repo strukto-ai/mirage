@@ -124,10 +124,6 @@ export class S3Resource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   commands(): readonly RegisteredCommand[] {
     return S3_COMMANDS
   }

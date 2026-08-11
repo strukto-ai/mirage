@@ -119,7 +119,7 @@ export class DriftQueue {
  */
 export function installDriftState(
   registry: RegistryLike,
-  cache: { remove(key: string): Promise<void> },
+  cache: { evictPaths(paths: Iterable<string>): void },
   drift: DriftQueue,
   state: { fingerprints?: FingerprintEntry[]; live_only_mounts?: string[] },
   policy: DriftPolicy,
@@ -128,9 +128,10 @@ export function installDriftState(
   const entries = state.fingerprints ?? []
   if (entries.length === 0) return
   if (policy === DriftPolicy.OFF) {
-    for (const e of entries) {
-      void cache.remove(e.path)
-    }
+    // Synchronously: this function returns into a sync `fromState`, so
+    // a fire-and-forget `remove()` would let the very next read be
+    // served the snapshot bytes OFF exists to bypass.
+    cache.evictPaths(entries.map((e) => e.path))
     return
   }
   for (const e of entries) {

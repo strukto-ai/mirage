@@ -54,10 +54,6 @@ export class QdrantResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   ops(): readonly RegisteredOp[] {
     return QDRANT_OPS
   }

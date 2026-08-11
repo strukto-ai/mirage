@@ -36,6 +36,20 @@ def leaf(*path: str):
     return node
 
 
+def verb(*path: str):
+    """The handler a leaf wraps, for patching the module it lives in.
+
+    Every ntn leaf is registered as ``partial(guarded, verb)`` so an API
+    failure answers in upstream's voice, which puts the partial where the
+    function used to be. Reach through it the same way a ``@command``
+    wrapper is reached through ``__wrapped__``.
+
+    Args:
+        path (str): the subcommand words under the root.
+    """
+    return leaf(*path).fn.args[0]
+
+
 def test_tree_shape_matches_the_official_grammar():
     assert NTN.name == "ntn"
     assert NTN.config_model is NotionConfig
@@ -133,7 +147,7 @@ async def test_page_id_is_taken_from_the_operand(monkeypatch):
         return {"id": page_id}
 
     monkeypatch.setitem(
-        leaf("pages", "trash").fn.__globals__, "update_page", fake_update)
+        verb("pages", "trash").__globals__, "update_page", fake_update)
     ws = Workspace({})
     ws.register_cli("ntn", NTN, CONFIG)
     io = await ws.execute("ntn pages trash P9 --yes")

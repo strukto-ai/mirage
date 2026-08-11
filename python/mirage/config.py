@@ -224,6 +224,28 @@ class StoreBlock(BaseModel):
     observer: StoreGroupBlock | None = None
     workspace: StoreGroupBlock | None = None
 
+    @model_validator(mode="after")
+    def _s3_hosts_only_the_workspace_group(self) -> "StoreBlock":
+        """Refuse an s3 override on a plane the s3 store cannot host.
+
+        The type alone permits it on any group, but ``S3WorkspaceStateStore``
+        raises when asked to build a namespace or observer plane, so
+        without this the config loads and the workspace fails to
+        construct.
+
+        Raises:
+            ValueError: an s3 group was given for namespace or observer.
+        """
+        for group in ("namespace", "observer"):
+            block = getattr(self, group)
+            if block is not None and block.type == "s3":
+                raise ValueError(
+                    f"config `store.{group}` cannot be s3: the s3 store hosts "
+                    f"only the sessions+meta group; keep the {group} plane on "
+                    "ram or redis and pass the s3 store as the 'workspace' "
+                    "group override")
+        return self
+
 
 class GuardBlock(BaseModel):
     """One declarative command guard (the yaml ``guards:`` entries).
@@ -492,7 +514,7 @@ class WorkspaceConfig(BaseModel):
         """Produce kwargs ready to splat into ``Workspace(**kwargs)``.
 
         Async because building a mount's resource can be: a backend
-        whose setup needs I/O does it in ``BaseResource.create``. Only
+        whose setup needs I/O does it in ``BaseResource.build``. Only
         the resources are awaited — ``Workspace(**kwargs)`` itself stays
         synchronous. Mirrors the TypeScript ``configToWorkspaceArgs``.
 

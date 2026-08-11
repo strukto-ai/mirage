@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { IOResult } from '../io/types.ts'
@@ -32,6 +31,7 @@ import type { CLIInstall } from './cli/types.ts'
 import { resolveLimit } from '../policy/index.ts'
 import { JobTable } from '../shell/job_table.ts'
 import type { ShellParser } from '../shell/parse.ts'
+import { buildFileCache } from './workspace/cache.ts'
 import { DriftQueue, installDriftState } from './snapshot/drift.ts'
 import { snapshot as writeSnapshot } from './snapshot/api.ts'
 import { readFileBytes } from './snapshot/fs.ts'
@@ -194,7 +194,7 @@ export class Workspace {
     )
     this.observer = new Observer(stores.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
-    this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
+    this.cache = buildFileCache(options.cache, options.cacheLimit)
     this.registry.attachFileCache(this.cache)
     // Only an explicit agentId claims the workspace user; a bare launch
     // adopts whatever identity the namespace store holds.

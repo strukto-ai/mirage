@@ -13,19 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  buildFileCache,
   CLISpec,
+  DiskNamespaceStore,
+  DiskWorkspaceStateStore,
   RAMNamespaceStore,
   RAMWorkspaceStateStore,
   RedisFileCacheStore,
   RedisNamespaceStore,
   RedisWorkspaceStateStore,
   ScriptSource,
+  Workspace,
 } from '@struktoai/mirage-node'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  checkWorkspaceConfigFile,
   interpolateEnv,
   loadWorkspaceConfig,
   loadWorkspaceConfigFile,
@@ -216,26 +222,19 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reference a \.py\/\.js file/)
   })
 
-  it('builds a redis index config from an index block', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { resource: 'ram' } },
-      index: { type: 'redis', url: 'redis://localhost:6379/0', keyPrefix: 'x:' },
-    })
-    const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.index).toEqual({
-      type: 'redis',
-      url: 'redis://localhost:6379/0',
-      keyPrefix: 'x:',
-    })
-  })
-
-  it('builds a redis file cache from a cache block', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { resource: 'ram' } },
-      cache: { type: 'redis', keyPrefix: 'c:' },
-    })
-    const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.cache).toBeInstanceOf(RedisFileCacheStore)
+  // The camelCase spelling of a snake_case config key is a key Python
+  // rejects, so accepting it here would make the same YAML load in one
+  // language and fail in the other. See the snake_case twins below.
+  it('refuses the camelCase spelling of a config key', () => {
+    for (const block of [
+      { index: { type: 'redis', keyPrefix: 'x:' } },
+      { cache: { type: 'redis', keyPrefix: 'c:' } },
+      { cache: { type: 'ram', maxDrainBytes: 8 } },
+    ]) {
+      expect(() => loadWorkspaceConfig({ mounts: { '/': { resource: 'ram' } }, ...block })).toThrow(
+        /unknown (cache|index)/,
+      )
+    }
   })
 
   it('builds a redis state store from a store block (snake_case key_prefix)', async () => {
@@ -246,6 +245,30 @@ describe('configToWorkspaceArgs', () => {
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.store).toBeInstanceOf(RedisWorkspaceStateStore)
     expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RedisNamespaceStore)
+    // A store built here has no other owner, so the workspace must be
+    // told to close it — without this the redis client is never quit.
+    expect(args.options.ownsStore).toBe(true)
+  })
+
+  it('hands the workspace a store it will actually close', async () => {
+    // The store built here has no other owner, so a workspace that
+    // treats it as borrowed leaks it — for redis or s3 that is a client
+    // that is never quit, once per workspace the daemon creates.
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      store: { type: 'ram' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const store = args.options.store
+    if (store === undefined) throw new Error('the store block built no store')
+    let closed = 0
+    store.close = () => {
+      closed++
+      return Promise.resolve()
+    }
+    const ws = new Workspace({}, args.options)
+    await ws.close()
+    expect(closed).toBe(1)
   })
 
   it('builds a ram state store from a store block', async () => {
@@ -256,6 +279,63 @@ describe('configToWorkspaceArgs', () => {
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.store).toBeInstanceOf(RAMWorkspaceStateStore)
     expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
+  })
+
+  it('builds a disk state store from a store block', async () => {
+    // `store: {type: disk}` used to build a RAM store here while Python
+    // built a disk one, so state a user believed was persisted was not.
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-store-'))
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      store: { type: 'disk', root: dir },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.store).toBeInstanceOf(DiskWorkspaceStateStore)
+    expect(args.options.store?.namespace('ws1')).toBeInstanceOf(DiskNamespaceStore)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('takes an s3 group as the workspace override, credentials intact', async () => {
+    // An s3 group IS an S3Config, whose snake_case keys do not camelize
+    // into the TS field names (`aws_access_key_id` is `accessKeyId`, not
+    // `awsAccessKeyId`), so a plain camelize would silently drop the
+    // credentials and endpoint and authenticate against the wrong thing.
+    const raw = {
+      mounts: { '/': { resource: 'ram' } },
+      store: {
+        type: 'ram',
+        workspace: {
+          type: 's3',
+          bucket: 'b',
+          region: 'us-east-1',
+          aws_access_key_id: 'AKIA',
+          aws_secret_access_key: 'secret',
+          endpoint_url: 'http://localhost:9000',
+          path_style: true,
+          timeout: 5,
+        },
+      },
+    }
+    const cfg = loadWorkspaceConfig(raw)
+    const group = (cfg.store as unknown as { workspace: Record<string, unknown> }).workspace
+    expect(group.aws_access_key_id).toBe('AKIA')
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
+    const s3 = (
+      args.options.store as unknown as {
+        workspaceOverride: { config: Record<string, unknown> }
+      }
+    ).workspaceOverride
+    expect(s3.config).toMatchObject({
+      bucket: 'b',
+      region: 'us-east-1',
+      accessKeyId: 'AKIA',
+      secretAccessKey: 'secret',
+      endpoint: 'http://localhost:9000',
+      forcePathStyle: true,
+      timeoutMs: 5000,
+      keyPrefix: 'mirage/',
+    })
   })
 
   it('routes a per-group override to its own backend', async () => {
@@ -336,13 +416,20 @@ describe('configToWorkspaceArgs', () => {
     })
   })
 
-  it('builds a redis cache from snake_case key_prefix / max_drain_bytes', async () => {
+  it('hands a redis cache to the workspace as config, not as a store', async () => {
+    // The workspace builds it, so the workspace closes it; building it
+    // here would leave the redis client with no owner at shutdown.
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
       cache: { type: 'redis', key_prefix: 'c:', max_drain_bytes: 1024 },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.cache).toBeInstanceOf(RedisFileCacheStore)
+    expect(args.options.cache).toEqual({
+      type: 'redis',
+      keyPrefix: 'c:',
+      maxDrainBytes: 1024,
+    })
+    expect(buildFileCache(args.options.cache)).toBeInstanceOf(RedisFileCacheStore)
   })
 
   it('coerces consistency (default lazy, accepts always, rejects junk)', async () => {
@@ -429,14 +516,16 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/reason/)
   })
 
-  it('a guard with an unknown key fails loud', async () => {
+  it('a guard with an unknown key fails loud', () => {
     // A typo like `path:` would otherwise widen the guard into an
-    // unconditional denial (mirrors Python's extra="forbid").
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/data': { resource: 'ram' } },
-      guards: [{ reason: 'x', path: ['/data/prod/*'] }],
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown guard key/)
+    // unconditional denial (mirrors Python's extra="forbid"), and like
+    // Python it must fail at load, not when the args are built.
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/data': { resource: 'ram' } },
+        guards: [{ reason: 'x', path: ['/data/prod/*'] }],
+      }),
+    ).toThrow(/unknown guard key/)
   })
 })
 
@@ -457,12 +546,13 @@ describe('clis section', () => {
     })
   })
 
-  it('refuses unknown keys in a clis entry', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/data': { resource: 'ram' } },
-      clis: { sl: { cli: 'slack', mode: 'write' } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown keys: mode/)
+  it('refuses unknown keys in a clis entry', () => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/data': { resource: 'ram' } },
+        clis: { sl: { cli: 'slack', mode: 'write' } },
+      }),
+    ).toThrow(/unknown cli `sl` key `mode`/)
   })
 
   it('a script entry synthesizes a spec', async () => {
@@ -536,5 +626,79 @@ describe('clis section', () => {
       clis: { sl: { cli: 'slack', runtime: 'monty' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
+  })
+})
+
+describe('CLI to daemon round trip', () => {
+  it('the shape a CLI sends passes the daemon check unchanged', () => {
+    // `workspace create` checks the file client-side (env interpolation
+    // needs the user's shell) and POSTs the result; the daemon runs the
+    // same check on what arrives. Camelizing before sending would force
+    // the loader to accept its own output, and with it the camelCase
+    // spellings Python refuses.
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-wire-'))
+    const file = join(dir, 'w.yaml')
+    writeFileSync(
+      file,
+      [
+        'mounts:',
+        '  /:',
+        '    resource: ram',
+        'default_session_id: mysess',
+        'cache:',
+        '  type: ram',
+        '  limit: 256MB',
+        '  max_drain_bytes: 1048576',
+        '',
+      ].join('\n'),
+    )
+    const wire = checkWorkspaceConfigFile(file)
+    expect(Object.keys(wire)).toContain('default_session_id')
+    const cfg = loadWorkspaceConfig(wire)
+    expect(cfg.defaultSessionId).toBe('mysess')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// integ/fixtures/config/{rejected,accepted}.json are the contract: the
+// python suite (tests/config/test_loader.py) reads the same two files, so
+// a config that loads in one language and not the other fails a test
+// until both loaders agree.
+function fixtureCases(name: string): { name: string; config: Record<string, unknown> }[] {
+  const path = fileURLToPath(
+    new URL(`../../../../integ/fixtures/config/${name}.json`, import.meta.url),
+  )
+  return (
+    JSON.parse(readFileSync(path, 'utf8')) as {
+      cases: { name: string; config: Record<string, unknown> }[]
+    }
+  ).cases
+}
+
+describe('shared rejection fixture', () => {
+  const cases = fixtureCases('rejected')
+
+  it('has cases', () => {
+    expect(cases.length).toBeGreaterThan(0)
+  })
+
+  it.each(cases)('refuses $name', ({ config }) => {
+    expect(() => loadWorkspaceConfig(config)).toThrow()
+  })
+})
+
+describe('shared acceptance fixture', () => {
+  // The key tables are copied by hand from Python's models, so the drift
+  // this catches is a field added there and never mirrored here: every
+  // key of every block appears in the fixture, and an unmirrored one
+  // comes back as `unknown ... key`.
+  const cases = fixtureCases('accepted')
+
+  it('has cases', () => {
+    expect(cases.length).toBeGreaterThan(0)
+  })
+
+  it.each(cases)('accepts $name', ({ config }) => {
+    expect(() => loadWorkspaceConfig(config)).not.toThrow()
   })
 })

@@ -78,10 +78,6 @@ export class LangfuseResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   commands(): readonly RegisteredCommand[] {
     return LANGFUSE_COMMANDS
   }

@@ -30,7 +30,7 @@ jobs:
           enable-cache: true
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 

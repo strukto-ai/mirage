@@ -17,10 +17,13 @@ import { OpRecord } from '../../observe/record.ts'
 import type { Resource } from '../../resource/base.ts'
 import { FileStat } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
+import { DriftPolicy } from '../../types.ts'
 import {
   captureFingerprints,
   checkDrift,
   ContentDriftError,
+  DriftQueue,
+  installDriftState,
   liveOnlyMountPrefixes,
 } from './drift.ts'
 
@@ -199,5 +202,33 @@ describe('checkDrift', () => {
     await expect(
       checkDrift(makeRegistry([mount]), makeStatFn(stats), '/gmail/a', 'fp-snap'),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('installDriftState under DriftPolicy.OFF', () => {
+  it('evicts the snapshot bytes before it returns', () => {
+    // fromState is sync, so a fire-and-forget remove() would let the
+    // very next read be served the bytes OFF exists to bypass.
+    const evicted: string[] = []
+    const cache = {
+      evictPaths: (paths: Iterable<string>): void => {
+        evicted.push(...paths)
+      },
+    }
+    const drift = new DriftQueue()
+    installDriftState(
+      { mountFor: () => null, allMounts: () => [] },
+      cache,
+      drift,
+      {
+        fingerprints: [
+          { path: '/d/a.txt', mount_prefix: '/d', fingerprint: 'f1' },
+          { path: '/d/b.txt', mount_prefix: '/d', fingerprint: 'f2' },
+        ],
+      },
+      DriftPolicy.OFF,
+    )
+    expect(evicted).toEqual(['/d/a.txt', '/d/b.txt'])
+    expect(drift.pending).toBe(false)
   })
 })

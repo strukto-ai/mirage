@@ -193,7 +193,7 @@ export {
 export { OpRecord, type OpRecordInit } from './observe/record.ts'
 export { LogEntry, type LogEntryInit } from './observe/log_entry.ts'
 export { type EventDict, Observer } from './observe/observer.ts'
-export { type ObserverStore, RAMObserverStore } from './observe/store.ts'
+export { type ObserverStore, ObserverStoreBase, RAMObserverStore } from './observe/store.ts'
 export { NamespaceStore, type NodeFields } from './workspace/mount/namespace/store.ts'
 export { RAMNamespaceStore } from './workspace/mount/namespace/ram.ts'
 export { HISTORY_PREFIX, HistoryViewResource } from './resource/history/history.ts'
@@ -452,6 +452,13 @@ export { Precision, ProvisionResult, type ProvisionResultInit } from './provisio
 export { IndexEntry, type IndexEntryInit, ResourceType } from './cache/index/config.ts'
 export { drainBudget, type FileCache, validateMaxDrainBytes } from './cache/file/mixin.ts'
 export { CacheEntry, type CacheEntryInit } from './cache/file/entry.ts'
+export { CacheType, type CacheConfig, type RedisCacheConfig } from './cache/file/config.ts'
+export {
+  buildFileCache,
+  registerFileCacheStore,
+  type FileCacheFactory,
+  type FileCacheStore,
+} from './workspace/workspace/cache.ts'
 export { defaultFingerprint, globEscape, parseLimit } from './cache/file/utils.ts'
 export { RAMFileCacheStore } from './cache/file/ram.ts'
 export { applyIo, readFingerprint } from './cache/file/io.ts'
