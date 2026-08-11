@@ -38,8 +38,8 @@
 // unreachable.
 //
 // Not implemented yet, tracked as later phases: the remaining Notion
-// operations (users, comment listing, block get/update/delete, database create
-// and update, page properties), and filter/sorts on database query.
+// operations (users, block get/update, database create and update, page
+// properties), and filter/sorts on database query.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -65,6 +65,12 @@ const DEFAULT_PORT = 5091
 // integ/runners/*/adapters, so it names the workspace the battery seeds.
 const DEFAULT_TOKEN = 'integ-test'
 const MAX_PAGE_SIZE = 100
+// The version mirage's own client and the ntn CLI both send, so an unversioned
+// request answers the way every in-repo caller expects.
+const DEFAULT_API_VERSION = '2025-09-03'
+// The generation that moved the column schema off the database and onto the
+// data source. Versions are ISO dates, so they order as strings.
+const DATA_SOURCE_VERSION = '2025-09-03'
 
 const MOUNT = '/notion'
 const PAGE_A = 'aaaa1111-2222-3333-4444-555566667777'
@@ -518,20 +524,28 @@ async function seed(db: PrismaClient, fx: Fixture, workspaceId: string): Promise
       },
     })
   }
-  position = 0
+  // Per parent, not a single running counter, because createComment numbers a
+  // new comment by its parent's existing count. A global counter left a seeded
+  // comment at a position a later write could duplicate and sort ahead of, so
+  // an agent that wrote a comment and read it back saw it above the ones that
+  // were already there.
+  const perParentComment = new Map<string, number>()
   for (const c of fx.comments) {
+    const parentId = c.parent.id ?? ''
+    const at = perParentComment.get(parentId) ?? 0
+    perParentComment.set(parentId, at + 1)
     await db.notionComment.create({
       data: {
         id: c.id,
         workspaceId,
         parentType: c.parent.type,
-        parentId: c.parent.id ?? '',
+        parentId,
         discussionId: c.discussion_id ?? `disc-${c.id}`,
         richTextJson: JSON.stringify(c.rich_text),
         createdTime: c.created_time ?? fx.defaults.created_time,
         lastEditedTime: c.last_edited_time ?? fx.defaults.last_edited_time,
         createdBy: c.created_by ?? fx.defaults.created_by,
-        position: position++,
+        position: at,
       },
     })
   }
@@ -571,6 +585,13 @@ function dataSourceIdOf(databaseId: string): string {
 // database id rides along because Notion kept emitting it through the
 // migration; storage still keys rows by database id, which is the same fact
 // one derivation away.
+//
+// Deliberately not versioned, unlike `databaseJson`: 2022-06-28 answers
+// `{type: "database_id", database_id}` with no data source, so a legacy caller
+// reads a parent shape its generation never had. Left as one shape on purpose,
+// because no in-repo or MCP caller reads `parent` off a row, and the divergence
+// is drawn from Notion's upgrade guide rather than probed against the real API
+// the way the schema behaviour was. Probe it before rendering both.
 function pageParentJson(parentType: string, parentId: string | null): Json {
   if (parentType !== 'database_id' || parentId === null) {
     return parentJson(parentType, parentId)
@@ -606,13 +627,26 @@ function dataSourceJson(row: DatabaseRow): Json {
 }
 
 // The 2025-09-03 database object is a container, not a schema: `properties`
-// moved to the data source and is deliberately absent here, so anything that
-// still reads a column list off a database fails loudly instead of silently
-// rendering an empty one.
-function databaseJson(row: DatabaseRow): Json {
+// moved to the data source and is deliberately absent there, so anything that
+// still reads a column list off a modern database fails loudly instead of
+// silently rendering an empty one.
+//
+// A 2022-06-28 caller gets the pre-split object back, because that is what real
+// Notion answers it with: upstream calls the new behavior a *repurposing* of
+// Retrieve a Database, and a connection on the old version "will continue to
+// work with existing databases that have a single data source". Answering one
+// shape to both versions is worse than either, and it cost a graded run: the
+// agent could not learn a select column's options, wrote a value outside them,
+// and Notion mints an unknown select option rather than rejecting it, so
+// nothing told it. `data_sources` is absent from that answer for the same
+// reason `properties` is absent from the modern one: the field did not exist
+// at that version.
+function databaseJson(row: DatabaseRow, version: string = DEFAULT_API_VERSION): Json {
   const out: Json = {
     object: 'database',
-    data_sources: [{ id: dataSourceIdOf(row.id), name: row.titleText }],
+    ...(version < DATA_SOURCE_VERSION
+      ? { properties: JSON.parse(row.propertiesJson) as Json }
+      : { data_sources: [{ id: dataSourceIdOf(row.id), name: row.titleText }] }),
     id: row.id,
     created_time: row.createdTime,
     last_edited_time: row.lastEditedTime,
@@ -802,6 +836,15 @@ function bearer(req: IncomingMessage): string {
   return auth.startsWith('Bearer ') ? auth.slice(7) : ''
 }
 
+// Notion answers each request in the shape of the version it carries, and the
+// two generations disagree about where a database's column schema lives, so
+// the header has to reach the renderer rather than being read once at startup.
+function apiVersion(req: IncomingMessage): string {
+  const header = req.headers['notion-version']
+  const value = Array.isArray(header) ? header[0] : header
+  return value === undefined || value === '' ? DEFAULT_API_VERSION : value
+}
+
 function asObject(value: unknown): Json {
   return typeof value === 'object' && value !== null ? (value as Json) : {}
 }
@@ -830,7 +873,12 @@ async function childrenOf(
   })) as BlockRow[]
 }
 
-async function searchResults(db: PrismaClient, workspaceId: string, args: Json): Promise<Json[]> {
+async function searchResults(
+  db: PrismaClient,
+  workspaceId: string,
+  args: Json,
+  version: string = DEFAULT_API_VERSION,
+): Promise<Json[]> {
   const filter = asObject(args.filter)
   const query = typeof args.query === 'string' ? args.query.toLowerCase() : ''
   const matches = (title: string): boolean => query === '' || title.toLowerCase().includes(query)
@@ -843,7 +891,9 @@ async function searchResults(db: PrismaClient, workspaceId: string, args: Json):
       orderBy: [{ position: 'asc' }, { id: 'asc' }],
     })) as DatabaseRow[]
     const kept = rows.filter((r) => matches(r.titleText))
-    return filter.value === 'data_source' ? kept.map(dataSourceJson) : kept.map(databaseJson)
+    return filter.value === 'data_source'
+      ? kept.map(dataSourceJson)
+      : kept.map((r) => databaseJson(r, version))
   }
   const rows = (await db.notionPage.findMany({
     where: { workspaceId, inTrash: false },
@@ -1162,6 +1212,40 @@ async function createComment(
   return { status: 200, json: commentJson(row) }
 }
 
+// The read half of the comment surface. Without it a scenario can only write:
+// an evaluator that grades what an agent said in a comment, or an agent that
+// leaves a link in one and reads it back, both need this and both used to hit
+// the route-not-found fallthrough.
+//
+// `block_id` names a page or a block, which is why existence is resolved
+// against both tables the way deleteBlock resolves its operand. Comments are
+// stored parented to a page today, so an existing block carrying none of them
+// answers with an empty list rather than a 404, since upstream 404s only when
+// the id itself is not shared with the integration.
+async function listComments(
+  db: PrismaClient,
+  workspaceId: string,
+  q: URLSearchParams,
+): Promise<Reply> {
+  const blockId = q.get('block_id') ?? ''
+  if (blockId === '') {
+    return apiError(400, 'validation_error', 'block_id should be a valid uuid.')
+  }
+  const page = await db.notionPage.findFirst({ where: { workspaceId, id: blockId } })
+  if (page === null) {
+    const block = await db.notionBlock.findFirst({ where: { workspaceId, id: blockId } })
+    if (block === null) return notFound('block', blockId)
+  }
+  // Upstream returns every discussion's comments in one ascending chronological
+  // flat list, distinguishable by discussion_id, rather than grouped by thread.
+  const rows = (await db.notionComment.findMany({
+    where: { workspaceId, parentId: blockId },
+    orderBy: [{ position: 'asc' }, { id: 'asc' }],
+  })) as CommentRow[]
+  const size = intOr(q.get('page_size'), MAX_PAGE_SIZE)
+  return { status: 200, json: pageOf(rows.map(commentJson), q.get('start_cursor'), size) }
+}
+
 // A child page is one object in two tables (see the schema's NotionPage note),
 // so trashing it has to move both rows: the NotionPage row is what /search and
 // a database query read, the NotionBlock row is what the parent's children
@@ -1375,7 +1459,7 @@ async function handle(
       where: { workspaceId: ws, id },
     })) as DatabaseRow | null
     if (row === null) return notFound('database', id)
-    return { status: 200, json: databaseJson(row) }
+    return { status: 200, json: databaseJson(row, apiVersion(req)) }
   }
 
   if (method === 'GET' && parts.length === 4 && parts[1] === 'blocks' && parts[3] === 'children') {
@@ -1385,7 +1469,7 @@ async function handle(
   }
 
   if (method === 'POST' && parts.length === 2 && parts[1] === 'search') {
-    const results = await searchResults(db, ws, body)
+    const results = await searchResults(db, ws, body, apiVersion(req))
     const size = intOr(body.page_size, MAX_PAGE_SIZE)
     return { status: 200, json: pageOf(results, cursorOf(body.start_cursor), size) }
   }
@@ -1413,6 +1497,10 @@ async function handle(
 
   if (method === 'DELETE' && parts.length === 3 && parts[1] === 'blocks') {
     return deleteBlock(db, ws, parts[2] ?? '')
+  }
+
+  if (method === 'GET' && parts.length === 2 && parts[1] === 'comments') {
+    return listComments(db, ws, q)
   }
 
   if (method === 'POST' && parts.length === 2 && parts[1] === 'comments') {
@@ -1547,6 +1635,10 @@ async function toolPayload(db: PrismaClient, name: string, args: Json): Promise<
       where: { workspaceId: ws, id },
     })) as DatabaseRow | null
     if (row === null) throw new Error(`mock notion: unknown database ${id}`)
+    // No version to read: a tool call carries no Notion-Version, and this arm
+    // exists to render byte-identically to the REST arm, which mirage's own
+    // 2025-09-03 client drives. An external MCP server that pins 2022-06-28
+    // reaches the fake over REST and gets that version's shape from there.
     return databaseJson(row)
   }
   if (name === 'API-retrieve-a-data-source') {

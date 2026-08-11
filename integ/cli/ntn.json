@@ -727,6 +727,175 @@
         "stdout": "a0000000-0000-4000-8000-000000000002\tRow page\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_api_comments_empty",
+      "seq": 566056,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 | jq -r '.results | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_comment_create",
+      "seq": 566057,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments -d '{\"parent\":{\"page_id\":\"aaaa1111-2222-3333-4444-555566667777\"},\"rich_text\":[{\"type\":\"text\",\"text\":{\"content\":\"sheet ready\"}}]}' | jq -r '.object, .parent.page_id, .rich_text[0].text.content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "comment\naaaa1111-2222-3333-4444-555566667777\nsheet ready\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_comment_create_second",
+      "seq": 566058,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments -d '{\"parent\":{\"page_id\":\"aaaa1111-2222-3333-4444-555566667777\"},\"rich_text\":[{\"type\":\"text\",\"text\":{\"content\":\"second note\"}}]}' | jq -r '.object'",
+      "expect": {
+        "exit": 0,
+        "stdout": "comment\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_comments_list_in_write_order",
+      "seq": 566059,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 | jq -r '(.results|length), .results[0].rich_text[0].text.content, .results[1].rich_text[0].text.content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\nsheet ready\nsecond note\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_comments_page_size",
+      "seq": 566060,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 page_size==1 | jq -r '(.results|length), .has_more, .next_cursor'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\ntrue\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_comments_cursor",
+      "seq": 566061,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 page_size==1 start_cursor==1 | jq -r '.results[0].rich_text[0].text.content, .has_more'",
+      "expect": {
+        "exit": 0,
+        "stdout": "second note\nfalse\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_database_legacy_version_has_properties",
+      "seq": 566062,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/databases/eeee1111-2222-3333-4444-555566667777 --notion-version 2022-06-28 | jq -r '.properties.Stage.select.options[].name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Draft\nReview\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_database_legacy_version_has_no_data_sources",
+      "seq": 566063,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/databases/eeee1111-2222-3333-4444-555566667777 --notion-version 2022-06-28 | jq -r '.data_sources // \"absent\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "absent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_database_default_version_has_no_properties",
+      "seq": 566064,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/databases/eeee1111-2222-3333-4444-555566667777 | jq -r '.properties // \"absent\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "absent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_search_legacy_version_has_properties",
+      "seq": 566065,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search --notion-version 2022-06-28 -d '{\"filter\":{\"property\":\"object\",\"value\":\"database\"}}' | jq -r '.results[0].properties.Stage.type'",
+      "expect": {
+        "exit": 0,
+        "stdout": "select\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ntn_api_comments_missing_block_id",
+      "seq": 566066,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Public API request failed (400 Bad Request validation_error): block_id should be a valid uuid.\n"
+      }
+    },
+    {
+      "id": "ntn_api_comments_unknown_block",
+      "seq": 566067,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/comments block_id==11111111-1111-1111-1111-111111111111",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Public API request failed (404 Not Found object_not_found): Could not find block with ID: 11111111-1111-1111-1111-111111111111. Make sure the relevant pages and databases are shared with your integration.\n"
+      }
+    },
+    {
+      "id": "ntn_datasources_query_unknown_id",
+      "seq": 566068,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query 11111111-1111-1111-1111-111111111111",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Public API request failed (404 Not Found object_not_found): Could not find data source with ID: 11111111-1111-1111-1111-111111111111. Make sure the relevant pages and databases are shared with your integration.\n  hint: Could not find a data source or database with ID `11111111-1111-1111-1111-111111111111`. Check that the ID or URL points to a data source or database shared with your integration.\n"
+      }
     }
   ]
 }

@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.commands.cli.builtin.ntn.failure import HintedAPIError, source_hint
 from mirage.commands.cli.builtin.ntn.util import (first_text, notion_config,
                                                   parse_json_text, pretty_json,
                                                   property_cell)
@@ -84,7 +85,18 @@ async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
     except NotionAPIError as miss:
         if miss.status != 404:
             raise
-    database = await get_database(config, ref)
+        first = miss
+    # The database endpoint is a fallback, so its own 404 is not the
+    # answer to report: upstream names the *data source* the operand
+    # failed to be and adds one hint covering both, where reporting the
+    # second miss would tell the user their data source id is not a
+    # database id, which they never claimed it was.
+    try:
+        database = await get_database(config, ref)
+    except NotionAPIError as second:
+        if second.status != 404:
+            raise
+        raise HintedAPIError(first, source_hint(ref)) from second
     stubs = database.get("data_sources") or []
     if not stubs or not isinstance(stubs[0], dict):
         raise UsageError(f"database {ref} has no data sources")

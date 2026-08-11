@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.cli.builtin.ntn.api import api
 from mirage.commands.cli.builtin.ntn.auth.token import token
 from mirage.commands.cli.builtin.ntn.datasources.query import query
 from mirage.commands.cli.builtin.ntn.datasources.resolve import resolve
+from mirage.commands.cli.builtin.ntn.failure import guarded
 from mirage.commands.cli.builtin.ntn.pages.create import create
 from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
@@ -74,7 +77,7 @@ NTN = CLISpec(
         CLISpec(
             name="api",
             description="Call the public Notion API (beta)",
-            fn=api,
+            fn=partial(guarded, api),
             write=True,
             rest=API_PATH,
             options=(
@@ -95,7 +98,7 @@ NTN = CLISpec(
             subcommands=(CLISpec(
                 name="token",
                 description="Print the current authentication token",
-                fn=token,
+                fn=partial(guarded, token),
             ), ),
         ),
         CLISpec(
@@ -105,7 +108,7 @@ NTN = CLISpec(
                 CLISpec(
                     name="query",
                     description="Query pages in a data source",
-                    fn=query,
+                    fn=partial(guarded, query),
                     positional=(DATA_SOURCE_ID, ),
                     options=(
                         Option(long="--limit",
@@ -137,7 +140,7 @@ NTN = CLISpec(
                     name="resolve",
                     description=("Resolve a Notion database ID to its "
                                  "data source IDs"),
-                    fn=resolve,
+                    fn=partial(guarded, resolve),
                     positional=(DATABASE_ID, ),
                     options=(JSON_OUT, NOTION_VERSION),
                 ),
@@ -150,14 +153,14 @@ NTN = CLISpec(
                 CLISpec(
                     name="get",
                     description="Retrieve a page as Markdown",
-                    fn=get,
+                    fn=partial(guarded, get),
                     positional=(PAGE_ID, ),
                     options=(JSON_OUT, NOTION_VERSION),
                 ),
                 CLISpec(
                     name="create",
                     description="Create a page from Markdown content",
-                    fn=create,
+                    fn=partial(guarded, create),
                     write=True,
                     options=(
                         CONTENT,
@@ -174,7 +177,7 @@ NTN = CLISpec(
                 CLISpec(
                     name="edit",
                     description="Edit a page's content from Markdown",
-                    fn=edit,
+                    fn=partial(guarded, edit),
                     write=True,
                     positional=(PAGE_ID, ),
                     options=(CONTENT, JSON_OUT, NOTION_VERSION),
@@ -182,7 +185,7 @@ NTN = CLISpec(
                 CLISpec(
                     name="trash",
                     description="Trash a page",
-                    fn=trash,
+                    fn=partial(guarded, trash),
                     write=True,
                     positional=(PAGE_ID, ),
                     options=(
@@ -197,7 +200,7 @@ NTN = CLISpec(
         CLISpec(
             name="whoami",
             description="Show the authenticated Notion user",
-            fn=whoami,
+            fn=partial(guarded, whoami),
             options=(JSON_OUT, PLAIN, NOTION_VERSION),
         ),
     ),

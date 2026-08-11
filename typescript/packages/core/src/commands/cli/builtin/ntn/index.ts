@@ -17,6 +17,7 @@ import { registerCliSpec } from '../../specs.ts'
 import { CLISpec } from '../../types.ts'
 import { Operand, Option, UsageStyle } from '../../../spec/types.ts'
 import { api } from './api.ts'
+import { guarded } from './failure.ts'
 import { token } from './auth/token.ts'
 import { query } from './datasources/query.ts'
 import { resolve } from './datasources/resolve.ts'
@@ -81,7 +82,7 @@ export const NTN = new CLISpec({
     new CLISpec({
       name: 'api',
       description: 'Call the public Notion API (beta)',
-      fn: api,
+      fn: guarded(api),
       write: true,
       rest: API_PATH,
       options: [
@@ -107,7 +108,7 @@ export const NTN = new CLISpec({
         new CLISpec({
           name: 'token',
           description: 'Print the current authentication token',
-          fn: token,
+          fn: guarded(token),
         }),
       ],
     }),
@@ -118,7 +119,7 @@ export const NTN = new CLISpec({
         new CLISpec({
           name: 'query',
           description: 'Query pages in a data source',
-          fn: query,
+          fn: guarded(query),
           positional: [DATA_SOURCE_ID],
           options: [
             new Option({ long: '--limit', type: 'int', description: 'Maximum rows to return' }),
@@ -155,7 +156,7 @@ export const NTN = new CLISpec({
         new CLISpec({
           name: 'resolve',
           description: 'Resolve a Notion database ID to its data source IDs',
-          fn: resolve,
+          fn: guarded(resolve),
           positional: [DATABASE_ID],
           options: [jsonOut(), notionVersion()],
         }),
@@ -168,14 +169,14 @@ export const NTN = new CLISpec({
         new CLISpec({
           name: 'get',
           description: 'Retrieve a page as Markdown',
-          fn: get,
+          fn: guarded(get),
           positional: [PAGE_ID],
           options: [jsonOut(), notionVersion()],
         }),
         new CLISpec({
           name: 'create',
           description: 'Create a page from Markdown content',
-          fn: create,
+          fn: guarded(create),
           write: true,
           options: [
             content(),
@@ -191,7 +192,7 @@ export const NTN = new CLISpec({
         new CLISpec({
           name: 'edit',
           description: "Edit a page's content from Markdown",
-          fn: edit,
+          fn: guarded(edit),
           write: true,
           positional: [PAGE_ID],
           options: [content(), jsonOut(), notionVersion()],
@@ -199,7 +200,7 @@ export const NTN = new CLISpec({
         new CLISpec({
           name: 'trash',
           description: 'Trash a page',
-          fn: trash,
+          fn: guarded(trash),
           write: true,
           positional: [PAGE_ID],
           options: [
@@ -216,7 +217,7 @@ export const NTN = new CLISpec({
     new CLISpec({
       name: 'whoami',
       description: 'Show the authenticated Notion user',
-      fn: whoami,
+      fn: guarded(whoami),
       options: [jsonOut(), plain(), notionVersion()],
     }),
   ],
