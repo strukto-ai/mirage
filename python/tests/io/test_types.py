@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, OpReport
 
 
 async def _async_source(*chunks):
@@ -37,6 +37,33 @@ def test_ioresult_reads_accepts_async_iterator():
 def test_ioresult_cache_default_empty():
     io = IOResult()
     assert io.cache == []
+
+
+def test_op_report_defaults_say_nothing_ran():
+    # A refusal at a pre gate or a backend failure leaves the report
+    # untouched, and an observer records nothing off it.
+    report = OpReport()
+    assert report.completed is False
+    assert report.source is None
+    assert report.bytes is None
+
+
+def test_op_report_served_stamps_the_completion():
+    report = OpReport()
+    report.served("ram", 10)
+    assert report.completed is True
+    assert report.source == "ram"
+    assert report.bytes == 10
+
+
+def test_op_report_served_defaults_to_the_owning_mount():
+    # None source means the owning mount answered; None bytes means the
+    # result is the measure.
+    report = OpReport()
+    report.served()
+    assert report.completed is True
+    assert report.source is None
+    assert report.bytes is None
 
 
 def test_ioresult_cache_set():

@@ -180,7 +180,7 @@ export {
 } from './commands/spec/index.ts'
 export { type ByteSource, IOResult, type IOResultInit, materialize } from './io/types.ts'
 export { CachableAsyncIterator } from './io/cachable_iterator.ts'
-export { CompletedOpError } from './io/errors.ts'
+export { OpReport } from './io/types.ts'
 export {
   asyncChain,
   closeQuietly,

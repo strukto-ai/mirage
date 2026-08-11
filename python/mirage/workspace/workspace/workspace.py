@@ -154,8 +154,10 @@ class Workspace:
         self._namespace = Namespace(self._registry,
                                     store=stores.namespace,
                                     user=agent_id)
-        self._dispatcher = Dispatcher(self._namespace, self._cache,
-                                      consistency)
+        self._dispatcher = Dispatcher(self._namespace,
+                                      self._cache,
+                                      consistency,
+                                      drift=self._drift)
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
 
@@ -675,9 +677,8 @@ class Workspace:
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
-        await self._namespace.ensure_loaded()
-        if self._drift.pending:
-            await self._drift.drain(self)
+        # The door owns pre-dispatch initialization (namespace load,
+        # pending drift checks), so FUSE and the ops facade get it too.
         return await self._dispatcher.dispatch(op, path, **kwargs)
 
     async def stat(self, path: str) -> FileStat:

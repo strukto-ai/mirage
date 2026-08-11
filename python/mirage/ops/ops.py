@@ -17,7 +17,7 @@ import errno
 import time
 from typing import Any
 
-from mirage.io import CompletedOpError
+from mirage.io import OpReport
 from mirage.observe import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.runtime.types import DispatchFn
@@ -190,22 +190,26 @@ class Ops:
         if self._links is not None and op not in NO_FOLLOW_OPS:
             path = self._links.follow(path)
         owner = self._owner(path)
+        report = OpReport()
         try:
-            result, io = await self._dispatch(op, PathSpec.from_str_path(path),
-                                              **kwargs)
-        except CompletedOpError as withheld:
-            # A refusal after the op ran (a post_ops deny, a hard output
-            # cap) suppresses the result, not the effect, so observation
-            # must reflect the op before the error propagates. The
-            # result is gone, so the door's report rides on the error
-            # under the same two names it uses on the way out.
-            if withheld.completed and owner is not None:
-                self._record_op(op, path, owner, withheld.op_source,
-                                withheld.op_bytes, None, kwargs, start)
+            result, _ = await self._dispatch(op,
+                                             PathSpec.from_str_path(path),
+                                             report=report,
+                                             **kwargs)
+        except BaseException:
+            # Anything raised after the op ran (a post_ops deny, a hard
+            # output cap, a bookkeeping failure) suppresses the result,
+            # not the effect, so observation must reflect the op before
+            # the error propagates. The door stamps the report at the
+            # moment of completion, so even a foreign error the door
+            # never defined leaves the transfer on the books.
+            if report.completed and owner is not None:
+                self._record_op(op, path, owner, report.source, report.bytes,
+                                None, kwargs, start)
             raise
         if owner is not None:
-            self._record_op(op, path, owner, io.op_source, io.op_bytes, result,
-                            kwargs, start)
+            self._record_op(op, path, owner, report.source, report.bytes,
+                            result, kwargs, start)
         return result
 
     def _record_op(self, op: str, path: str, owner: OpsMount,

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CompletedOpError } from '../io/errors.ts'
-
 /**
  * A policy returned something a hook may not return. Raised loudly at
  * the seam (never silently dropped): an illegal Action kind for the
@@ -35,13 +33,12 @@ export class PolicyError extends Error {
  * special-case mount-mode refusals (the read-only wording) tell a
  * policy deny apart.
  *
- * It is also a CompletedOpError, which is what carries the door's
- * report (`completed`, `opSource`, `opBytes`) for a postOps refusal:
- * that suppresses the result, not the effect, so the fs facade still
- * has to account for the op. A preOps refusal leaves `completed` false
- * and is recorded nowhere.
+ * It carries no accounting: a postOps refusal suppresses the result,
+ * not the effect, and the door reports the completed op through the
+ * caller's `OpReport`, which covers this error and any foreign one the
+ * same way.
  */
-export class PolicyDenied extends CompletedOpError {
+export class PolicyDenied extends Error {
   readonly code = 'EACCES'
   readonly virtualPath: string
 

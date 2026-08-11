@@ -37,6 +37,52 @@ async def materialize(stream: ByteSource | None) -> bytes:
 
 
 @dataclass
+class OpReport:
+    """The op door's account of what actually ran, filled in place.
+
+    A caller that observes ops passes one per dispatch and reads it
+    back whatever happens next: the door stamps it the moment an op
+    completes, before invalidation, the post gate, or an output cap
+    run, so a failure in any of those cannot erase the fact that the
+    backend already did the work. Riding the result loses that fact on
+    every error, and riding the exception only covers exceptions the
+    door itself defines; a report object covers a foreign error (a
+    cache-store outage, an invalid policy return) the same way.
+
+    Args:
+        completed (bool): the op ran against its answering store. False
+            until the door says otherwise, so a refusal at a pre gate
+            or a backend failure leaves nothing to record.
+        source (str | None): who answered, when that was not the owning
+            mount: "ram" for a warm file-cache hit and for a synthetic
+            namespace answer, since neither contacted a backend. None
+            means the owning mount answered.
+        bytes (int | None): bytes the answering store moved, when the
+            delivered result no longer measures them. None means "the
+            result is the measure".
+    """
+
+    completed: bool = False
+    source: str | None = None
+    bytes: int | None = None
+
+    def served(self,
+               source: str | None = None,
+               moved: int | None = None) -> None:
+        """Stamp the report at the moment an op completes.
+
+        Args:
+            source (str | None): who answered, None for the owning
+                mount.
+            moved (int | None): bytes the answering store moved, None
+                when the result is the measure.
+        """
+        self.completed = True
+        self.source = source
+        self.bytes = moved
+
+
+@dataclass
 class IOResult:
     """Returned by commands to tell workspace how to update cache.
 
@@ -47,22 +93,6 @@ class IOResult:
         reads (dict[str, ByteSource]): Paths read with content or streams.
         writes (dict[str, ByteSource]): Paths written with content or streams.
         cache (list[str]): Paths worth caching (from reads or writes).
-        op_source (str | None): the resource that actually served a
-            single VFS op, when that is not the mount that owns the
-            path: "ram" for a warm file-cache hit and for a synthetic
-            namespace answer, since neither contacted a backend. None
-            means the owning mount served it. Only the op door sets
-            it; without it an accounting caller attributes both to the
-            lexical owner and counts network traffic that never
-            happened.
-        op_bytes (int | None): bytes the backend moved for a single VFS
-            op, when that differs from what the caller receives. Only
-            the op door sets it, and only when a post_ops Limit
-            truncated the result: the transfer already happened, so an
-            accounting caller that measured the delivered bytes would
-            under-report it. None everywhere else, which means "the
-            result is the measure". Facts ride the envelope, so this is
-            a fact about the transfer, never a decision about it.
         producer (Producer | None): provenance of this result (which
             command, spanning which mounts); merge keeps the rightmost
             producer, mirroring whose stream the shell shows. The
@@ -95,8 +125,6 @@ class IOResult:
     reads: dict[str, ByteSource] = field(default_factory=dict)
     writes: dict[str, ByteSource] = field(default_factory=dict)
     cache: list[str] = field(default_factory=list)
-    op_source: str | None = None
-    op_bytes: int | None = None
     producer: Producer | None = None
     _stream_source: "IOResult | None" = field(default=None, repr=False)
 
@@ -160,10 +188,6 @@ class IOResult:
                 **other.writes
             },
             cache=self.cache + other.cache,
-            op_source=(other.op_source
-                       if other.op_source is not None else self.op_source),
-            op_bytes=(other.op_bytes
-                      if other.op_bytes is not None else self.op_bytes),
             producer=other.producer,
         )
         result._stream_source = other

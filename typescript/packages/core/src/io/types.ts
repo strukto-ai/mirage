@@ -26,6 +26,41 @@ export async function materialize(source: ByteSource | null | undefined): Promis
   return concat(chunks)
 }
 
+/**
+ * The op door's account of what actually ran, filled in place.
+ *
+ * A caller that observes ops passes one per dispatch and reads it back
+ * whatever happens next: the door stamps it the moment an op
+ * completes, before invalidation, the post gate, or an output cap run,
+ * so a failure in any of those cannot erase the fact that the backend
+ * already did the work. Riding the result loses that fact on every
+ * error, and riding the exception only covers exceptions the door
+ * itself defines; a report object covers a foreign error (a
+ * cache-store outage, an invalid policy return) the same way.
+ *
+ * `completed` says the op ran against its answering store; false until
+ * the door says otherwise, so a refusal at a pre gate or a backend
+ * failure leaves nothing to record. `source` names who answered when
+ * that was not the owning mount ('ram' for a warm file-cache hit and
+ * for a synthetic namespace answer; null means the owning mount).
+ * `bytes` is what the answering store moved when the delivered result
+ * no longer measures it; null means "the result is the measure".
+ *
+ * Mirrors Python's mirage.io.types.OpReport.
+ */
+export class OpReport {
+  completed = false
+  source: string | null = null
+  bytes: number | null = null
+
+  /** Stamp the report at the moment an op completes. */
+  served(source: string | null = null, moved: number | null = null): void {
+    this.completed = true
+    this.source = source
+    this.bytes = moved
+  }
+}
+
 export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
@@ -33,8 +68,6 @@ export interface IOResultInit {
   reads?: Record<string, ByteSource>
   writes?: Record<string, ByteSource>
   cache?: string[]
-  opSource?: string | null
-  opBytes?: number | null
   producer?: Producer | null
 }
 
@@ -45,20 +78,6 @@ export class IOResult {
   reads: Record<string, ByteSource>
   writes: Record<string, ByteSource>
   cache: string[]
-  // The resource that actually served a single VFS op, when that is
-  // not the mount that owns the path: 'ram' for a warm file-cache hit
-  // and for a synthetic namespace answer, since neither contacted a
-  // backend. Null means the owning mount served it. Only the op door
-  // sets it; without it an accounting caller attributes both to the
-  // lexical owner and counts network traffic that never happened.
-  opSource: string | null
-  // Bytes the backend moved for a single VFS op, when that differs
-  // from what the caller receives. Only the op door sets it, and only
-  // when a postOps Limit truncated the result: the transfer already
-  // happened, so an accounting caller that measured the delivered
-  // bytes would under-report it. Null everywhere else, which means
-  // "the result is the measure".
-  opBytes: number | null
   // Provenance of this result (which command, spanning which
   // mounts); merge keeps the rightmost producer, mirroring whose
   // stream the shell shows. The workspace boundary hands it to the
@@ -74,8 +93,6 @@ export class IOResult {
     this.reads = init.reads ?? {}
     this.writes = init.writes ?? {}
     this.cache = init.cache ?? []
-    this.opSource = init.opSource ?? null
-    this.opBytes = init.opBytes ?? null
     this.producer = init.producer ?? null
     this.streamSource = null
   }
@@ -134,8 +151,6 @@ export class IOResult {
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },
       cache: [...this.cache, ...other.cache],
-      opSource: other.opSource ?? this.opSource,
-      opBytes: other.opBytes ?? this.opBytes,
       producer: other.producer,
     })
     result.streamSource = other

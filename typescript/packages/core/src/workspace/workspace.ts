@@ -209,6 +209,7 @@ export class Workspace {
       this.opsRegistry,
       consistency,
       this.registry.policies,
+      this.drift,
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
@@ -700,16 +701,13 @@ export class Workspace {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    await this.namespace.ensureLoaded()
-    if (this.drift.pending) {
-      await this.drift.drain(this.registry, (p) => this.dispatch('stat', p))
-    }
-    // The Dispatcher owns the rest — symlink follow, resolution (its
-    // resolveFn is Workspace.resolve, so lazy open and mount grants
-    // happen there), cache read-through, mode enforcement, per-op
-    // commandLimits on the executing mount, revisions, overlay stat, and
-    // post-write invalidation — the same single path Python's
-    // Workspace.dispatch delegates to.
+    // The Dispatcher owns the whole pipeline: pre-dispatch
+    // initialization (namespace load, pending drift checks), symlink
+    // follow, resolution (its resolveFn is Workspace.resolve, so lazy
+    // open and mount grants happen there), cache read-through, mode
+    // enforcement, per-op commandLimits on the executing mount,
+    // revisions, overlay stat, and post-write invalidation. The same
+    // single path Python's Workspace.dispatch delegates to.
     const [result] = await this.dispatcher.dispatch(
       opName,
       PathSpec.fromStrPath(path),

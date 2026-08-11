@@ -13,9 +13,10 @@ from mirage.workspace.snapshot.drift import ContentDriftError, check_drift
 _ITEM = re.compile(r".*/root:/a\.txt(\?.*)?$")
 
 
-def _ws() -> Workspace:
+def _mount_for():
     backend = OneDriveResource(OneDriveConfig(access_token="tok"))
-    return Workspace({"/od": (backend, MountMode.WRITE)}, mode=MountMode.WRITE)
+    ws = Workspace({"/od": (backend, MountMode.WRITE)}, mode=MountMode.WRITE)
+    return ws._registry.mount_for
 
 
 def test_drift_raises_when_live_ctag_differs():
@@ -28,7 +29,8 @@ def test_drift_raises_when_live_ctag_differs():
                   "file": {}
               })
         with pytest.raises(ContentDriftError) as exc:
-            asyncio.run(check_drift(_ws(), "/od/a.txt", "snapshot-ctag"))
+            asyncio.run(check_drift(_mount_for(), "/od/a.txt",
+                                    "snapshot-ctag"))
     assert exc.value.path == "/od/a.txt"
     assert exc.value.live_fingerprint == "live-ctag"
 
@@ -42,7 +44,7 @@ def test_no_drift_when_ctag_matches():
                   "cTag": "same-ctag",
                   "file": {}
               })
-        asyncio.run(check_drift(_ws(), "/od/a.txt", "same-ctag"))
+        asyncio.run(check_drift(_mount_for(), "/od/a.txt", "same-ctag"))
 
 
 def test_drift_raises_when_file_missing():
@@ -54,4 +56,5 @@ def test_drift_raises_when_file_missing():
                   "message": "no"
               }})
         with pytest.raises(ContentDriftError):
-            asyncio.run(check_drift(_ws(), "/od/a.txt", "snapshot-ctag"))
+            asyncio.run(check_drift(_mount_for(), "/od/a.txt",
+                                    "snapshot-ctag"))

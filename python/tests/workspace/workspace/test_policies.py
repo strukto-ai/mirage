@@ -19,7 +19,8 @@ import pytest
 from mirage import Action, CommandContext, Deny, GuardSpec, Policy, Workspace
 from mirage.commands.builtin.utils.limit import LimitExceededError
 from mirage.io import IOResult
-from mirage.policy import ExecuteResultContext, OpsContext, OpsResultContext
+from mirage.policy import (ExecuteResultContext, OpsContext, OpsResultContext,
+                           PolicyError)
 from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountMode, OnExceed
 
@@ -338,6 +339,36 @@ async def test_a_hard_capped_warm_read_is_not_network_traffic():
         assert rec.source == "ram"
         assert rec.is_cache is True
         assert ws.ops.network_bytes == 0
+    finally:
+        await ws.close()
+
+
+class BrokenPostOps(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext):
+        if ctx.write and ctx.path.virtual == "/data/prod/x.txt":
+            return 42
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
+    # The backend applied the write, then a step after it (here an
+    # invalid post_ops return, but any foreign bookkeeping error looks
+    # the same) blew up. The error must propagate AND the transfer must
+    # stay on the books: the door stamped the report at completion, so
+    # the record does not depend on what kind of exception followed.
+    ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        ws.ops.records.clear()
+        ws.policies.add(BrokenPostOps())
+        with pytest.raises(PolicyError):
+            await ws.ops.write("/data/prod/x.txt", b"123456")
+        assert await ws.ops.read("/data/prod/x.txt") == b"123456"
+        writes = [r for r in ws.ops.records if r.op == "write"]
+        assert [(r.source, r.bytes) for r in writes] == [("s3", 6)]
+        assert ws.ops.network_bytes >= 6
     finally:
         await ws.close()
 

@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io.errors import CompletedOpError
-
 
 class PolicyError(Exception):
     """A policy returned something a hook may not return.
@@ -24,7 +22,7 @@ class PolicyError(Exception):
     """
 
 
-class PolicyDenied(PermissionError, CompletedOpError):
+class PolicyDenied(PermissionError):
     """An op refused by an admission policy at an op door.
 
     A PermissionError subclass so every existing consumer keeps
@@ -34,9 +32,8 @@ class PolicyDenied(PermissionError, CompletedOpError):
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
 
-    It is also a CompletedOpError, which is what carries the door's
-    report (``completed``, ``op_source``, ``op_bytes``) for a post_ops
-    refusal: that suppresses the result, not the effect, so the ops
-    facade still has to account for the op. A pre_ops refusal leaves
-    ``completed`` False and is recorded nowhere.
+    It carries no accounting: a post_ops refusal suppresses the result,
+    not the effect, and the door reports the completed op through the
+    caller's ``OpReport``, which covers this error and any foreign one
+    the same way.
     """

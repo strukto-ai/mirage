@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CompletedOpError } from '../io/errors.ts'
+import { OpReport } from '../io/types.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
 import type { OpKwargs } from '../ops/registry.ts'
@@ -110,27 +110,25 @@ export class WorkspaceFS {
     const start = Date.now()
     const followed = this.links !== null && !NO_FOLLOW_OPS.has(op) ? this.links.follow(path) : path
     const owner = this.ownerOf(followed)
+    const report = new OpReport()
     let result: unknown
-    let servedBy: string | null = null
-    let moved: number | null = null
     try {
-      const [value, io] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs)
+      const [value] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs, report)
       result = value
-      servedBy = io.opSource
-      moved = io.opBytes
     } catch (err) {
-      // A refusal after the op ran (a postOps deny, a hard output cap)
-      // suppresses the result, not the effect, so observation must
-      // reflect the op before the error propagates. The result is gone,
-      // so the door's report rides on the error under the same two
-      // names it uses on the way out.
-      if (err instanceof CompletedOpError && err.completed && owner !== null) {
-        await this.recordOp(op, followed, owner, err.opSource, err.opBytes, null, args, start)
+      // Anything thrown after the op ran (a postOps deny, a hard
+      // output cap, a bookkeeping failure) suppresses the result, not
+      // the effect, so observation must reflect the op before the
+      // error propagates. The door stamps the report at the moment of
+      // completion, so even a foreign error the door never defined
+      // leaves the transfer on the books.
+      if (report.completed && owner !== null) {
+        await this.recordOp(op, followed, owner, report.source, report.bytes, null, args, start)
       }
       throw err
     }
     if (owner !== null) {
-      await this.recordOp(op, followed, owner, servedBy, moved, result, args, start)
+      await this.recordOp(op, followed, owner, report.source, report.bytes, result, args, start)
     }
     return result
   }

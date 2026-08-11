@@ -17,7 +17,7 @@ import { runWithSession } from '../context/session_context.ts'
 import { LimitExceededError } from '../commands/builtin/utils/limit.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import type { Policy } from '../policy/base.ts'
-import { PolicyDenied } from '../policy/errors.ts'
+import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
@@ -398,6 +398,13 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     }
   }
 
+  class BrokenPostOps implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.write && ctx.path.virtual === '/m/a.txt') return 42 as unknown as Action
+      return null
+    }
+  }
+
   function mkWs(policy: Policy): Workspace {
     const resource = new RAMResource()
     const ops = new OpsRegistry()
@@ -440,6 +447,29 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     const read = ws.records.find((r) => r.op === 'read')
     expect([read?.source, read?.bytes]).toEqual(['s3', 10])
     expect(ws.networkBytes).toBe(10)
+  })
+
+  it('records a committed write when bookkeeping after it fails', async () => {
+    // The backend applied the write, then a step after it (here an
+    // invalid postOps return, but any foreign bookkeeping error looks
+    // the same) blew up. The error must propagate AND the transfer
+    // must stay on the books: the door stamped the report at
+    // completion, so the record does not depend on what kind of
+    // exception followed. Mirrors Python's test_policies.py.
+    const resource = new RAMResource()
+    Object.assign(resource, { kind: 's3' })
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register({ ...op, resource: 's3' })
+    const ws = new Workspace(
+      { '/m': resource },
+      { mode: MountMode.WRITE, ops, policies: [new BrokenPostOps()] },
+    )
+    ws.records.length = 0
+    await expect(ws.fs.writeFile('/m/a.txt', '123456')).rejects.toThrow(PolicyError)
+    expect(DEC.decode(await ws.fs.readFile('/m/a.txt'))).toBe('123456')
+    const write = ws.records.find((r) => r.op === 'write')
+    expect([write?.source, write?.bytes]).toEqual(['s3', 6])
+    expect(ws.networkBytes).toBeGreaterThanOrEqual(6)
   })
 
   it('does not count a hard-capped warm read as network traffic', async () => {

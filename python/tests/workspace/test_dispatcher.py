@@ -50,6 +50,7 @@ def _path(virtual: str) -> PathSpec:
 
 def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     namespace = MagicMock()
+    namespace.ensure_loaded = AsyncMock()
     namespace.follow = MagicMock(side_effect=lambda p: p)
     mount = MagicMock()
     mount.prefix = "/data/"
