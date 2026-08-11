@@ -13,17 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SET_FLAG_TO_OPTION } from './types.ts'
-
-export interface OptionWord {
-  // Shell options the word turns on or off, in the order written.
-  settings: [string, boolean][]
-  // Cluster letters that name no shell option. `set` ignores them;
-  // shell startup reads its own startup letters out of them and refuses
-  // the rest.
-  other: string
-  // Words the option took, 2 for the `-o NAME` form.
-  consumed: number
-}
+import type { OptionWord } from './types.ts'
 
 /**
  * Read one option word, or null when the word is an operand.

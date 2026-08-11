@@ -24,10 +24,12 @@ import type { MountMode } from '../../types.ts'
  * field the other leaks, and adding a field here is a compile error
  * until `snapshot` and `restore` both carry it. `lastExitCode` is
  * deliberately absent: `$?` after a child shell is the child's status,
- * which is the one thing it reports back.
+ * which is the one thing it reports back. `sourceDepth` is here because a
+ * child shell starts outside any `source` its caller is inside.
  */
 export interface ChildShellState {
   cwd: string
+  sourceDepth: number
   env: Record<string, string>
   functions: Record<string, unknown>
   shellOptions: Record<string, boolean>
@@ -235,6 +237,7 @@ export class Session {
     for (const [name, value] of Object.entries(this.arrays)) arrays[name] = [...value]
     return {
       cwd: this.cwd,
+      sourceDepth: this.sourceDepth,
       env: ownRecord(this.env),
       functions: ownRecord(this.functions),
       shellOptions: { ...this.shellOptions },
@@ -251,6 +254,7 @@ export class Session {
   /** Put back a snapshot, ending a child shell. */
   restore(state: ChildShellState): void {
     this.cwd = state.cwd
+    this.sourceDepth = state.sourceDepth
     this.env = state.env
     this.functions = state.functions
     this.shellOptions = state.shellOptions

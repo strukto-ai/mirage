@@ -286,6 +286,10 @@ export async function handleBash(
   const saved = session.snapshot()
   session.positionalArgs = positional
   session.scriptName = scriptName
+  // A child shell is outside every `source` its caller is inside, so a
+  // top-level `return` in the script it runs is the error bash reports
+  // rather than an early exit the program loop absorbs.
+  session.sourceDepth = 0
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   let io
   try {

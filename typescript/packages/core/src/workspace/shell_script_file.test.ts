@@ -346,4 +346,28 @@ describe('sh/bash script file', () => {
       await ws.close()
     }
   })
+
+  it('keeps return invalid in a child shell run from a sourced file', async () => {
+    const { ws } = await makeIntegrationWS({
+      'child.sh': 'return 5\necho child-after\n',
+      'lib.sh': 'bash /data/child.sh\necho after=$?\n',
+    })
+    try {
+      const [code, out, err] = await runResult(ws, 'source /data/lib.sh; echo done')
+      expect(out).toBe('child-after\nafter=0\ndone\n')
+      expect(err).toBe("return: can only `return' from a function or sourced script\n")
+      expect(code).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps return valid in the sourced file itself', async () => {
+    const { ws } = await makeIntegrationWS({ 'child.sh': 'return 5\necho child-after\n' })
+    try {
+      expect(await run(ws, 'source /data/child.sh; echo after=$?')).toBe('after=5\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })

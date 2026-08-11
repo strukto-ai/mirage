@@ -70,6 +70,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
 # reports back.
 CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "cwd",
+    "source_depth",
     "env",
     "functions",
     "shell_options",

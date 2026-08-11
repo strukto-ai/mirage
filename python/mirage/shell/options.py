@@ -12,26 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
-
-from mirage.shell.types import SET_FLAG_TO_OPTION
-
-
-@dataclass(frozen=True, slots=True)
-class OptionWord:
-    """One word of the shell's option grammar.
-
-    Args:
-        settings (tuple[tuple[str, bool], ...]): shell options the word
-            turns on or off, in the order they were written.
-        other (str): cluster letters that name no shell option. `set`
-            ignores them; shell startup reads its own startup letters
-            out of them and refuses the rest.
-        consumed (int): words the option took, 2 for the `-o NAME` form.
-    """
-    settings: tuple[tuple[str, bool], ...] = ()
-    other: str = ""
-    consumed: int = 1
+from mirage.shell.types import SET_FLAG_TO_OPTION, OptionWord
 
 
 def parse_option_word(word: str, nxt: str | None) -> OptionWord | None:

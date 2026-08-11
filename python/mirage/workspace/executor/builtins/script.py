@@ -360,6 +360,10 @@ async def handle_bash(
     saved = session.snapshot()
     session.positional_args = positional
     session.script_name = script_name
+    # A child shell is outside every `source` its caller is inside, so a
+    # top-level `return` in the script it runs is the error bash reports
+    # rather than an early exit the program loop absorbs.
+    session.source_depth = 0
     for option, enable in parsed.settings:
         session.shell_options[option] = enable
     try:

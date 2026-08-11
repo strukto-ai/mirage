@@ -214,3 +214,18 @@ def test_broken_symlink_operand_reports_the_link(shell):
         "ln -s /data/gone.sh /data/dead.sh; sh /data/dead.sh")
     assert err == "sh: /data/dead.sh: No such file or directory\n"
     assert code == 127
+
+
+def test_return_in_a_child_shell_is_invalid_even_when_sourced(shell):
+    shell.create_file("child.sh", b"return 5\necho child-after\n")
+    shell.create_file("lib.sh", b"bash /data/child.sh\necho after=$?\n")
+    code, out, err = shell.mirage_result("source /data/lib.sh; echo done")
+    assert out == "child-after\nafter=0\ndone\n"
+    assert err == ("return: can only `return' from a function or "
+                   "sourced script\n")
+    assert code == 0
+
+
+def test_return_stays_valid_in_the_sourced_file_itself(shell):
+    shell.create_file("child.sh", b"return 5\necho child-after\n")
+    assert shell.mirage("source /data/child.sh; echo after=$?") == "after=5\n"

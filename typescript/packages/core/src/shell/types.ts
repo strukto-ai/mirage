@@ -133,6 +133,17 @@ export const SET_FLAG_TO_OPTION: Readonly<Record<string, string>> = Object.freez
   f: 'noglob',
 })
 
+export interface OptionWord {
+  // Shell options the word turns on or off, in the order written.
+  settings: [string, boolean][]
+  // Cluster letters that name no shell option. `set` ignores them;
+  // shell startup reads its own startup letters out of them and refuses
+  // the rest.
+  other: string
+  // Words the option took, 2 for the `-o NAME` form.
+  consumed: number
+}
+
 export const RedirectKind = Object.freeze({
   STDOUT: 'stdout',
   STDERR: 'stderr',
