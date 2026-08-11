@@ -61,6 +61,14 @@ async def test_malformed_date_is_enoent(api, accessor, index):
         await stat(accessor, spec("/primary/not-a-date"), index)
 
 
+async def test_date_shaped_but_impossible_date_is_enoent(api, accessor, index):
+    # Shape alone used to be enough, so stat reported a directory that
+    # readdir then raised ValueError on.
+    for bad in ("2026-02-30", "2026-13-01"):
+        with pytest.raises(FileNotFoundError):
+            await stat(accessor, spec(f"/primary/{bad}"), index)
+
+
 async def test_event_reports_json_with_a_rendered_size(api, accessor, index):
     row = await stat(
         accessor,

@@ -16,7 +16,8 @@ from datetime import date, datetime
 
 from mirage.core.gcal.day import (DEFAULT_TZ, clamped_hhmm, day_bounds,
                                   days_covered, event_span, is_all_day,
-                                  local_midnight, window_bounds, zone)
+                                  local_midnight, slot_instant, valid_day,
+                                  window_bounds, zone)
 
 HK = "Asia/Hong_Kong"
 LA = "America/Los_Angeles"
@@ -152,3 +153,46 @@ def test_clamped_hhmm_spells_an_all_day_event_as_the_full_day():
     span = event_span(_all_day("2026-08-11", "2026-08-12"), HK)
     assert span is not None
     assert clamped_hhmm(span, "2026-08-11", HK) == "0000-2400"
+
+
+def test_valid_day_rejects_a_date_shaped_non_date():
+    # Regex-shaped but impossible: letting it through made stat report a
+    # directory that every later call raised ValueError on.
+    assert valid_day("2026-02-11")
+    assert not valid_day("2026-02-30")
+    assert not valid_day("2026-13-01")
+    assert not valid_day("not-a-date")
+
+
+def test_zone_less_datetime_uses_the_slots_declared_zone():
+    # Google requires an offset on dateTime UNLESS the slot names a zone.
+    slot = {"dateTime": "2026-08-11T09:00:00", "timeZone": "Asia/Hong_Kong"}
+    got = slot_instant(slot, "UTC")
+    assert got is not None and got.tzinfo is not None
+    assert got == datetime.fromisoformat("2026-08-11T01:00:00+00:00")
+
+
+def test_zone_less_datetime_without_a_declared_zone_uses_the_bucket_zone():
+    got = slot_instant({"dateTime": "2026-08-11T09:00:00"}, HK)
+    assert got is not None
+    assert got == datetime.fromisoformat("2026-08-11T01:00:00+00:00")
+
+
+def test_a_zone_less_event_buckets_without_raising():
+    # A naive instant here used to reach clamped_hhmm and blow up comparing
+    # against the aware local midnights ("can't compare offset-naive and
+    # offset-aware datetimes").
+    event = {
+        "start": {
+            "dateTime": "2026-08-11T09:00:00",
+            "timeZone": HK
+        },
+        "end": {
+            "dateTime": "2026-08-11T10:30:00",
+            "timeZone": HK
+        },
+    }
+    span = event_span(event, "UTC")
+    assert span is not None
+    assert days_covered(span, HK) == ["2026-08-11"]
+    assert clamped_hhmm(span, "2026-08-11", HK) == "0900-1030"

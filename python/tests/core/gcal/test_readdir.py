@@ -140,6 +140,20 @@ async def test_malformed_date_is_enoent(api, accessor, index):
         await readdir(accessor, spec("/primary/not-a-date"), index)
 
 
+async def test_date_shaped_but_impossible_date_is_enoent(api, accessor, index):
+    with pytest.raises(FileNotFoundError):
+        await readdir(accessor, spec("/primary/2026-02-30"), index)
+
+
+async def test_the_window_is_centred_in_the_bucket_zone(api, accessor, index):
+    # today is pinned, so this asserts the zone reaches the accessor at all;
+    # the bounds carry the bucket zone's offset rather than the host's.
+    await readdir(accessor, spec("/primary"), index)
+    _, time_min, time_max = api.listed[-1]
+    assert time_min.endswith("+08:00")
+    assert time_max.endswith("+08:00")
+
+
 async def test_too_deep_a_path_is_enoent(api, accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(accessor, spec("/primary/2026-08-11/x/y"), index)

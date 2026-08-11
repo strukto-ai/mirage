@@ -162,6 +162,17 @@ describe('gws tree', () => {
 })
 
 describe('gws api passthrough', () => {
+  it('fillPath percent-encodes a reserved character', () => {
+    // A Google holiday calendar id carries '#', which opens a URL fragment:
+    // unencoded, the request reached /calendars/en.usa and 404'd.
+    const [path, query] = fillPath('/calendars/{calendarId}/events', {
+      calendarId: 'en.usa#holiday@group.v.calendar.google.com',
+    })
+    expect(path).toBe('/calendars/en.usa%23holiday%40group.v.calendar.google.com/events')
+    expect(query).toEqual({})
+    expect(fillPath('/files/{fileId}', { fileId: '1AbC-_dEf' })[0]).toBe('/files/1AbC-_dEf')
+  })
+
   it('fillPath substitutes and leaves query params', () => {
     const [path, query] = fillPath('/files/{fileId}/permissions', { fileId: 'f1', pageSize: 5 })
     expect(path).toBe('/files/f1/permissions')

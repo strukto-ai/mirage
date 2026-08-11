@@ -15,6 +15,7 @@
 from datetime import date, datetime
 
 from mirage.accessor.base import Accessor
+from mirage.core.gcal.day import zone
 from mirage.core.google._client import TokenManager
 from mirage.resource.gcal.config import GCalConfig
 
@@ -26,15 +27,22 @@ class GCalAccessor(Accessor):
         self.config = config
         self.token_manager = token_manager
 
-    def today(self) -> date:
+    def today(self, tz: str) -> date:
         """The day the default listing window centres on.
+
+        Taken in the mount's bucketing zone rather than the host's: the two
+        disagree for several hours a day, so a window centred on the wrong
+        one shifts the whole listing by a day around either midnight.
 
         A method rather than a module-level call so a test can pin it and so
         a long-lived mount does not freeze its window at import time.
 
+        Args:
+            tz (str): the mount-wide bucketing zone.
+
         Returns:
-            date: today in the mount's bucketing zone, or the pinned day.
+            date: today in that zone, or the pinned day.
         """
         if self.config.today:
             return date.fromisoformat(self.config.today)
-        return datetime.now().date()
+        return datetime.now(zone(tz)).date()

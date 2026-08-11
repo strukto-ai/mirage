@@ -18,9 +18,9 @@ from datetime import date, timedelta
 from mirage.accessor.gcal import GCalAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gcal._client import list_calendars, list_events
-from mirage.core.gcal.day import (DATE_RE, WINDOW_AHEAD_DAYS, WINDOW_BACK_DAYS,
+from mirage.core.gcal.day import (WINDOW_AHEAD_DAYS, WINDOW_BACK_DAYS,
                                   clamped_hhmm, day_bounds, days_covered,
-                                  event_span, window_bounds)
+                                  event_span, valid_day, window_bounds)
 from mirage.core.google.date_glob import glob_to_date_range
 from mirage.resource.gcal.event_entry import (CALENDAR_FILE, PRIMARY_DIR,
                                               event_title,
@@ -245,7 +245,7 @@ async def readdir(
 
     if len(parts) == 1:
         time_min, time_max, first, last = day_span(path.pattern,
-                                                   accessor.today(), tz)
+                                                   accessor.today(tz), tz)
         events = await list_events(accessor.token_manager, cal_id, time_min,
                                    time_max, tz)
         seen: set[str] = set()
@@ -280,7 +280,7 @@ async def readdir(
         return [f"{prefix}/{key}/{name}" for name, _ in rows]
 
     day = parts[1]
-    if not DATE_RE.match(day):
+    if not valid_day(day):
         raise enoent(path.virtual)
     time_min, time_max = day_bounds(day, tz)
     events = await list_events(accessor.token_manager, cal_id, time_min,

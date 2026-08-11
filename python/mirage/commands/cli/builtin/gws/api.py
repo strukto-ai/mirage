@@ -17,6 +17,7 @@ import json as json_lib
 from collections.abc import Awaitable, Callable
 from enum import Enum, auto
 from typing import Any
+from urllib.parse import quote
 
 from mirage.cache.context import invalidate_after_write
 from mirage.commands.cli.builtin.gws.methods import (GWS_METHODS,
@@ -95,7 +96,14 @@ def fill_path(template: str, params: dict[str,
         name = path[start + 1:end]
         if name not in query:
             raise UsageError(f"--params must contain {name}")
-        path = path[:start] + str(query.pop(name)) + path[end + 1:]
+        # Percent-encode the value: a Discovery path parameter is one
+        # segment, and several real ids carry characters that change what
+        # the URL means. A Google holiday calendar id
+        # ("en.usa#holiday@group.v.calendar.google.com") is the sharp case,
+        # since "#" opens a fragment and the request would reach
+        # /calendars/en.usa instead.
+        path = path[:start] + quote(str(query.pop(name)),
+                                    safe="") + path[end + 1:]
     return path, query
 
 

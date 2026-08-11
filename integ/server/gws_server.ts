@@ -2279,27 +2279,41 @@ function zoneOffsetMs(instant: number, timeZone: string): number {
   return asUtc - instant
 }
 
-// Midnight local to `timeZone` on a floating date, as an absolute instant.
+// A wall-clock reading resolved in `timeZone`, as an absolute instant.
 // Two passes because the offset itself depends on the instant: on a DST
 // boundary the first guess lands in the wrong offset and corrects on retry.
-function zonedMidnight(date: string, timeZone: string): number {
-  const [y, mo, d] = date.split('-').map(Number)
-  const guess = Date.UTC(y as number, (mo as number) - 1, d as number)
+function wallClockMs(naive: string, timeZone: string): number {
+  const guess = Date.parse(`${naive}Z`)
   const once = guess - zoneOffsetMs(guess, timeZone)
   return guess - zoneOffsetMs(once, timeZone)
 }
 
+function zonedMidnight(date: string, timeZone: string): number {
+  return wallClockMs(`${date}T00:00:00`, timeZone)
+}
+
+// An offset is mandatory on dateTime UNLESS the slot names its own zone, so
+// a bare wall clock here is a zoned event rather than an error. Date.parse
+// would read it in the SERVER's local zone, which is neither.
+const HAS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/
+
+function slotMs(slot: EventTime, fallbackTz: string): number | null {
+  if (slot.dateTime !== undefined) {
+    if (HAS_OFFSET.test(slot.dateTime)) return Date.parse(slot.dateTime)
+    return wallClockMs(slot.dateTime, slot.timeZone ?? fallbackTz)
+  }
+  if (slot.date !== undefined) return zonedMidnight(slot.date, fallbackTz)
+  return null
+}
+
 function eventStartMs(ev: CalendarEvent, tz: string): number {
-  if (ev.start.dateTime !== undefined) return Date.parse(ev.start.dateTime)
-  return zonedMidnight(ev.start.date as string, tz)
+  return slotMs(ev.start, tz) ?? 0
 }
 
 // An all-day event's end.date is EXCLUSIVE, so a single-day event spans
 // start=D, end=D+1 and its instant end is midnight opening the next day.
 function eventEndMs(ev: CalendarEvent, tz: string): number {
-  if (ev.end.dateTime !== undefined) return Date.parse(ev.end.dateTime)
-  if (ev.end.date !== undefined) return zonedMidnight(ev.end.date, tz)
-  return eventStartMs(ev, tz)
+  return slotMs(ev.end, tz) ?? eventStartMs(ev, tz)
 }
 
 function calendarOr404(id: string): CalendarEntry | null {

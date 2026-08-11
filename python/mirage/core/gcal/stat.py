@@ -16,7 +16,7 @@ import logging
 
 from mirage.accessor.gcal import GCalAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gcal.day import DATE_RE
+from mirage.core.gcal.day import valid_day
 from mirage.core.gcal.readdir import (CALENDAR_JSON, EVENT, calendar_index,
                                       normalize, readdir)
 from mirage.types import FileStat, FileType, PathSpec
@@ -68,7 +68,7 @@ async def stat(
 
     if result.entry is None:
         parts = key.split("/")
-        if len(parts) == 2 and DATE_RE.match(parts[1]):
+        if len(parts) == 2 and valid_day(parts[1]):
             # Outside the default window, or a day with nothing on it. Ask
             # the calendar list rather than the index: the index only knows
             # the calendar once the ROOT has been listed, which a stat of a

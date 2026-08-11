@@ -546,6 +546,19 @@
         "stdout": "0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_calendar_zoneless_datetime_uses_declared_zone",
+      "seq": 563045,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Zoneless\",\"start\":{\"dateTime\":\"2026-02-19T09:00:00\",\"timeZone\":\"Asia/Hong_Kong\"},\"end\":{\"dateTime\":\"2026-02-19T10:30:00\",\"timeZone\":\"Asia/Hong_Kong\"}}' > /dev/null; gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-02-19T00:30:00Z\",\"timeMax\":\"2026-02-19T01:30:00Z\"}' | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Zoneless\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -99,6 +99,24 @@ def window_bounds(today: date, tz: str) -> tuple[str, str]:
     return day_bounds(lo, tz)[0], day_bounds(hi, tz)[1]
 
 
+def valid_day(day: str) -> bool:
+    """Whether a string is a real calendar date, not merely date-shaped.
+
+    ``2026-02-30`` matches the shape and is not a day; letting it through
+    made stat report a directory that every later call raised ValueError on.
+
+    Args:
+        day (str): the candidate date.
+    """
+    if not DATE_RE.match(day):
+        return False
+    try:
+        date.fromisoformat(day)
+    except ValueError:
+        return False
+    return True
+
+
 def is_all_day(slot: dict[str, JsonValue]) -> bool:
     """Whether an event time slot is a floating all-day date.
 
@@ -120,7 +138,17 @@ def slot_instant(slot: dict[str, JsonValue], tz: str) -> datetime | None:
     """
     raw = slot.get("dateTime")
     if isinstance(raw, str) and raw:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if stamp.tzinfo is not None:
+            return stamp
+        # Google requires an offset on dateTime UNLESS the slot names its
+        # own zone, so a naive stamp here is a zoned event, not an error.
+        # Leaving it naive made it uncomparable with the aware local
+        # midnights every bucketing call comes from (TypeError), and using
+        # the host zone would silently move the event.
+        declared = slot.get("timeZone")
+        zone_name = declared if isinstance(declared, str) and declared else tz
+        return stamp.replace(tzinfo=zone(zone_name))
     day = slot.get("date")
     if isinstance(day, str) and DATE_RE.match(day):
         return local_midnight(day, tz)
