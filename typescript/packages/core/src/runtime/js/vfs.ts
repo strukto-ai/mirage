@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NO_WRITE, type RuntimeVFS, type VFSStat } from '../vfs.ts'
+import { FileHandle, FileTable, parseMode } from '../handles.ts'
+import type { RuntimeVFS, VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
 const ENC = new TextEncoder()
@@ -50,26 +51,14 @@ function wasiErrno(err: unknown): number {
   return EIO
 }
 
-interface GuestFile {
-  path: string
-  buf: Uint8Array
-  pos: number
-  dirty: boolean
-  writable: boolean
-  // What close needs to plan the flush: the length this handle opened
-  // over, and the lowest offset it wrote at. An append-mode handle only
-  // ever writes at or past baseLen, so its close ships the tail alone.
-  baseLen: number
-  lowWrite: number
-}
-
 // The `std.open`/`os.readdir` surface that qjs-wasi exposes natively,
 // synthesized here over the runtime's mount vocabulary so
-// quickjs-emscripten matches it. Whole-file buffering mirrors the Python
-// `WasiFs`: open fetches the bytes (or starts empty), the byte-level
-// calls touch the in-memory buffer, and close hands the buffer to
-// `RuntimeVFS.flush`, which ships a tail when the handle only extended
-// the file. Only open, close, and readdir cross the async boundary, so
+// quickjs-emscripten matches it. Whole-file buffering is the shared
+// `FileHandle` (the same one Python's `WasiFs` rides): open fetches the
+// bytes (or starts empty), the byte-level calls touch the in-memory
+// buffer, and close hands the buffer to `RuntimeVFS.flush`, which ships
+// a tail when the handle only extended the file. Only open, close, and
+// readdir cross the async boundary, so
 // they are asyncified host functions (the guest suspends until the
 // dispatch resolves); the byte-level calls are synchronous.
 //
@@ -103,23 +92,6 @@ os.S_IFDIR = 16384;
 os.S_IFREG = 32768;
 `
 
-function isWritable(mode: string): boolean {
-  return /[wax+]/.test(mode)
-}
-
-function writeAt(file: GuestFile, bytes: Uint8Array): void {
-  file.lowWrite = Math.min(file.lowWrite, file.pos)
-  const end = file.pos + bytes.length
-  if (end > file.buf.length) {
-    const grown = new Uint8Array(end)
-    grown.set(file.buf)
-    file.buf = grown
-  }
-  file.buf.set(bytes, file.pos)
-  file.pos = end
-  file.dirty = true
-}
-
 /**
  * Install the `std.open`/`os.readdir` host functions on an asyncified
  * quickjs context, backed by the runtime vfs. A null vfs (no
@@ -132,8 +104,7 @@ function writeAt(file: GuestFile, bytes: Uint8Array): void {
  * @param vfs - the runtime's mount vocabulary, or null when no mounts are wired
  */
 export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null): void {
-  const table = new Map<number, GuestFile>()
-  let nextFd = 1
+  const table = new FileTable<FileHandle>()
 
   const mountOf = (path: string): string | null => (vfs === null ? null : vfs.mountOf(path))
 
@@ -156,49 +127,36 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = ctx.getString(pathH)
-    const mode = ctx.getString(modeH)
+    const mode = parseMode(ctx.getString(modeH))
     if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
-    const truncate = mode.includes('w')
-    const append = mode.includes('a')
-    const writable = isWritable(mode)
     let buf: Uint8Array = new Uint8Array()
     let existed = false
-    if (!truncate) {
+    if (!mode.truncate) {
       try {
         buf = await vfs.read(path)
         existed = true
       } catch {
-        if (!writable) return ctx.newNumber(-1)
+        if (!mode.writable) return ctx.newNumber(-1)
       }
     }
     // Truncate or create writes through the mount at open, mirroring
     // the Python runtime: this enforces write modes (a read-only mount
     // or a read-narrowed session throws here, so the guest gets null)
     // and establishes the file before the buffered writes.
-    if (truncate || (writable && !existed)) {
+    if (mode.truncate || (mode.writable && !existed)) {
       try {
         await vfs.write(path, buf)
       } catch {
         return ctx.newNumber(-1)
       }
     }
-    const fd = nextFd++
-    table.set(fd, {
-      path,
-      buf,
-      pos: append ? buf.length : 0,
-      dirty: false,
-      writable,
-      baseLen: buf.length,
-      lowWrite: NO_WRITE,
-    })
+    const fd = table.add(FileHandle.opened(path, buf, mode))
     return ctx.newNumber(fd)
   })
 
   defineAsync('__mirage_close', async (fdH) => {
-    const file = table.get(ctx.getNumber(fdH))
+    const file = table.pop(ctx.getNumber(fdH))
     if (file === undefined) return ctx.undefined
-    table.delete(ctx.getNumber(fdH))
     if (file.dirty && file.writable && vfs !== null) {
       await vfs.flush(file.path, file.baseLen, file.lowWrite, file.buf)
     }
@@ -241,11 +199,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
   defineSync('__mirage_read', (fdH, maxH) => {
     const file = table.get(ctx.getNumber(fdH))
     if (file === undefined) return ctx.newString('')
-    const max = ctx.getNumber(maxH)
-    const end = max < 0 ? file.buf.length : Math.min(file.buf.length, file.pos + max)
-    const slice = file.buf.subarray(file.pos, end)
-    file.pos = end
-    return ctx.newString(DEC.decode(slice))
+    return ctx.newString(DEC.decode(file.read(ctx.getNumber(maxH))))
   })
 
   defineSync('__mirage_getline', (fdH) => {
@@ -260,7 +214,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineSync('__mirage_write', (fdH, textH) => {
     const file = table.get(ctx.getNumber(fdH))
-    if (file?.writable) writeAt(file, ENC.encode(ctx.getString(textH)))
+    if (file?.writable) file.write(ENC.encode(ctx.getString(textH)))
     return ctx.undefined
   })
 
@@ -281,7 +235,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineSync('__mirage_eof', (fdH) => {
     const file = table.get(ctx.getNumber(fdH))
-    const atEof = file === undefined || file.pos >= file.buf.length
+    const atEof = file === undefined || file.eof
     return atEof ? ctx.true : ctx.false
   })
 

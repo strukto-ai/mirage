@@ -15,8 +15,10 @@
 import { posix } from 'node:path'
 import {
   type FileStat,
+  FileTable,
   FileType,
   isMissingOp,
+  mergeWrites,
   type OpRecord,
   rstripSlash,
   type Session,
@@ -83,13 +85,12 @@ export class MountCore {
   readonly session: Session | null
   private readonly now: Date
   private readonly root: string
-  readonly handles = new Map<number, Handle>()
+  readonly handles = new FileTable<Handle>()
   // In-memory extended attributes, keyed by path. Backends have no POSIX
   // xattrs, so these are advisory and never persisted; see setxattr.
   readonly xattrs = new Map<string, Map<string, Buffer>>()
   readonly prefetchCache = new Map<string, PrefetchEntry>()
   private readonly prefetchInflight = new Map<string, Promise<Uint8Array | null>>()
-  private nextFh = 1
   private readonly uid: number
   private readonly gid: number
 
@@ -332,24 +333,7 @@ export class MountCore {
     } catch {
       // file may not exist yet
     }
-    let merged = existing
-    if (pos > merged.byteLength) {
-      // zero-pad from end-of-file up to the write offset (sparse write).
-      const padded = new Uint8Array(pos + data.byteLength)
-      padded.set(merged, 0)
-      padded.set(data, pos)
-      merged = padded
-    } else {
-      const size = Math.max(merged.byteLength, pos + data.byteLength)
-      const out = new Uint8Array(size)
-      out.set(merged.subarray(0, pos), 0)
-      out.set(data, pos)
-      if (pos + data.byteLength < merged.byteLength) {
-        out.set(merged.subarray(pos + data.byteLength), pos + data.byteLength)
-      }
-      merged = out
-    }
-    await this.writeFile(path, merged)
+    await this.writeFile(path, mergeWrites(existing, [[pos, data]]))
   }
 
   async create(path: string): Promise<number> {
@@ -362,7 +346,7 @@ export class MountCore {
       if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
       await this.writeFile(path, new Uint8Array(0))
     }
-    return this.track({ path })
+    return this.handles.add({ path })
   }
 
   async mkdir(path: string): Promise<void> {
@@ -492,7 +476,7 @@ export class MountCore {
       const data = await this.prefetch(path)
       if (data !== null) ctx.data = data
     }
-    return this.track(ctx)
+    return this.handles.add(ctx)
   }
 
   async release(fd: number): Promise<void> {
@@ -504,7 +488,7 @@ export class MountCore {
       // written through an fskit mount.
       await this.flush(ctx.path, fd)
     }
-    this.handles.delete(fd)
+    this.handles.pop(fd)
   }
 
   async flush(path: string, fd: number): Promise<void> {
@@ -518,21 +502,6 @@ export class MountCore {
     } catch {
       // missing file: start from empty; the write creates it
     }
-    let total = existing.byteLength
-    for (const [off, chunk] of writes) {
-      total = Math.max(total, off + chunk.byteLength)
-    }
-    const merged = new Uint8Array(total)
-    merged.set(existing, 0)
-    for (const [off, chunk] of writes) {
-      merged.set(chunk, off)
-    }
-    await this.writeFile(path, merged)
-  }
-
-  private track(ctx: Handle): number {
-    const fh = this.nextFh++
-    this.handles.set(fh, ctx)
-    return fh
+    await this.writeFile(path, mergeWrites(existing, writes))
   }
 }

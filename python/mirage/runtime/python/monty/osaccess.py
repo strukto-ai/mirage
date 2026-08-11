@@ -18,6 +18,7 @@ from pathlib import PurePosixPath
 from typing import Any, Callable
 
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.handles import parse_mode
 from mirage.runtime.python.monty.binding import (MemoryFile, MontyFileHandle,
                                                  OSAccess, path_from_arg)
 from mirage.runtime.python.monty.constants import (EXDEV_MESSAGE,
@@ -164,7 +165,7 @@ class MirageOSAccess(OSAccess):
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         self._ensure_file(path)
-        if any(c in mode for c in ("w", "a", "x", "+")):
+        if parse_mode(mode).writable:
             self._ensure_dir(path.parent)
         return super().path_open(path, mode)
 

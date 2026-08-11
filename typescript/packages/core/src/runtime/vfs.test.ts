@@ -16,28 +16,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { enotsup } from '../utils/errors.ts'
 import { CrossMountError } from './errors.ts'
 import type { BridgeDispatchFn } from './types.ts'
-import { planFlush, RuntimeVFS } from './vfs.ts'
+import { RuntimeVFS } from './vfs.ts'
 import { PrefixResolver } from './resolver.ts'
 
 const enc = new TextEncoder()
-
-describe('planFlush', () => {
-  it('ships a tail when the handle only extended the file', () => {
-    expect(planFlush(3, 3, enc.encode('abcXYZ'))).toEqual(['append', enc.encode('XYZ')])
-  })
-
-  it('ships the whole file when history was rewritten', () => {
-    expect(planFlush(3, 0, enc.encode('ZZZdef'))).toEqual(['write', enc.encode('ZZZdef')])
-  })
-
-  it('ships the whole file for a new one', () => {
-    expect(planFlush(0, 0, enc.encode('fresh'))).toEqual(['write', enc.encode('fresh')])
-  })
-
-  it('ships the whole file when the buffer shrank', () => {
-    expect(planFlush(6, 6, enc.encode('abc'))).toEqual(['write', enc.encode('abc')])
-  })
-})
 
 describe('RuntimeVFS transport', () => {
   it('forwards read to dispatch READ and returns bytes', async () => {

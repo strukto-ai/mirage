@@ -21,7 +21,7 @@ from mirage.context import (get_current_session, reset_current_session,
                             set_current_session)
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.vfs import RuntimeVFS, plan_flush
+from mirage.runtime.vfs import RuntimeVFS
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.workspace.session import Session
 
@@ -56,24 +56,6 @@ class RecordingDispatch:
         if self.raises is not None:
             raise self.raises
         return self.result, None
-
-
-def test_plan_flush_sends_a_tail_when_the_handle_only_extended():
-    assert plan_flush(3, 3, b"abcXYZ") == ("append", b"XYZ")
-
-
-def test_plan_flush_sends_the_whole_file_when_history_was_rewritten():
-    assert plan_flush(3, 0, b"ZZZdef") == ("write", b"ZZZdef")
-
-
-def test_plan_flush_sends_the_whole_file_for_a_new_one():
-    # base_len 0 means create or truncate: there is nothing to extend,
-    # and the mount may not have the file at all yet.
-    assert plan_flush(0, 0, b"fresh") == ("write", b"fresh")
-
-
-def test_plan_flush_sends_the_whole_file_when_the_buffer_shrank():
-    assert plan_flush(6, 6, b"abc") == ("write", b"abc")
 
 
 def test_mount_of_takes_the_longest_prefix():

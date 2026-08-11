@@ -14,42 +14,16 @@
 
 import asyncio
 from collections.abc import Coroutine
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
 from mirage.context import (get_current_session, reset_current_session,
                             set_current_session)
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.handles import plan_flush
 from mirage.runtime.resolver import MountResolver
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import norm
-
-FlushKind = Literal["append", "write"]
-
-
-def plan_flush(base_len: int, low_write: int,
-               buf: bytes | bytearray) -> tuple[FlushKind, bytes]:
-    """Decide what a closing whole-file buffer owes the mount.
-
-    Every encoder buffers a whole file and has to answer the same
-    question at close: did this handle only add to the end, or did it
-    rewrite what was already there? Only the first can travel as a
-    delta, and answering "write" always is what makes an append loop
-    quadratic.
-
-    Args:
-        base_len (int): length the file had when the handle opened.
-        low_write (int): lowest offset this handle wrote at, or the
-            base length when it never wrote below the end.
-        buf (bytes | bytearray): the handle's whole buffer.
-
-    Returns:
-        tuple[FlushKind, bytes]: ("append", tail) when the handle only
-        extended the file, else ("write", whole buffer).
-    """
-    if base_len > 0 and low_write >= base_len and len(buf) >= base_len:
-        return "append", bytes(buf[base_len:])
-    return "write", bytes(buf)
 
 
 class RuntimeVFS:

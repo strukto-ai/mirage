@@ -540,13 +540,8 @@ export {
   type RuntimeConfig,
 } from './runtime/config.ts'
 export { CrossMountError, EvalError } from './runtime/errors.ts'
-export {
-  planFlush,
-  RuntimeVFS,
-  type FlushKind,
-  type VFSEntry,
-  type VFSStat,
-} from './runtime/vfs.ts'
+export { RuntimeVFS, type VFSEntry, type VFSStat } from './runtime/vfs.ts'
+export { FileTable, mergeWrites, planFlush, type FlushKind } from './runtime/handles.ts'
 export {
   EVALUATOR,
   isEvaluator,

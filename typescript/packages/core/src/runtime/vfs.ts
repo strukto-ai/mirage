@@ -15,15 +15,9 @@
 import { isMissingOp, isMissingPath } from '../utils/errors.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir } from '../utils/slash.ts'
+import { planFlush } from './handles.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
-
-export type FlushKind = 'append' | 'write'
-
-// The lowest offset a handle has written at, before it writes anything.
-// A sentinel rather than a null because every write takes the minimum of
-// it and the new offset, and "nothing yet" has to lose that comparison.
-export const NO_WRITE = Number.MAX_SAFE_INTEGER
 
 /** One directory entry as the mounts report it. */
 export interface VFSEntry {
@@ -48,36 +42,6 @@ export function concatBytes(head: Uint8Array, tail: Uint8Array): Uint8Array {
   out.set(head, 0)
   out.set(tail, head.length)
   return out
-}
-
-/**
- * Decide what a closing whole-file buffer owes the mount.
- *
- * Every encoder buffers a whole file and has to answer the same
- * question at close: did this handle only add to the end, or did it
- * rewrite what was already there? Only the first can travel as a
- * delta, and answering "write" always is what makes an append loop
- * quadratic.
- *
- * Args:
- *   baseLen: length the file had when the handle opened.
- *   lowWrite: lowest offset this handle wrote at, or the base length
- *     when it never wrote below the end.
- *   buf: the handle's whole buffer.
- *
- * Returns:
- *   ['append', tail] when the handle only extended the file, else
- *   ['write', whole buffer].
- */
-export function planFlush(
-  baseLen: number,
-  lowWrite: number,
-  buf: Uint8Array,
-): [FlushKind, Uint8Array] {
-  if (baseLen > 0 && lowWrite >= baseLen && buf.length >= baseLen) {
-    return ['append', buf.slice(baseLen)]
-  }
-  return ['write', buf.slice()]
 }
 
 /**

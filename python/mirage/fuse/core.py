@@ -28,6 +28,7 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.fuse.errors import NO_XATTR
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
+from mirage.runtime.handles import FileTable, merge_writes
 from mirage.types import FileStat, FileType
 from mirage.workspace.session.session import Session
 
@@ -73,13 +74,12 @@ class MountCore:
         self._session = session
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
-        self._handles: dict[int, Handle] = {}
+        self._handles: FileTable[Handle] = FileTable()
         # Prefetched content for size-unknown files: path -> (data, expiry).
         self._prefetch: dict[str, tuple[bytes, float]] = {}
         # In-memory extended attributes, keyed by path. Backends have no
         # POSIX xattrs, so these are advisory, not persisted (see setxattr).
         self._xattrs: dict[str, dict[str, bytes]] = {}
-        self._next_fh = 1
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
         # as owned by the mounting user (see mount.py). Mirrors fs.ts.
@@ -95,7 +95,7 @@ class MountCore:
         return self._ops
 
     @property
-    def handles(self) -> dict[int, Handle]:
+    def handles(self) -> FileTable[Handle]:
         return self._handles
 
     def _run(self, coro: Coroutine[Any, Any, Any]) -> Any:
@@ -416,9 +416,7 @@ class MountCore:
         except FileNotFoundError:
             # missing file: start from empty and let the write create it
             pass
-        if offset > len(existing):
-            existing = existing + b"\0" * (offset - len(existing))
-        new_data = existing[:offset] + data + existing[offset + len(data):]
+        new_data = merge_writes(existing, [(offset, data)])
         self._run(self._ops.write(self.resolve(path), new_data))
         self._prefetch.pop(path, None)
         return len(data)
@@ -434,7 +432,7 @@ class MountCore:
         """
         self._run(self._ops.create(self.resolve(path)))
         self._prefetch.pop(path, None)
-        return self._track(Handle(path=path))
+        return self._handles.add(Handle(path=path))
 
     def mkdir(self, path: str) -> None:
         self._run(self._ops.mkdir(self.resolve(path)))
@@ -572,13 +570,8 @@ class MountCore:
         except FileNotFoundError:
             # missing file: start from empty; the write creates it
             pass
-        merged = bytearray(existing)
-        for off, chunk in ctx.write_buf:
-            end = off + len(chunk)
-            if end > len(merged):
-                merged.extend(b"\0" * (end - len(merged)))
-            merged[off:off + len(chunk)] = chunk
-        self._run(self._ops.write(self.resolve(path), bytes(merged)))
+        merged = merge_writes(existing, ctx.write_buf)
+        self._run(self._ops.write(self.resolve(path), merged))
         ctx.write_buf = []
         self._prefetch.pop(path, None)
 
@@ -601,7 +594,7 @@ class MountCore:
             # now: getattr(fh) and read() then serve real bytes, and the TTL
             # cache keeps release-then-stat bursts from refetching.
             ctx.data = self.prefetch_read(path)
-        return self._track(ctx)
+        return self._handles.add(ctx)
 
     def release(self, fh: int) -> None:
         ctx = self._handles.get(fh)
@@ -611,17 +604,11 @@ class MountCore:
             # still hold buffered writes here. Dropping them would silently
             # lose data written through an fskit mount.
             self.flush(ctx.path, fh)
-        self._handles.pop(fh, None)
+        self._handles.pop(fh)
 
     def truncate(self, path: str, length: int) -> None:
         self._run(self._ops.truncate(self.resolve(path), length))
         self._prefetch.pop(path, None)
-
-    def _track(self, ctx: Handle) -> int:
-        fh = self._next_fh
-        self._next_fh += 1
-        self._handles[fh] = ctx
-        return fh
 
     def _forget(self, path: str) -> None:
         self._xattrs.pop(path, None)

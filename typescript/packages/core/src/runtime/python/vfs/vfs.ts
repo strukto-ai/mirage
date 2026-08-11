@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NO_WRITE, planFlush } from '../../vfs.ts'
+import { NO_WRITE, planFlush } from '../../handles.ts'
 import { BLKSIZE, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
 import type { MutationJournal } from './journal.ts'
