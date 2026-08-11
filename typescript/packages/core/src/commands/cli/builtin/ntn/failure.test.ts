@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { NotionAPIError } from '../../../../core/notion/_client.ts'
-import { IOResult, type ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CLISpec } from '../../types.ts'
 import { NTN } from './index.ts'
 import { GUARDED, HintedAPIError, apiFailure, guarded, sourceHint } from './failure.ts'
@@ -141,7 +141,11 @@ describe('guarded', () => {
     const wrapped = guarded(() => {
       throw new NotionAPIError('boom.', 404, 'object_not_found')
     })
-    const [stdout, io]: [ByteSource | null, IOResult] = await wrapped({} as never)
+    // A verb may return null instead of a pair, so narrow before destructuring:
+    // guarded answering null would mean it swallowed the failure.
+    const caught = await wrapped({} as never)
+    if (caught === null) throw new Error('guarded returned no result')
+    const [stdout, io] = caught
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(5)
     expect(DEC.decode(io.stderr as Uint8Array)).toContain('404 Not Found object_not_found')
