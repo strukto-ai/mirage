@@ -28,8 +28,8 @@ def test_nothing_ran_by_default():
 def test_every_door_error_is_caught_by_the_one_name():
     # The facade records off this base rather than an allowlist of
     # types, so a door error that already ran opts in by inheriting it.
-    for error in (PolicyDenied(errno.EACCES, "no", "/m/x"),
-                  LimitExceededError("cap")):
+    for error in (PolicyDenied(errno.EACCES, "no",
+                               "/m/x"), LimitExceededError("cap")):
         assert isinstance(error, CompletedOpError)
 
 
