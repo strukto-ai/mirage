@@ -96,6 +96,14 @@
       "storage_id": false,
       "supports_snapshot": false
     },
+    "gcal": {
+      "caches_reads": true,
+      "index_ttl": 300,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
     "gcs": {
       "caches_reads": true,
       "index_ttl": 600,
@@ -552,6 +560,18 @@
       ]
     },
     "email": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gcal": {
       "local": false,
       "max_du_entries": 10000,
       "max_glob_matches": 10000,
@@ -1043,6 +1063,7 @@
     "disk",
     "dropbox",
     "email",
+    "gcal",
     "gdocs",
     "gdrive",
     "github",
@@ -1085,6 +1106,7 @@
     "disk",
     "dropbox",
     "email",
+    "gcal",
     "gcs",
     "gdocs",
     "gdrive",

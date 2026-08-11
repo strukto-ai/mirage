@@ -25,6 +25,12 @@
         "has_provision": true,
         "has_write": true
       },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
       "gdocs": {
         "filetypes": [],
         "has_aggregate": false,
@@ -113,6 +119,7 @@
       "databricks_volume",
       "disk",
       "dropbox",
+      "gcal",
       "gdocs",
       "gdrive",
       "gridfs",

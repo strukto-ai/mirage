@@ -120,6 +120,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "linear":
     ResourceEntry("mirage.resource.linear:LinearResource",
                   "mirage.resource.linear:LinearConfig"),
+    "gcal":
+    ResourceEntry("mirage.resource.gcal:GCalResource",
+                  "mirage.resource.gcal:GCalConfig"),
     "gdocs":
     ResourceEntry("mirage.resource.gdocs:GDocsResource",
                   "mirage.resource.gdocs:GDocsConfig"),

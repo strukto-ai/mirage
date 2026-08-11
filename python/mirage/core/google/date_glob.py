@@ -22,6 +22,35 @@ def _iso(d: date) -> str:
 
 
 def glob_to_modified_range(pattern: str | None) -> tuple[str, str] | None:
+    """Translate a date-prefixed glob into an RFC3339 modifiedTime range.
+
+    Args:
+        pattern (str | None): the glob as typed, or None.
+
+    Returns:
+        tuple[str, str] | None: (start, end) in UTC, or None when the glob
+        does not start with a date prefix.
+    """
+    span = glob_to_date_range(pattern)
+    if span is None:
+        return None
+    return _iso(span[0]), _iso(span[1])
+
+
+def glob_to_date_range(pattern: str | None) -> tuple[date, date] | None:
+    """Translate a date-prefixed glob into a half-open range of dates.
+
+    Kept separate from ``glob_to_modified_range`` because a caller bucketing
+    in a named time zone has to build its own bounds from the dates; UTC
+    instants would silently shift the window by the zone's offset.
+
+    Args:
+        pattern (str | None): the glob as typed, or None.
+
+    Returns:
+        tuple[date, date] | None: (start, end) with end exclusive, or None
+        when the glob does not start with a date prefix.
+    """
     if not pattern:
         return None
     meta_index = -1
@@ -58,4 +87,4 @@ def glob_to_modified_range(pattern: str | None) -> tuple[str, str] | None:
             return None
     except ValueError:
         return None
-    return _iso(start), _iso(end)
+    return start, end

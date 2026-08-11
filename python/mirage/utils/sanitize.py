@@ -17,6 +17,31 @@ import re
 UNSAFE_CHARS = re.compile(r"[^\w\s\-.]")
 MULTI_UNDERSCORE = re.compile(r"_+")
 MAX_LEN = 100
+# POSIX NAME_MAX on ext4 and APFS alike, and it counts BYTES. Truncating by
+# characters is the same number only for ASCII: a 100-character CJK title is
+# 300 bytes.
+NAME_MAX_BYTES = 255
+
+
+def truncate_bytes(text: str, budget: int) -> str:
+    """Trim a string to fit a byte budget without splitting a character.
+
+    Args:
+        text (str): the string to trim.
+        budget (int): maximum length in UTF-8 bytes.
+
+    Returns:
+        str: ``text`` unchanged when it already fits, else the longest
+        prefix whose UTF-8 encoding is at most ``budget`` bytes.
+    """
+    if budget <= 0:
+        return ""
+    raw = text.encode("utf-8")
+    if len(raw) <= budget:
+        return text
+    # errors="ignore" drops the partial sequence the cut may have left,
+    # which is exactly the trailing character that did not fit.
+    return raw[:budget].decode("utf-8", errors="ignore")
 
 
 def sanitize_name(name: str) -> str:
