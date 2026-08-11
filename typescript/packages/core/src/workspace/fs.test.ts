@@ -14,12 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
+import { LimitExceededError } from '../commands/builtin/utils/limit.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { FileType, Limit, MountMode } from '../types.ts'
+import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
 import { enotdir } from '../utils/errors.ts'
 import { Workspace } from './workspace.ts'
 
@@ -253,6 +254,13 @@ describe('WorkspaceFS is one door with the dispatcher', () => {
     expect(counter.seen).toEqual(['write:/data/', 'read:/data/'])
   })
 
+  class DenyInner implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.path.virtual === '/m/inner') return { kind: 'deny', message: 'no\n' }
+      return null
+    }
+  }
+
   it('serves the namespace structure a nested mount implies', async () => {
     // '/data/inner' is served by no backend: it exists only because a
     // mount sits below it. The dispatcher answers it, so the facade
@@ -288,6 +296,28 @@ describe('WorkspaceFS is one door with the dispatcher', () => {
     await runWithSession(session, async () => {
       ws.records.length = 0
       expect(await ws.fs.readdir('/m/inner')).toEqual(['/m/inner/deep'])
+      expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
+      expect(ws.networkRecords).toEqual([])
+    })
+  })
+
+  it('does not attribute a denied namespace answer to the lexical owner', async () => {
+    // Refusing the synthetic answer does not make the parent backend
+    // have served it: a deny suppresses a result nothing was contacted
+    // to produce. Mirrors Python's tests/ops/test_ops.py.
+    const outer = new RAMResource()
+    const inner = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of outer.ops()) ops.register({ ...op, resource: 's3' })
+    ops.registerResource(inner)
+    Object.assign(outer, { kind: 's3' })
+    const ws = new Workspace({}, { mode: MountMode.WRITE, ops, policies: [new DenyInner()] })
+    ws.addMount('/m', outer, MountMode.WRITE)
+    ws.addMount('/m/inner/deep', inner, MountMode.WRITE)
+    const session = ws.createSession('agent', { mounts: { '/m/inner/deep': MountMode.EXEC } })
+    await runWithSession(session, async () => {
+      ws.records.length = 0
+      await expect(ws.fs.readdir('/m/inner')).rejects.toThrow(PolicyDenied)
       expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
       expect(ws.networkRecords).toEqual([])
     })
@@ -354,6 +384,13 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     }
   }
 
+  class HardCapReadsTo3 implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read') return new Limit({ maxBytes: 3, onExceed: OnExceed.ERROR })
+      return null
+    }
+  }
+
   class SealReads implements Policy {
     preOps(ctx: OpsContext): Action | null {
       if (ctx.op === 'read') return { kind: 'deny', message: 'sealed\n' }
@@ -383,6 +420,46 @@ describe('WorkspaceFS accounting survives the delegation', () => {
     await ws.fs.writeFile('/data/a.txt', '0123456789')
     expect(DEC.decode(await ws.fs.readFile('/data/a.txt'))).toBe('012')
     expect(ws.records.find((r) => r.op === 'read')?.bytes).toBe(10)
+  })
+
+  it('records a hard-capped read: the backend still moved the bytes', async () => {
+    // An ERROR-mode cap refuses the caller the bytes, but the backend
+    // already moved them; dropping the record loses the whole transfer
+    // rather than just truncating it. Mirrors Python's test_policies.py.
+    const resource = new RAMResource()
+    Object.assign(resource, { kind: 's3' })
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register({ ...op, resource: 's3' })
+    const ws = new Workspace(
+      { '/m': resource },
+      { mode: MountMode.WRITE, ops, policies: [new HardCapReadsTo3()] },
+    )
+    await ws.fs.writeFile('/m/a.txt', '0123456789')
+    ws.records.length = 0
+    await expect(ws.fs.readFile('/m/a.txt')).rejects.toThrow(LimitExceededError)
+    const read = ws.records.find((r) => r.op === 'read')
+    expect([read?.source, read?.bytes]).toEqual(['s3', 10])
+    expect(ws.networkBytes).toBe(10)
+  })
+
+  it('does not count a hard-capped warm read as network traffic', async () => {
+    // Same refusal, but the cache produced the bytes, so the transfer
+    // it stands for never happened.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true, kind: 's3' })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace(
+      { '/m': resource },
+      { mode: MountMode.WRITE, ops, policies: [new HardCapReadsTo3()] },
+    )
+    await ws.cache.set('/m/a.txt', new TextEncoder().encode('0123456789'))
+    ws.records.length = 0
+    await expect(ws.fs.readFile('/m/a.txt')).rejects.toThrow(LimitExceededError)
+    const read = ws.records.find((r) => r.op === 'read')
+    expect(read?.source).toBe('ram')
+    expect(read?.isCache).toBe(true)
+    expect(ws.networkBytes).toBe(0)
   })
 
   it('does not count a denied warm read as network traffic', async () => {

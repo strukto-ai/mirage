@@ -16,10 +16,11 @@ import { NOOPAccessor } from '../accessor/base.ts'
 import { applyIo } from '../cache/file/io.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { applyOpLimit, runWithTimeout } from '../commands/builtin/utils/limit.ts'
+import { CompletedOpError } from '../io/errors.ts'
 import { getExtension } from '../commands/resolve.ts'
 import { IOResult } from '../io/types.ts'
 import { eaccesReadOnly } from '../utils/errors.ts'
-import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../policy/index.ts'
+import { Policies, postOpsGate, preOpsGate } from '../policy/index.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { runWithMountPrefix, runWithRevisions } from '../observe/context.ts'
@@ -65,6 +66,29 @@ const DISPATCH_WRITE_OPS = new Set([
 const POLICY_WRITE_OPS = new Set([...DISPATCH_WRITE_OPS, 'setattr'])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
+
+/**
+ * Say memory answered, on an error thrown after it did.
+ *
+ * The success path names the server through `IOResult`; a gate or a
+ * hard cap that fires afterwards throws that report away, and the
+ * facade would fall back to the owning mount. Same fact, same field,
+ * carried on the error instead.
+ *
+ * The value is `ResourceName.RAM`, which is how a record says "this
+ * never crossed the network": `OpRecord.isCache` is defined as that
+ * string, and every network/cache total derives from it. The block it
+ * wraps has no RAM mount in it; the answer came from the file cache or
+ * from namespace structure.
+ */
+async function servedFromMemory<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof CompletedOpError) err.opSource = ResourceName.RAM
+    throw err
+  }
+}
 
 export class Dispatcher {
   private readonly namespace: Namespace
@@ -130,12 +154,23 @@ export class Dispatcher {
       if (fallback === null) throw err
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
       await preOpsGate(this.policies, opName, p, fallbackWrite, '')
-      const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
-      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
       // A synthetic namespace answer (a directory that exists only
       // because a mount or a link sits below it) contacts nothing, so
       // attributing it to the mount that lexically owns the path would
-      // invent a network op against that backend.
+      // invent a network op against that backend. A gate or a hard cap
+      // that refuses it afterwards throws that report away, so the
+      // same fact is stamped on the error.
+      const gated = await servedFromMemory(async () => {
+        const fallbackBound = await postOpsGate(
+          this.policies,
+          opName,
+          p,
+          fallbackWrite,
+          '',
+          fallback,
+        )
+        return fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
+      })
       return [gated, new IOResult({ opSource: ResourceName.RAM })]
     }
     const [resource, scope, mode] = resolved
@@ -166,20 +201,22 @@ export class Dispatcher {
         // agree. Mirrors Python's Dispatcher.dispatch.
         const [offset, size] = readWindow(kwargs)
         const window = sliceWindow(cached, offset, size)
-        let warmBound
-        try {
-          warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
-        } catch (err) {
-          // Nothing crossed the network, and the caller cannot tell from
-          // the exception alone: without this a denied warm read is
-          // recorded against the backend and counted as traffic that
-          // never happened.
-          if (err instanceof PolicyDenied) err.fromCache = true
-          throw err
-        }
         const moved = window.byteLength
-        const served =
-          warmBound !== null ? ((await applyOpLimit(window, warmBound)) as Uint8Array) : window
+        // Nothing crossed the network, and neither a gate nor a hard
+        // cap leaves the caller able to tell: without the stamp a
+        // refused warm read is recorded against the backend and counted
+        // as traffic that never happened.
+        const served = (await servedFromMemory(async () => {
+          const warmBound = await postOpsGate(
+            this.policies,
+            opName,
+            p,
+            opWrite,
+            mountPrefix,
+            window,
+          )
+          return warmBound !== null ? await applyOpLimit(window, warmBound) : window
+        })) as Uint8Array
         return [
           served,
           new IOResult({

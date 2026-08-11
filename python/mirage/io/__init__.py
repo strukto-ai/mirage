@@ -14,12 +14,14 @@
 
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.errors import CompletedOpError
 from mirage.io.sync_bridge import async_to_sync_iter
 from mirage.io.types import IOResult
 
 __all__ = [
     "AsyncLineIterator",
     "CachableAsyncIterator",
+    "CompletedOpError",
     "IOResult",
     "async_to_sync_iter",
 ]

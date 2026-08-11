@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CompletedOpError } from '../../../io/errors.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
@@ -31,10 +32,19 @@ export class CommandTimeoutError extends Error {
   }
 }
 
-export class LimitExceededError extends Error {
+/**
+ * A hard cap refused output the producer had already made.
+ *
+ * A CompletedOpError because the cap is applied to a result that
+ * exists: at an op door the backend has already moved those bytes, so
+ * the fs facade must record the transfer even though the caller
+ * receives nothing.
+ */
+export class LimitExceededError extends CompletedOpError {
   constructor(message: string) {
     super(message)
     this.name = 'LimitExceededError'
+    this.completed = true
   }
 }
 
@@ -218,7 +228,12 @@ export async function applyOpLimit(result: unknown, limit: Limit | null): Promis
   const [data, sgIo] = await applyLimit(result as ByteSource, limit)
   if (sgIo.exitCode !== 0) {
     const message = sgIo.stderr instanceof Uint8Array ? DEC.decode(sgIo.stderr) : 'limit exceeded'
-    throw new LimitExceededError(message.trim())
+    const exceeded = new LimitExceededError(message.trim())
+    // The producer moved these before the cap refused them, and the
+    // result is about to be discarded, so the count lives nowhere else.
+    // A stream was stopped early, so its total is unknown.
+    if (result instanceof Uint8Array) exceeded.opBytes = result.byteLength
+    throw exceeded
   }
   return data
 }

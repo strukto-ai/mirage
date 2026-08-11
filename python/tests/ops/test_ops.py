@@ -19,7 +19,8 @@ import pytest
 from mirage import Workspace
 from mirage.context import reset_current_session, set_current_session
 from mirage.ops import Ops
-from mirage.policy import Action, Deny, OpsContext, Policy, PolicyDenied
+from mirage.policy import (Action, Deny, OpsContext, OpsResultContext, Policy,
+                           PolicyDenied)
 from mirage.resource.ram import RAMResource
 from mirage.types import FileType, MountMode
 from mirage.workspace.session import Session
@@ -189,6 +190,37 @@ async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
     try:
         ws.ops.records.clear()
         assert await ws.ops.readdir("/m/inner") == ["/m/inner/deep"]
+        assert [(r.source, r.is_cache)
+                for r in ws.ops.records] == [("ram", True)]
+        assert ws.ops.network_records == []
+    finally:
+        await ws.close()
+
+
+class DenyInner(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.path.virtual == "/m/inner":
+            return Deny(message="no")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_denied_namespace_answer_is_not_a_backend_op(
+        deep_only_session):
+    # Refusing the synthetic answer does not make the parent backend
+    # have served it: a deny suppresses a result nothing was contacted
+    # to produce.
+    ws = Workspace({
+        "/m/": UngrantedRemote(),
+        "/m/inner/deep/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    try:
+        ws.policies.add(DenyInner())
+        ws.ops.records.clear()
+        with pytest.raises(PermissionError):
+            await ws.ops.readdir("/m/inner")
         assert [(r.source, r.is_cache)
                 for r in ws.ops.records] == [("ram", True)]
         assert ws.ops.network_records == []

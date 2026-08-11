@@ -13,18 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.context import mount_allowed
-from mirage.io import IOResult
+from mirage.io import CompletedOpError, IOResult
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
                                        namespace_stat)
-from mirage.policy import PolicyDenied, post_ops_gate, pre_ops_gate
+from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec, ResourceName
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import slice_window
@@ -55,6 +57,28 @@ def _namespace_served() -> IOResult:
     against that backend.
     """
     return IOResult(op_source=ResourceName.RAM.value)
+
+
+@contextmanager
+def _served_from_memory() -> Iterator[None]:
+    """Say memory answered, on an error raised after it did.
+
+    The success path names the server through ``IOResult``; a gate or a
+    hard cap that fires afterwards throws that report away, and the
+    facade would fall back to the owning mount. Same fact, same field,
+    carried on the error instead.
+
+    The value is ``ResourceName.RAM``, which is how a record says "this
+    never crossed the network": ``OpRecord.is_cache`` is defined as
+    that string, and every network/cache total derives from it. The
+    block it wraps has no RAM mount in it; the answer came from the
+    file cache or from namespace structure.
+    """
+    try:
+        yield
+    except CompletedOpError as error:
+        error.op_source = ResourceName.RAM.value
+        raise
 
 
 def _window(kwargs: dict[str, Any]) -> tuple[int, int | None]:
@@ -127,10 +151,14 @@ class Dispatcher:
         """
         policies = self._namespace.registry.policies
         write = op in _POLICY_WRITE_OPS
+        # A pre gate refuses before the answer exists, so it is not a
+        # completed op and stays outside the stamp.
         await pre_ops_gate(policies, op, path, write, "")
-        bound = await post_ops_gate(policies, op, path, write, "", fallback)
-        if bound is not None:
-            return await apply_op_limit(fallback, bound)
+        with _served_from_memory():
+            bound = await post_ops_gate(policies, op, path, write, "",
+                                        fallback)
+            if bound is not None:
+                return await apply_op_limit(fallback, bound)
         return fallback
 
     async def dispatch(self, op: str, path: PathSpec,
@@ -191,19 +219,16 @@ class Dispatcher:
                 # op falls back to, so warm and cold agree.
                 offset, size = _window(kwargs)
                 served = slice_window(cached, offset, size)
-                try:
+                moved: int | None = len(served)
+                # Nothing crossed the network, and neither a gate nor a
+                # hard cap leaves the caller able to tell: without the
+                # stamp a refused warm read is recorded against the
+                # backend and counted as traffic that never happened.
+                with _served_from_memory():
                     bound = await post_ops_gate(policies, op, path, write,
                                                 mount.prefix, served)
-                except PolicyDenied as denied:
-                    # Nothing crossed the network, and the caller cannot
-                    # tell from the exception alone: without this a
-                    # denied warm read is recorded against the backend
-                    # and counted as traffic that never happened.
-                    denied.from_cache = True
-                    raise
-                moved: int | None = len(served)
-                if bound is not None:
-                    served = await apply_op_limit(served, bound)
+                    if bound is not None:
+                        served = await apply_op_limit(served, bound)
                 return served, IOResult(reads={path.virtual: served},
                                         op_source=ResourceName.RAM.value,
                                         op_bytes=moved)

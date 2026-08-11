@@ -85,7 +85,7 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
                               path.virtual)
         denied.completed = True
         if isinstance(result, (bytes, bytearray)):
-            denied.completed_bytes = len(result)
+            denied.op_bytes = len(result)
         raise denied
     return bound
 

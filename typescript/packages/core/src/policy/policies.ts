@@ -67,7 +67,7 @@ export async function postOpsGate(
   if (deny !== null) {
     const denied = new PolicyDenied(deny.message.replace(/\n$/, ''), path.virtual)
     denied.completed = true
-    if (result instanceof Uint8Array) denied.completedBytes = result.byteLength
+    if (result instanceof Uint8Array) denied.opBytes = result.byteLength
     throw denied
   }
   return bound

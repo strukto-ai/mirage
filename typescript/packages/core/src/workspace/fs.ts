@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CompletedOpError } from '../io/errors.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
 import type { OpKwargs } from '../ops/registry.ts'
-import { PolicyDenied } from '../policy/errors.ts'
 import type { FileStat } from '../types.ts'
-import { FileType, PathSpec, ResourceName } from '../types.ts'
+import { FileType, PathSpec } from '../types.ts'
 import { exdev, isMissingPath } from '../utils/errors.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 
@@ -119,29 +119,42 @@ export class WorkspaceFS {
       servedBy = io.opSource
       moved = io.opBytes
     } catch (err) {
-      // A postOps deny suppresses the result, not the effect: the
-      // backend already ran, so observation must reflect the op before
-      // the deny propagates. The suppressed result is gone, so a read's
-      // byte count rides on the exception; a write's is still in its
-      // own arguments.
-      if (err instanceof PolicyDenied && err.completed && owner !== null) {
-        const nbytes = err.completedBytes || payloadBytes(null, args)
-        const source = err.fromCache ? ResourceName.RAM : owner.kind
-        await this.record(op, followed, source, nbytes, start)
+      // A refusal after the op ran (a postOps deny, a hard output cap)
+      // suppresses the result, not the effect, so observation must
+      // reflect the op before the error propagates. The result is gone,
+      // so the door's report rides on the error under the same two
+      // names it uses on the way out.
+      if (err instanceof CompletedOpError && err.completed && owner !== null) {
+        await this.recordOp(op, followed, owner, err.opSource, err.opBytes, null, args, start)
       }
       throw err
     }
     if (owner !== null) {
-      // The door names the server when it is not the owning mount (a
-      // warm cache hit, a synthetic namespace answer): neither moved
-      // bytes over the network, and 'ram' is what OpRecord.isCache
-      // reads. It reports opBytes when a postOps limit truncated the
-      // result, since the transfer had already happened by then.
-      const source = servedBy ?? owner.kind
-      const nbytes = moved ?? payloadBytes(result, args)
-      await this.record(op, followed, source, nbytes, start)
+      await this.recordOp(op, followed, owner, servedBy, moved, result, args, start)
     }
     return result
+  }
+
+  /**
+   * Record one op from the door's report of who served it.
+   *
+   * The door names the server when it was not the owning mount (a warm
+   * cache hit, a synthetic namespace answer): neither moved bytes over
+   * the network, and 'ram' is what OpRecord.isCache reads. It names the
+   * moved bytes when the delivered result no longer measures them,
+   * because a cap truncated it or a refusal withheld it entirely.
+   */
+  private async recordOp(
+    op: string,
+    path: string,
+    owner: MountOwner,
+    source: string | null,
+    moved: number | null,
+    result: unknown,
+    args: readonly unknown[],
+    start: number,
+  ): Promise<void> {
+    await this.record(op, path, source ?? owner.kind, moved ?? payloadBytes(result, args), start)
   }
 
   // `raw` skips the filetype cascade: an explicit null filetype stops

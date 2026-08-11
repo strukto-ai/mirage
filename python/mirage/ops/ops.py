@@ -17,9 +17,9 @@ import errno
 import time
 from typing import Any
 
+from mirage.io import CompletedOpError
 from mirage.observe import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
-from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.path import owner_prefix
@@ -193,30 +193,47 @@ class Ops:
         try:
             result, io = await self._dispatch(op, PathSpec.from_str_path(path),
                                               **kwargs)
-        except PolicyDenied as denied:
-            # A post_ops deny suppresses the result, not the effect: the
-            # backend already ran, so observation must reflect the op
-            # before the deny propagates. The suppressed result is gone,
-            # so a read's byte count rides on the exception; a write's is
-            # still in its own arguments.
-            if denied.completed and owner is not None:
-                nbytes = (denied.completed_bytes
-                          or self._payload_bytes(None, kwargs))
-                source = "ram" if denied.from_cache else owner.resource_type
-                self._record(op, path, source, nbytes, start)
+        except CompletedOpError as withheld:
+            # A refusal after the op ran (a post_ops deny, a hard output
+            # cap) suppresses the result, not the effect, so observation
+            # must reflect the op before the error propagates. The
+            # result is gone, so the door's report rides on the error
+            # under the same two names it uses on the way out.
+            if withheld.completed and owner is not None:
+                self._record_op(op, path, owner, withheld.op_source,
+                                withheld.op_bytes, None, kwargs, start)
             raise
         if owner is not None:
-            # The door names the server when it is not the owning mount
-            # (a warm cache hit, a synthetic namespace answer): neither
-            # moved bytes over the network, and "ram" is what
-            # OpRecord.is_cache reads. It reports op_bytes when a
-            # post_ops limit truncated the result, since the transfer
-            # had already happened by then.
-            source = io.op_source or owner.resource_type
-            nbytes = (io.op_bytes if io.op_bytes is not None else
-                      self._payload_bytes(result, kwargs))
-            self._record(op, path, source, nbytes, start)
+            self._record_op(op, path, owner, io.op_source, io.op_bytes, result,
+                            kwargs, start)
         return result
+
+    def _record_op(self, op: str, path: str, owner: OpsMount,
+                   source: str | None, moved: int | None, result: Any,
+                   kwargs: dict[str, Any], start: int) -> None:
+        """Record one op from the door's report of who served it.
+
+        The door names the server when it was not the owning mount (a
+        warm cache hit, a synthetic namespace answer): neither moved
+        bytes over the network, and "ram" is what ``OpRecord.is_cache``
+        reads. It names the moved bytes when the delivered result no
+        longer measures them, because a cap truncated it or a refusal
+        withheld it entirely.
+
+        Args:
+            op (str): the op name.
+            path (str): the resolved virtual path.
+            owner (OpsMount): the mount owning the path.
+            source (str | None): the door's server, None for the mount.
+            moved (int | None): bytes the backend moved, None to
+                measure the result.
+            result (Any): what the op returned, None when withheld.
+            kwargs (dict[str, Any]): the op's arguments.
+            start (int): monotonic start stamp, in milliseconds.
+        """
+        nbytes = (moved if moved is not None else self._payload_bytes(
+            result, kwargs))
+        self._record(op, path, source or owner.resource_type, nbytes, start)
 
     async def read(self,
                    path: str,

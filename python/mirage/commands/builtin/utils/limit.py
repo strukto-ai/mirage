@@ -17,6 +17,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 
+from mirage.io.errors import CompletedOpError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
 from mirage.utils.stream import ensure_stream
@@ -32,10 +33,18 @@ class CommandTimeoutError(Exception):
         self.seconds = seconds
 
 
-class LimitExceededError(Exception):
+class LimitExceededError(CompletedOpError):
+    """A hard cap refused output the producer had already made.
+
+    A CompletedOpError because the cap is applied to a result that
+    exists: at an op door the backend has already moved those bytes, so
+    the ops facade must record the transfer even though the caller
+    receives nothing.
+    """
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+        self.completed = True
 
 
 async def with_timeout(
@@ -210,7 +219,13 @@ async def apply_op_limit(result, limit: Limit | None):
     if sg_io.exit_code != 0:
         message = (await sg_io.stderr_str()
                    if sg_io.stderr else "limit exceeded")
-        raise LimitExceededError(message.strip())
+        exceeded = LimitExceededError(message.strip())
+        # The producer moved these before the cap refused them, and the
+        # result is about to be discarded, so the count lives nowhere
+        # else. A stream was stopped early, so its total is unknown.
+        if isinstance(result, (bytes, bytearray)):
+            exceeded.op_bytes = len(result)
+        raise exceeded
     if sg_io.stderr:
         logger.debug("vfs op output truncated: %s",
                      (await sg_io.stderr_str()).strip())

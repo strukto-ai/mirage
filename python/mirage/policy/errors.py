@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.io.errors import CompletedOpError
+
 
 class PolicyError(Exception):
     """A policy returned something a hook may not return.
@@ -22,7 +24,7 @@ class PolicyError(Exception):
     """
 
 
-class PolicyDenied(PermissionError):
+class PolicyDenied(PermissionError, CompletedOpError):
     """An op refused by an admission policy at an op door.
 
     A PermissionError subclass so every existing consumer keeps
@@ -32,23 +34,9 @@ class PolicyDenied(PermissionError):
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
 
-    ``completed`` says whether the refused op had already run against
-    the backend: a post_ops deny suppresses the result, not the effect,
-    so the door's caller must still account for the op (the ops facade
-    records it). A pre_ops deny leaves it False, the class default.
-
-    ``from_cache`` says the completed op was answered from the file
-    cache, because the caller cannot tell afterwards: without it a
-    denied warm read is recorded against the backend and counted as
-    network traffic that never happened.
-
-    ``completed_bytes`` carries how many bytes that completed op moved,
-    because the caller cannot recover it: the result is suppressed, and
-    a read's byte count lives nowhere else (a write's is still in its
-    own arguments). Without it a denied read records zero and
-    ``network_bytes`` under-reports traffic that actually happened.
+    It is also a CompletedOpError, which is what carries the door's
+    report (``completed``, ``op_source``, ``op_bytes``) for a post_ops
+    refusal: that suppresses the result, not the effect, so the ops
+    facade still has to account for the op. A pre_ops refusal leaves
+    ``completed`` False and is recorded nowhere.
     """
-
-    completed = False
-    completed_bytes = 0
-    from_cache = False
