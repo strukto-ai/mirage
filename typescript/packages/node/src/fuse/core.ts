@@ -252,6 +252,21 @@ export class MountCore {
     await this.ws.fs.writeFile(this.resolve(path), data)
   }
 
+  /**
+   * Merge buffered writes over the raw base and persist the result.
+   * The base is read raw so a flush never stores a rendered view back
+   * into the mount.
+   */
+  private async applyWrites(path: string, writes: [number, Uint8Array][]): Promise<void> {
+    let existing: Uint8Array = new Uint8Array(0)
+    try {
+      existing = await this.ws.fs.readFile(this.resolve(path), { raw: true })
+    } catch {
+      // missing file: start from empty; the write creates it
+    }
+    await this.writeFile(path, mergeWrites(existing, writes))
+  }
+
   // ── POSIX surface (throws; adapters classify) ────────────────────
 
   async getattr(path: string): Promise<FuseAttr> {
@@ -327,13 +342,7 @@ export class MountCore {
       ctx.writeBuf.push([pos, data])
       return
     }
-    let existing: Uint8Array = new Uint8Array(0)
-    try {
-      existing = await this.ws.fs.readFile(this.resolve(path), { raw: true })
-    } catch {
-      // file may not exist yet
-    }
-    await this.writeFile(path, mergeWrites(existing, [[pos, data]]))
+    await this.applyWrites(path, [[pos, data]])
   }
 
   async create(path: string): Promise<number> {
@@ -496,12 +505,6 @@ export class MountCore {
     if (ctx?.writeBuf === undefined || ctx.writeBuf.length === 0) return
     const writes = ctx.writeBuf
     ctx.writeBuf = []
-    let existing: Uint8Array = new Uint8Array(0)
-    try {
-      existing = await this.ws.fs.readFile(this.resolve(path), { raw: true })
-    } catch {
-      // missing file: start from empty; the write creates it
-    }
-    await this.writeFile(path, mergeWrites(existing, writes))
+    await this.applyWrites(path, writes)
   }
 }

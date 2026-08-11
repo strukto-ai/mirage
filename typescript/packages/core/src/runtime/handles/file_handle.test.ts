@@ -13,46 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileHandle, FileTable, mergeWrites, NO_WRITE, parseMode, planFlush } from './handles.ts'
+import { FileHandle, mergeWrites } from './file_handle.ts'
+import { NO_WRITE } from './flush.ts'
 
 const enc = new TextEncoder()
-
-describe('planFlush', () => {
-  it('ships a tail when the handle only extended the file', () => {
-    expect(planFlush(3, 3, enc.encode('abcXYZ'))).toEqual(['append', enc.encode('XYZ')])
-  })
-
-  it('ships the whole file when history was rewritten', () => {
-    expect(planFlush(3, 0, enc.encode('ZZZdef'))).toEqual(['write', enc.encode('ZZZdef')])
-  })
-
-  it('ships the whole file for a new one', () => {
-    expect(planFlush(0, 0, enc.encode('fresh'))).toEqual(['write', enc.encode('fresh')])
-  })
-
-  it('ships the whole file when the buffer shrank', () => {
-    expect(planFlush(6, 6, enc.encode('abc'))).toEqual(['write', enc.encode('abc')])
-  })
-})
-
-describe('parseMode', () => {
-  it('reads the five facts', () => {
-    const read = parseMode('r')
-    expect(read.writable).toBe(false)
-    expect(read.create).toBe(false)
-    const update = parseMode('r+b')
-    expect(update.writable).toBe(true)
-    expect(update.truncate).toBe(false)
-    expect(update.create).toBe(false)
-    const write = parseMode('w')
-    expect(write.writable && write.truncate && write.create).toBe(true)
-    const append = parseMode('a')
-    expect(append.append).toBe(true)
-    expect(append.truncate).toBe(false)
-    const exclusive = parseMode('x')
-    expect(exclusive.exclusive && exclusive.create).toBe(true)
-  })
-})
 
 describe('FileHandle', () => {
   it('positions by append and seeds the flush facts', () => {
@@ -132,26 +96,5 @@ describe('mergeWrites', () => {
         [1, enc.encode('O')],
       ]),
     ).toEqual(enc.encode('nOw'))
-  })
-})
-
-describe('FileTable', () => {
-  it('hands out dense ids from firstId', () => {
-    const table = new FileTable<string>(4)
-    expect(table.add('a')).toBe(4)
-    expect(table.add('b')).toBe(5)
-    expect(table.get(4)).toBe('a')
-    expect(table.has(5)).toBe(true)
-    expect(table.has(9)).toBe(false)
-  })
-
-  it('set and pop move entries without burning ids', () => {
-    const table = new FileTable<string>()
-    const fd = table.add('a')
-    table.set(0, 'seeded')
-    expect(table.pop(fd)).toBe('a')
-    expect(table.pop(fd)).toBeUndefined()
-    expect(table.get(0)).toBe('seeded')
-    expect([...table.values()]).toEqual(['seeded'])
   })
 })

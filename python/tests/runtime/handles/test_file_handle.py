@@ -12,39 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.handles import (NO_WRITE, FileHandle, FileTable,
-                                    merge_writes, parse_mode, plan_flush)
-
-
-def test_plan_flush_sends_a_tail_when_the_handle_only_extended():
-    assert plan_flush(3, 3, b"abcXYZ") == ("append", b"XYZ")
-
-
-def test_plan_flush_sends_the_whole_file_when_history_was_rewritten():
-    assert plan_flush(3, 0, b"ZZZdef") == ("write", b"ZZZdef")
-
-
-def test_plan_flush_sends_the_whole_file_for_a_new_one():
-    # base_len 0 means create or truncate: there is nothing to extend,
-    # and the mount may not have the file at all yet.
-    assert plan_flush(0, 0, b"fresh") == ("write", b"fresh")
-
-
-def test_plan_flush_sends_the_whole_file_when_the_buffer_shrank():
-    assert plan_flush(6, 6, b"abc") == ("write", b"abc")
-
-
-def test_parse_mode_reads_the_five_facts():
-    read = parse_mode("r")
-    assert not read.writable and not read.create
-    update = parse_mode("r+b")
-    assert update.writable and not update.truncate and not update.create
-    write = parse_mode("w")
-    assert write.writable and write.truncate and write.create
-    append = parse_mode("a")
-    assert append.writable and append.append and not append.truncate
-    exclusive = parse_mode("x")
-    assert exclusive.writable and exclusive.exclusive and exclusive.create
+from mirage.runtime.handles.file_handle import FileHandle, merge_writes
+from mirage.runtime.handles.flush import NO_WRITE
 
 
 def test_opened_positions_by_append_and_seeds_the_flush_facts():
@@ -109,21 +78,3 @@ def test_merge_writes_splices_pads_and_keeps_arrival_order():
     assert merge_writes(b"hello", [(1, b"XY")]) == b"hXYlo"
     assert merge_writes(b"ab", [(4, b"z")]) == b"ab\0\0z"
     assert merge_writes(b"", [(0, b"new"), (1, b"O")]) == b"nOw"
-
-
-def test_table_hands_out_dense_ids_from_first_id():
-    table: FileTable[str] = FileTable(first_id=4)
-    assert table.add("a") == 4
-    assert table.add("b") == 5
-    assert table.get(4) == "a"
-    assert 5 in table and 9 not in table
-
-
-def test_table_set_and_pop_move_entries_without_burning_ids():
-    table: FileTable[str] = FileTable()
-    fd = table.add("a")
-    table.set(0, "seeded")
-    assert table.pop(fd) == "a"
-    assert table.pop(fd) is None
-    assert table.get(0) == "seeded"
-    assert list(table.values()) == ["seeded"]

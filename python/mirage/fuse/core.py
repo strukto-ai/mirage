@@ -37,12 +37,14 @@ from mirage.workspace.session.session import Session
 # an unknown size. Mirrors the TS PREFETCH_TTL_MS.
 PREFETCH_TTL = 30.0
 
+WriteBuf = list[tuple[int, bytes]]
+
 
 @dataclass(slots=True)
 class Handle:
     path: str
     data: bytes | None = None
-    write_buf: list[tuple[int, bytes]] = field(default_factory=list)
+    write_buf: WriteBuf = field(default_factory=list)
 
 
 class MountCore:
@@ -97,6 +99,15 @@ class MountCore:
     @property
     def handles(self) -> FileTable[Handle]:
         return self._handles
+
+    def _ctx(self, fh: int | None) -> Handle | None:
+        """The open handle under `fh`, or None for a path-based op.
+
+        Args:
+            fh (int | None): handle id; the adapter passes None when the
+                kernel op arrived without one.
+        """
+        return self._handles.get(fh) if fh is not None else None
 
     def _run(self, coro: Coroutine[Any, Any, Any]) -> Any:
         if self._session is not None:
@@ -383,7 +394,7 @@ class MountCore:
         Returns:
             bytes: the requested slice, possibly short at EOF.
         """
-        ctx = self._handles.get(fh) if fh is not None else None
+        ctx = self._ctx(fh)
         if ctx is not None and ctx.data is not None:
             return ctx.data[offset:offset + size]
         data = self.cached_data(path)
@@ -392,6 +403,26 @@ class MountCore:
         if ctx is not None:
             ctx.data = data
         return data[offset:offset + size]
+
+    def _apply_writes(self, path: str, writes: WriteBuf) -> None:
+        """Merge buffered writes over the raw base and persist the result.
+
+        The base is read raw so a flush never stores a rendered view
+        back into the mount.
+
+        Args:
+            path (str): mount path being written.
+            writes (WriteBuf): (offset, payload) pairs in arrival order.
+        """
+        existing = b""
+        try:
+            existing = self._run(self._ops.read(self.resolve(path), raw=True))
+        except FileNotFoundError:
+            # missing file: start from empty; the write creates it
+            pass
+        merged = merge_writes(existing, writes)
+        self._run(self._ops.write(self.resolve(path), merged))
+        self._prefetch.pop(path, None)
 
     def write(self, path: str, data: bytes, offset: int,
               fh: int | None) -> int:
@@ -406,19 +437,11 @@ class MountCore:
         Returns:
             int: number of bytes accepted.
         """
-        ctx = self._handles.get(fh) if fh is not None else None
+        ctx = self._ctx(fh)
         if ctx is not None:
             ctx.write_buf.append((offset, data))
             return len(data)
-        existing = b""
-        try:
-            existing = self._run(self._ops.read(self.resolve(path), raw=True))
-        except FileNotFoundError:
-            # missing file: start from empty and let the write create it
-            pass
-        new_data = merge_writes(existing, [(offset, data)])
-        self._run(self._ops.write(self.resolve(path), new_data))
-        self._prefetch.pop(path, None)
+        self._apply_writes(path, [(offset, data)])
         return len(data)
 
     def create(self, path: str) -> int:
@@ -561,19 +584,11 @@ class MountCore:
             path (str): mount path being flushed.
             fh (int | None): the handle whose buffer to drain.
         """
-        ctx = self._handles.get(fh) if fh is not None else None
+        ctx = self._ctx(fh)
         if ctx is None or not ctx.write_buf:
             return
-        existing = b""
-        try:
-            existing = self._run(self._ops.read(self.resolve(path), raw=True))
-        except FileNotFoundError:
-            # missing file: start from empty; the write creates it
-            pass
-        merged = merge_writes(existing, ctx.write_buf)
-        self._run(self._ops.write(self.resolve(path), merged))
+        self._apply_writes(path, ctx.write_buf)
         ctx.write_buf = []
-        self._prefetch.pop(path, None)
 
     def open(self, path: str) -> int:
         """Open a path, hydrating it when its size is unknown.

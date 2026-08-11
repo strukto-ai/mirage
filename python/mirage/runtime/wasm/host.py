@@ -155,6 +155,28 @@ class WasiFs:
     def _ino(path: str) -> int:
         return hash(path) & (2**63 - 1)
 
+    # -- fd lookups -------------------------------------------------------
+
+    def _handle(self, fd: int) -> FileHandle | None:
+        """The buffered handle under `fd`: a file's, or stdin's.
+
+        Args:
+            fd (int): the guest fd.
+        """
+        entry = self._fds.get(fd)
+        return entry.handle if entry is not None else None
+
+    def _file_handle(self, fd: int) -> FileHandle | None:
+        """The handle under `fd` only when it is a regular file.
+
+        Args:
+            fd (int): the guest fd.
+        """
+        entry = self._fds.get(fd)
+        if entry is None or entry.kind != "file":
+            return None
+        return entry.handle
+
     # -- prestat ----------------------------------------------------------
 
     def fd_prestat_get(self, caller: "wasmtime.Caller", fd: int,
@@ -224,10 +246,9 @@ class WasiFs:
         if entry is None or entry.preopen:
             return EBADF
         self._fds.pop(fd)
-        if entry.kind == "file" and entry.handle is not None:
-            h = entry.handle
-            if h.dirty:
-                self._fs.flush(h.path, h.base_len, h.low_write, h.buf)
+        h = entry.handle
+        if entry.kind == "file" and h is not None and h.dirty:
+            self._fs.flush(h.path, h.base_len, h.low_write, h.buf)
         return OK
 
     def fd_renumber(self, caller: "wasmtime.Caller", fd: int, to: int) -> int:
@@ -243,8 +264,7 @@ class WasiFs:
 
     def fd_read(self, caller: "wasmtime.Caller", fd: int, iovs: int,
                 count: int, nread: int) -> int:
-        entry = self._fds.get(fd)
-        h = entry.handle if entry is not None else None
+        h = self._handle(fd)
         if h is None:
             return EBADF
         total = 0
@@ -260,12 +280,12 @@ class WasiFs:
 
     def fd_pread(self, caller: "wasmtime.Caller", fd: int, iovs: int,
                  count: int, offset: int, nread: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or entry.kind != "file" or entry.handle is None:
+        h = self._file_handle(fd)
+        if h is None:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
-            chunk = entry.handle.pread(pos, blen)
+            chunk = h.pread(pos, blen)
             if chunk:
                 self._store(caller, bptr, chunk)
             pos += len(chunk)
@@ -299,15 +319,13 @@ class WasiFs:
 
     def fd_pwrite(self, caller: "wasmtime.Caller", fd: int, iovs: int,
                   count: int, offset: int, nwritten: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or entry.kind != "file" or entry.handle is None:
-            return EBADF
-        if not entry.handle.writable:
+        h = self._file_handle(fd)
+        if h is None or not h.writable:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
             data = self._load(caller, bptr, blen)
-            entry.handle.pwrite(pos, data)
+            h.pwrite(pos, data)
             pos += blen
             total += blen
         self._store(caller, nwritten, pack_u32(total))
@@ -315,8 +333,7 @@ class WasiFs:
 
     def fd_seek(self, caller: "wasmtime.Caller", fd: int, offset: int,
                 whence: int, out: int) -> int:
-        entry = self._fds.get(fd)
-        h = entry.handle if entry is not None else None
+        h = self._handle(fd)
         if h is None:
             return EBADF
         # abi WHENCE_* numbering is POSIX's 0/1/2, which seek speaks.
@@ -327,8 +344,7 @@ class WasiFs:
         return OK
 
     def fd_tell(self, caller: "wasmtime.Caller", fd: int, out: int) -> int:
-        entry = self._fds.get(fd)
-        h = entry.handle if entry is not None else None
+        h = self._handle(fd)
         if h is None:
             return EBADF
         self._store(caller, out, pack_u64(h.pos))
@@ -377,12 +393,10 @@ class WasiFs:
 
     def fd_filestat_set_size(self, caller: "wasmtime.Caller", fd: int,
                              size: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or entry.kind != "file" or entry.handle is None:
+        h = self._file_handle(fd)
+        if h is None or not h.writable:
             return EBADF
-        if not entry.handle.writable:
-            return EBADF
-        entry.handle.truncate(size)
+        h.truncate(size)
         return OK
 
     # -- readdir ----------------------------------------------------------

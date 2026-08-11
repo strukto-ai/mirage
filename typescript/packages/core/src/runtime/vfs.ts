@@ -15,7 +15,7 @@
 import { isMissingOp, isMissingPath } from '../utils/errors.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir } from '../utils/slash.ts'
-import { planFlush } from './handles.ts'
+import { planFlush } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
 
