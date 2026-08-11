@@ -1295,6 +1295,7 @@
       "epoch": "2026-02-01T00:00:00Z",
       "apps": "google-apps/v1",
       "mail": "gmail/v1",
+      "calendar": "calendar/v1",
       "clis": [
         "gws"
       ],

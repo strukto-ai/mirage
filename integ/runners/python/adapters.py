@@ -532,6 +532,12 @@ class GwsService:
                 ).parents[2] / "fixtures" / f"{mail}.json"
                 await cls._seed_mail(session, url,
                                      json.loads(manifest.read_text()))
+            calendar = target.get("calendar")
+            if calendar:
+                manifest = Path(__file__).resolve(
+                ).parents[2] / "fixtures" / f"{calendar}.json"
+                await cls._seed_calendar(session, url,
+                                         json.loads(manifest.read_text()))
         return cls(url, folder_ids, target.get("cli_scope"))
 
     @staticmethod
@@ -577,6 +583,18 @@ class GwsService:
                     resp.raise_for_status()
             else:
                 raise ValueError(f"unknown google-apps kind: {kind}")
+
+    @staticmethod
+    async def _seed_calendar(session: aiohttp.ClientSession, url: str,
+                             entries: list[dict]) -> None:
+        # Events are API objects, so they seed through events.insert and
+        # take the ids the server mints; the manifest pins the times, which
+        # is what the day directories are derived from.
+        for entry in entries:
+            async with session.post(
+                    f"{url}/calendar/v3/calendars/primary/events",
+                    json=entry) as resp:
+                resp.raise_for_status()
 
     @staticmethod
     async def _seed_mail(session: aiohttp.ClientSession, url: str,

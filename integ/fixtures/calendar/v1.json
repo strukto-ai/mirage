@@ -1,0 +1,22 @@
+[
+  {
+    "summary": "PhD Dissertation Defense",
+    "start": { "dateTime": "2026-02-11T09:00:00+08:00" },
+    "end": { "dateTime": "2026-02-11T10:30:00+08:00" }
+  },
+  {
+    "summary": "Academic Committee Meeting",
+    "start": { "dateTime": "2026-02-11T15:00:00+08:00" },
+    "end": { "dateTime": "2026-02-11T16:00:00+08:00" }
+  },
+  {
+    "summary": "Conference Offsite",
+    "start": { "dateTime": "2026-02-10T09:00:00+08:00" },
+    "end": { "dateTime": "2026-02-13T17:00:00+08:00" }
+  },
+  {
+    "summary": "Public Holiday",
+    "start": { "date": "2026-02-11" },
+    "end": { "date": "2026-02-12" }
+  }
+]

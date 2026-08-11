@@ -1111,6 +1111,14 @@ async function seedGwsApps(base: string, entries: GwsAppEntry[]): Promise<void> 
   }
 }
 
+interface CalendarEntry {
+  summary: string
+  // A timed event carries dateTime with a mandatory offset; an all-day one
+  // carries a floating date and no zone at all.
+  start: { date?: string; dateTime?: string }
+  end: { date?: string; dateTime?: string }
+}
+
 interface MailEntry {
   from: string
   to: string
@@ -1174,6 +1182,19 @@ async function seedGwsMail(base: string, entries: MailEntry[]): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ raw, labelIds: entry.labels ?? [] }),
+    })
+  }
+}
+
+// Events are API objects, so they seed through events.insert and take the
+// ids the server mints; the manifest pins the times, which is what the day
+// directories are derived from.
+async function seedGwsCalendar(base: string, entries: CalendarEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await gwsJson(`${base}/calendar/v3/calendars/primary/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
     })
   }
 }
@@ -1248,6 +1269,10 @@ async function openGws(target: Target): Promise<Open> {
   if (target.mail !== undefined) {
     const manifest = join(integRoot(), 'fixtures', `${target.mail}.json`)
     await seedGwsMail(base, JSON.parse(readFileSync(manifest, 'utf8')) as MailEntry[])
+  }
+  if (target.calendar !== undefined) {
+    const manifest = join(integRoot(), 'fixtures', `${target.calendar}.json`)
+    await seedGwsCalendar(base, JSON.parse(readFileSync(manifest, 'utf8')) as CalendarEntry[])
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('gws') === true) {

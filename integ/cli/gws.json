@@ -9,7 +9,7 @@
       "command": "gws --help | grep -c 'API commands'",
       "expect": {
         "exit": 0,
-        "stdout": "6\n",
+        "stdout": "8\n",
         "stderr": ""
       }
     },
@@ -388,6 +388,162 @@
       "expect": {
         "exit": 0,
         "stdout": "marcus@example.com\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_list_primary",
+      "seq": 563033,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar calendarList list | jq -r '.items[] | select(.primary) | .id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ@example.com\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_timezone_is_reported",
+      "seq": 563034,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar calendarList list | jq -r '.items[0].timeZone'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Asia/Hong_Kong\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_list_day",
+      "seq": 563035,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-02-11T00:00:00+08:00\",\"timeMax\":\"2026-02-12T00:00:00+08:00\",\"orderBy\":\"startTime\"}' | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Conference Offsite\nPublic Holiday\nPhD Dissertation Defense\nAcademic Committee Meeting\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_all_day_end_is_exclusive",
+      "seq": 563036,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-02-12T00:00:00+08:00\",\"timeMax\":\"2026-02-13T00:00:00+08:00\"}' | jq -r '[.items[].summary] | join(\",\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Conference Offsite\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_q_search",
+      "seq": 563037,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"primary\",\"q\":\"committee\"}' | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Academic Committee Meeting\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_insert_and_get",
+      "seq": 563038,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"COML camera-ready\",\"start\":{\"dateTime\":\"2026-02-21T20:59:00-12:00\"},\"end\":{\"dateTime\":\"2026-02-21T21:59:00-12:00\"}}' | jq -r '.start.dateTime'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-02-21T20:59:00-12:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_event_id_is_26_chars",
+      "seq": 563039,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"primary\",\"q\":\"committee\"}' | jq -r '.items[0].id | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "26\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_freebusy_query",
+      "seq": 563040,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar freebusy query --json '{\"timeMin\":\"2026-02-11T00:00:00+08:00\",\"timeMax\":\"2026-02-12T00:00:00+08:00\",\"items\":[{\"id\":\"primary\"}]}' | jq -r '.calendars.primary.busy | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_delete",
+      "seq": 563041,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "ID=$(gws calendar events list --params '{\"calendarId\":\"primary\",\"q\":\"committee\"}' | jq -r '.items[0].id'); gws calendar events delete --params \"{\\\"calendarId\\\":\\\"primary\\\",\\\"eventId\\\":\\\"$ID\\\"}\"; gws calendar events list --params '{\"calendarId\":\"primary\",\"q\":\"committee\"}' | jq -r '.items | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_create_and_add_question",
+      "seq": 563042,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws forms forms create --json '{\"info\":{\"title\":\"Recall Form\",\"documentTitle\":\"Recall\"}}' | jq -r .formId); gws forms forms batchUpdate --params \"{\\\"formId\\\":\\\"$FID\\\"}\" --json '{\"requests\":[{\"createItem\":{\"item\":{\"title\":\"Serial number?\",\"questionItem\":{\"question\":{\"textQuestion\":{}}}},\"location\":{\"index\":0}}}]}' > /dev/null; gws forms forms get --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r '.items[].title'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Serial number?\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_id_is_the_drive_file_id",
+      "seq": 563043,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws forms forms create --json '{\"info\":{\"title\":\"Survey\",\"documentTitle\":\"Survey\"}}' | jq -r .formId); gws drive files list --params '{\"q\":\"mimeType=\\u0027application/vnd.google-apps.form\\u0027\"}' | jq -r --arg f \"$FID\" '[.files[].id] | index($f) != null'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_responses_empty",
+      "seq": 563044,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws forms forms create --json '{\"info\":{\"title\":\"Poll\"}}' | jq -r .formId); gws forms forms responses list --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r '.responses | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
         "stderr": ""
       }
     }
