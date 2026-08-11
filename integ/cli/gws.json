@@ -559,6 +559,292 @@
         "stdout": "Zoneless\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_calendar_calendars_get",
+      "seq": 563046,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar calendars get --params '{\"calendarId\":\"primary\"}' | jq -r '.summary + \" \" + .timeZone' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "Integ User Asia/Hong_Kong\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_get_by_id",
+      "seq": 563047,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "ID=$(gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Vendor Sync\",\"start\":{\"dateTime\":\"2026-03-02T14:00:00+08:00\"},\"end\":{\"dateTime\":\"2026-03-02T15:00:00+08:00\"}}' | jq -r .id); gws calendar events get --params \"{\\\"calendarId\\\":\\\"primary\\\",\\\"eventId\\\":\\\"$ID\\\"}\" | jq -r '.summary + \" \" + .start.dateTime' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "Vendor Sync 2026-03-02T14:00:00+08:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_patch_is_partial",
+      "seq": 563048,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "ID=$(gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Draft Review\",\"start\":{\"dateTime\":\"2026-03-03T09:00:00+08:00\"},\"end\":{\"dateTime\":\"2026-03-03T10:00:00+08:00\"}}' | jq -r .id); gws calendar events patch --params \"{\\\"calendarId\\\":\\\"primary\\\",\\\"eventId\\\":\\\"$ID\\\"}\" --json '{\"summary\":\"Draft Review (final)\"}' | jq -r '.summary + \" \" + .start.dateTime + \" \" + .end.dateTime' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "Draft Review (final) 2026-03-03T09:00:00+08:00 2026-03-03T10:00:00+08:00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_patch_reschedules_the_day",
+      "seq": 563049,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "ID=$(gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Standup Moved\",\"start\":{\"dateTime\":\"2026-03-04T09:00:00+08:00\"},\"end\":{\"dateTime\":\"2026-03-04T09:30:00+08:00\"}}' | jq -r .id); gws calendar events patch --params \"{\\\"calendarId\\\":\\\"primary\\\",\\\"eventId\\\":\\\"$ID\\\"}\" --json '{\"start\":{\"dateTime\":\"2026-03-05T09:00:00+08:00\"},\"end\":{\"dateTime\":\"2026-03-05T09:30:00+08:00\"}}' > /dev/null; gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-03-04T00:00:00+08:00\",\"timeMax\":\"2026-03-05T00:00:00+08:00\"}' | jq -r '.items | length'; gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-03-05T00:00:00+08:00\",\"timeMax\":\"2026-03-06T00:00:00+08:00\"}' | jq -r '.items[].summary' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nStandup Moved\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_patch_unknown_is_not_found",
+      "seq": 563050,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events patch --params '{\"calendarId\":\"primary\",\"eventId\":\"nosuchevent\"}' --json '{\"summary\":\"x\"}' 2>&1 | grep -c 'Not Found' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_unknown_event_exit_code",
+      "seq": 563051,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events get --params '{\"calendarId\":\"primary\",\"eventId\":\"nosuchevent\"}' > /dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_list_paginates",
+      "seq": 563052,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-02-11T00:00:00+08:00\",\"timeMax\":\"2026-02-12T00:00:00+08:00\",\"orderBy\":\"startTime\",\"maxResults\":2}' | jq -r '.items | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_update_info_changes_title",
+      "seq": 563053,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws forms forms create --json '{\"info\":{\"title\":\"Draft Survey\"}}' | jq -r .formId); gws forms forms batchUpdate --params \"{\\\"formId\\\":\\\"$FID\\\"}\" --json '{\"requests\":[{\"updateFormInfo\":{\"info\":{\"title\":\"Customer Survey\",\"description\":\"Tell us about your order\"},\"updateMask\":\"title,description\"}}]}' > /dev/null; gws forms forms get --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r '.info.title + \" | \" + .info.description' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "Customer Survey | Tell us about your order\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_create_item_honors_the_index",
+      "seq": 563054,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws forms forms create --json '{\"info\":{\"title\":\"Ordered\"}}' | jq -r .formId); gws forms forms batchUpdate --params \"{\\\"formId\\\":\\\"$FID\\\"}\" --json '{\"requests\":[{\"createItem\":{\"item\":{\"title\":\"First asked\"},\"location\":{\"index\":0}}},{\"createItem\":{\"item\":{\"title\":\"Asked second\"},\"location\":{\"index\":0}}}]}' > /dev/null; gws forms forms get --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r '.items[].title' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "Asked second\nFirst asked\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_batch_update_bumps_the_revision",
+      "seq": 563055,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws forms forms create --json '{\"info\":{\"title\":\"Revised\"}}' | jq -r .formId); gws forms forms get --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r .revisionId; gws forms forms batchUpdate --params \"{\\\"formId\\\":\\\"$FID\\\"}\" --json '{\"requests\":[{\"updateFormInfo\":{\"info\":{\"description\":\"v2\"},\"updateMask\":\"description\"}}]}' > /dev/null; gws forms forms get --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r .revisionId",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_get_unknown_is_not_found",
+      "seq": 563056,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws forms forms get --params '{\"formId\":\"nope\"}' 2>&1 | grep -ci 'not found' ",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_list_pages_are_ordered",
+      "seq": 563057,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"primary\",\"timeMin\":\"2026-02-11T00:00:00+08:00\",\"timeMax\":\"2026-02-12T00:00:00+08:00\",\"orderBy\":\"startTime\",\"maxResults\":2}' | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Conference Offsite\nPublic Holiday\nPhD Dissertation Defense\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_list_names_every_calendar",
+      "seq": 563058,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar calendarList list | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Integ User\nTeam Roadmap\nHolidays in United States\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_list_reports_access_roles",
+      "seq": 563059,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar calendarList list | jq -r '.items[] | .id + \" \" + .accessRole'",
+      "expect": {
+        "exit": 0,
+        "stdout": "integ@example.com owner\nteam@group.calendar.google.com writer\nen.usa#holiday@group.v.calendar.google.com reader\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_events_on_a_secondary_calendar",
+      "seq": 563060,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"team@group.calendar.google.com\"}' | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Review\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_id_with_a_fragment_reaches_the_api",
+      "seq": 563061,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events list --params '{\"calendarId\":\"en.usa#holiday@group.v.calendar.google.com\"}' | jq -r '.items[].summary'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Presidents' Day\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_insert_on_a_reader_calendar_is_denied",
+      "seq": 563062,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events insert --params '{\"calendarId\":\"en.usa#holiday@group.v.calendar.google.com\"}' --json '{\"summary\":\"Nope\",\"start\":{\"date\":\"2026-02-20\"},\"end\":{\"date\":\"2026-02-21\"}}' 2>&1 | grep -c 'writer access'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_reader_calendar_insert_exit_code",
+      "seq": 563063,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar events insert --params '{\"calendarId\":\"en.usa#holiday@group.v.calendar.google.com\"}' --json '{\"summary\":\"Nope\",\"start\":{\"date\":\"2026-02-20\"},\"end\":{\"date\":\"2026-02-21\"}}' > /dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_calendar_freebusy_spans_calendars",
+      "seq": 563064,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws calendar freebusy query --json '{\"timeMin\":\"2026-02-11T00:00:00+08:00\",\"timeMax\":\"2026-02-12T00:00:00+08:00\",\"items\":[{\"id\":\"primary\"},{\"id\":\"team@group.calendar.google.com\"}]}' | jq -r '.calendars[\"team@group.calendar.google.com\"].busy | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_seeded_responses_are_listed",
+      "seq": 563065,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws drive files list --params \"{\\\"q\\\":\\\"mimeType='application/vnd.google-apps.form'\\\"}\" | jq -r '.files[] | select(.name==\"Recall Survey\") | .id'); gws forms forms responses list --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r '.responses[].responseId'",
+      "expect": {
+        "exit": 0,
+        "stdout": "resp0001\nresp0002\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_responses_get_one",
+      "seq": 563066,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws drive files list --params \"{\\\"q\\\":\\\"mimeType='application/vnd.google-apps.form'\\\"}\" | jq -r '.files[] | select(.name==\"Recall Survey\") | .id'); gws forms forms responses get --params \"{\\\"formId\\\":\\\"$FID\\\",\\\"responseId\\\":\\\"resp0002\\\"}\" | jq -r '.answers.q_serial.textAnswers.answers[0].value'",
+      "expect": {
+        "exit": 0,
+        "stdout": "SN-9902\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_forms_seeded_items_are_readable",
+      "seq": 563067,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "FID=$(gws drive files list --params \"{\\\"q\\\":\\\"mimeType='application/vnd.google-apps.form'\\\"}\" | jq -r '.files[] | select(.name==\"Recall Survey\") | .id'); gws forms forms get --params \"{\\\"formId\\\":\\\"$FID\\\"}\" | jq -r '.items[].title'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Serial number\nContact email\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -501,7 +501,16 @@ class GwsService:
         # Native mounts (gdocs/gsheets/gslides) render the modified date
         # into filenames, so those targets pin the server clock.
         epoch = target.get("epoch")
-        reset_body = {"epoch": epoch} if epoch else {}
+        reset_body: dict = {"epoch": epoch} if epoch else {}
+        # Secondary calendars and seeded form responses are declared to
+        # /reset rather than inserted: a calendar's accessRole and a form
+        # response are both states no API call can produce.
+        calendar = cls._manifest(target.get("calendar"))
+        if calendar and calendar.get("calendars"):
+            reset_body["calendars"] = calendar["calendars"]
+        forms = cls._manifest(target.get("forms"))
+        if forms:
+            reset_body["forms"] = forms
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{url}/reset", json=reset_body) as resp:
                 resp.raise_for_status()
@@ -520,25 +529,31 @@ class GwsService:
                 for segment in str(mount["root"]).split("/"):
                     parent = await cls._folder(session, url, segment, parent)
                 folder_ids[mount["path"]] = parent
-            apps = target.get("apps")
+            apps = cls._manifest(target.get("apps"))
             if apps:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{apps}.json"
-                await cls._seed_apps(session, url,
-                                     json.loads(manifest.read_text()))
-            mail = target.get("mail")
+                await cls._seed_apps(session, url, apps)
+            mail = cls._manifest(target.get("mail"))
             if mail:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{mail}.json"
-                await cls._seed_mail(session, url,
-                                     json.loads(manifest.read_text()))
-            calendar = target.get("calendar")
+                await cls._seed_mail(session, url, mail)
             if calendar:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{calendar}.json"
-                await cls._seed_calendar(session, url,
-                                         json.loads(manifest.read_text()))
+                await cls._seed_calendar(session, url, calendar["events"])
         return cls(url, folder_ids, target.get("cli_scope"))
+
+    @staticmethod
+    def _manifest(name: str | None) -> list | dict | None:
+        """Read a fixture manifest by its targets.json name.
+
+        Args:
+            name (str | None): the fixture path, e.g. ``calendar/v1``.
+
+        Returns:
+            list | dict | None: the parsed manifest, or None when unnamed.
+        """
+        if not name:
+            return None
+        path = Path(
+            __file__).resolve().parents[2] / "fixtures" / f"{name}.json"
+        return json.loads(path.read_text())
 
     @staticmethod
     async def _seed_apps(session: aiohttp.ClientSession, url: str,

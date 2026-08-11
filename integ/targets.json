@@ -1296,6 +1296,7 @@
       "apps": "google-apps/v1",
       "mail": "gmail/v1",
       "calendar": "calendar/v1",
+      "forms": "forms/v1",
       "clis": [
         "gws"
       ],

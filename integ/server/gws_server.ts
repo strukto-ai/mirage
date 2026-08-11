@@ -197,6 +197,28 @@ interface FormDoc {
   revision: number
 }
 
+// A secondary calendar and a form carrying responses are both harness state
+// rather than anything the API can mint: you own every calendar you create,
+// so a reader one is by definition shared with you, and the Forms API has no
+// method that submits a response at all. Both therefore ride /reset, the same
+// out-of-band channel the pinned epoch already uses.
+interface SeedCalendar {
+  id: string
+  summary: string
+  timeZone?: string
+  accessRole?: string
+  hidden?: boolean
+  events?: Record<string, unknown>[]
+}
+
+interface SeedForm {
+  title: string
+  documentTitle?: string
+  description?: string
+  items?: Record<string, unknown>[]
+  responses?: Record<string, unknown>[]
+}
+
 // Non-UTC on purpose: a UTC default would hide exactly the day-bucketing
 // bugs this mock exists to catch. /reset can pin a different one.
 const DEFAULT_CALENDAR_TZ = 'Asia/Hong_Kong'
@@ -1782,8 +1804,17 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   }
   if (method === 'POST' && path === '/reset') {
     const body =
-      ctx.body.length > 0 ? (json(ctx) as { epoch?: string; calendarTimeZone?: string }) : {}
+      ctx.body.length > 0
+        ? (json(ctx) as {
+            epoch?: string
+            calendarTimeZone?: string
+            calendars?: SeedCalendar[]
+            forms?: SeedForm[]
+          })
+        : {}
     state = new GwsState(body.epoch, body.calendarTimeZone)
+    if (body.calendars !== undefined) seedCalendars(body.calendars)
+    if (body.forms !== undefined) seedForms(body.forms)
     return [200, { ok: true }]
   }
 
@@ -2412,6 +2443,69 @@ function readEventTimes(
   return { start, end }
 }
 
+function makeEvent(body: Record<string, unknown>): CalendarEvent | null {
+  const times = readEventTimes(body)
+  if (times === null) return null
+  const now = state.now()
+  return {
+    id: state.nextEventId(),
+    status: 'confirmed',
+    summary: body.summary as string | undefined,
+    description: body.description as string | undefined,
+    location: body.location as string | undefined,
+    attendees: body.attendees as Record<string, unknown>[] | undefined,
+    start: times.start,
+    end: times.end,
+    created: now,
+    updated: now,
+  }
+}
+
+function seedCalendars(entries: SeedCalendar[]): void {
+  for (const entry of entries) {
+    state.calendars.set(entry.id, {
+      id: entry.id,
+      summary: entry.summary,
+      timeZone: entry.timeZone ?? DEFAULT_CALENDAR_TZ,
+      accessRole: entry.accessRole ?? 'owner',
+      ...(entry.hidden === true ? { hidden: true } : {}),
+    })
+    const bucket = eventsOf(entry.id)
+    for (const raw of entry.events ?? []) {
+      const ev = makeEvent(raw)
+      if (ev === null) throw new Error(`seed event needs a start and an end: ${JSON.stringify(raw)}`)
+      bucket.set(ev.id, ev)
+    }
+  }
+}
+
+function seedForms(entries: SeedForm[]): void {
+  for (const entry of entries) {
+    // Through the Drive table for the same reason forms.create is: the
+    // formId IS the Drive file id, and a seeded form has to be findable
+    // the one way an agent can find one.
+    const item = createDriveItem(
+      entry.documentTitle ?? entry.title,
+      FORM_MIME,
+      [],
+      Buffer.alloc(0),
+      state.nextId('form'),
+    )
+    state.forms.set(item.id, {
+      formId: item.id,
+      title: entry.title,
+      documentTitle: entry.documentTitle ?? entry.title,
+      ...(entry.description === undefined ? {} : { description: entry.description }),
+      items: (entry.items ?? []).map((raw) => ({
+        itemId: state.nextId('item'),
+        ...(raw as Omit<FormItem, 'itemId'>),
+      })),
+      responses: entry.responses ?? [],
+      revision: 1,
+    })
+  }
+}
+
 function routeCalendar(ctx: Ctx): [number, object | Buffer | null, string?] | null {
   const { method, path, query } = ctx
   const base = '/calendar/v3'
@@ -2454,23 +2548,9 @@ function routeCalendar(ctx: Ctx): [number, object | Buffer | null, string?] | nu
       if (cal.accessRole !== 'owner' && cal.accessRole !== 'writer') {
         return googleError(403, 'You need to have writer access.', 'PERMISSION_DENIED')
       }
-      const body = json(ctx)
-      const times = readEventTimes(body)
-      if (times === null) {
+      const ev = makeEvent(json(ctx))
+      if (ev === null) {
         return googleError(400, 'Missing end time.', 'INVALID_ARGUMENT')
-      }
-      const now = state.now()
-      const ev: CalendarEvent = {
-        id: state.nextEventId(),
-        status: 'confirmed',
-        summary: body.summary as string | undefined,
-        description: body.description as string | undefined,
-        location: body.location as string | undefined,
-        attendees: body.attendees as Record<string, unknown>[] | undefined,
-        start: times.start,
-        end: times.end,
-        created: now,
-        updated: now,
       }
       eventsOf(cal.id).set(ev.id, ev)
       return [200, fmtEvent(cal, ev)]

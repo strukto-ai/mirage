@@ -1,0 +1,55 @@
+[
+  {
+    "title": "Product Recall Survey",
+    "documentTitle": "Recall Survey",
+    "description": "Owners of the affected batch",
+    "items": [
+      {
+        "itemId": "serial",
+        "title": "Serial number",
+        "questionItem": {
+          "question": { "questionId": "q_serial", "textQuestion": {} }
+        }
+      },
+      {
+        "itemId": "email",
+        "title": "Contact email",
+        "questionItem": {
+          "question": { "questionId": "q_email", "textQuestion": {} }
+        }
+      }
+    ],
+    "responses": [
+      {
+        "responseId": "resp0001",
+        "createTime": "2026-02-09T03:00:00Z",
+        "lastSubmittedTime": "2026-02-09T03:00:00Z",
+        "answers": {
+          "q_serial": {
+            "questionId": "q_serial",
+            "textAnswers": { "answers": [{ "value": "SN-4417" }] }
+          },
+          "q_email": {
+            "questionId": "q_email",
+            "textAnswers": { "answers": [{ "value": "dana@example.com" }] }
+          }
+        }
+      },
+      {
+        "responseId": "resp0002",
+        "createTime": "2026-02-09T04:30:00Z",
+        "lastSubmittedTime": "2026-02-09T04:30:00Z",
+        "answers": {
+          "q_serial": {
+            "questionId": "q_serial",
+            "textAnswers": { "answers": [{ "value": "SN-9902" }] }
+          },
+          "q_email": {
+            "questionId": "q_email",
+            "textAnswers": { "answers": [{ "value": "lila@example.com" }] }
+          }
+        }
+      }
+    ]
+  }
+]
