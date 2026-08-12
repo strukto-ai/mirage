@@ -192,7 +192,7 @@ export function enoentWithMessage(
   return err
 }
 
-// The phrases live once, in the posix seat table. The DOMAIN here stays
+// The phrases live once, in the posix table. The DOMAIN here stays
 // deliberately narrower than the vocabulary: these are the per-operand
 // codes a read-family command skips-and-reports, and widening it (say
 // to ELOOP or EIO) would widen isFsError's swallow set, which mirrors

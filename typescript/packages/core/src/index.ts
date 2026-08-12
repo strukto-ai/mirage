@@ -546,14 +546,9 @@ export {
   FS_CONDITIONS,
   type FsCondition,
   gnuPhrase,
-  GUEST,
-  guestSeat,
-  type GuestSeat,
   POSIX,
   posixErrno,
-  type PosixSeat,
-  WASI,
-  wasiErrno,
+  type PosixErrno,
 } from './errors/index.ts'
 export { RuntimeVFS, type VFSEntry, type VFSStat } from './runtime/vfs.ts'
 export { FileTable, mergeWrites, planFlush, type FlushKind } from './runtime/handles/index.ts'

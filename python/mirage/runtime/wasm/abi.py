@@ -14,16 +14,67 @@
 
 import struct
 
-from mirage.errors import FsCondition, classify, wasi_errno
+from mirage.errors import FsCondition, classify
 
-# WASI preview1 wire constants. The errno numbering lives in
-# mirage.errors.wasi (it is NOT the host's: ENOENT is 44 on the wire, 2
-# in Python's errno module); the host re-exports the seats it names in
-# its own code paths. EBADF stays a local literal because a bad guest
-# fd is the fd table's condition, never a mount's, so it has no seat in
-# the shared vocabulary.
+# WASI preview1 wire numbers, from wasi-libc's errno.h (alphabetical
+# numbering). These are NOT the host's POSIX values and must never be
+# collapsed with them: ENOENT is 44 on the wire and 2 in Python's errno
+# module, and 18 here is EDOM where the host's 18 is EXDEV. The table
+# is total over the vocabulary; test_abi.py fails a half-added member.
+WASI: dict[FsCondition, int] = {
+    FsCondition.ENOENT:
+    44,
+    FsCondition.ENOTDIR:
+    54,
+    FsCondition.EISDIR:
+    31,
+    FsCondition.EEXIST:
+    20,
+    FsCondition.EACCES:
+    2,
+    FsCondition.EPERM:
+    63,
+    FsCondition.ENOTEMPTY:
+    55,
+    FsCondition.EXDEV:
+    75,
+    # Each mount is its own preopen to a WASI guest, so a rename between
+    # two of them reads as a destination that is not there. pathlib's
+    # EXDEV is the monty dialect's answer, not this wire's; the row IS
+    # that decision (finding 8).
+    FsCondition.CROSS_MOUNT:
+    44,
+    FsCondition.ENOTSUP:
+    58,
+    FsCondition.ELOOP:
+    32,
+    FsCondition.EINVAL:
+    28,
+    FsCondition.EIO:
+    29,
+    FsCondition.EBUSY:
+    10,
+    FsCondition.EROFS:
+    69,
+    # preview1 has no xattr syscalls, so this row is unreachable from a
+    # guest; ENOTSUP is the honest answer if a future host ever asks.
+    FsCondition.NO_XATTR:
+    58,
+}
 
-# errno
+
+def wasi_errno(condition: FsCondition) -> int:
+    """The preview1 wire number for a condition.
+
+    Args:
+        condition (FsCondition): the named condition.
+    """
+    return WASI[condition]
+
+
+# errno. EBADF stays a local literal because a bad guest fd is the fd
+# table's condition, never a mount's, so the vocabulary does not name
+# it.
 OK = 0
 EACCES = wasi_errno(FsCondition.EACCES)
 EBADF = 8
@@ -65,9 +116,10 @@ def errno_for(exc: BaseException) -> int:
     """Map a host/dispatch exception to its preview1 errno.
 
     The naming lives in ``mirage.errors.classify`` and the numbering in
-    the wasi seat table, where the cross-mount-rename-is-ENOENT decision
-    now also lives. An OSError with no seat degrades to EIO and anything
-    else to EINVAL, matching the arms this function carried by hand.
+    the ``WASI`` table above, where the cross-mount-rename-is-ENOENT
+    decision also lives. An OSError the vocabulary does not name
+    degrades to EIO and anything else to EINVAL, matching the arms this
+    function carried by hand.
 
     Args:
         exc (BaseException): exception raised by a WasmVFS operation.

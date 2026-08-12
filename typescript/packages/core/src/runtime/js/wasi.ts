@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FsCondition } from './types.ts'
+import type { FsCondition } from '../../errors/index.ts'
 
 // WASI preview1 wire numbers, from wasi-libc's errno.h (alphabetical
-// numbering). These are NOT POSIX values and must never be collapsed
-// with them: ENOENT is 44 on the wire, and 18 here is EDOM where a
-// POSIX host means EXDEV.
+// numbering; the same table python's abi.py keeps). These are NOT
+// POSIX values and must never be collapsed with them: ENOENT is 44 on
+// the wire, and 18 here is EDOM where a POSIX host means EXDEV. The
+// table is total over the vocabulary; wasi.test.ts fails a half-added
+// member.
 export const WASI: Record<FsCondition, number> = {
   ENOENT: 44,
   ENOTDIR: 54,

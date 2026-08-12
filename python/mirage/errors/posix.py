@@ -14,47 +14,47 @@
 
 import errno
 
-from mirage.errors.types import FsCondition, PosixSeat
+from mirage.errors.types import FsCondition, PosixErrno
 
 # "attribute not set": ENOATTR on macOS, ENODATA on Linux. One
 # condition, resolved once; the phrase follows the number so a raw
 # strerror on either platform reads consistently.
-_NO_XATTR = (PosixSeat(errno.ENOATTR, "Attribute not found") if hasattr(
-    errno, "ENOATTR") else PosixSeat(errno.ENODATA, "No data available"))
+_NO_XATTR = (PosixErrno(errno.ENOATTR, "Attribute not found") if hasattr(
+    errno, "ENOATTR") else PosixErrno(errno.ENODATA, "No data available"))
 
-POSIX: dict[FsCondition, PosixSeat] = {
+POSIX: dict[FsCondition, PosixErrno] = {
     FsCondition.ENOENT:
-    PosixSeat(errno.ENOENT, "No such file or directory"),
+    PosixErrno(errno.ENOENT, "No such file or directory"),
     FsCondition.ENOTDIR:
-    PosixSeat(errno.ENOTDIR, "Not a directory"),
+    PosixErrno(errno.ENOTDIR, "Not a directory"),
     FsCondition.EISDIR:
-    PosixSeat(errno.EISDIR, "Is a directory"),
+    PosixErrno(errno.EISDIR, "Is a directory"),
     FsCondition.EEXIST:
-    PosixSeat(errno.EEXIST, "File exists"),
+    PosixErrno(errno.EEXIST, "File exists"),
     FsCondition.EACCES:
-    PosixSeat(errno.EACCES, "Permission denied"),
+    PosixErrno(errno.EACCES, "Permission denied"),
     FsCondition.EPERM:
-    PosixSeat(errno.EPERM, "Operation not permitted"),
+    PosixErrno(errno.EPERM, "Operation not permitted"),
     FsCondition.ENOTEMPTY:
-    PosixSeat(errno.ENOTEMPTY, "Directory not empty"),
+    PosixErrno(errno.ENOTEMPTY, "Directory not empty"),
     FsCondition.EXDEV:
-    PosixSeat(errno.EXDEV, "Invalid cross-device link"),
+    PosixErrno(errno.EXDEV, "Invalid cross-device link"),
     # A cross-mount rename is EXDEV to every POSIX consumer: the kernel
     # reads it as "not one filesystem" and mv falls back to copy+unlink.
     FsCondition.CROSS_MOUNT:
-    PosixSeat(errno.EXDEV, "Invalid cross-device link"),
+    PosixErrno(errno.EXDEV, "Invalid cross-device link"),
     FsCondition.ENOTSUP:
-    PosixSeat(errno.ENOTSUP, "Operation not supported"),
+    PosixErrno(errno.ENOTSUP, "Operation not supported"),
     FsCondition.ELOOP:
-    PosixSeat(errno.ELOOP, "Too many levels of symbolic links"),
+    PosixErrno(errno.ELOOP, "Too many levels of symbolic links"),
     FsCondition.EINVAL:
-    PosixSeat(errno.EINVAL, "Invalid argument"),
+    PosixErrno(errno.EINVAL, "Invalid argument"),
     FsCondition.EIO:
-    PosixSeat(errno.EIO, "Input/output error"),
+    PosixErrno(errno.EIO, "Input/output error"),
     FsCondition.EBUSY:
-    PosixSeat(errno.EBUSY, "Device or resource busy"),
+    PosixErrno(errno.EBUSY, "Device or resource busy"),
     FsCondition.EROFS:
-    PosixSeat(errno.EROFS, "Read-only file system"),
+    PosixErrno(errno.EROFS, "Read-only file system"),
     FsCondition.NO_XATTR:
     _NO_XATTR,
 }

@@ -14,8 +14,46 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { FS_CONDITIONS } from '../../../errors/index.ts'
+import { POSIX } from '../../../errors/posix.ts'
 import { CrossMountError } from '../../errors.ts'
-import { asGuestError, guestError } from './errors.ts'
+import { asGuestError, CPYTHON, cpythonError, guestError } from './errors.ts'
+
+describe('the CPython table', () => {
+  it('covers the whole vocabulary', () => {
+    // A condition cannot be half-added: the dialect table stays total
+    // over the vocabulary, keyed on exactly the union.
+    expect(Object.keys(CPYTHON).sort()).toEqual([...FS_CONDITIONS].sort())
+  })
+
+  it.each([
+    ['ENOENT', 'FileNotFoundError', 2],
+    ['ENOTDIR', 'NotADirectoryError', 20],
+    ['EISDIR', 'IsADirectoryError', 21],
+    ['EEXIST', 'FileExistsError', 17],
+    ['EACCES', 'PermissionError', 13],
+    ['EPERM', 'PermissionError', 1],
+    ['EXDEV', 'OSError', 18],
+    ['CROSS_MOUNT', 'OSError', 18],
+    ['ENOTEMPTY', 'OSError', 39],
+    ['ELOOP', 'OSError', 40],
+  ] as const)('renders %s as CPython on Linux', (cond, exception, errno) => {
+    // A guest interpreter is platform-neutral, so the numbering must
+    // not wobble with the host. Mirrors the python
+    // tests/runtime/python/monty/test_errors.py pins.
+    const row = cpythonError(cond)
+    expect([row.exception, row.errno]).toEqual([exception, errno])
+  })
+
+  it('speaks one phrase per condition, shared with the posix table', () => {
+    // NO_XATTR is exempt: the posix row may resolve to macOS's
+    // "Attribute not found" while a guest always speaks Linux.
+    for (const cond of FS_CONDITIONS) {
+      if (cond === 'NO_XATTR') continue
+      expect(CPYTHON[cond].phrase).toBe(POSIX[cond].phrase)
+    }
+  })
+})
 
 describe('guestError', () => {
   it('renders CPython message shape', () => {
@@ -31,7 +69,7 @@ describe('guestError', () => {
 })
 
 describe('asGuestError', () => {
-  it('converts every seated condition, not a private six', () => {
+  it('converts every named condition, not a private six', () => {
     // ENOTEMPTY had no row in the old table, so a non-empty rmdir
     // reached guest code as a raw JS error it could not `except`.
     const raw = Object.assign(new Error('directory not empty: /d'), {
@@ -57,7 +95,7 @@ describe('asGuestError', () => {
     expect(guest.message).toBe("[Errno 18] Invalid cross-device link: '/a/x'")
   })
 
-  it('passes an unseated error through untouched', () => {
+  it('passes an unnamed error through untouched', () => {
     const raw = new Error('transport exploded')
     expect(asGuestError(raw, '/x')).toBe(raw)
   })

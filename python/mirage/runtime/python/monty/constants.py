@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.errors import FsCondition, guest_seat
+from mirage.errors import FsCondition
+from mirage.runtime.python.monty.errors import cpython_error
 
 MISSING_EXTRA_HINT = (
     "the monty runtime requires the 'monty' extra. Install with: "
@@ -30,8 +31,8 @@ INCOMPLETE_MARKERS = ("unexpected EOF", "Expected an indented block")
 
 # POSIX's answer for a rename across filesystems. Monty ships no shutil,
 # so guest code writes the copy-and-delete fallback by hand; the errno
-# is what tells it to. The phrase is the guest seat's, so the py and ts
-# encoders cannot drift apart on it.
-EXDEV_MESSAGE = guest_seat(FsCondition.CROSS_MOUNT).phrase
+# is what tells it to. The phrase is the CPython table's, so the py and
+# ts encoders cannot drift apart on it.
+EXDEV_MESSAGE = cpython_error(FsCondition.CROSS_MOUNT).phrase
 
 FILE_EXISTS_MESSAGE = "[Errno 17] File exists: {path!r}"

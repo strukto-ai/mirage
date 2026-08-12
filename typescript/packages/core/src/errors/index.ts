@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { classify } from './classify.ts'
-export { GUEST, guestSeat } from './guest.ts'
 export { gnuPhrase, POSIX, posixErrno } from './posix.ts'
 export { FS_CONDITIONS } from './types.ts'
-export type { FsCondition, GuestSeat, PosixSeat } from './types.ts'
-export { WASI, wasiErrno } from './wasi.ts'
+export type { FsCondition, PosixErrno } from './types.ts'

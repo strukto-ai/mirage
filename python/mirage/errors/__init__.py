@@ -13,21 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.errors.classify import classify
-from mirage.errors.guest import GUEST, guest_seat
 from mirage.errors.posix import POSIX, gnu_phrase, posix_errno
-from mirage.errors.types import FsCondition, GuestSeat, PosixSeat
-from mirage.errors.wasi import WASI, wasi_errno
+from mirage.errors.types import FsCondition, PosixErrno
 
 __all__ = [
-    "GUEST",
     "POSIX",
-    "WASI",
     "FsCondition",
-    "GuestSeat",
-    "PosixSeat",
+    "PosixErrno",
     "classify",
     "gnu_phrase",
-    "guest_seat",
     "posix_errno",
-    "wasi_errno",
 ]

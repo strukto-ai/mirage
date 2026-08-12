@@ -70,7 +70,7 @@ describe('classify', () => {
     [Object.assign(new Error('x'), { code: 7 })],
     ['not even an error'],
     [null],
-  ])('answers null for anything without a seat', (err) => {
+  ])('answers null for anything the vocabulary does not name', (err) => {
     expect(classify(err)).toBeNull()
   })
 })

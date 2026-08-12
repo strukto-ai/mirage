@@ -43,7 +43,7 @@ _CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
 
 # The reverse arm for a plain OSError that carries a vocabulary errno.
 # EOPNOTSUPP is ENOTSUP's second spelling (a distinct number on macOS,
-# the same one on Linux); NO_XATTR reads its platform-resolved seat.
+# the same one on Linux); NO_XATTR reads its platform-resolved row.
 _ERRNO_ARMS: dict[int, FsCondition] = {
     errno.ENOENT: FsCondition.ENOENT,
     errno.ENOTDIR: FsCondition.ENOTDIR,
@@ -65,7 +65,7 @@ _ERRNO_ARMS: dict[int, FsCondition] = {
 
 
 def classify(exc: BaseException) -> FsCondition | None:
-    """Name the condition an exception reports, if it has a seat.
+    """Name the condition an exception reports, if the vocabulary names one.
 
     The one classifier: every boundary (FUSE/FSKit adapters, the wasi
     host, the monty encoders) calls this and then renders the condition

@@ -56,7 +56,7 @@ def test_errno_carrying_oserror_arms(code, expected):
 
 def test_xattr_miss_is_one_condition_whatever_the_platform_calls_it():
     # ENOATTR on macOS, ENODATA on Linux: one condition, resolved through
-    # the posix seat so the reverse arm matches the running host.
+    # the posix row so the reverse arm matches the running host.
     number = POSIX[FsCondition.NO_XATTR].errno
     assert classify(OSError(number, "x")) is FsCondition.NO_XATTR
 
@@ -64,8 +64,7 @@ def test_xattr_miss_is_one_condition_whatever_the_platform_calls_it():
 def test_a_subclass_wins_over_its_stamped_errno():
     # FileNotFoundError IS an OSError with errno 2; the class arm answers
     # before the errno lookup so the two can never disagree.
-    assert classify(FileNotFoundError(errno.ENOENT,
-                                      "x")) is FsCondition.ENOENT
+    assert classify(FileNotFoundError(errno.ENOENT, "x")) is FsCondition.ENOENT
 
 
 @pytest.mark.parametrize("exc", [
@@ -74,6 +73,6 @@ def test_a_subclass_wins_over_its_stamped_errno():
     OSError(errno.ENAMETOOLONG, "outside the vocabulary"),
 ])
 def test_unnamed_conditions_answer_none(exc):
-    # None means "no seat": the caller keeps its own fallback (FUSE
+    # None means "no named condition": the caller keeps its own fallback (FUSE
     # passes a raw OSError errno through, wasi answers EIO/EINVAL).
     assert classify(exc) is None

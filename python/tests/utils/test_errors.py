@@ -166,7 +166,7 @@ async def test_readdir_error_reports_the_virtual_path():
 
 
 def test_new_constructors_name_their_condition():
-    # The four seats python was missing (R5a): each construction
+    # The four constructors python was missing (R5a): each construction
     # classifies to its own condition, so no boundary needs a message
     # needle to recognize it.
     spec = PathSpec.from_str_path("/data/x")

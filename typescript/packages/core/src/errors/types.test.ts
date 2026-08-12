@@ -14,19 +14,16 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { GUEST } from './guest.ts'
 import { POSIX } from './posix.ts'
 import { FS_CONDITIONS } from './types.ts'
-import { WASI } from './wasi.ts'
 
 describe('the condition vocabulary', () => {
-  it('is covered by every number table exactly', () => {
-    // The gate of R5a: a condition cannot be half-added. Every boundary
-    // table keys on exactly the vocabulary, no more, no fewer.
-    const conditions = [...FS_CONDITIONS].sort()
-    expect(Object.keys(POSIX).sort()).toEqual(conditions)
-    expect(Object.keys(WASI).sort()).toEqual(conditions)
-    expect(Object.keys(GUEST).sort()).toEqual(conditions)
+  it('is covered by the posix table exactly', () => {
+    // The gate of R5a: a condition cannot be half-added. The shared
+    // base is pinned here; each runtime dialect pins its own totality
+    // beside its boundary (runtime/js/wasi.test.ts for the preview1
+    // wire, runtime/python/monty/errors.test.ts for CPython).
+    expect(Object.keys(POSIX).sort()).toEqual([...FS_CONDITIONS].sort())
   })
 
   it('names the probed conditions', () => {

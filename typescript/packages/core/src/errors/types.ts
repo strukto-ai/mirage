@@ -18,11 +18,13 @@
  * Every boundary that has to say a condition in a number (POSIX for the
  * kernel adapters, preview1 for a WASI guest, CPython errnos for a
  * monty guest) keeps only a table from these names to its own numbers,
- * and nothing else. Adding a member means adding one row per table;
- * `types.test.ts` fails a half-added one. The spellings are the
- * uppercase POSIX names because that is what `.code` already carries
- * throughout the TypeScript tree (python's enum uses the same member
- * names with lowercase values).
+ * and nothing else. The POSIX table is the shared base and lives here;
+ * each runtime dialect lives beside its boundary (`runtime/js/wasi.ts`,
+ * `runtime/python/monty/errors.ts`). Every table stays total over this
+ * union, and each table's own test fails a half-added member. The
+ * spellings are the uppercase POSIX names because that is what `.code`
+ * already carries throughout the TypeScript tree (python's enum uses
+ * the same member names with lowercase values).
  *
  * Two members are mirage's own conditions rather than POSIX spellings:
  * `CROSS_MOUNT` is a rename whose ends live on different mounts (posix
@@ -68,19 +70,7 @@ export const FS_CONDITIONS: readonly FsCondition[] = [
 ]
 
 /** One condition's POSIX rendering: errno plus GNU strerror. */
-export interface PosixSeat {
-  errno: number
-  phrase: string
-}
-
-/**
- * One condition's guest-python rendering, for the monty encoders: the
- * builtin exception a guest should be able to `except`, with
- * CPython-on-Linux numbering (a guest interpreter is platform-neutral,
- * so the numbering must not wobble with the host).
- */
-export interface GuestSeat {
-  name: string
+export interface PosixErrno {
   errno: number
   phrase: string
 }

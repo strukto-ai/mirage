@@ -25,8 +25,8 @@ from mirage.utils.stat_view import (DIR_MODE, FILE_MODE, content_size, is_dir,
 
 NAIVE = "2026-01-02T03:04:05"
 UTC_NS = int(
-    datetime(2026, 1, 2, 3, 4, 5,
-             tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc).timestamp() *
+    1_000_000_000)
 
 
 @pytest.fixture
@@ -64,8 +64,8 @@ def test_aware_and_offsetless_stamps_agree(new_york_clock):
 
 def test_missing_or_garbage_mtime_is_zero():
     assert mtime_ns(FileStat(name="f", type=FileType.TEXT)) == 0
-    assert mtime_ns(FileStat(name="f", type=FileType.TEXT,
-                             modified="yesterday-ish")) == 0
+    assert mtime_ns(
+        FileStat(name="f", type=FileType.TEXT, modified="yesterday-ish")) == 0
 
 
 def test_directory_size_is_zero_whatever_the_backend_reports():

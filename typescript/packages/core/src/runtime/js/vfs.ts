@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { classify, WASI } from '../../errors/index.ts'
+import { classify } from '../../errors/index.ts'
+import { WASI } from './wasi.ts'
 import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
 import { FileHandle, FileTable, parseMode } from '../handles/index.ts'
 import type { RuntimeVFS, VFSStat } from '../vfs.ts'
@@ -23,9 +24,9 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 // WASI preview1 errnos this shim answers with directly. The numbering
-// lives in the shared seat table (errors/wasi.ts, the same numbers
-// python's abi.py re-exports): guests compare against these, so host
-// errno numbering must not leak.
+// lives beside this shim (wasi.ts, the same numbers python's abi.py
+// keeps): guests compare against these, so host errno numbering must
+// not leak.
 const EIO = WASI.EIO
 const ENOENT = WASI.ENOENT
 

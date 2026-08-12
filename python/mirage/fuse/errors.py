@@ -42,7 +42,7 @@ def classify_error(err: BaseException) -> int:
     naming lives in ``mirage.errors.classify`` (shared with the wasi
     host and, through its TS twin, both fuse-native and the monty
     encoders); this adapter only renders the condition in host POSIX
-    numbers. An OSError whose errno has no seat in the vocabulary is
+    numbers. An OSError whose errno the vocabulary does not name is
     passed through untouched (ENAMETOOLONG reaches the kernel as
     itself), and the message needles are a last resort for bare
     OSErrors, not a classification channel.

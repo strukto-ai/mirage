@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FsCondition, PosixSeat } from './types.ts'
+import type { FsCondition, PosixErrno } from './types.ts'
 
 // Linux-canonical numbers: core is runtime-agnostic and has no host
 // errno module to ask (python's posix.py resolves per platform). A
@@ -21,7 +21,7 @@ import type { FsCondition, PosixSeat } from './types.ts'
 // ENOTEMPTY, and fuse-native normalizes); what lives here once is the
 // canonical numbering and the GNU strerror phrases every message
 // renderer shares.
-export const POSIX: Record<FsCondition, PosixSeat> = {
+export const POSIX: Record<FsCondition, PosixErrno> = {
   ENOENT: { errno: 2, phrase: 'No such file or directory' },
   ENOTDIR: { errno: 20, phrase: 'Not a directory' },
   EISDIR: { errno: 21, phrase: 'Is a directory' },

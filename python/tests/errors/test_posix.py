@@ -42,7 +42,7 @@ def test_numbers_come_from_the_host_errno_module(cond, number):
 
 
 def test_xattr_miss_resolves_per_platform():
-    # ENOATTR on macOS, ENODATA on Linux; one condition, one seat.
+    # ENOATTR on macOS, ENODATA on Linux; one condition, one row.
     expected = getattr(errno, "ENOATTR", None) or errno.ENODATA
     assert posix_errno(FsCondition.NO_XATTR) == expected
 
@@ -68,8 +68,8 @@ def test_phrases_are_gnu_strerror(cond, phrase):
     assert gnu_phrase(cond) == phrase
 
 
-def test_every_seat_has_a_positive_number_and_a_phrase():
+def test_every_row_has_a_positive_number_and_a_phrase():
     for cond in FsCondition:
-        seat = POSIX[cond]
-        assert seat.errno > 0
-        assert seat.phrase
+        row = POSIX[cond]
+        assert row.errno > 0
+        assert row.phrase

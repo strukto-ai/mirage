@@ -15,10 +15,12 @@
 import errno as host_errno
 import struct
 
+from mirage.errors import FsCondition
 from mirage.runtime.wasm.abi import (EACCES, EEXIST, EIO, EISDIR, ENOENT,
                                      ENOTDIR, ENOTSUP, EXDEV, FT_DIR, FT_REG,
-                                     errno_for, pack_dirent, pack_fdstat,
-                                     pack_filestat, pack_prestat, unpack_iovs)
+                                     WASI, errno_for, pack_dirent, pack_fdstat,
+                                     pack_filestat, pack_prestat, unpack_iovs,
+                                     wasi_errno)
 from mirage.utils.path import CycleError
 
 
@@ -53,9 +55,49 @@ def test_exdev_is_wasi_libc_75_not_the_host_18():
 
 
 def test_symlink_loop_is_wire_eloop():
-    # preview1 seat 32; CycleError is not an OSError, so before the
+    # preview1 number 32; CycleError is not an OSError, so before the
     # shared vocabulary it fell to the EINVAL fallback.
     assert errno_for(CycleError("/a")) == 32
+
+
+def test_wire_table_covers_the_whole_vocabulary():
+    # A condition cannot be half-added: the dialect table stays total
+    # over the vocabulary, keyed on exactly the enum.
+    assert set(WASI) == set(FsCondition)
+
+
+def test_preview1_numbering_is_the_wasi_libc_table():
+    # wasi-libc errno.h numbering, which is NOT the host's: ENOENT is 44
+    # on the wire and 2 in Python's errno module. Pinned literally so a
+    # host-errno leak cannot pass.
+    assert WASI == {
+        FsCondition.ENOENT: 44,
+        FsCondition.ENOTDIR: 54,
+        FsCondition.EISDIR: 31,
+        FsCondition.EEXIST: 20,
+        FsCondition.EACCES: 2,
+        FsCondition.EPERM: 63,
+        FsCondition.ENOTEMPTY: 55,
+        FsCondition.EXDEV: 75,
+        FsCondition.CROSS_MOUNT: 44,
+        FsCondition.ENOTSUP: 58,
+        FsCondition.ELOOP: 32,
+        FsCondition.EINVAL: 28,
+        FsCondition.EIO: 29,
+        FsCondition.EBUSY: 10,
+        FsCondition.EROFS: 69,
+        FsCondition.NO_XATTR: 58,
+    }
+
+
+def test_cross_mount_is_deliberately_noent_on_this_wire():
+    # Finding 8: each mount is its own preopen to a WASI guest, so a
+    # rename between two of them reads as a destination that is not
+    # there. pathlib's EXDEV is the monty dialect's answer, not this
+    # one's. The table row IS the decision; do not "fix" it to 75.
+    assert wasi_errno(FsCondition.CROSS_MOUNT) == wasi_errno(
+        FsCondition.ENOENT)
+    assert wasi_errno(FsCondition.CROSS_MOUNT) != wasi_errno(FsCondition.EXDEV)
 
 
 def test_record_sizes_match_the_preview1_layouts():

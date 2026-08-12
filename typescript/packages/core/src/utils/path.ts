@@ -127,7 +127,7 @@ export const MAX_SYMLINK_HOPS = 40
 // "Too many levels of symbolic links".
 export class CycleError extends Error {
   readonly path: string
-  // The condition's seat in the shared vocabulary (errors/classify.ts
+  // The condition's name in the shared vocabulary (errors/classify.ts
   // keys on codes), so a loop stops degrading to EIO at the kernel and
   // guest boundaries.
   readonly code = 'ELOOP'

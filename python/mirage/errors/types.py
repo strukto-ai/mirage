@@ -22,8 +22,11 @@ class FsCondition(StrEnum):
     Every boundary that has to say a condition in a number (POSIX for
     the kernel adapters, preview1 for a WASI guest, CPython errnos for
     a monty guest) keeps only a table from these names to its own
-    numbers, and nothing else. Adding a member means adding one row per
-    table; ``tests/errors/test_types.py`` fails a half-added one.
+    numbers, and nothing else. The POSIX table is the shared base and
+    lives here; each runtime dialect lives beside its boundary
+    (``runtime/wasm/abi.py``, ``runtime/python/monty/errors.py``).
+    Every table stays total over this enum, and each table's own test
+    fails a half-added member.
 
     Two members are mirage's own conditions rather than POSIX spellings:
     ``CROSS_MOUNT`` is a rename whose ends live on different mounts
@@ -51,7 +54,7 @@ class FsCondition(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class PosixSeat:
+class PosixErrno:
     """One condition's POSIX rendering: host errno plus GNU strerror.
 
     Args:
@@ -60,23 +63,5 @@ class PosixSeat:
         phrase (str): the GNU strerror text command boundaries render.
     """
 
-    errno: int
-    phrase: str
-
-
-@dataclass(frozen=True, slots=True)
-class GuestSeat:
-    """One condition's guest-python rendering, for the monty encoders.
-
-    Args:
-        name (str): the builtin exception a guest should be able to
-            ``except`` (e.g. ``FileNotFoundError``).
-        errno (int): CPython-on-Linux errno; a guest interpreter is
-            platform-neutral, so the numbering must not wobble with the
-            host.
-        phrase (str): CPython's message phrase for the errno.
-    """
-
-    name: str
     errno: int
     phrase: str

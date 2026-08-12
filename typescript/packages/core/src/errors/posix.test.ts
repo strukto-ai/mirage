@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { gnuPhrase, POSIX, posixErrno } from './posix.ts'
 import { FS_CONDITIONS } from './types.ts'
 
-describe('the posix seat table', () => {
+describe('the posix table', () => {
   it.each([
     ['ENOENT', 'No such file or directory'],
     ['ENOTDIR', 'Not a directory'],
@@ -42,7 +42,7 @@ describe('the posix seat table', () => {
     expect(posixErrno('CROSS_MOUNT')).toBe(posixErrno('EXDEV'))
   })
 
-  it('gives every seat a positive number and a phrase', () => {
+  it('gives every row a positive number and a phrase', () => {
     for (const cond of FS_CONDITIONS) {
       expect(POSIX[cond].errno).toBeGreaterThan(0)
       expect(POSIX[cond].phrase).not.toBe('')

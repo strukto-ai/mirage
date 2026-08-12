@@ -14,7 +14,7 @@
 
 import type { FsCondition } from './types.ts'
 
-// Every code spelling with a seat. Identity for the vocabulary's own
+// Every code spelling the vocabulary names. Identity for the vocabulary's own
 // names (which is what the utils/errors constructors, CycleError and
 // CrossMountError stamp), plus the aliases other raisers use:
 // EOPNOTSUPP is ENOTSUP's second POSIX spelling, and ENODATA/ENOATTR
@@ -41,7 +41,7 @@ const CODE_ARMS: Record<string, FsCondition> = {
 }
 
 /**
- * Name the condition an error reports, if it has a seat.
+ * Name the condition an error reports, if the vocabulary names one.
  *
  * The one classifier: every boundary (the fuse-native adapter, the
  * quickjs wasi shim, the monty encoders, pyodide's errno lookup) calls
