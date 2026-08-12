@@ -18,6 +18,7 @@ import base64
 import hashlib
 import io
 import re
+import sys
 import zipfile
 from pathlib import Path
 
@@ -331,6 +332,11 @@ class FakeRepo:
         # accepted and dropped.
         self.issues: list[dict] = []
         self.commits: list[dict] = []
+        # Staged trees, and which one each commit points at. A multi-file
+        # write builds a tree, commits it and then moves the branch, and
+        # only that last step is allowed to change what a read returns.
+        self.trees: dict[str, dict[str, bytes]] = {}
+        self.commit_trees: dict[str, str] = {}
 
     @property
     def full_name(self) -> str:
@@ -341,6 +347,17 @@ class FakeRepo:
         self.files[key] = data
         self.blobs[_blob_sha(data)] = data
         self._index(key, data)
+
+    def replace_files(self, files: dict[str, bytes]) -> None:
+        """Make a staged tree the repository's contents.
+
+        Args:
+            files (dict[str, bytes]): the tree to check out.
+        """
+        self.files = {}
+        self.terms = {}
+        for path, data in files.items():
+            self.seed_path(path, data)
 
     def seed_submodule(self, path: str) -> None:
         """Register a submodule gitlink: a tree entry of type "commit"
@@ -439,11 +456,25 @@ class FakeGitHub:
         # resolves that by asking /user first.
         self.login = DEFAULT_LOGIN
 
-    def repo(self, owner: str, name: str) -> FakeRepo:
+    def repo(self,
+             owner: str,
+             name: str,
+             default_branch: str = DEFAULT_BRANCH) -> FakeRepo:
         key = f"{owner}/{name}"
         if key not in self.repos:
-            self.repos[key] = FakeRepo(owner, name)
+            self.repos[key] = FakeRepo(owner, name, default_branch)
         return self.repos[key]
+
+    def rename(self, repo: FakeRepo, name: str) -> None:
+        """Move a repository to a new name under the same owner.
+
+        Args:
+            repo (FakeRepo): the repository to rename.
+            name (str): its new name.
+        """
+        self.repos.pop(repo.full_name, None)
+        repo.name = name
+        self.repos[repo.full_name] = repo
 
 
 class GitHubServer:
@@ -517,6 +548,35 @@ class GitHubServer:
         repo = self.state.repo(self.state.login, name)
         return web.json_response(_repo_json(repo), status=201)
 
+    async def update_repo(self, request: web.Request) -> web.Response:
+        """Rename a repository, or move its default branch.
+
+        A task that forks a template and renames the fork does it here, so
+        the rename has to carry the content with it rather than leaving an
+        empty repository behind under the new name.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the updated repository, or 422 on a name clash.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        name = str(body.get("name") or "").strip()
+        if name and name != repo.name:
+            if f"{repo.owner}/{name}" in self.state.repos:
+                return _error(422, "Repository creation failed.")
+            self.state.rename(repo, name)
+        branch = str(body.get("default_branch") or "").strip()
+        if branch:
+            repo.default_branch = branch
+        return web.json_response(_repo_json(repo))
+
     async def delete_repo(self, request: web.Request) -> web.Response:
         """Delete a repository, as a task's preprocess does before seeding.
 
@@ -552,7 +612,11 @@ class GitHubServer:
         source = self._lookup(request)
         if source is None:
             return _error(404, "Not Found")
-        fork = self.state.repo(self.state.login, source.name)
+        # GitHub lets the fork be named at creation time, which is how a
+        # caller avoids a two-step fork-then-rename.
+        body = await _json_body(request)
+        name = str(body.get("name") or "").strip() or source.name
+        fork = self.state.repo(self.state.login, name)
         fork.default_branch = source.default_branch
         fork.submodules = set(source.submodules)
         for path, data in source.files.items():
@@ -681,6 +745,175 @@ class GitHubServer:
             },
             status=201 if created else 200)
 
+    async def search_repos(self, request: web.Request) -> web.Response:
+        """Find repositories by substring, over everything the fake holds.
+
+        Substring rather than GitHub's own qualifier grammar, which nothing
+        here parses. It is here at all because the alternative is a 404, and
+        a caller reads that as "no such repository" -- an agent looking for
+        the fork it just made would conclude it had not made one.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the matching repositories.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        query = request.query.get("q", "").lower()
+        # Qualifiers (`user:x`, `in:name`) are dropped rather than honoured;
+        # what is left is matched against the full name.
+        terms = [t for t in query.split() if ":" not in t]
+        items = [
+            _repo_json(repo) for name, repo in sorted(self.state.repos.items())
+            if all(t in name.lower() for t in terms)
+        ]
+        return web.json_response({
+            "total_count": len(items),
+            "incomplete_results": False,
+            "items": items,
+        })
+
+    async def git_commit(self, request: web.Request) -> web.Response:
+        """One commit by sha, with the tree it points at.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the commit object, or 404.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        sha = request.match_info["sha"]
+        for commit in _commit_list(repo):
+            if commit["sha"] == sha:
+                return web.json_response({
+                    "sha": sha,
+                    "message": commit["commit"]["message"],
+                    "tree": {
+                        "sha": repo.commit_trees.get(sha, _tree_sha(""))
+                    },
+                })
+        return _error(404, "Not Found")
+
+    async def create_tree(self, request: web.Request) -> web.Response:
+        """Stage a tree. Nothing becomes visible until a ref points at it.
+
+        This is the multi-file write path: a caller builds a tree, commits
+        it, then moves the branch. Applying the files here instead would
+        make a tree that is never committed show up in the repository, which
+        is the kind of difference a task only notices as a wrong answer.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the staged tree's sha.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        base = str(body.get("base_tree") or "")
+        files = dict(repo.trees.get(base, repo.files))
+        entries = body.get("tree")
+        if not isinstance(entries, list):
+            return _error(422, "Invalid request.\n\n\"tree\" wasn't supplied.")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            path = str(entry.get("path") or "").strip("/")
+            if not path:
+                continue
+            # A null sha is git's delete; content is the inline form and a
+            # sha names a blob the caller wrote earlier.
+            if "sha" in entry and entry["sha"] is None:
+                files.pop(path, None)
+            elif entry.get("content") is not None:
+                files[path] = str(entry["content"]).encode()
+            elif entry.get("sha"):
+                blob = repo.blob(str(entry["sha"]))
+                if blob is None:
+                    return _error(422, f"Tree entry {path} has an unknown sha")
+                files[path] = blob
+        sha = _tree_sha(f"{repo.full_name}:{len(repo.trees)}")
+        repo.trees[sha] = files
+        return web.json_response({"sha": sha, "tree": []}, status=201)
+
+    async def create_commit(self, request: web.Request) -> web.Response:
+        """Record a commit against a staged tree.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the new commit.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        tree = str(body.get("tree") or "")
+        if tree not in repo.trees:
+            return _error(422, "Invalid request.\n\n\"tree\" is invalid.")
+        staged = repo.trees[tree]
+        touched = sorted(
+            set(staged) ^ set(repo.files)
+            | {p
+               for p, d in staged.items() if repo.files.get(p) != d})
+        commit = _record_commit(repo, str(body.get("message") or "Update"),
+                                sorted(touched))
+        repo.commit_trees[commit["sha"]] = tree
+        return web.json_response(
+            {
+                "sha": commit["sha"],
+                "message": commit["commit"]["message"],
+                "tree": {
+                    "sha": tree
+                },
+            },
+            status=201)
+
+    async def update_ref(self, request: web.Request) -> web.Response:
+        """Move a branch, which is what makes a staged tree visible.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the moved reference.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        ref = request.match_info["ref"].strip("/")
+        if ref != f"heads/{repo.default_branch}":
+            return _error(422, "Reference does not exist")
+        body = await _json_body(request)
+        sha = str(body.get("sha") or "")
+        tree = repo.commit_trees.get(sha)
+        if tree is None:
+            return _error(422, "Invalid request.\n\n\"sha\" is invalid.")
+        repo.replace_files(repo.trees[tree])
+        return web.json_response({
+            "ref": f"refs/{ref}",
+            "object": {
+                "sha": sha,
+                "type": "commit"
+            },
+        })
+
     async def list_issues(self, request: web.Request) -> web.Response:
         """List issues, newest first, filtered by state.
 
@@ -789,6 +1022,88 @@ class GitHubServer:
             "commits": [],
         })
 
+    async def raw_content(self, request: web.Request) -> web.Response:
+        """Serve a file's bytes the way raw.githubusercontent.com does.
+
+        A client reading one file fetches it from the raw host rather than
+        the API, and decides text from binary by the Content-Type it gets
+        back, so serving everything as octet-stream would base64 the whole
+        repository. The fixture is text apart from the stubbed binaries, so
+        the split is on whether the bytes decode as UTF-8.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the file's bytes, or 404.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        path = request.match_info["path"].strip("/")
+        data = repo.files.get(path)
+        if data is None:
+            return _error(404, "Not Found")
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            content_type = "application/octet-stream"
+        else:
+            content_type = "text/plain; charset=utf-8"
+        return web.Response(body=data, content_type=content_type.split(";")[0])
+
+    async def unrouted(self, request: web.Request) -> web.Response:
+        """Answer 404 for an endpoint the fake does not implement, loudly.
+
+        A real client treats a 404 as an answer -- "no such ref", "no such
+        file" -- so an unimplemented endpoint is indistinguishable from a
+        negative result, and the caller reports a plausible wrong conclusion
+        instead of an error. Naming it on stderr is what turns that into a
+        visible gap.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: 404.
+        """
+        print(f"github fake: no route for {request.method} {request.path}",
+              file=sys.stderr,
+              flush=True)
+        return _error(404, "Not Found")
+
+    async def git_ref(self, request: web.Request) -> web.Response:
+        """Resolve `refs/heads/<branch>` or `refs/tags/<tag>` to a commit.
+
+        A client that takes a `ref` argument resolves it here before reading
+        anything, trying the branch spelling and then the tag spelling, so a
+        404 on this route reads to it as "no such ref" rather than as a
+        missing endpoint. The fake keeps one branch and no tags.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the reference object, or 404.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        ref = request.match_info["ref"].strip("/")
+        if ref != f"heads/{repo.default_branch}":
+            return _error(404, "Not Found")
+        return web.json_response({
+            "ref": f"refs/{ref}",
+            "object": {
+                "sha": _commit_list(repo)[0]["sha"],
+                "type": "commit",
+            },
+        })
+
     async def tree(self, request: web.Request) -> web.Response:
         if not self._authed(request):
             return _error(401, "Requires authentication")
@@ -799,7 +1114,12 @@ class GitHubServer:
         # The backend passes either a ref name (recursive whole-tree fetch) or
         # a tree sha from a previous listing (the truncation fallback path).
         scope = ""
-        if ref not in (repo.default_branch, "HEAD"):
+        # A client that resolves a ref to a commit first then asks for the
+        # tree by that commit's sha, which git accepts because a commit
+        # names its root tree. Accepting only the branch name reads to it as
+        # "the repository has no tree".
+        commits = {c["sha"] for c in _commit_list(repo)}
+        if ref not in (repo.default_branch, "HEAD") and ref not in commits:
             matches = [d for d in repo.directories() if _tree_sha(d) == ref]
             if not matches:
                 return _error(404, "Not Found")
@@ -977,51 +1297,119 @@ class GitHubServer:
         return web.json_response(anns)
 
 
-def build_app(server: GitHubServer) -> web.Application:
-    app = web.Application()
-    app.router.add_get("/repos/{owner}/{repo}", server.repo_info)
+def _add_routes(app: web.Application, server: "GitHubServer",
+                prefix: str) -> None:
+    """Register every route once under one path prefix.
+
+    Args:
+        app (web.Application): the application to register on.
+        server (GitHubServer): the handler set.
+        prefix (str): "" for github.com, "/api/v3" for Enterprise.
+    """
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}", server.repo_info)
     # Write and listing routes. Ordered before the tree routes only for
     # readability; aiohttp matches on the full pattern, not on order.
-    app.router.add_get("/user", server.user)
-    app.router.add_post("/user/repos", server.create_repo)
-    app.router.add_delete("/repos/{owner}/{repo}", server.delete_repo)
-    app.router.add_post("/repos/{owner}/{repo}/forks", server.fork_repo)
-    app.router.add_get("/repos/{owner}/{repo}/branches", server.branches)
-    app.router.add_get("/repos/{owner}/{repo}/branches/{branch}",
-                       server.branch)
-    app.router.add_get("/repos/{owner}/{repo}/commits", server.commits)
-    app.router.add_get("/repos/{owner}/{repo}/contents/{path:.*}",
-                       server.contents)
-    app.router.add_put("/repos/{owner}/{repo}/contents/{path:.*}",
-                       server.put_contents)
-    app.router.add_get("/repos/{owner}/{repo}/issues", server.list_issues)
-    app.router.add_post("/repos/{owner}/{repo}/issues", server.create_issue)
-    app.router.add_get("/repos/{owner}/{repo}/compare/{basehead}",
-                       server.compare)
-    app.router.add_get("/repos/{owner}/{repo}/git/trees/{ref}", server.tree)
-    app.router.add_get("/repos/{owner}/{repo}/git/blobs/{sha}", server.blob)
-    app.router.add_get("/search/code", server.search_code)
-    app.router.add_get("/repos/{owner}/{repo}/actions/workflows",
+    app.router.add_get(f"{prefix}/user", server.user)
+    app.router.add_post(f"{prefix}/user/repos", server.create_repo)
+    app.router.add_patch(f"{prefix}/repos/{{owner}}/{{repo}}",
+                         server.update_repo)
+    app.router.add_delete(f"{prefix}/repos/{{owner}}/{{repo}}",
+                          server.delete_repo)
+    app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/forks",
+                        server.fork_repo)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/branches",
+                       server.branches)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/branches/{{branch}}",
+        server.branch)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/commits",
+                       server.commits)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/contents/{{path:.*}}",
+        server.contents)
+    app.router.add_put(
+        f"{prefix}/repos/{{owner}}/{{repo}}/contents/{{path:.*}}",
+        server.put_contents)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/issues",
+                       server.list_issues)
+    app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/issues",
+                        server.create_issue)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/compare/{{basehead}}",
+        server.compare)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/git/ref/{{ref:.*}}",
+                       server.git_ref)
+    app.router.add_patch(
+        f"{prefix}/repos/{{owner}}/{{repo}}/git/refs/{{ref:.*}}",
+        server.update_ref)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/git/commits/{{sha}}",
+        server.git_commit)
+    app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/git/commits",
+                        server.create_commit)
+    app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/git/trees",
+                        server.create_tree)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/git/trees/{{ref}}",
+                       server.tree)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/git/blobs/{{sha}}",
+                       server.blob)
+    app.router.add_get(f"{prefix}/search/code", server.search_code)
+    app.router.add_get(f"{prefix}/search/repositories", server.search_repos)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/actions/workflows",
                        server.ci_workflows)
-    app.router.add_get("/repos/{owner}/{repo}/actions/workflows/{workflow_id}",
-                       server.ci_workflow)
-    app.router.add_get("/repos/{owner}/{repo}/actions/runs", server.ci_runs)
-    app.router.add_get("/repos/{owner}/{repo}/actions/runs/{run_id}",
-                       server.ci_run)
-    app.router.add_get("/repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
-                       server.ci_jobs)
-    app.router.add_get("/repos/{owner}/{repo}/actions/jobs/{job_id}",
-                       server.ci_job)
-    app.router.add_get("/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
-                       server.ci_job_logs)
-    app.router.add_get("/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
-                       server.ci_artifacts)
     app.router.add_get(
-        "/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip",
-        server.ci_artifact_zip)
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/workflows/{{workflow_id}}",
+        server.ci_workflow)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/actions/runs",
+                       server.ci_runs)
     app.router.add_get(
-        "/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
-        server.ci_annotations)
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/runs/{{run_id}}",
+        server.ci_run)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/runs/{{run_id}}/jobs",
+        server.ci_jobs)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/jobs/{{job_id}}",
+        server.ci_job)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/jobs/{{job_id}}/logs",
+        server.ci_job_logs)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/runs/{{run_id}}/artifacts",
+        server.ci_artifacts)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/actions/artifacts/"
+        f"{{artifact_id}}/zip", server.ci_artifact_zip)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/check-runs/"
+        f"{{check_run_id}}/annotations", server.ci_annotations)
+
+
+def build_app(server: GitHubServer) -> web.Application:
+    """Serve the API at the root and under the Enterprise prefix.
+
+    A client pointed at a host that is not github.com talks to GitHub
+    Enterprise, which serves REST under `/api/v3/`. Toolathlon's MCP server
+    is reached that way -- its `--gh-host` is the only place a base URL can
+    be set -- while mirage's own backend and the graders call the dotcom
+    paths. Both are the same handlers.
+
+    Args:
+        server (GitHubServer): the handler set.
+
+    Returns:
+        web.Application: the configured application.
+    """
+    app = web.Application()
+    for prefix in ("", "/api/v3"):
+        _add_routes(app, server, prefix)
+    # The raw host is not the API host on github.com, but an Enterprise
+    # install serves both from one origin, under /raw/. The ref segment is
+    # a branch name or a commit sha and the fake keeps one of each, so it
+    # is matched and ignored.
+    app.router.add_get("/raw/{owner}/{repo}/{ref}/{path:.*}",
+                       server.raw_content)
+    app.router.add_route("*", "/{tail:.*}", server.unrouted)
     return app
 
 
@@ -1038,16 +1426,20 @@ async def start_fake_github(
     return state, server, runner
 
 
-def seed_from_dir(state: FakeGitHub, full_name: str, source: Path) -> None:
+def seed_from_dir(state: FakeGitHub,
+                  full_name: str,
+                  source: Path,
+                  default_branch: str = DEFAULT_BRANCH) -> None:
     """Load every file under a fixture directory into one repository.
 
     Args:
         state (FakeGitHub): the store to seed.
         full_name (str): "owner/name" of the repository to create.
         source (Path): fixture directory to walk.
+        default_branch (str): branch the repository reports as default.
     """
     owner, _, name = full_name.partition("/")
-    repo = state.repo(owner, name)
+    repo = state.repo(owner, name, default_branch)
     for path in sorted(source.rglob("*")):
         if not path.is_file():
             continue
@@ -1067,9 +1459,18 @@ async def _serve(port: int, repos: list[str]) -> None:
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     for spec in repos:
         full_name, _, fixture = spec.partition("=")
-        fixture, _, flag = fixture.partition(":")
-        seed_from_dir(state, full_name, fixtures / fixture)
-        if flag == "truncated":
+        # Flags are colon-separated and order-free: "truncated", or
+        # "branch=<name>" for a template whose default is not `main`.
+        fixture, _, rest = fixture.partition(":")
+        flags = [f for f in rest.split(":") if f]
+        branch = DEFAULT_BRANCH
+        for flag in flags:
+            if flag.startswith("branch="):
+                branch = flag.split("=", 1)[1]
+        # A task outside this tree seeds from its own directory, so an
+        # absolute fixture path has to win over the bundled one.
+        seed_from_dir(state, full_name, fixtures / fixture, branch)
+        if "truncated" in flags:
             state.repos[full_name].truncated = True
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
