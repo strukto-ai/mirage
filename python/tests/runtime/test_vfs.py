@@ -14,11 +14,13 @@
 
 import asyncio
 import threading
+import time
 
 import pytest
 
 from mirage.context import (get_current_session, reset_current_session,
                             set_current_session)
+from mirage.observe.context import RecordingScope, record
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry
@@ -223,6 +225,47 @@ async def test_the_hop_rebinds_the_launch_session_on_a_bare_thread():
     worker.start()
     await asyncio.to_thread(worker.join)
     assert dispatch.sessions == [sess]
+
+
+class LedgerDispatch(RecordingDispatch):
+    """Emits an op event inside the dispatched op, like a backend core."""
+
+    async def __call__(self, op, path, **kwargs):
+        record(op, path.virtual, "ram", 7, int(time.monotonic() * 1000))
+        return await super().__call__(op, path, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_hop_rebinds_the_launch_recorder_on_a_bare_thread():
+    # The op ledger is contextvar state exactly like the session: the
+    # threads guest calls arrive on never had it, and the loop task
+    # run_coroutine_threadsafe schedules gets the loop's context, not
+    # the typed line's. Without the rebind a guest's file I/O never
+    # reaches ws.ops.records while the same op from a shell line does.
+    dispatch = LedgerDispatch()
+    scope = RecordingScope()
+    try:
+        vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+        worker = threading.Thread(target=vfs.read, args=("/data/f.txt", ))
+        worker.start()
+        await asyncio.to_thread(worker.join)
+    finally:
+        scope.close()
+    assert [(r.op, r.path) for r in scope.records] == [("read", "/data/f.txt")]
+
+
+@pytest.mark.asyncio
+async def test_a_recorderless_launch_dispatches_unrecorded():
+    dispatch = LedgerDispatch()
+    vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
+    scope = RecordingScope()
+    try:
+        worker = threading.Thread(target=vfs.read, args=("/data/f.txt", ))
+        worker.start()
+        await asyncio.to_thread(worker.join)
+    finally:
+        scope.close()
+    assert scope.records == []
 
 
 @pytest.mark.asyncio

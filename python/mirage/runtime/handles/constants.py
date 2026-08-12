@@ -12,19 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
+# The fopen mode alphabet: one base letter (r/w/a/x), at most one each
+# of +, b, t. parse_mode owns the rule; these tables are the vocabulary
+# it reads.
+MODE_CHARS = frozenset("rwaxbt+")
 
-from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.context import invalidate_after_write
-from mirage.core.onedrive._client import graph_put_bytes, item_url, split_path
-from mirage.observe.context import record
-from mirage.types import PathSpec
-
-
-async def create(accessor: OneDriveAccessor, path: PathSpec) -> None:
-    _, stripped = split_path(path)
-    start_ms = int(time.monotonic() * 1000)
-    url = item_url(accessor.config, "/" + stripped, action="/content")
-    await graph_put_bytes(accessor.config, url, b"")
-    record("create", stripped, "onedrive", 0, start_ms)
-    await invalidate_after_write(path)
+# The legal base-letter sets: CPython's four plus C fopen's wx
+# (exclusive create), which CPython spells as a bare x.
+MODE_BASES = (frozenset("r"), frozenset("w"), frozenset("a"), frozenset("x"),
+              frozenset("wx"))

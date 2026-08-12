@@ -12,15 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
-import type { GridFSAccessor } from '../../accessor/gridfs.ts'
-import { gridfsKey, rawPathOf } from './_client.ts'
-import { uploadBytes } from './write.ts'
+// The fopen mode alphabet: one base letter (r/w/a/x), at most one each
+// of +, b, t. parseMode owns the rule; these tables are the vocabulary
+// it reads.
+export const MODE_CHARS = 'rwaxbt+'
 
-export async function create(accessor: GridFSAccessor, path: PathSpec): Promise<void> {
-  const raw = rawPathOf(path)
-  const startMs = performance.now()
-  await uploadBytes(accessor, gridfsKey(raw, accessor.config), new Uint8Array(0))
-  record('create', path.virtual, ResourceName.GRIDFS, 0, startMs)
-  await invalidateAfterWrite(path)
-}
+// The legal base-letter spellings: CPython's four plus C fopen's wx
+// (exclusive create), which CPython spells as a bare x.
+export const MODE_BASES: readonly string[] = ['r', 'w', 'a', 'x', 'wx']

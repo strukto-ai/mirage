@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-_VALID = frozenset("rwaxbt+")
+from mirage.runtime.handles.constants import MODE_BASES, MODE_CHARS
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,9 +46,6 @@ class OpenMode:
     binary: bool
 
 
-_BASES = ({"r"}, {"w"}, {"a"}, {"x"}, {"w", "x"})
-
-
 def parse_mode(mode: str) -> OpenMode:
     """Read an fopen-style mode string into its facts, validating it.
 
@@ -68,10 +65,10 @@ def parse_mode(mode: str) -> OpenMode:
     Raises:
         ValueError: the mode does not parse, in CPython's own wording.
     """
-    if (not mode or any(char not in _VALID for char in mode)
+    if (not mode or any(char not in MODE_CHARS for char in mode)
             or any(mode.count(char) > 1
-                   for char in _VALID) or ("b" in mode and "t" in mode)
-            or set(mode) & set("rwax") not in _BASES):
+                   for char in MODE_CHARS) or ("b" in mode and "t" in mode)
+            or set(mode) & set("rwax") not in MODE_BASES):
         raise ValueError(f"invalid mode: {mode!r}")
     plus = "+" in mode
     return OpenMode(

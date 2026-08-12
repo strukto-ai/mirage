@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const VALID = 'rwaxbt+'
+import { MODE_BASES, MODE_CHARS } from './constants.ts'
+
+// Inside a character class every mode letter (and +) is literal.
+const INVALID_CHAR = new RegExp(`[^${MODE_CHARS}]`)
 
 /**
  * What an fopen-style mode string says about a handle.
@@ -38,8 +41,6 @@ export interface OpenMode {
   binary: boolean
 }
 
-const BASES = ['r', 'w', 'a', 'x', 'wx']
-
 /**
  * Read an fopen-style mode string into its facts, validating it.
  *
@@ -63,13 +64,13 @@ export function parseMode(mode: string): OpenMode {
   let bases = ''
   for (const char of 'rwax') if (mode.includes(char)) bases += char
   let duplicated = false
-  for (const char of VALID) if (count(char) > 1) duplicated = true
+  for (const char of MODE_CHARS) if (count(char) > 1) duplicated = true
   if (
     mode.length === 0 ||
-    /[^rwaxbt+]/.test(mode) ||
+    INVALID_CHAR.test(mode) ||
     duplicated ||
     (mode.includes('b') && mode.includes('t')) ||
-    !BASES.includes(bases)
+    !MODE_BASES.includes(bases)
   ) {
     throw new Error(`invalid mode: '${mode}'`)
   }

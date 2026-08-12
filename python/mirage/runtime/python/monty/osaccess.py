@@ -168,9 +168,22 @@ class MirageOSAccess(OSAccess):
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         self._ensure_file(path)
-        if parse_mode(mode).writable:
+        facts = parse_mode(mode)
+        if facts.writable:
             self._ensure_dir(path.parent)
-        return super().path_open(path, mode)
+        existed = self._get_entry(path) is not None
+        handle = super().path_open(path, mode)
+        # The mode's open-time effect on the mount, the same
+        # establishing op quickjs's shim and wasi's path_open dispatch:
+        # 'w' truncates what exists and creates what does not, 'a'
+        # creates what does not. Without it a bare open/close never
+        # flushes (there is no delta), so the file either kept its old
+        # bytes or never existed at all.
+        if existed and facts.truncate:
+            self._vfs.truncate(str(path))
+        elif not existed and facts.create:
+            self._vfs.create(str(path))
+        return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:
         self._ensure_file(path_from_arg(path))

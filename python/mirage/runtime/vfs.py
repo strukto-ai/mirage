@@ -18,6 +18,8 @@ from typing import Any, Callable
 
 from mirage.context import (get_current_session, reset_current_session,
                             set_current_session)
+from mirage.observe.context import (active_recorder, reset_active_recorder,
+                                    set_active_recorder)
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import plan_flush
 from mirage.runtime.resolver import MountResolver
@@ -44,12 +46,14 @@ class RuntimeVFS:
     that caller. The hop cannot carry the launching task's contextvars:
     what travels is the calling thread's context, and the threads guest
     calls arrive on (monty's tokio workers, wasmtime's run thread) never
-    had the session bound. So the VFS captures the session on the
-    launching task at construction — every runtime builds one per run,
-    and monty builds one per eval — and re-binds it around each
-    dispatched op, the same bracket FUSE's ``MountCore`` puts around its
-    ops. Session mount modes are then enforced inside the op exactly as
-    they are for a shell command.
+    had the session bound. So the VFS captures the session and the op
+    recorder on the launching task at construction — every runtime
+    builds one per run, and monty builds one per eval — and re-binds
+    both around each dispatched op, the same bracket FUSE's
+    ``MountCore`` puts around its ops. Session mount modes are then
+    enforced inside the op exactly as they are for a shell command, and
+    a guest's file I/O lands on the typed line's ledger exactly as a
+    shell command's does.
 
     Args:
         dispatch (Callable): the workspace dispatch coroutine function.
@@ -67,6 +71,7 @@ class RuntimeVFS:
         self._resolver = resolver
         self._no_append: set[str] = set()
         self._session = get_current_session()
+        self._recorder = active_recorder()
 
     def _raw(self, op: str, path: str, **kwargs: Any) -> Any:
         coro = self._dispatch(op, PathSpec.from_str_path(path), **kwargs)
@@ -75,22 +80,27 @@ class RuntimeVFS:
         return result
 
     async def _bind_session(self, coro: Coroutine[Any, Any, Any]) -> Any:
-        """Run one dispatched op under the captured launch session.
+        """Run one dispatched op under the captured launch context.
 
-        Set inside the coroutine so the token lands on the event-loop
+        Set inside the coroutine so the tokens land on the event-loop
         task that executes the op, mirroring ``MountCore._bind_session``.
+        Binds the session (mount modes) and the op recorder (the typed
+        line's ledger) together: both were captured on the launching
+        task and both are invisible to the thread the guest called from.
 
         Args:
             coro (Coroutine): the dispatch coroutine to run under the
-                session.
+                session and recorder.
 
         Returns:
             Any: whatever the wrapped coroutine returns.
         """
         token = set_current_session(self._session)
+        rec_token = set_active_recorder(self._recorder)
         try:
             return await coro
         finally:
+            reset_active_recorder(rec_token)
             reset_current_session(token)
 
     def call(self, op: str, path: str, **kwargs: Any) -> Any:

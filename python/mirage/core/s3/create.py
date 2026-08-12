@@ -12,18 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import time
+
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.s3._client import _client_kwargs, _key, async_session
+from mirage.observe.context import record
 from mirage.types import PathSpec
 
 
 async def create(accessor: S3Accessor, path_spec: PathSpec) -> None:
     path = path_spec.mount_path
+    start_ms = int(time.monotonic() * 1000)
     config = accessor.config
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         await client.put_object(Bucket=config.bucket,
                                 Key=_key(path, config),
                                 Body=b"")
+    record("create", path, "s3", 0, start_ms)
     await invalidate_after_write(path_spec)

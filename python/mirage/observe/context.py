@@ -79,6 +79,30 @@ def active_recorder() -> Recorder | None:
     return _recorder.get()
 
 
+def set_active_recorder(rec: Recorder | None):
+    """Bind ``rec`` as the active Recorder for the current context.
+
+    The door for a caller that captured a recorder on one task and must
+    re-establish it on another (``RuntimeVFS`` re-binding the typed
+    line's ledger around a guest op that hopped threads). Returns the
+    token for :func:`reset_active_recorder`.
+
+    Args:
+        rec (Recorder | None): the recorder to bind; None binds the
+            unrecorded state.
+    """
+    return _recorder.set(rec)
+
+
+def reset_active_recorder(token) -> None:
+    """Restore the previous recorder after a :func:`set_active_recorder`.
+
+    Args:
+        token: The token returned by ``set_active_recorder``.
+    """
+    _recorder.reset(token)
+
+
 def push_mount_prefix(prefix: str) -> str:
     """Set the mount prefix on the active Recorder. Returns the previous
     prefix so callers can restore it.
