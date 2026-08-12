@@ -35,6 +35,7 @@ const PLAIN = [
 
 const listMock = vi.fn()
 const appendMock = vi.fn()
+let closeSpy: ReturnType<typeof vi.spyOn>
 
 function config(overrides: Partial<EmailConfig> = {}): EmailConfig {
   return {
@@ -61,7 +62,7 @@ beforeEach(() => {
     list: listMock,
     append: appendMock,
   } as unknown as Awaited<ReturnType<EmailAccessor['getImap']>>)
-  vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+  closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
 })
 
 describe('resolveSentFolder', () => {
@@ -86,13 +87,13 @@ describe('saveSentCopy', () => {
     listMock.mockResolvedValue(GMAIL)
     expect(await saveSentCopy(config(), RAW)).toBe('[Gmail]/Sent Mail')
     expect(appendMock).toHaveBeenCalledWith('[Gmail]/Sent Mail', Buffer.from(RAW), ['\\Seen'])
-    expect(EmailAccessor.prototype.close).toHaveBeenCalled()
+    expect(closeSpy).toHaveBeenCalled()
   })
 
   it('names the mailbox when the server refuses', async () => {
     appendMock.mockResolvedValue(false)
     await expect(saveSentCopy(config(), RAW)).rejects.toThrow('Sent: the server refused')
-    expect(EmailAccessor.prototype.close).toHaveBeenCalled()
+    expect(closeSpy).toHaveBeenCalled()
   })
 })
 

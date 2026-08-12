@@ -50,12 +50,40 @@ def quote_mailbox(folder: str) -> str:
     return f'"{escaped}"'
 
 
+def read_quoted(text: str) -> tuple[str, str]:
+    """Read one RFC 3501 quoted string off the front of ``text``.
+
+    Args:
+        text (str): a fragment whose first character is the opening
+            quote.
+
+    Returns:
+        tuple[str, str]: the unescaped contents, and whatever follows
+            the closing quote with leading spaces dropped.
+    """
+    chars: list[str] = []
+    index = 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text):
+            chars.append(text[index + 1])
+            index += 2
+            continue
+        if char == '"':
+            return "".join(chars), text[index + 1:].lstrip()
+        chars.append(char)
+        index += 1
+    return "".join(chars), ""
+
+
 def parse_folder_line(line: str | bytes) -> tuple[str, tuple[str, ...]] | None:
     """Read one LIST response line as a name and its attributes.
 
-    A line looks like ``(\\HasNoChildren \\Sent) "/" "Sent"``: the
-    parenthesized attributes come first, so they can be read without
-    knowing anything about the name that follows.
+    The grammar is ``(attrs) delimiter mailbox``, and the mailbox is an
+    astring: a quoted string on most servers but a bare atom whenever
+    the name needs no quoting, which is legal and which some servers
+    emit. Splitting on quotes reads the delimiter as the name for the
+    atom form, so the three tokens are walked in order instead.
 
     Args:
         line (str | bytes): one line of the LIST response.
@@ -67,18 +95,24 @@ def parse_folder_line(line: str | bytes) -> tuple[str, tuple[str, ...]] | None:
     """
     if isinstance(line, (bytes, bytearray)):
         line = bytes(line).decode(errors="replace")
-    if '"' not in line:
+    text = line.strip()
+    # An untagged LIST line always opens with its attribute list, which
+    # is what tells it apart from the completion line.
+    if not text.startswith("("):
         return None
-    parts = line.rsplit('"', 2)
-    if len(parts) < 2:
+    end = text.find(")")
+    if end == -1:
         return None
-    attributes: tuple[str, ...] = ()
-    if "(" in line:
-        start = line.index("(")
-        end = line.find(")", start)
-        if end != -1:
-            attributes = tuple(line[start + 1:end].split())
-    return parts[-2], attributes
+    attributes = tuple(text[1:end].split())
+    rest = text[end + 1:].lstrip()
+    if rest.startswith('"'):
+        _, rest = read_quoted(rest)
+    elif rest[:3].upper() == "NIL":
+        rest = rest[3:].lstrip()
+    if not rest:
+        return None
+    name = read_quoted(rest)[0] if rest.startswith('"') else rest.split()[0]
+    return (name, attributes) if name else None
 
 
 async def list_folder_entries(

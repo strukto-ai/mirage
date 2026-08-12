@@ -82,8 +82,9 @@ async def save_sent_copy(config: EmailConfig,
                                      flags=SEEN_FLAG)
         if response.result != "OK":
             detail = " ".join(
-                line.decode(errors="replace") if isinstance(
-                    line, (bytes, bytearray)) else str(line)
+                line.decode(
+                    errors="replace") if isinstance(line, (
+                        bytes, bytearray)) else str(line)
                 for line in (response.lines or []))
             raise ValueError(f"{folder}: {detail or response.result}")
     finally:

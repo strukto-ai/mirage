@@ -98,6 +98,29 @@ def test_parse_folder_line_reads_a_name_holding_a_paren():
         "Notes (old)", ("\\HasNoChildren", ))
 
 
+def test_parse_folder_line_reads_an_atom_mailbox():
+    # A mailbox is an astring, so a name needing no quoting may arrive
+    # bare. Splitting on quotes reads the delimiter as the name here.
+    assert parse_folder_line(b'(\\HasNoChildren \\Sent) "/" Sent') == (
+        "Sent", ("\\HasNoChildren", "\\Sent"))
+
+
+def test_parse_folder_line_reads_an_atom_after_a_nil_delimiter():
+    assert parse_folder_line(b"(\\HasNoChildren) NIL INBOX") == ("INBOX", (
+        "\\HasNoChildren", ))
+
+
+def test_parse_folder_line_unescapes_a_quoted_name():
+    assert parse_folder_line(b'(\\HasNoChildren) "/" "od\\"d"') == ('od"d', (
+        "\\HasNoChildren", ))
+
+
+def test_an_atom_sent_mailbox_survives_into_resolution():
+    # The whole point of the parse: this used to answer "/", which the
+    # sent copy would then have tried to APPEND into.
+    assert parse_folder_line(b'(\\Sent) "/" Sent')[0] == "Sent"
+
+
 def test_quote_mailbox_wraps_and_escapes():
     assert quote_mailbox("Sent Items") == '"Sent Items"'
     assert quote_mailbox('od"d') == '"od\\"d"'
