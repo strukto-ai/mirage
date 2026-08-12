@@ -207,8 +207,16 @@ def _commit_list(repo: "FakeRepo", branch: str = "") -> list[dict]:
         list[dict]: the commit list.
     """
     target = branch or repo.default_branch
+    # Derived from the branch's content, not from the repository's name, so
+    # that a mirror of a repository has the same root sha as its source --
+    # which is what `git clone --mirror` followed by a push actually does,
+    # and what a grader comparing a local copy against its upstream relies
+    # on. Two branches differ here exactly when their trees differ.
+    tree = sorted(
+        (path, _blob_sha(data))
+        for path, data in repo.trees_by_branch.get(target, {}).items())
     root = {
-        "sha": _commit_sha(f"{repo.full_name}@{target}"),
+        "sha": _commit_sha("root\0" + "\0".join(f"{p}:{b}" for p, b in tree)),
         "commit": {
             "message": "Initial commit"
         },
@@ -652,6 +660,28 @@ class GitHubServer:
             "name": self.state.login,
             "type": "User",
         })
+
+    async def list_repos(self, request: web.Request) -> web.Response:
+        """One account's repositories.
+
+        Serves `/users/{login}/repos` and `/user/repos`. A task that asks
+        "is there a repository for this on my GitHub" answers it here, and
+        a 404 would read as "the account has none".
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the account's repositories, in name order.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        owner = request.match_info.get("owner", self.state.login)
+        items = [
+            _repo_json(repo) for name, repo in sorted(self.state.repos.items())
+            if repo.owner == owner
+        ]
+        return web.json_response(items)
 
     async def create_repo(self, request: web.Request) -> web.Response:
         """Create a repository under the authenticated user.
@@ -1603,7 +1633,9 @@ def _add_routes(app: web.Application, server: "GitHubServer",
     # Write and listing routes. Ordered before the tree routes only for
     # readability; aiohttp matches on the full pattern, not on order.
     app.router.add_get(f"{prefix}/user", server.user)
+    app.router.add_get(f"{prefix}/user/repos", server.list_repos)
     app.router.add_post(f"{prefix}/user/repos", server.create_repo)
+    app.router.add_get(f"{prefix}/users/{{owner}}/repos", server.list_repos)
     app.router.add_patch(f"{prefix}/repos/{{owner}}/{{repo}}",
                          server.update_repo)
     app.router.add_delete(f"{prefix}/repos/{{owner}}/{{repo}}",
@@ -1621,6 +1653,10 @@ def _add_routes(app: web.Application, server: "GitHubServer",
                        server.commits)
     app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/commits/{{ref}}",
                        server.commit)
+    # Both spellings of the repository root: GitHub serves `/contents` as
+    # well as `/contents/`, and a caller listing the root picks either.
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/contents",
+                       server.contents)
     app.router.add_get(
         f"{prefix}/repos/{{owner}}/{{repo}}/contents/{{path:.*}}",
         server.contents)
