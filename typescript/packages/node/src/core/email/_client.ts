@@ -29,10 +29,20 @@ function internalDateOf(value: Date | string | undefined): string {
   return value.toISOString()
 }
 
-export async function listFolders(accessor: EmailAccessor): Promise<string[]> {
+export interface FolderEntry {
+  name: string
+  /** The RFC 6154 special-use attribute the server tagged it with. */
+  specialUse: string | null
+}
+
+export async function listFolderEntries(accessor: EmailAccessor): Promise<FolderEntry[]> {
   const imap = await accessor.getImap()
   const tree = await imap.list()
-  return tree.map((m) => m.pathAsListed)
+  return tree.map((m) => ({ name: m.pathAsListed, specialUse: m.specialUse ?? null }))
+}
+
+export async function listFolders(accessor: EmailAccessor): Promise<string[]> {
+  return (await listFolderEntries(accessor)).map((entry) => entry.name)
 }
 
 /**

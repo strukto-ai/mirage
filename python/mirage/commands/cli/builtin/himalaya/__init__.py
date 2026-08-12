@@ -43,6 +43,15 @@ PAGE_SIZE = Option(short="-s",
                    type="int",
                    description="Maximum envelopes per page")
 
+# Upstream v2 spells the sent copy as an explicit mailbox on every verb
+# that produces a message, so `--save` alone files it without sending and
+# `--save` with `--send` does both, naming the mailbox the account's
+# save_copy would otherwise resolve on its own.
+SAVE = Option(long="--save",
+              type="str",
+              metavar="MAILBOX",
+              description="Append a copy of the message to this mailbox")
+
 # The built-in flag composer, shared verbatim by compose, reply and
 # forward: upstream flattens the same clap struct into all three.
 COMPOSER: tuple[Option, ...] = (
@@ -76,6 +85,7 @@ COMPOSER: tuple[Option, ...] = (
            description="Signature appended after a '-- ' line"),
     Option(long="--send",
            description="Send through SMTP instead of writing MIME to stdout"),
+    SAVE,
 )
 QUOTING: tuple[Option, ...] = (
     Option(short="-P",
@@ -152,6 +162,7 @@ HIMALAYA = CLISpec(
                     description="Send a raw RFC 5322 message",
                     fn=send,
                     write=True,
+                    options=(SAVE, ),
                     rest=ID,
                 ),
                 CLISpec(

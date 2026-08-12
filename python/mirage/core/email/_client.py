@@ -30,6 +30,69 @@ INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
 FETCH_ITEMS = "(UID FLAGS INTERNALDATE BODY.PEEK[])"
 
 
+def quote_mailbox(folder: str) -> str:
+    """Spell a mailbox name as an IMAP quoted string.
+
+    aioimaplib joins a command's arguments with spaces exactly as
+    given, so a bare mailbox name containing one arrives as two
+    arguments and the server reads only the first word. That is not
+    exotic: the sent mailbox is ``Sent Items`` on Exchange and
+    ``[Gmail]/Sent Mail`` on Gmail.
+
+    Args:
+        folder (str): the mailbox name as the server listed it.
+
+    Returns:
+        str: the name wrapped in quotes, with quotes and backslashes
+            escaped per RFC 3501's quoted-string rules.
+    """
+    escaped = folder.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def parse_folder_line(line: str | bytes) -> tuple[str, tuple[str, ...]] | None:
+    """Read one LIST response line as a name and its attributes.
+
+    A line looks like ``(\\HasNoChildren \\Sent) "/" "Sent"``: the
+    parenthesized attributes come first, so they can be read without
+    knowing anything about the name that follows.
+
+    Args:
+        line (str | bytes): one line of the LIST response.
+
+    Returns:
+        tuple[str, tuple[str, ...]] | None: the mailbox name and its
+            attributes, or None for a line that is not a mailbox (the
+            trailing "LIST completed" among them).
+    """
+    if isinstance(line, (bytes, bytearray)):
+        line = bytes(line).decode(errors="replace")
+    if '"' not in line:
+        return None
+    parts = line.rsplit('"', 2)
+    if len(parts) < 2:
+        return None
+    attributes: tuple[str, ...] = ()
+    if "(" in line:
+        start = line.index("(")
+        end = line.find(")", start)
+        if end != -1:
+            attributes = tuple(line[start + 1:end].split())
+    return parts[-2], attributes
+
+
+async def list_folder_entries(
+        accessor: EmailAccessor) -> list[tuple[str, tuple[str, ...]]]:
+    imap = await accessor.get_imap()
+    response = await imap.list('""', "*")
+    entries: list[tuple[str, tuple[str, ...]]] = []
+    for line in response.lines:
+        parsed = parse_folder_line(line)
+        if parsed is not None:
+            entries.append(parsed)
+    return entries
+
+
 async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
     """Select a mailbox, failing loudly when it does not exist.
 
@@ -45,23 +108,13 @@ async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
     Raises:
         FileNotFoundError: the server refused the mailbox.
     """
-    response = await imap.select(folder)
+    response = await imap.select(quote_mailbox(folder))
     if response.result != "OK":
         raise FileNotFoundError(f"no such mailbox {folder!r}")
 
 
 async def list_folders(accessor: EmailAccessor) -> list[str]:
-    imap = await accessor.get_imap()
-    response = await imap.list('""', "*")
-    folders: list[str] = []
-    for line in response.lines:
-        if isinstance(line, (bytes, bytearray)):
-            line = bytes(line).decode(errors="replace")
-        if '"' in line:
-            parts = line.rsplit('"', 2)
-            if len(parts) >= 2:
-                folders.append(parts[-2])
-    return folders
+    return [name for name, _ in await list_folder_entries(accessor)]
 
 
 async def list_message_uids(
