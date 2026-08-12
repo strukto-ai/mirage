@@ -17,7 +17,7 @@ import errno
 from mirage.errors.posix import POSIX
 from mirage.errors.types import FsCondition
 from mirage.runtime.errors import CrossMountError
-from mirage.utils.errors import OperationNotSupportedError
+from mirage.utils.errors import NoMountError, OperationNotSupportedError
 from mirage.utils.path import CycleError
 
 # Exception class beats OSError.errno beats everything, because mirage
@@ -36,9 +36,12 @@ CLASS_ARMS: tuple[tuple[type[BaseException], FsCondition], ...] = (
     (FileExistsError, FsCondition.EEXIST),
     (PermissionError, FsCondition.EACCES),
     (FileNotFoundError, FsCondition.ENOENT),
-    # A mount miss ("no mount matches path: /x") is a ValueError in the
-    # registry, and a path outside every mount is simply not there.
-    (ValueError, FsCondition.ENOENT),
+    # Only the registry's typed miss: a path outside every mount is
+    # simply not there. A bare ValueError stays unnamed, because
+    # backends raise it for refusals that are not absence (an oversized
+    # read, a rename into the source's own subtree), and naming those
+    # ENOENT would report an existing object as missing.
+    (NoMountError, FsCondition.ENOENT),
 )
 
 # The reverse arm for a plain OSError that carries a vocabulary errno.

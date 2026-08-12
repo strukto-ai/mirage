@@ -38,11 +38,20 @@ describe('mtimeMs', () => {
     expect(new Set(stamps).size).toBe(1)
   })
 
-  it('answers 0 for a missing or garbage stamp', () => {
-    expect(mtimeMs(new FileStat({ name: 'f', type: FileType.TEXT }))).toBe(0)
+  it('answers null for a missing or garbage stamp', () => {
+    expect(mtimeMs(new FileStat({ name: 'f', type: FileType.TEXT }))).toBeNull()
     expect(
       mtimeMs(new FileStat({ name: 'f', type: FileType.TEXT, modified: 'yesterday-ish' })),
-    ).toBe(0)
+    ).toBeNull()
+  })
+
+  it('answers 0 for epoch zero, a real time distinct from unknown', () => {
+    const st = new FileStat({
+      name: 'f',
+      type: FileType.TEXT,
+      modified: '1970-01-01T00:00:00Z',
+    })
+    expect(mtimeMs(st)).toBe(0)
   })
 })
 

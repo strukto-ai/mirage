@@ -20,7 +20,7 @@ from mirage.errors.classify import classify
 from mirage.errors.posix import POSIX
 from mirage.errors.types import FsCondition
 from mirage.runtime.errors import CrossMountError
-from mirage.utils.errors import enotsup
+from mirage.utils.errors import enotsup, no_mount
 from mirage.utils.path import CycleError
 
 
@@ -34,7 +34,7 @@ from mirage.utils.path import CycleError
     (PermissionError("/x"), FsCondition.EACCES),
     (enotsup("ram", "unlink", "/x"), FsCondition.ENOTSUP),
     (NotImplementedError("append"), FsCondition.ENOTSUP),
-    (ValueError("no mount matches path: /x"), FsCondition.ENOENT),
+    (no_mount("/x"), FsCondition.ENOENT),
 ])
 def test_class_arms(exc, expected):
     assert classify(exc) is expected
@@ -67,11 +67,17 @@ def test_a_subclass_wins_over_its_stamped_errno():
     assert classify(FileNotFoundError(errno.ENOENT, "x")) is FsCondition.ENOENT
 
 
-@pytest.mark.parametrize("exc", [
-    OSError("bare message, no errno"),
-    RuntimeError("something else entirely"),
-    OSError(errno.ENAMETOOLONG, "outside the vocabulary"),
-])
+@pytest.mark.parametrize(
+    "exc",
+    [
+        OSError("bare message, no errno"),
+        RuntimeError("something else entirely"),
+        OSError(errno.ENAMETOOLONG, "outside the vocabulary"),
+        # A backend refusal that is not absence (an oversized read, a
+        # rename into the source's own subtree): only the registry's typed
+        # miss reads as ENOENT.
+        ValueError("row too large to render"),
+    ])
 def test_unnamed_conditions_answer_none(exc):
     # None means "no named condition": the caller keeps its own fallback (FUSE
     # passes a raw OSError errno through, wasi answers EIO/EINVAL).

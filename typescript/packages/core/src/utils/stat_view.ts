@@ -24,17 +24,20 @@ export const DIR_MODE = S_IFDIR | 0o755
 export const FILE_MODE = S_IFREG | 0o644
 
 /**
- * A FileStat's mtime as epoch milliseconds, 0 when unknown.
+ * A FileStat's mtime as epoch milliseconds, null when unknown.
  *
  * Delegates to `isoTimestamp` rather than re-parsing, which is the
  * whole point: an offset-less stamp is read as UTC so every translator
  * (the FUSE attr fold, the runtime bridge, python's twins) answers the
  * same epoch, instead of drifting by the host's UTC offset the way a
- * bare `Date.parse`/`new Date` does.
+ * bare `Date.parse`/`new Date` does. Null (missing or unparseable
+ * stamp) is distinct from 0, which is the real answer for
+ * 1970-01-01T00:00:00Z; a wire with no validity channel collapses the
+ * two at its own boundary.
  */
-export function mtimeMs(st: FileStat): number {
+export function mtimeMs(st: FileStat): number | null {
   const seconds = isoTimestamp(st.modified)
-  return seconds === null ? 0 : seconds * 1000
+  return seconds === null ? null : seconds * 1000
 }
 
 /** Whether a FileStat describes a directory. */

@@ -139,9 +139,12 @@ class WasmVFS:
         if build is not None:
             return build.stat(path)
         fs = self._core_call("stat", path)
+        ns = mtime_ns(fs)
+        # The filestat record has no validity channel, so an unknown
+        # mtime and epoch zero both encode as 0 on this wire.
         return GuestStat(is_dir=is_dir(fs),
                          size=content_size(fs),
-                         mtime_ns=mtime_ns(fs))
+                         mtime_ns=0 if ns is None else ns)
 
     def stat_or_none(self, path: str) -> GuestStat | None:
         try:

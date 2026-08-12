@@ -24,6 +24,7 @@ from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import VFSRuntime
 from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
+from mirage.utils.errors import no_mount
 from mirage.utils.path import owner_prefix
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
@@ -254,7 +255,7 @@ class MountRegistry:
         """Find the mount that handles this path."""
         owner = owner_prefix((m.prefix for m in self._mounts), path)
         if owner is None:
-            raise ValueError(f"no mount matches path: {path!r}")
+            raise no_mount(path)
         return self.mount_for_prefix(owner)
 
     def is_exec_allowed(self) -> bool:

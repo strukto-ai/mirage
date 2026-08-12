@@ -167,4 +167,29 @@ describe('applyStatAttrs', () => {
     expect(gotNaive.mtime.getTime()).toBe(gotAware.mtime.getTime())
     expect(gotNaive.mtime.getTime()).toBe(mtimeMs(naive))
   })
+
+  it('lands an epoch-zero stamp instead of reading it as unknown', async () => {
+    // 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
+    // fold keys on null, so epoch zero overwrites the construction-time
+    // default instead of leaving it in place.
+    const core = await mkCore()
+    const epoch = new FileStat({
+      name: 'f',
+      type: FileType.TEXT,
+      modified: '1970-01-01T00:00:00Z',
+    })
+    const base = {
+      mtime: new Date(12345),
+      atime: new Date(12345),
+      ctime: new Date(12345),
+      nlink: 1,
+      size: 0,
+      mode: 0o100644,
+      uid: 0,
+      gid: 0,
+    }
+    const got = core.applyStatAttrs({ ...base }, epoch)
+    expect(got.mtime.getTime()).toBe(0)
+    expect(got.ctime.getTime()).toBe(0)
+  })
 })

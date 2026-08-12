@@ -24,20 +24,23 @@ DIR_MODE = S_IFDIR | 0o755
 FILE_MODE = S_IFREG | 0o644
 
 
-def mtime_ns(st: FileStat) -> int:
-    """A FileStat's mtime as epoch nanoseconds, 0 when unknown.
+def mtime_ns(st: FileStat) -> int | None:
+    """A FileStat's mtime as epoch nanoseconds, None when unknown.
 
     Delegates to ``iso_timestamp`` rather than re-parsing, which is the
     whole point: an offset-less stamp is read as UTC so every
     translator (FUSE, wasm, the TS bridge) answers the same epoch,
-    instead of three of them drifting by the host's UTC offset.
+    instead of three of them drifting by the host's UTC offset. None
+    (missing or unparseable stamp) is distinct from 0, which is the
+    real answer for 1970-01-01T00:00:00Z; a wire with no validity
+    channel collapses the two at its own boundary.
 
     Args:
         st (FileStat): the stat whose ``modified`` field to read.
     """
     seconds = iso_timestamp(st.modified)
     if seconds is None:
-        return 0
+        return None
     return int(seconds * 1_000_000_000)
 
 

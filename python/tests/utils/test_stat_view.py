@@ -62,10 +62,18 @@ def test_aware_and_offsetless_stamps_agree(new_york_clock):
     assert mtime_ns(naive) == mtime_ns(aware) == mtime_ns(zulu)
 
 
-def test_missing_or_garbage_mtime_is_zero():
-    assert mtime_ns(FileStat(name="f", type=FileType.TEXT)) == 0
+def test_missing_or_garbage_mtime_is_none():
+    assert mtime_ns(FileStat(name="f", type=FileType.TEXT)) is None
     assert mtime_ns(
-        FileStat(name="f", type=FileType.TEXT, modified="yesterday-ish")) == 0
+        FileStat(name="f", type=FileType.TEXT,
+                 modified="yesterday-ish")) is None
+
+
+def test_epoch_zero_is_a_real_time_not_unknown():
+    st = FileStat(name="f",
+                  type=FileType.TEXT,
+                  modified="1970-01-01T00:00:00Z")
+    assert mtime_ns(st) == 0
 
 
 def test_directory_size_is_zero_whatever_the_backend_reports():

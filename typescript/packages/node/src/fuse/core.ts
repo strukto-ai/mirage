@@ -156,8 +156,10 @@ export class MountCore {
     if (s.modified !== null) {
       // One translator per language: the naive-stamp-is-UTC rule lives
       // in core's stat view, never re-parsed here with a bare Date.
+      // Null means the stamp did not parse; epoch zero is a real time
+      // and lands.
       const ms = mtimeMs(s)
-      if (ms !== 0) {
+      if (ms !== null) {
         entry.mtime = new Date(ms)
         entry.ctime = new Date(ms)
       }

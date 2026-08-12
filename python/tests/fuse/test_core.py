@@ -238,3 +238,17 @@ async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
     got_aware = seeded._apply_stat_attrs(dict(entry), aware)
     assert got_naive["st_mtime"] == got_aware["st_mtime"]
     assert got_naive["st_mtime"] == mtime_ns(naive)
+
+
+@pytest.mark.asyncio
+async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
+    # 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
+    # fold keys on None, so epoch zero overwrites the construction-time
+    # default instead of leaving it in place.
+    epoch = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="1970-01-01T00:00:00Z")
+    entry = {"st_mode": 0o100644, "st_mtime": 12345, "st_ctime": 12345}
+    got = seeded._apply_stat_attrs(dict(entry), epoch)
+    assert got["st_mtime"] == 0
+    assert got["st_ctime"] == 0

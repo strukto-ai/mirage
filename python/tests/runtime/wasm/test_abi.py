@@ -16,11 +16,12 @@ import errno as host_errno
 import struct
 
 from mirage.errors import FsCondition
-from mirage.runtime.wasm.abi import (EACCES, EEXIST, EIO, EISDIR, ENOENT,
-                                     ENOTDIR, ENOTSUP, EXDEV, FT_DIR, FT_REG,
-                                     WASI, errno_for, pack_dirent, pack_fdstat,
-                                     pack_filestat, pack_prestat, unpack_iovs,
-                                     wasi_errno)
+from mirage.runtime.wasm.abi import (EACCES, EEXIST, EINVAL, EIO, EISDIR,
+                                     ENOENT, ENOTDIR, ENOTSUP, EXDEV, FT_DIR,
+                                     FT_REG, WASI, errno_for, pack_dirent,
+                                     pack_fdstat, pack_filestat, pack_prestat,
+                                     unpack_iovs, wasi_errno)
+from mirage.utils.errors import no_mount
 from mirage.utils.path import CycleError
 
 
@@ -34,8 +35,11 @@ def test_errno_map_covers_fs_exceptions():
     assert errno_for(OSError(host_errno.EXDEV, "x")) == EXDEV
     assert errno_for(OSError("boom")) == EIO
     # A path outside every mount is a miss, the same answer the FUSE
-    # classifier gives the kernel; EINVAL was the unhandled fallback.
-    assert errno_for(ValueError("no mount matches")) == ENOENT
+    # classifier gives the kernel. Only the registry's typed miss reads
+    # that way: a backend's bare ValueError is a refusal, not absence,
+    # and keeps the EINVAL fallback.
+    assert errno_for(no_mount("/x")) == ENOENT
+    assert errno_for(ValueError("row too large")) == EINVAL
 
 
 def test_errno_values_are_preview1_not_posix():

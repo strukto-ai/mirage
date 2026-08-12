@@ -18,10 +18,10 @@ import pytest
 
 from mirage.errors import FsCondition, classify
 from mirage.types import PathSpec
-from mirage.utils.errors import (OperationNotSupportedError, eacces, eloop,
-                                 enoent, enotdir, enotempty, enotsup,
-                                 error_path, exdev, format_fs_error,
-                                 fs_strerror, readdir_error)
+from mirage.utils.errors import (NoMountError, OperationNotSupportedError,
+                                 eacces, eloop, enoent, enotdir, enotempty,
+                                 enotsup, error_path, exdev, format_fs_error,
+                                 fs_strerror, no_mount, readdir_error)
 
 
 def test_fs_strerror_known_types():
@@ -180,3 +180,15 @@ def test_new_constructors_carry_the_virtual_path():
     spec = PathSpec.from_str_path("/data/x")
     for exc in (eacces(spec), enotempty(spec), exdev(spec), eloop(spec)):
         assert error_path(exc) == "/data/x"
+
+
+def test_no_mount_is_a_typed_miss():
+    # The registry's miss stays a ValueError for every existing catch,
+    # but only the subclass classifies to ENOENT: a backend's bare
+    # ValueError is a refusal, not absence.
+    err = no_mount("/nowhere/x")
+    assert isinstance(err, NoMountError)
+    assert isinstance(err, ValueError)
+    assert str(err) == "no mount matches path: '/nowhere/x'"
+    assert classify(err) is FsCondition.ENOENT
+    assert classify(ValueError("row too large to render")) is None

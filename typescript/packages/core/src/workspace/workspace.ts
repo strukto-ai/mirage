@@ -355,10 +355,12 @@ export class Workspace {
           const st = (await this.dispatch('stat', path)) as FileStat
           // One translator: bare Date.parse read an offset-less stamp
           // as LOCAL time here while the fuse fold read it as UTC.
+          // VFSStat has no validity channel, so an unknown mtime and
+          // epoch zero both encode as 0 on this wire.
           return {
             size: contentSize(st),
             isDir: statIsDir(st),
-            mtimeMs: mtimeMs(st),
+            mtimeMs: mtimeMs(st) ?? 0,
           }
         }
         case 'UNLINK':

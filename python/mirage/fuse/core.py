@@ -197,9 +197,10 @@ class MountCore:
             entry["st_gid"] = s.gid
         if s.modified is not None:
             # One translator per language: the naive-stamp-is-UTC rule
-            # lives in stat_view, never re-parsed here.
+            # lives in stat_view, never re-parsed here. None means the
+            # stamp did not parse; epoch zero is a real time and lands.
             ns = mtime_ns(s)
-            if ns:
+            if ns is not None:
                 entry["st_mtime"] = ns
                 entry["st_ctime"] = ns
         return entry
