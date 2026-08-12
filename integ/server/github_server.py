@@ -1333,6 +1333,37 @@ class GitHubServer:
               flush=True)
         return _error(404, "Not Found")
 
+    async def git_refs(self, request: web.Request) -> web.Response:
+        """Every ref under a prefix, as a list.
+
+        `git/ref/<full-ref>` returns one object and `git/refs/<prefix>` a
+        list of everything beneath it; the two are different endpoints and
+        a caller picks whichever it expects, so serving only the singular
+        makes the plural read as "no such ref".
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the matching references.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        prefix = request.match_info["ref"].strip("/")
+        items = [{
+            "ref": f"refs/heads/{name}",
+            "object": {
+                "sha": _commit_list(repo, name)[0]["sha"],
+                "type": "commit",
+            },
+        } for name in repo.branch_names if f"heads/{name}".startswith(prefix)]
+        if not items:
+            return _error(404, "Not Found")
+        return web.json_response(items)
+
     async def git_ref(self, request: web.Request) -> web.Response:
         """Resolve `refs/heads/<branch>` or `refs/tags/<tag>` to a commit.
 
@@ -1608,6 +1639,9 @@ def _add_routes(app: web.Application, server: "GitHubServer",
         server.compare)
     app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/git/ref/{{ref:.*}}",
                        server.git_ref)
+    app.router.add_get(
+        f"{prefix}/repos/{{owner}}/{{repo}}/git/refs/{{ref:.*}}",
+        server.git_refs)
     app.router.add_patch(
         f"{prefix}/repos/{{owner}}/{{repo}}/git/refs/{{ref:.*}}",
         server.update_ref)
