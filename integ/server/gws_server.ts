@@ -21,7 +21,8 @@
 // simplifications, all deterministic so both language runners see
 // byte-identical responses:
 //   - ids and timestamps are counters over a fixed clock, not random
-//   - `fields` masks are ignored (full resources are returned)
+//   - `fields` masks are ignored (full resources are returned), except on
+//     updateCells, where the mask decides whether values are touched at all
 //   - sheets store literal values; formulas are not evaluated
 //   - files.list paginates on pageSize/pageToken; the token is the next
 //     item's index, so pages are stable for a fixed query
@@ -45,8 +46,9 @@
 //     no threads or drafts resources at all
 //   - drive changes.list / changes.getStartPageToken (needs a change feed)
 //   - Sheets requests that need a cell format or style model
-//     (updateCells, repeatCell, copyPaste, conditional formats) and
-//     spreadsheets.getByDataFilter
+//     (repeatCell, copyPaste, conditional formats) and
+//     spreadsheets.getByDataFilter; updateCells is served, but only for
+//     userEnteredValue, so a format-only request is a no-op
 //   - Docs requests that need document structure beyond a text body
 //     (insertTable, insertInlineImage, updateTextStyle, bullets)
 //   - Slides presentations.pages.getThumbnail, and the shape/table/image
@@ -1072,6 +1074,21 @@ function cellText(cell: RawCellData | undefined): string | null {
   return null
 }
 
+// The field mask scopes an updateCells request on both sides: the real API
+// writes and clears only the fields it names, so a request masking a format
+// (`userEnteredFormat.numberFormat`) must leave cell contents alone rather
+// than blanking the range. A mask entry may be dotted or use the parenthesised
+// sub-selector form, so only its head segment decides. An absent mask is read
+// as "*", the way every other request here ignores `fields`, even though the
+// real API rejects it.
+function fieldsTouchValue(fields: string | undefined): boolean {
+  if (fields === undefined || fields.trim() === '') return true
+  return fields.split(',').some((entry) => {
+    const head = entry.trim().split(/[.(]/)[0]
+    return head === '*' || head === 'userEnteredValue'
+  })
+}
+
 // updateCells writes a rectangle by grid index rather than by A1 range, and
 // clears whatever the supplied rows do not cover -- which is how a caller
 // shortens a sheet it previously wrote longer.
@@ -1079,6 +1096,7 @@ function updateCells(sheet: Spreadsheet, request: RawUpdateCells): [number, obje
   const grid = request.range ?? request.start
   const tab = sheet.tabs.find((t) => t.sheetId === (grid?.sheetId ?? 0))
   if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+  if (!fieldsTouchValue(request.fields)) return null
   const rows = request.rows ?? []
   const startRow = request.range?.startRowIndex ?? request.start?.rowIndex ?? 0
   const startCol = request.range?.startColumnIndex ?? request.start?.columnIndex ?? 0

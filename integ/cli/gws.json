@@ -897,6 +897,19 @@
         "stdout": "[[\"region\",\"revenue\"],[\"emea\",\"120\"]]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_sheets_update_cells_format_mask_leaves_values_alone",
+      "seq": 563072,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Format Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"a\"],[\"b\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateCells\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":2},\"rows\":[{\"values\":[{\"userEnteredValue\":{\"stringValue\":\"zzz\"}}]}],\"fields\":\"userEnteredFormat.numberFormat\"}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range Sheet1 | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"a\"],[\"b\"]]\n",
+        "stderr": ""
+      }
     }
   ]
 }
