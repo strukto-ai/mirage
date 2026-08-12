@@ -1104,6 +1104,49 @@ class GitHubServer:
             },
             status=201)
 
+    async def create_ref(self, request: web.Request) -> web.Response:
+        """Create a branch, pointing it at an existing commit.
+
+        The new branch starts as a copy of whatever the base sha resolves
+        to, which is what a branch is: another name for one commit, and
+        every file reachable from it. Its own history starts there, so the
+        two do not share future commits.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the created reference, or 422.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        ref = str(body.get("ref") or "").strip("/")
+        if not ref.startswith("refs/heads/"):
+            return _error(422, "Invalid request.\n\n\"ref\" is invalid.")
+        name = ref[len("refs/heads/"):]
+        if not name:
+            return _error(422, "Invalid request.\n\n\"ref\" is invalid.")
+        if name in repo.trees_by_branch:
+            return _error(422, "Reference already exists")
+        base = repo.branch_for(str(body.get("sha") or ""))
+        if base is None:
+            return _error(422, "Object does not exist")
+        repo.trees_by_branch[name] = dict(repo.trees_by_branch[base])
+        repo.commits_by_branch[name] = []
+        return web.json_response(
+            {
+                "ref": f"refs/heads/{name}",
+                "object": {
+                    "sha": _commit_list(repo, name)[0]["sha"],
+                    "type": "commit",
+                },
+            },
+            status=201)
+
     async def update_ref(self, request: web.Request) -> web.Response:
         """Move a branch, which is what makes a staged tree visible.
 
@@ -1678,6 +1721,8 @@ def _add_routes(app: web.Application, server: "GitHubServer",
     app.router.add_get(
         f"{prefix}/repos/{{owner}}/{{repo}}/git/refs/{{ref:.*}}",
         server.git_refs)
+    app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/git/refs",
+                        server.create_ref)
     app.router.add_patch(
         f"{prefix}/repos/{{owner}}/{{repo}}/git/refs/{{ref:.*}}",
         server.update_ref)
