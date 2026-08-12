@@ -66,15 +66,18 @@ class MirageFile:
         self._closed = False
         self._dirty = False
         self._buf: io.BytesIO | io.StringIO | None = None
-        if self._facts.truncate:
-            self._run(self._ops.create(self._path))
-        elif self._facts.exclusive:
+        # Exclusivity outranks truncation: wx carries both facts, and
+        # testing truncate first would create over the existing file the
+        # mode promises to refuse.
+        if self._facts.exclusive:
             try:
                 self._run(self._ops.stat(self._path))
             except FileNotFoundError:
                 self._run(self._ops.create(self._path))
             else:
                 raise FileExistsError(self._path)
+        elif self._facts.truncate:
+            self._run(self._ops.create(self._path))
         elif self._facts.append:
             try:
                 self._run(self._ops.stat(self._path))

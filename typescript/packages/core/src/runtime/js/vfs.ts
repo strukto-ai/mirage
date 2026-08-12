@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../errors/index.ts'
+import { isMissingPath } from '../../utils/errors.ts'
 import { WASI } from './wasi.ts'
 import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
 import { FileHandle, FileTable, parseMode, type OpenMode } from '../handles/index.ts'
@@ -131,8 +132,13 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
     let st: VFSStat | null = null
     try {
       st = await vfs.stat(path)
-    } catch {
-      st = null
+    } catch (err) {
+      // Only a confirmed absence reads as "no file yet" (the python
+      // host's stat_or_none makes the same distinction): a transient
+      // failure or a policy denial on an existing file must refuse the
+      // open, or a create-capable mode would create over content this
+      // open never saw.
+      if (!isMissingPath(err)) return ctx.newNumber(-1)
     }
     // The same ladder as the python wasi host's path_open, so the two
     // engines refuse the same opens: a directory, an exclusive open
