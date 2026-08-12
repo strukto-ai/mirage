@@ -14,12 +14,12 @@
 
 import { OpReport } from '../io/types.ts'
 import { OpRecord } from '../observe/record.ts'
-import { NO_FOLLOW_OPS, type NamespaceLinks } from '../ops/config.ts'
-import type { OpKwargs } from '../ops/registry.ts'
+import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
+import type { OpKwargs } from './registry.ts'
 import type { FileStat } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { exdev, isMissingPath } from '../utils/errors.ts'
-import type { DispatchFn } from './executor/cross_mount.ts'
+import type { DispatchFn } from '../workspace/executor/cross_mount.ts'
 
 export type OpSink = (rec: OpRecord) => Promise<void>
 
@@ -48,17 +48,25 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
  * same pipeline as a shell command: link follow, session grants,
  * admission policies, cache read-through, namespace structure, and
  * post-write invalidation all fire once, at that one door. The facade
- * keeps only what is its own: the typed surface and op recording
- * (`ws.records`, and the network/cache split derived from it). Mirrors
- * Python's `Ops` attached to a workspace.
+ * keeps only what is its own: the typed surface and the op ledger
+ * (`records`, with the network/cache split derived from it) — the
+ * ledger lives here, not on the workspace, which is what lets
+ * `MountCore` take one `Ops` instead of reaching through a whole
+ * `Workspace`. Mirrors Python's `Ops`.
  */
-export class WorkspaceFS {
+export class Ops {
   private readonly dispatch: DispatchFn
   private readonly sink: OpSink | null
   // Injected namespace seam (workspace wires it); FUSE reads `links`
   // for its symlink surface.
   readonly links: NamespaceLinks | null
   private readonly ownerOf: OwnerOf
+  /**
+   * The op ledger: every facade op lands here, and the executor
+   * appends each shell line's ops too, so this is the one
+   * workspace-wide account (python's `Ops.records`).
+   */
+  readonly records: OpRecord[] = []
 
   constructor(
     dispatch: DispatchFn,
@@ -72,6 +80,28 @@ export class WorkspaceFS {
     this.ownerOf = ownerOf
   }
 
+  /** Ops that moved bytes over the network, in arrival order. */
+  get networkRecords(): OpRecord[] {
+    return this.records.filter((r) => !r.isCache)
+  }
+
+  get networkBytes(): number {
+    let total = 0
+    for (const r of this.records) if (!r.isCache) total += r.bytes
+    return total
+  }
+
+  /** Ops a warm cache answered, in arrival order. */
+  get cacheRecords(): OpRecord[] {
+    return this.records.filter((r) => r.isCache)
+  }
+
+  get cacheBytes(): number {
+    let total = 0
+    for (const r of this.records) if (r.isCache) total += r.bytes
+    return total
+  }
+
   private async record(
     op: string,
     path: string,
@@ -79,17 +109,16 @@ export class WorkspaceFS {
     bytes: number,
     startMs: number,
   ): Promise<void> {
-    if (this.sink === null) return
-    await this.sink(
-      new OpRecord({
-        op,
-        path,
-        source,
-        bytes,
-        timestamp: Date.now(),
-        durationMs: Date.now() - startMs,
-      }),
-    )
+    const rec = new OpRecord({
+      op,
+      path,
+      source,
+      bytes,
+      timestamp: Date.now(),
+      durationMs: Date.now() - startMs,
+    })
+    this.records.push(rec)
+    if (this.sink !== null) await this.sink(rec)
   }
 
   /**

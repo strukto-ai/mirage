@@ -26,7 +26,7 @@ async function mkCore(): Promise<MountCore> {
   )
   await ws.execute("echo 'hello world' | tee /data/greeting.txt")
   await ws.execute("mkdir -p /data/sub && echo 'nested' > /data/sub/inner.txt")
-  return new MountCore(ws)
+  return new MountCore(ws.fs)
 }
 
 describe('MountCore', () => {
@@ -120,7 +120,7 @@ describe('MountCore', () => {
 
   it('honors the root prefix when resolving', () => {
     const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
-    const core = new MountCore(ws, { rootPrefix: '/data/' })
+    const core = new MountCore(ws.fs, { rootPrefix: '/data/' })
     expect(core.resolve('/')).toBe('/data')
     expect(core.resolve('/x.txt')).toBe('/data/x.txt')
   })

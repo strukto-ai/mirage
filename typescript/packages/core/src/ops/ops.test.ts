@@ -15,14 +15,14 @@
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
 import { LimitExceededError } from '../commands/builtin/utils/limit.ts'
-import { OpsRegistry } from '../ops/registry.ts'
+import { OpsRegistry } from './registry.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
 import { enotdir } from '../utils/errors.ts'
-import { Workspace } from './workspace.ts'
+import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
@@ -52,7 +52,7 @@ function mkFailingStat(err: unknown): Workspace {
   return ws
 }
 
-describe('WorkspaceFS', () => {
+describe('Ops', () => {
   it('writeFile + readFile round-trips bytes', async () => {
     const ws = mkWorkspace()
     await ws.fs.writeFile('/data/a.txt', 'hello')
@@ -117,7 +117,7 @@ describe('WorkspaceFS', () => {
   })
 })
 
-describe('WorkspaceFS existence probes', () => {
+describe('Ops existence probes', () => {
   it('report false for a missing path', async () => {
     const ws = mkWorkspace()
     expect(await ws.fs.exists('/data/nope')).toBe(false)
@@ -149,7 +149,7 @@ describe('WorkspaceFS existence probes', () => {
 
 // The fs facade is an op door like the dispatcher: FUSE and programmatic
 // access read through it, so policy hooks must fire here too.
-describe('WorkspaceFS policy door', () => {
+describe('Ops policy door', () => {
   class SealReads implements Policy {
     preOps(ctx: OpsContext): Action | null {
       if (!ctx.write && ctx.path.virtual.endsWith('.sealed')) {
@@ -231,7 +231,7 @@ describe('WorkspaceFS policy door', () => {
 // The facade is not a second pipeline: it hands every op to the
 // dispatcher, so what the shell sees and what ws.fs sees cannot drift,
 // and each gate fires exactly once per op.
-describe('WorkspaceFS is one door with the dispatcher', () => {
+describe('Ops is one door with the dispatcher', () => {
   class CountPre implements Policy {
     readonly seen: string[] = []
     preOps(ctx: OpsContext): Action | null {
@@ -369,7 +369,7 @@ describe('WorkspaceFS is one door with the dispatcher', () => {
   })
 })
 
-describe('WorkspaceFS accounting survives the delegation', () => {
+describe('Ops accounting survives the delegation', () => {
   class DenyBigReads implements Policy {
     postOps(ctx: OpsResultContext): Action | null {
       if (ctx.op === 'read') return { kind: 'deny', message: 'too big\n' }
@@ -572,7 +572,7 @@ describe('a warm cache still answers a ranged read with the window', () => {
   })
 })
 
-describe('WorkspaceFS rename is bounded by the mount', () => {
+describe('Ops rename is bounded by the mount', () => {
   function mkTwoMounts(): Workspace {
     const a = new RAMResource()
     const b = new RAMResource()
