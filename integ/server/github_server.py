@@ -661,6 +661,35 @@ class GitHubServer:
             "type": "User",
         })
 
+    async def root(self, request: web.Request) -> web.Response:
+        """The API root, which github.com answers with a URL map.
+
+        Only the handful of templates anything here would follow. It exists
+        so that a client probing the root gets "this is a GitHub API" rather
+        than a 404, which reads as the host not being there at all.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the URL map.
+        """
+        base = self.state.base or ""
+        return web.json_response({
+            "current_user_url":
+            f"{base}/user",
+            "current_user_repositories_url":
+            f"{base}/user/repos",
+            "user_url":
+            f"{base}/users/{{user}}",
+            "repository_url":
+            f"{base}/repos/{{owner}}/{{repo}}",
+            "repository_search_url":
+            f"{base}/search/repositories?q={{query}}",
+            "code_search_url":
+            f"{base}/search/code?q={{query}}",
+        })
+
     async def list_repos(self, request: web.Request) -> web.Response:
         """One account's repositories.
 
@@ -1676,6 +1705,7 @@ def _add_routes(app: web.Application, server: "GitHubServer",
     # Write and listing routes. Ordered before the tree routes only for
     # readability; aiohttp matches on the full pattern, not on order.
     app.router.add_get(f"{prefix}/user", server.user)
+    app.router.add_get(f"{prefix}/" if prefix else "/", server.root)
     app.router.add_get(f"{prefix}/user/repos", server.list_repos)
     app.router.add_post(f"{prefix}/user/repos", server.create_repo)
     app.router.add_get(f"{prefix}/users/{{owner}}/repos", server.list_repos)
