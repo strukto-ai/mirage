@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno as host_errno
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,24 +22,8 @@ from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
 from mirage.runtime.wasm.types import GuestStat
-from mirage.types import FileType
 from mirage.utils.path import owner_prefix
-
-
-def _mtime_ns(modified: str | None) -> int:
-    """Convert a FileStat ISO timestamp to epoch nanoseconds.
-
-    Args:
-        modified (str | None): ISO-8601 timestamp, or None when the
-            backend reports no mtime.
-    """
-    if not modified:
-        return 0
-    try:
-        ts = datetime.fromisoformat(modified)
-    except ValueError:
-        return 0
-    return int(ts.timestamp() * 1_000_000_000)
+from mirage.utils.stat_view import content_size, is_dir, mtime_ns
 
 
 class WasmVFS:
@@ -156,9 +139,9 @@ class WasmVFS:
         if build is not None:
             return build.stat(path)
         fs = self._core_call("stat", path)
-        return GuestStat(is_dir=fs.type == FileType.DIRECTORY,
-                         size=fs.size or 0,
-                         mtime_ns=_mtime_ns(fs.modified))
+        return GuestStat(is_dir=is_dir(fs),
+                         size=content_size(fs),
+                         mtime_ns=mtime_ns(fs))
 
     def stat_or_none(self, path: str) -> GuestStat | None:
         try:

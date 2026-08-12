@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno as host_errno
+import os
+import time
 
 import pytest
 
@@ -24,6 +26,7 @@ from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.types import GuestStat
 from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.types import FileStat, FileType
+from mirage.utils.stat_view import mtime_ns
 
 
 class FakeVFS(RuntimeVFS):
@@ -33,12 +36,17 @@ class FakeVFS(RuntimeVFS):
     guard and the append fallback under test are the shipping ones.
     """
 
-    def __init__(self, files=None, dirs=None, prefixes=()):
+    def __init__(self,
+                 files=None,
+                 dirs=None,
+                 prefixes=(),
+                 modified="2026-07-15T00:00:00Z"):
         super().__init__(dispatch=None,
                          loop=None,
                          resolver=PrefixResolver(lambda: list(prefixes)))
         self.files = dict(files or {})
         self.dirs = set(dirs or ())
+        self.modified = modified
         self.calls = []
 
     def _raw(self, op, path, **kwargs):
@@ -47,7 +55,7 @@ class FakeVFS(RuntimeVFS):
             if path in self.files:
                 return FileStat(name=path,
                                 size=len(self.files[path]),
-                                modified="2026-07-15T00:00:00Z",
+                                modified=self.modified,
                                 type=FileType.TEXT)
             if path in self.dirs or path == "/":
                 return FileStat(name=path, type=FileType.DIRECTORY)
@@ -201,3 +209,34 @@ def test_rename_within_bridge_and_across_routes(tmp_path):
     with pytest.raises(OSError) as exc:
         fs.rename("/host.txt", "/data/c.txt")
     assert exc.value.errno == host_errno.EXDEV
+
+
+def test_stat_reads_offsetless_stamps_as_utc():
+    # R6 acceptance: the wasm translator answers the same epoch as
+    # mirage.utils.stat_view for an offset-less stamp, instead of
+    # parsing it in the host's local zone.
+    if not hasattr(time, "tzset"):
+        pytest.skip("tzset unavailable on this platform")
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    time.tzset()
+    try:
+        naive = FakeVFS(files={"/data/f.txt": b"hello"},
+                        prefixes=["/data/"],
+                        modified="2026-01-02T03:04:05")
+        aware = FakeVFS(files={"/data/f.txt": b"hello"},
+                        prefixes=["/data/"],
+                        modified="2026-01-02T03:04:05+00:00")
+        got_naive = WasmVFS(core=naive).stat("/data/f.txt").mtime_ns
+        got_aware = WasmVFS(core=aware).stat("/data/f.txt").mtime_ns
+        assert got_naive == got_aware
+        assert got_naive == mtime_ns(
+            FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="2026-01-02T03:04:05"))
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()

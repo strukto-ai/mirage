@@ -540,6 +540,7 @@ export {
   type RuntimeConfig,
 } from './runtime/config.ts'
 export { CrossMountError, EvalError } from './runtime/errors.ts'
+export { contentSize, DIR_MODE, FILE_MODE, mtimeMs } from './utils/stat_view.ts'
 export {
   classify,
   FS_CONDITIONS,

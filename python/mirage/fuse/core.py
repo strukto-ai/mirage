@@ -20,7 +20,6 @@ import stat
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
@@ -30,6 +29,7 @@ from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
 from mirage.runtime.handles import FileTable, merge_writes
 from mirage.types import FileStat, FileType
+from mirage.utils.stat_view import DIR_MODE, FILE_MODE, mtime_ns
 from mirage.workspace.session.session import Session
 
 # How long prefetched bytes for size-unknown files outlive their handle, so a
@@ -150,7 +150,7 @@ class MountCore:
 
     def dir_stat(self) -> dict[str, Any]:
         return {
-            "st_mode": stat.S_IFDIR | 0o755,
+            "st_mode": DIR_MODE,
             "st_nlink": 2,
             "st_uid": self._uid,
             "st_gid": self._gid,
@@ -162,7 +162,7 @@ class MountCore:
 
     def file_stat(self, size: int) -> dict[str, Any]:
         return {
-            "st_mode": stat.S_IFREG | 0o644,
+            "st_mode": FILE_MODE,
             "st_nlink": 1,
             "st_uid": self._uid,
             "st_gid": self._gid,
@@ -196,15 +196,12 @@ class MountCore:
         if isinstance(s.gid, int):
             entry["st_gid"] = s.gid
         if s.modified is not None:
-            try:
-                ts = datetime.fromisoformat(s.modified)
-            except ValueError:
-                return entry
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            ns = int(ts.timestamp()) * 1_000_000_000
-            entry["st_mtime"] = ns
-            entry["st_ctime"] = ns
+            # One translator per language: the naive-stamp-is-UTC rule
+            # lives in stat_view, never re-parsed here.
+            ns = mtime_ns(s)
+            if ns:
+                entry["st_mtime"] = ns
+                entry["st_ctime"] = ns
         return entry
 
     def link_target(self, path: str) -> str | None:

@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource } from '@struktoai/mirage-core'
+import { FileStat, FileType, MountMode, mtimeMs, RAMResource } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MountCore } from './core.ts'
+
+const NAIVE_STAMP = '2026-01-02T03:04:05'
 
 async function mkCore(): Promise<MountCore> {
   const ws = new Workspace(
@@ -134,5 +136,35 @@ describe('MountCore', () => {
     const fh = await core.open('/data/greeting.txt')
     const body = await core.read('/data/greeting.txt', fh, 0, 100)
     expect(new TextDecoder().decode(body)).toBe('hello world\n')
+  })
+})
+
+describe('applyStatAttrs', () => {
+  it('reads an offset-less overlay stamp as UTC', async () => {
+    // The R6 acceptance pin: this translator answers the same epoch as
+    // core's stat view for a naive stamp, instead of `new Date`'s
+    // local-time reading, which put python FUSE and node FUSE apart by
+    // the host's UTC offset for the same backend stamp.
+    const core = await mkCore()
+    const naive = new FileStat({ name: 'f', type: FileType.TEXT, modified: NAIVE_STAMP })
+    const aware = new FileStat({
+      name: 'f',
+      type: FileType.TEXT,
+      modified: `${NAIVE_STAMP}+00:00`,
+    })
+    const base = {
+      mtime: new Date(0),
+      atime: new Date(0),
+      ctime: new Date(0),
+      nlink: 1,
+      size: 0,
+      mode: 0o100644,
+      uid: 0,
+      gid: 0,
+    }
+    const gotNaive = core.applyStatAttrs({ ...base }, naive)
+    const gotAware = core.applyStatAttrs({ ...base }, aware)
+    expect(gotNaive.mtime.getTime()).toBe(gotAware.mtime.getTime())
+    expect(gotNaive.mtime.getTime()).toBe(mtimeMs(naive))
   })
 })

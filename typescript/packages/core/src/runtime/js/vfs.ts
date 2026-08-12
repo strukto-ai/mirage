@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify, WASI } from '../../errors/index.ts'
+import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
 import { FileHandle, FileTable, parseMode } from '../handles/index.ts'
 import type { RuntimeVFS, VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
@@ -27,10 +28,6 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // errno numbering must not leak.
 const EIO = WASI.EIO
 const ENOENT = WASI.ENOENT
-
-// stat mode bits (matching qjs-wasi's synthesized st_mode)
-const S_IFDIR = 16384
-const S_IFREG = 32768
 
 function wasiErrno(err: unknown): number {
   // Naming is the shared classifier's; this boundary only renders the
@@ -301,7 +298,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
       }
       setNum('dev', 0)
       setNum('ino', 0)
-      setNum('mode', (st.isDir ? S_IFDIR : S_IFREG) | 0o644)
+      setNum('mode', st.isDir ? DIR_MODE : FILE_MODE)
       setNum('nlink', 1)
       setNum('uid', 0)
       setNum('gid', 0)

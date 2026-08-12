@@ -15,10 +15,13 @@
 import { posix } from 'node:path'
 import {
   type FileStat,
+  DIR_MODE,
+  FILE_MODE,
   FileTable,
   FileType,
   isMissingOp,
   mergeWrites,
+  mtimeMs,
   type OpRecord,
   rstripSlash,
   type Session,
@@ -118,7 +121,7 @@ export class MountCore {
       ctime: this.now,
       nlink: 2,
       size: 0,
-      mode: 0o040755,
+      mode: DIR_MODE,
       uid: this.uid,
       gid: this.gid,
     }
@@ -131,7 +134,7 @@ export class MountCore {
       ctime: this.now,
       nlink: 1,
       size,
-      mode: 0o100644,
+      mode: FILE_MODE,
       uid: this.uid,
       gid: this.gid,
     }
@@ -151,10 +154,12 @@ export class MountCore {
     if (typeof s.uid === 'number') entry.uid = s.uid
     if (typeof s.gid === 'number') entry.gid = s.gid
     if (s.modified !== null) {
-      const ts = new Date(s.modified)
-      if (!Number.isNaN(ts.getTime())) {
-        entry.mtime = ts
-        entry.ctime = ts
+      // One translator per language: the naive-stamp-is-UTC rule lives
+      // in core's stat view, never re-parsed here with a bare Date.
+      const ms = mtimeMs(s)
+      if (ms !== 0) {
+        entry.mtime = new Date(ms)
+        entry.ctime = new Date(ms)
       }
     }
     return entry

@@ -20,6 +20,7 @@ import type { OpRecord } from '../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { assertMountAllowed } from '../context/session_context.ts'
 import { isMissingPath } from '../utils/errors.ts'
+import { contentSize, isDir as statIsDir, mtimeMs } from '../utils/stat_view.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
@@ -39,14 +40,7 @@ import { applyStateDict, buildMountArgs, type CLIOverrides, toStateDict } from '
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
 import type { FileEvent, FileStat } from '../types.ts'
-import {
-  ConsistencyPolicy,
-  DriftPolicy,
-  FileType,
-  MountMode,
-  parseMountMode,
-  PathSpec,
-} from '../types.ts'
+import { ConsistencyPolicy, DriftPolicy, MountMode, parseMountMode, PathSpec } from '../types.ts'
 import type { Policies } from '../policy/index.ts'
 import type { PolicyFn } from '../runtime/policy/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
@@ -359,12 +353,12 @@ export class Workspace {
         }
         case 'STAT': {
           const st = (await this.dispatch('stat', path)) as FileStat
-          const isDir = st.type === FileType.DIRECTORY
-          const mtimeMs = st.modified !== null ? Date.parse(st.modified) : 0
+          // One translator: bare Date.parse read an offset-less stamp
+          // as LOCAL time here while the fuse fold read it as UTC.
           return {
-            size: isDir ? 0 : (st.size ?? 0),
-            isDir,
-            mtimeMs: Number.isNaN(mtimeMs) ? 0 : mtimeMs,
+            size: contentSize(st),
+            isDir: statIsDir(st),
+            mtimeMs: mtimeMs(st),
           }
         }
         case 'UNLINK':
@@ -403,11 +397,10 @@ export class Workspace {
                 if (!isMissingPath(err)) throw err
                 return { path: entry, size: 0, isDir: false, ...(isLink ? { isLink } : {}) }
               }
-              const isDir = stat.type === FileType.DIRECTORY
               return {
                 path: entry,
-                size: isDir ? 0 : (stat.size ?? 0),
-                isDir,
+                size: contentSize(stat),
+                isDir: statIsDir(stat),
                 ...(isLink ? { isLink } : {}),
               }
             }),
