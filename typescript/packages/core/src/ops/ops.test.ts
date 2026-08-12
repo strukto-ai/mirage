@@ -76,6 +76,14 @@ describe('Ops', () => {
     expect(entries.sort()).toEqual(['/data/sub/x.txt', '/data/sub/y.txt'])
   })
 
+  it('append extends a file through the append op (the python facade has it too)', async () => {
+    const ws = mkWorkspace()
+    await ws.fs.writeFile('/data/log.txt', 'head')
+    await ws.fs.append('/data/log.txt', new TextEncoder().encode('-tail'))
+    expect(await ws.fs.readFileText('/data/log.txt')).toBe('head-tail')
+    expect(ws.records.map((r) => r.op)).toContain('append')
+  })
+
   it('exists returns true for existing files and dirs', async () => {
     const ws = mkWorkspace()
     await ws.fs.writeFile('/data/hi.txt', 'hi')

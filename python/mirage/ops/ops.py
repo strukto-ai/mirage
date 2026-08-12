@@ -21,7 +21,8 @@ from mirage.io import OpReport
 from mirage.observe import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.errors import NoMountError
 from mirage.utils.path import owner_prefix
 
 
@@ -40,7 +41,7 @@ class Ops:
     second pipeline here would be a second door, and it drifted from
     the real one exactly as expected: it served no cache, saw no
     namespace structure, and fired the gates only when a caller
-    remembered to hand it policies. TypeScript's ``WorkspaceFS`` takes
+    remembered to hand it policies. TypeScript's ``Ops`` takes
     the same stance.
     """
 
@@ -295,6 +296,69 @@ class Ops:
 
     async def readdir(self, path: str) -> list[str]:
         return await self._call("readdir", path)
+
+    # The three probes below answer "is this path there?", so only a
+    # genuine missing path may read back as False: the typed registry
+    # miss (NoMountError) and the backend's own absence. An auth
+    # failure, a timeout, or a backend bug is not an answer to that
+    # question; swallowing it would let a caller act on a false
+    # "missing" (overwrite, recreate, skip). Mirrors the TS facade.
+    async def exists(self, path: str) -> bool:
+        """True when a stat answers for the path.
+
+        Args:
+            path (str): Virtual path.
+        """
+        try:
+            await self.stat(path)
+        except (FileNotFoundError, NoMountError):
+            return False
+        return True
+
+    async def is_dir(self, path: str) -> bool:
+        """True when the path stats as a directory.
+
+        Args:
+            path (str): Virtual path.
+        """
+        try:
+            st = await self.stat(path)
+        except (FileNotFoundError, NoMountError):
+            return False
+        return st.type == FileType.DIRECTORY
+
+    async def is_file(self, path: str) -> bool:
+        """True when the path stats as anything but a directory.
+
+        Args:
+            path (str): Virtual path.
+        """
+        try:
+            st = await self.stat(path)
+        except (FileNotFoundError, NoMountError):
+            return False
+        return st.type != FileType.DIRECTORY
+
+    async def cat(self, path: str) -> str:
+        """The file's content as text (the TS facade's ``cat``).
+
+        Args:
+            path (str): Virtual path.
+        """
+        data = await self.read(path)
+        return data.decode("utf-8", errors="replace")
+
+    async def list_files(self, path: str) -> list[str]:
+        """Basenames of the directory's files, directories dropped.
+
+        Args:
+            path (str): Virtual path.
+        """
+        files = []
+        for entry in await self.readdir(path):
+            if await self.is_file(entry):
+                files.append(entry.rstrip("/").rsplit("/", 1)[-1])
+        return files
 
     async def mkdir(self, path: str) -> None:
         await self._call("mkdir", path)

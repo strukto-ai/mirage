@@ -202,6 +202,16 @@ export class Ops {
     await this.through('write', path, [bytes])
   }
 
+  /**
+   * Append bytes to a file through the mount's append op (the python
+   * facade's `append`). No whole-file fallback here: that is
+   * RuntimeVFS's business, where a guest holds the full buffer; an
+   * embedder calling the facade gets the mount's real answer.
+   */
+  async append(path: string, data: Uint8Array): Promise<void> {
+    await this.through('append', path, [data])
+  }
+
   async readdir(path: string): Promise<string[]> {
     return ((await this.through('readdir', path)) as string[] | null) ?? []
   }
