@@ -1,7 +1,8 @@
 from mirage.commands.builtin.generic.tar.constants import (READ_MODES,
                                                            WRITE_MODES)
 from mirage.commands.builtin.generic.tar.create import (excluded, member_name,
-                                                        plan_create, pruned)
+                                                        plan_create, pruned,
+                                                        strip_prefix)
 from mirage.commands.builtin.generic.tar.tar import tar
 from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
                                                        CreateResult, Member,
@@ -19,5 +20,6 @@ __all__ = [
     "member_name",
     "plan_create",
     "pruned",
+    "strip_prefix",
     "tar",
 ]

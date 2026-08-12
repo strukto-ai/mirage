@@ -196,7 +196,7 @@ def make_generic_ops(
     there is deliberately no ``forward_index`` knob here, in either
     language. Every write path evicts the parent listing through
     :meth:`Dispatcher.invalidate_after_write`, and both VFS/FUSE
-    surfaces (:class:`Ops`, TypeScript's ``WorkspaceFS``) delegate to
+    surfaces (:class:`Ops` in both languages) delegate to
     that same dispatcher, so the door that populates a listing is the
     door that evicts it.
 

@@ -32,6 +32,7 @@ from mirage.types import (CacheKey, CLIKey, ConsistencyPolicy, JobKey,
 from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
@@ -337,7 +338,7 @@ async def _restore_sessions(ws, state: dict[str, Any]) -> None:
                 # the replace_from_snapshot contract below.
                 session = ws._session_mgr.get(sid)
         fields = Session.from_dict(s_data)
-        session.cwd = fields.cwd
+        set_cwd(session, fields.cwd)
         session.env = fields.env
         session.mount_modes = fields.mount_modes
         restored.append(session)

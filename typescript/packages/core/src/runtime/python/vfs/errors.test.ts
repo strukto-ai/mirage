@@ -52,3 +52,17 @@ describe('errnoError', () => {
     expect(errnoError(HOST, CODES, 'EIO')).toBeInstanceOf(FakeErrnoError)
   })
 })
+
+describe('the shared vocabulary', () => {
+  it('keys the lookup on the condition, aliases included', () => {
+    // CROSS_MOUNT has no Emscripten name of its own: the interpreter
+    // knows the condition as EXDEV, and the alias row says so.
+    expect((errnoError(HOST, CODES, 'CROSS_MOUNT') as FakeErrnoError).errno).toBe(75)
+  })
+
+  it('falls back to EIO for a key this interpreter does not define', () => {
+    // Emscripten builds differ on ENODATA; a missing key must not
+    // surface as ErrnoError(undefined).
+    expect((errnoError(HOST, CODES, 'NO_XATTR') as FakeErrnoError).errno).toBe(29)
+  })
+})

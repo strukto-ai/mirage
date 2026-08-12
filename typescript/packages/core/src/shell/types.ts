@@ -131,7 +131,44 @@ export const SET_FLAG_TO_OPTION: Readonly<Record<string, string>> = Object.freez
   u: 'nounset',
   x: 'xtrace',
   f: 'noglob',
+  P: 'physical',
 })
+
+// Every name GNU's `set -o` accepts, pinned from `set -o` on
+// debian:stable-slim. mirage acts on a few and stores the rest, mirroring
+// how a cluster letter naming no option is kept rather than refused. A
+// name absent from here is the one thing bash rejects outright, and it
+// rejects it with exit 2 — which is what keeps a silently-ignored
+// `set -o physical` from looking supported.
+export const SET_OPTION_NAMES: ReadonlySet<string> = new Set([
+  'allexport',
+  'braceexpand',
+  'emacs',
+  'errexit',
+  'errtrace',
+  'functrace',
+  'hashall',
+  'histexpand',
+  'history',
+  'ignoreeof',
+  'interactive-comments',
+  'keyword',
+  'monitor',
+  'noclobber',
+  'noexec',
+  'noglob',
+  'nolog',
+  'notify',
+  'nounset',
+  'onecmd',
+  'physical',
+  'pipefail',
+  'posix',
+  'privileged',
+  'verbose',
+  'vi',
+  'xtrace',
+])
 
 export interface OptionWord {
   // Shell options the word turns on or off, in the order written.

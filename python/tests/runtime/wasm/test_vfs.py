@@ -13,17 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno as host_errno
+import os
+import time
 
 import pytest
 
 from mirage.ops.namespace_view import merge_readdir
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.types import GuestStat
 from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.types import FileStat, FileType
+from mirage.utils.stat_view import mtime_ns
 
 
 class FakeVFS(RuntimeVFS):
@@ -33,12 +36,17 @@ class FakeVFS(RuntimeVFS):
     guard and the append fallback under test are the shipping ones.
     """
 
-    def __init__(self, files=None, dirs=None, prefixes=()):
+    def __init__(self,
+                 files=None,
+                 dirs=None,
+                 prefixes=(),
+                 modified="2026-07-15T00:00:00Z"):
         super().__init__(dispatch=None,
                          loop=None,
                          resolver=PrefixResolver(lambda: list(prefixes)))
         self.files = dict(files or {})
         self.dirs = set(dirs or ())
+        self.modified = modified
         self.calls = []
 
     def _raw(self, op, path, **kwargs):
@@ -47,9 +55,12 @@ class FakeVFS(RuntimeVFS):
             if path in self.files:
                 return FileStat(name=path,
                                 size=len(self.files[path]),
-                                modified="2026-07-15T00:00:00Z",
+                                modified=self.modified,
                                 type=FileType.TEXT)
-            if path in self.dirs or path == "/":
+            # The real door answers a directory for a structure-only
+            # path (a mount prefix with no backend object behind it).
+            roots = {p.rstrip("/") or "/" for p in self.prefixes()}
+            if path in self.dirs or path == "/" or path in roots:
                 return FileStat(name=path, type=FileType.DIRECTORY)
             raise FileNotFoundError(path)
         if op == "read":
@@ -144,12 +155,15 @@ def test_stat_maps_filestat_fields():
     assert fs.stat_or_none("/data/nope") is None
 
 
-def test_readdir_bridge_marks_kind_from_trailing_slash():
+def test_readdir_bridge_resolves_kind_from_slash_or_stat():
+    # A slash-marked entry is a directory without a stat; an unmarked
+    # one is classified by the stat the same readdir populated, so a
+    # guest's d_type is real instead of FT_UNKNOWN.
     bridge = FakeVFS(files={"/data/f.txt": b""},
                      dirs={"/data/sub"},
                      prefixes=["/data/"])
     fs = WasmVFS(core=bridge)
-    assert fs.readdir("/data") == [("f.txt", FT_UNKNOWN), ("sub", FT_DIR)]
+    assert fs.readdir("/data") == [("f.txt", FT_REG), ("sub", FT_DIR)]
 
 
 def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
@@ -158,14 +172,14 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     bridge = FakeVFS(files={"/root.txt": b""}, prefixes=["/data/", "/logs/"])
     fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     # Mount entries arrive through the core readdir (the door merges
-    # them), so their kind is unknown here; guests stat lazily and the
-    # door answers a directory for a structure-only path.
+    # them) and resolve as directories through the door's stat, which
+    # answers for a structure-only path.
     assert fs.readdir("/") == [
-        ("data", FT_UNKNOWN),
+        ("data", FT_DIR),
         ("lib", FT_DIR),
-        ("logs", FT_UNKNOWN),
+        ("logs", FT_DIR),
         ("python.wasm", FT_REG),
-        ("root.txt", FT_UNKNOWN),
+        ("root.txt", FT_REG),
     ]
 
 
@@ -201,3 +215,34 @@ def test_rename_within_bridge_and_across_routes(tmp_path):
     with pytest.raises(OSError) as exc:
         fs.rename("/host.txt", "/data/c.txt")
     assert exc.value.errno == host_errno.EXDEV
+
+
+def test_stat_reads_offsetless_stamps_as_utc():
+    # R6 acceptance: the wasm translator answers the same epoch as
+    # mirage.utils.stat_view for an offset-less stamp, instead of
+    # parsing it in the host's local zone.
+    if not hasattr(time, "tzset"):
+        pytest.skip("tzset unavailable on this platform")
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    time.tzset()
+    try:
+        naive = FakeVFS(files={"/data/f.txt": b"hello"},
+                        prefixes=["/data/"],
+                        modified="2026-01-02T03:04:05")
+        aware = FakeVFS(files={"/data/f.txt": b"hello"},
+                        prefixes=["/data/"],
+                        modified="2026-01-02T03:04:05+00:00")
+        got_naive = WasmVFS(core=naive).stat("/data/f.txt").mtime_ns
+        got_aware = WasmVFS(core=aware).stat("/data/f.txt").mtime_ns
+        assert got_naive == got_aware
+        assert got_naive == mtime_ns(
+            FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="2026-01-02T03:04:05"))
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()

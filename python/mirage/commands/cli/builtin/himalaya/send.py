@@ -14,8 +14,9 @@
 
 import json
 
-from mirage.commands.cli.builtin.himalaya.smtp import send_raw
+from mirage.commands.cli.builtin.himalaya.deliver import deliver
 from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.spec.types import FlagView
 from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -31,7 +32,8 @@ async def send(
     if not raw.strip():
         raise ValueError("no message provided: pass it as an argument "
                          "or pipe it via standard input")
-    message = await send_raw(inv.config, raw)
+    message, warning = await deliver(inv.config, raw,
+                                     FlagView(inv.flags).as_str("save"))
     result = {
         "status": "sent",
         "to": message["To"],
@@ -39,4 +41,5 @@ async def send(
     }
     out = json.dumps(result, ensure_ascii=False,
                      separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return yield_bytes(out), IOResult(
+        stderr=warning.encode() if warning else None)

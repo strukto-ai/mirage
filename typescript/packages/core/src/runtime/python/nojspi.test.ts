@@ -36,8 +36,8 @@ describe('PyodideRuntime without JSPI', () => {
       // have to suspend, not ride an already-resolved promise
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push(bytes ? { op, path, bytes: new Uint8Array(bytes) } : { op, path })
-      if (op === 'READ') return new Uint8Array()
-      if (op === 'LIST') return []
+      if (op === 'read') return new Uint8Array()
+      if (op === 'readdir') return []
       return undefined
     }
     const rt = new PyodideRuntime()
@@ -50,7 +50,7 @@ describe('PyodideRuntime without JSPI', () => {
     })
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
-    const writes = calls.filter((c) => c.op === 'WRITE')
+    const writes = calls.filter((c) => c.op === 'write')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
     if (w0?.bytes === undefined) throw new Error('unreachable')
@@ -65,8 +65,8 @@ describe('PyodideRuntime without JSPI', () => {
     ])
     const dispatch: BridgeDispatchFn = async (op, path) => {
       await new Promise((resolve) => setTimeout(resolve, 1))
-      if (op === 'READ') return files.get(path) ?? new Uint8Array()
-      if (op === 'LIST') {
+      if (op === 'read') return files.get(path) ?? new Uint8Array()
+      if (op === 'readdir') {
         const entries = []
         for (const [p, content] of files) {
           if (p.startsWith(path) && !p.slice(path.length).includes('/')) {
@@ -98,8 +98,8 @@ describe('PyodideRuntime without JSPI', () => {
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, dst) => {
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push(dst === undefined ? { op, path } : { op, path, dst })
-      if (op === 'READ') return new Uint8Array()
-      if (op === 'LIST') return []
+      if (op === 'read') return new Uint8Array()
+      if (op === 'readdir') return []
       return undefined
     }
     const rt = new PyodideRuntime()
@@ -119,13 +119,13 @@ describe('PyodideRuntime without JSPI', () => {
     })
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
-    const mutations = calls.filter((c) => c.op !== 'READ' && c.op !== 'LIST')
+    const mutations = calls.filter((c) => c.op !== 'read' && c.op !== 'readdir')
     expect(mutations).toEqual([
-      { op: 'MKDIR', path: '/ram/box' },
-      { op: 'WRITE', path: '/ram/box/f.txt' },
-      { op: 'RENAME', path: '/ram/box/f.txt', dst: '/ram/box/g.txt' },
-      { op: 'UNLINK', path: '/ram/box/g.txt' },
-      { op: 'RMDIR', path: '/ram/box' },
+      { op: 'mkdir', path: '/ram/box' },
+      { op: 'write', path: '/ram/box/f.txt' },
+      { op: 'rename', path: '/ram/box/f.txt', dst: '/ram/box/g.txt' },
+      { op: 'unlink', path: '/ram/box/g.txt' },
+      { op: 'rmdir', path: '/ram/box' },
     ])
     await rt.close()
   }, 60_000)
@@ -139,19 +139,19 @@ describe('PyodideRuntime without JSPI', () => {
     const writes: { path: string; text: string }[] = []
     const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
       await new Promise((resolve) => setTimeout(resolve, 1))
-      if (op === 'READ') {
+      if (op === 'read') {
         const found = files.get(path)
         if (found === undefined) throw new Error(`no such file: ${path}`)
         return found
       }
-      if (op === 'LIST') {
+      if (op === 'readdir') {
         return [...files].map(([p, v]) => ({ path: p, size: v.length, isDir: false }))
       }
-      if (op === 'WRITE' && bytes !== undefined) {
+      if (op === 'write' && bytes !== undefined) {
         files.set(path, new Uint8Array(bytes))
         writes.push({ path, text: new TextDecoder().decode(bytes) })
       }
-      if (op === 'APPEND' && bytes !== undefined) {
+      if (op === 'append' && bytes !== undefined) {
         const base = files.get(path) ?? new Uint8Array()
         const next = new Uint8Array(base.length + bytes.length)
         next.set(base)

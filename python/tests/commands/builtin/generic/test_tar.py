@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from mirage.commands.builtin.generic.tar import (excluded, member_name, pruned,
-                                                 tar)
+                                                 strip_prefix, tar)
 from mirage.ops.types import LinkView, MountView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -168,6 +168,36 @@ def test_member_name_strips_the_leading_slash_and_marks_directories():
     assert member_name("link", "link") == "link"
 
 
+# Every row is GNU tar 1.35 on debian:stable-slim: `tar -cf` for the
+# notice, `tar -tf` for the stored name.
+STRIP_PREFIX_ROWS = [
+    ("/data/sub/../file", "file", "/data/sub/../"),
+    ("../file", "file", "../"),
+    ("x/../y/f3", "y/f3", "x/../"),
+    ("../../file", "file", "../../"),
+    ("/data/../data/file", "data/file", "/data/../"),
+    # No `..`, so the leading slash is the only thing tar refuses.
+    ("/data/file", "data/file", "/"),
+    # A `.` climbs nowhere, so GNU stores it and says nothing.
+    ("./file", "./file", ""),
+    ("d/a.txt", "d/a.txt", ""),
+    # Nothing survives the traversal; `member_name` supplies the name.
+    ("..", "", ".."),
+    ("sub/..", "", "sub/.."),
+]
+
+
+@pytest.mark.parametrize("spelled,name,prefix", STRIP_PREFIX_ROWS)
+def test_strip_prefix_drops_through_the_last_dotdot(spelled: str, name: str,
+                                                    prefix: str):
+    assert strip_prefix(spelled) == (name, prefix)
+
+
+def test_member_name_calls_an_all_traversal_directory_dot_slash():
+    assert member_name("..", "dir") == "./"
+    assert member_name("sub/..", "dir") == "./"
+
+
 @pytest.mark.asyncio
 async def test_create_walks_a_directory_operand():
     tree = _Tree({
@@ -227,6 +257,51 @@ async def test_create_reports_a_missing_operand_and_exits_two():
     assert "Exiting with failure status due to previous errors" in err
     # GNU still archives every operand it could read.
     assert "d/a.txt" in _names(io_res.writes["/out.tar"])
+
+
+@pytest.mark.asyncio
+async def test_create_announces_a_prefix_it_could_not_archive():
+    # GNU names the prefix before it reports the operand it could not
+    # read, even though nothing under that operand is stored.
+    tree = _Tree({"/d/a.txt": b"x"}, dirs=("/d", "/d/sub"))
+    _, io_res = await _create(tree, [_raw("/d/missing", "sub/../missing")],
+                              c=True,
+                              f=_spec("/out.tar"))
+    assert io_res.exit_code == 2
+    assert io_res.stderr.decode().splitlines()[:2] == [
+        "tar: Removing leading `sub/../' from member names",
+        "tar: sub/../missing: Cannot stat: No such file or directory",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_notices_in_operand_order():
+    # A later operand's prefix notice must not jump ahead of an earlier
+    # operand's error: GNU emits diagnostics as it walks the operands.
+    tree = _Tree({"/base/file": b"x"}, dirs=("/base", "/base/sub"))
+    _, io_res = await _create(
+        tree, [_raw("/base/nope", "nope"),
+               _raw("/base/file", "../file")],
+        c=True,
+        f=_spec("/out.tar"))
+    assert io_res.stderr.decode().splitlines()[:2] == [
+        "tar: nope: Cannot stat: No such file or directory",
+        "tar: Removing leading `../' from member names",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_announces_before_a_later_operand_fails():
+    tree = _Tree({"/base/file": b"x"}, dirs=("/base", "/base/sub"))
+    _, io_res = await _create(
+        tree, [_raw("/base/file", "../file"),
+               _raw("/base/nope", "nope")],
+        c=True,
+        f=_spec("/out.tar"))
+    assert io_res.stderr.decode().splitlines()[:2] == [
+        "tar: Removing leading `../' from member names",
+        "tar: nope: Cannot stat: No such file or directory",
+    ]
 
 
 @pytest.mark.asyncio

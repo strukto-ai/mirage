@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "arch_tar_drops_an_absolute_dotdot_prefix",
+      "seq": 960068,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/ttrav/sub && echo trav | tee /data/ttrav/g.txt > /dev/null && tar -c -f /data/ttrav.tar /data/ttrav/sub/../g.txt && tar -t -f /data/ttrav.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "g.txt\n",
+        "stderr": "tar: Removing leading `/data/ttrav/sub/../' from member names\n"
+      }
+    },
+    {
+      "id": "arch_tar_drops_a_relative_dotdot_prefix",
+      "seq": 960069,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/ttrav2/sub && echo trav2 | tee /data/ttrav2/g.txt > /dev/null && (cd /data/ttrav2 && tar -c -f /data/ttrav2.tar sub/../g.txt) && tar -t -f /data/ttrav2.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "g.txt\n",
+        "stderr": "tar: Removing leading `sub/../' from member names\n"
+      }
+    },
+    {
+      "id": "arch_tar_keeps_a_dot_slash_operand",
+      "seq": 960070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tdot && echo dot | tee /data/tdot/g.txt > /dev/null && (cd /data/tdot && tar -c -f /data/tdot.tar ./g.txt) && tar -t -f /data/tdot.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "./g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_names_each_dropped_prefix_once",
+      "seq": 960071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tmix/sub && echo m1 | tee /data/tmix/a.txt > /dev/null && echo m2 | tee /data/tmix/b.txt > /dev/null && tar -c -f /data/tmix.tar /data/tmix/a.txt /data/tmix/sub/../b.txt && tar -t -f /data/tmix.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/tmix/a.txt\nb.txt\n",
+        "stderr": "tar: Removing leading `/' from member names\ntar: Removing leading `/data/tmix/sub/../' from member names\n"
+      }
+    },
+    {
+      "id": "arch_zip_keeps_a_dotdot_member_name",
+      "seq": 960072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/ztrav/sub && echo z | tee /data/ztrav/g.txt > /dev/null && (cd /data/ztrav && zip -q /data/ztrav.zip sub/../g.txt) && unzip -l /data/ztrav.zip | tail -n 1 | awk '{print $2}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/../g.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arch_tar_owes_two_notices_for_a_bare_dotdot",
+      "seq": 960086,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tdd/sub/deep && echo dd | tee /data/tdd/sub/deep/g.txt > /dev/null && (cd /data/tdd/sub/deep && tar -c -f /data/tdd.tar ..) && tar -t -f /data/tdd.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "./\ndeep/\ndeep/g.txt\n",
+        "stderr": "tar: Removing leading `..' from member names\ntar: Removing leading `../' from member names\n"
+      }
+    },
+    {
+      "id": "arch_tar_announces_a_prefix_it_cannot_archive",
+      "seq": 960091,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tmiss2/sub && (cd /data/tmiss2 && tar -c -f /data/tmiss2.tar sub/../missing)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: Removing leading `sub/../' from member names\ntar: sub/../missing: Cannot stat: No such file or directory\ntar: Exiting with failure status due to previous errors\n"
+      }
+    },
+    {
+      "id": "arch_tar_keeps_notices_in_operand_order",
+      "seq": 960092,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/tord/sub && echo o | tee /data/tord/file.txt > /dev/null && (cd /data/tord/sub && tar -c -f /data/tord.tar missing ../file.txt)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: missing: Cannot stat: No such file or directory\ntar: Removing leading `../' from member names\ntar: Exiting with failure status due to previous errors\n"
+      }
+    }
+  ]
+}

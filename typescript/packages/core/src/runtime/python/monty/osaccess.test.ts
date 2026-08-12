@@ -107,7 +107,7 @@ describe('MirageOSAccess path operations', () => {
 
   it('answers the exists family as booleans, never as a rejection', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
-      if (op === 'LIST' && path === '/ram/d/') {
+      if (op === 'readdir' && path === '/ram/d/') {
         return Promise.resolve([{ path: '/ram/d/a', size: 1, isDir: false }])
       }
       return Promise.reject(Object.assign(new Error('gone'), { code: 'ENOENT' }))

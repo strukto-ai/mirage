@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileHandle, FileTable, parseMode } from '../handles/index.ts'
+import { classify } from '../../errors/index.ts'
+import { isMissingPath } from '../../utils/errors.ts'
+import { WASI } from './wasi.ts'
+import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
+import { FileHandle, FileTable, parseMode, type OpenMode } from '../handles/index.ts'
 import type { RuntimeVFS, VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -20,36 +24,19 @@ import { compareCodePoints } from '../../utils/sort.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-// WASI preview1 errnos, the numbers the real qjs-wasi engine reports
-// (python/mirage/runtime/wasm/abi.py is the reference table): guests
-// compare against these, so host errno numbering must not leak.
-const EACCES = 2
-const EEXIST = 20
-const EIO = 29
-const EISDIR = 31
-const ENOENT = 44
-const ENOTDIR = 54
-const ENOTSUP = 58
-
-// stat mode bits (matching qjs-wasi's synthesized st_mode)
-const S_IFDIR = 16384
-const S_IFREG = 32768
-
-// Mirror of the python errno_for table, keyed on the error's `code`.
-const CODE_TO_WASI: Record<string, number> = {
-  ENOENT: ENOENT,
-  EEXIST: EEXIST,
-  EISDIR: EISDIR,
-  ENOTDIR: ENOTDIR,
-  EACCES: EACCES,
-  EPERM: EACCES,
-  ENOTSUP: ENOTSUP,
-}
+// WASI preview1 errnos this shim answers with directly. The numbering
+// lives beside this shim (wasi.ts, the same numbers python's abi.py
+// keeps): guests compare against these, so host errno numbering must
+// not leak.
+const EIO = WASI.EIO
+const ENOENT = WASI.ENOENT
 
 function wasiErrno(err: unknown): number {
-  const code = (err as { code?: string }).code
-  if (code !== undefined && code in CODE_TO_WASI) return CODE_TO_WASI[code] ?? EIO
-  return EIO
+  // Naming is the shared classifier's; this boundary only renders the
+  // condition in preview1 numbers. EIO is the same everything-else
+  // fallback the python host keeps for an unnamed OSError.
+  const condition = classify(err)
+  return condition !== null ? WASI[condition] : EIO
 }
 
 // The `std.open`/`os.readdir` surface that qjs-wasi exposes natively,
@@ -68,6 +55,7 @@ function wasiErrno(err: unknown): number {
 export const MIRAGE_FS_BOOTSTRAP = `
 std.open = (path, mode) => {
   const fd = __mirage_open(String(path), String(mode === undefined ? 'r' : mode));
+  if (fd === -2) throw new TypeError('invalid file mode');
   if (fd < 0) return null;
   return {
     readAsString: (max) => __mirage_read(fd, max === undefined ? -1 : (max | 0)),
@@ -128,28 +116,53 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = ctx.getString(pathH)
-    const mode = parseMode(ctx.getString(modeH))
-    if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
-    let buf: Uint8Array = new Uint8Array()
-    let existed = false
-    if (!mode.truncate) {
-      try {
-        buf = await vfs.read(path)
-        existed = true
-      } catch {
-        if (!mode.writable) return ctx.newNumber(-1)
-      }
+    // The engine validates the mode before touching the filesystem
+    // (qjs-libc throws TypeError before any open); -2 tells the
+    // bootstrap to raise that refusal, since a host throw would not
+    // arrive typed. The shared parser is stricter than qjs-libc's
+    // character scan ('rr' passes strspn but not CPython's one-base
+    // rule); the strict answer is the one both guests can agree on.
+    let mode: OpenMode
+    try {
+      mode = parseMode(ctx.getString(modeH))
+    } catch {
+      return ctx.newNumber(-2)
     }
-    // Truncate or create writes through the mount at open, mirroring
-    // the Python runtime: this enforces write modes (a read-only mount
-    // or a read-narrowed session throws here, so the guest gets null)
-    // and establishes the file before the buffered writes.
-    if (mode.truncate || (mode.writable && !existed)) {
-      try {
-        await vfs.write(path, buf)
-      } catch {
-        return ctx.newNumber(-1)
+    if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
+    let st: VFSStat | null = null
+    try {
+      st = await vfs.stat(path)
+    } catch (err) {
+      // Only a confirmed absence reads as "no file yet" (the python
+      // host's stat_or_none makes the same distinction): a transient
+      // failure or a policy denial on an existing file must refuse the
+      // open, or a create-capable mode would create over content this
+      // open never saw.
+      if (!isMissingPath(err)) return ctx.newNumber(-1)
+    }
+    // The same ladder as the python wasi host's path_open, so the two
+    // engines refuse the same opens: a directory, an exclusive open
+    // over an existing file (EEXIST in the real engine), and a missing
+    // file whose mode does not create.
+    if (st?.isDir === true) return ctx.newNumber(-1)
+    if (st !== null && mode.exclusive) return ctx.newNumber(-1)
+    if (st === null && !mode.create) return ctx.newNumber(-1)
+    // The establishing op goes through the mount at open as the op it
+    // is — create for a missing file, truncate for a discarded one —
+    // so write modes and a read-narrowed session refuse here (the
+    // guest gets null), the ledger records the real op, and a backend
+    // with a native truncate receives it.
+    let buf: Uint8Array = new Uint8Array()
+    try {
+      if (st === null) {
+        await vfs.create(path)
+      } else if (mode.truncate) {
+        await vfs.truncate(path)
+      } else {
+        buf = await vfs.read(path)
       }
+    } catch {
+      return ctx.newNumber(-1)
     }
     const fd = table.add(FileHandle.opened(path, buf, mode))
     return ctx.newNumber(fd)
@@ -313,7 +326,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
       }
       setNum('dev', 0)
       setNum('ino', 0)
-      setNum('mode', (st.isDir ? S_IFDIR : S_IFREG) | 0o644)
+      setNum('mode', st.isDir ? DIR_MODE : FILE_MODE)
       setNum('nlink', 1)
       setNum('uid', 0)
       setNum('gid', 0)

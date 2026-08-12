@@ -195,6 +195,67 @@ describe('tar', () => {
     expect(text.split('Removing leading').length - 1).toBe(1)
   })
 
+  // GNU stores no traversal-bearing name: it drops everything through the
+  // last `..` and names the prefix it dropped.
+  it('drops a .. prefix from the member name and says which', async () => {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    resource.store.dirs.add('/d/sub')
+    resource.store.files.set('/d/a.txt', ENC.encode('alpha'))
+    const { stderr } = await runCmd(RAM_TAR, resource, [dirSpec('/d/a.txt', '/d/sub/../a.txt')], {
+      c: true,
+      f: '/out.tar',
+    })
+    expect(DEC.decode(stderr)).toBe("tar: Removing leading `/d/sub/../' from member names\n")
+    const listed = await runCmd(RAM_TAR, resource, [], { t: true, f: '/out.tar' })
+    expect(DEC.decode(listed.out).trim()).toBe('a.txt')
+  })
+
+  // GNU names the prefix before it reports the operand it could not read,
+  // even though nothing under that operand is stored.
+  it('announces a prefix it could not archive', async () => {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/d')
+    resource.store.dirs.add('/d/sub')
+    const { stderr } = await runCmd(RAM_TAR, resource, [dirSpec('/d/missing', 'sub/../missing')], {
+      c: true,
+      f: '/out.tar',
+    })
+    expect(DEC.decode(stderr).split('\n').slice(0, 2)).toEqual([
+      "tar: Removing leading `sub/../' from member names",
+      'tar: sub/../missing: Cannot stat: No such file or directory',
+    ])
+  })
+
+  // A later operand's notice must not jump ahead of an earlier operand's
+  // error: GNU emits diagnostics as it walks the operands.
+  it('keeps notices in operand order', async () => {
+    const resource = new RAMResource()
+    resource.store.dirs.add('/base')
+    resource.store.dirs.add('/base/sub')
+    resource.store.files.set('/base/file', ENC.encode('x'))
+    const first = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/base/nope', 'nope'), dirSpec('/base/file', '../file')],
+      { c: true, f: '/out.tar' },
+    )
+    expect(DEC.decode(first.stderr).split('\n').slice(0, 2)).toEqual([
+      'tar: nope: Cannot stat: No such file or directory',
+      "tar: Removing leading `../' from member names",
+    ])
+    const second = await runCmd(
+      RAM_TAR,
+      resource,
+      [dirSpec('/base/file', '../file'), dirSpec('/base/nope', 'nope')],
+      { c: true, f: '/out2.tar' },
+    )
+    expect(DEC.decode(second.stderr).split('\n').slice(0, 2)).toEqual([
+      "tar: Removing leading `../' from member names",
+      'tar: nope: Cannot stat: No such file or directory',
+    ])
+  })
+
   it("reports a missing operand in tar's own words and exits 2", async () => {
     const resource = new RAMResource()
     resource.store.dirs.add('/d')

@@ -141,7 +141,44 @@ SET_FLAG_TO_OPTION = {
     "u": "nounset",
     "x": "xtrace",
     "f": "noglob",
+    "P": "physical",
 }
+
+# Every name GNU's `set -o` accepts, pinned from `set -o` on
+# debian:stable-slim. mirage acts on a few and stores the rest, mirroring
+# how a cluster letter naming no option is kept rather than refused. A
+# name absent from here is the one thing bash rejects outright, and it
+# rejects it with exit 2 -- which is what keeps a silently-ignored
+# `set -o physical` from looking supported.
+SET_OPTION_NAMES = frozenset({
+    "allexport",
+    "braceexpand",
+    "emacs",
+    "errexit",
+    "errtrace",
+    "functrace",
+    "hashall",
+    "histexpand",
+    "history",
+    "ignoreeof",
+    "interactive-comments",
+    "keyword",
+    "monitor",
+    "noclobber",
+    "noexec",
+    "noglob",
+    "nolog",
+    "notify",
+    "nounset",
+    "onecmd",
+    "physical",
+    "pipefail",
+    "posix",
+    "privileged",
+    "verbose",
+    "vi",
+    "xtrace",
+})
 
 
 @dataclass(frozen=True, slots=True)

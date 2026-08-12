@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { constants as osConstants } from 'node:os'
+
+import { classify, type FsCondition } from '@struktoai/mirage-core'
+
 // Positive POSIX errno values. FUSE callbacks want them negated; other
 // kernel interfaces (FSKit) want them positive, so the classification is
 // kept protocol-neutral here and adapters apply their own sign.
@@ -29,16 +33,27 @@ export const ENOTEMPTY = 66
 // and `mv` falls back to copy+unlink, so it must survive the trip out.
 export const EXDEV = 18
 
-const CODE_ERRNO: Record<string, number> = {
-  ENOTEMPTY,
+// This kernel boundary's own numbering for the shared vocabulary: the
+// naming lives in core's `classify`, and the numbers here are the
+// host's (node:os supplies the platform-variant ones, mirroring how
+// python's adapter reads its errno module).
+const CONDITION_ERRNO: Record<FsCondition, number> = {
+  ENOENT,
   ENOTDIR,
   EISDIR,
-  EACCES,
   EEXIST,
-  ENOENT,
-  EINVAL,
-  EROFS,
+  EACCES,
+  EPERM: osConstants.errno.EPERM,
+  ENOTEMPTY,
   EXDEV,
+  CROSS_MOUNT: EXDEV,
+  ENOTSUP: osConstants.errno.ENOTSUP,
+  ELOOP: osConstants.errno.ELOOP,
+  EINVAL,
+  EIO,
+  EBUSY: osConstants.errno.EBUSY,
+  EROFS,
+  NO_XATTR: osConstants.errno.ENODATA,
 }
 
 const MESSAGE_ERRNO: [string[], number][] = [
@@ -57,15 +72,21 @@ const MESSAGE_ERRNO: [string[], number][] = [
  * Map a mirage-native error onto a positive POSIX errno.
  *
  * Mirrors Python's `mirage.fuse.errors.classify_error` so both languages
- * report the same errno for the same backend failure. The error `code`
- * property wins over the message, because backends raise a mix: some set a
- * code, others only a human-readable string.
+ * report the same errno for the same backend failure. The naming lives in
+ * core's `classify` (shared with the wasi shim and the monty encoders);
+ * this adapter only renders the condition in host numbers. A stamped code
+ * outside the vocabulary is passed through in the host's own numbering
+ * (Python's raw OSError.errno passthrough), and the message needles are a
+ * last resort for unstamped errors, not a classification channel.
  */
 export function classifyErrno(err: unknown): number {
+  const condition = classify(err)
+  if (condition !== null) return CONDITION_ERRNO[condition]
   const code = (err as { code?: string }).code
   if (code !== undefined) {
-    const mapped = CODE_ERRNO[code]
-    if (mapped !== undefined) return mapped
+    const errnos = osConstants.errno as Record<string, number>
+    const passthrough = errnos[code]
+    if (passthrough !== undefined) return passthrough
   }
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
   for (const [needles, errno] of MESSAGE_ERRNO) {
@@ -83,6 +104,6 @@ export function classifyError(err: unknown): number {
  * Build an error carrying a POSIX code, so the mount core can signal a
  * specific errno without importing any adapter's numbering.
  */
-export function errnoError(code: keyof typeof CODE_ERRNO, message: string): Error {
+export function errnoError(code: FsCondition, message: string): Error {
   return Object.assign(new Error(message), { code })
 }

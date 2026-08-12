@@ -516,7 +516,7 @@
       "command": "du /knowledge/",
       "expect": {
         "exit": 0,
-        "stdout": "354\t/knowledge/guides\n306\t/knowledge/policies\n712\t/knowledge\n",
+        "stdout": "354\t/knowledge/guides\n306\t/knowledge/policies\n712\t/knowledge/\n",
         "stderr": ""
       }
     },

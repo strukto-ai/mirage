@@ -49,7 +49,7 @@ const MONTY_OPEN_UNSUPPORTED =
 // has not seen starts from empty and the close-flush overwrites the
 // mount content the run never read.
 
-// The workspace bridge has no APPEND op, so every append close
+// The workspace bridge has no append op, so every append close
 // re-flushes the whole file: n appends ship O(n^2) bytes.
 
 interface Row {
@@ -519,16 +519,16 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
   const ops: [op: string, path: string, bytes: number][] = []
   const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
     ops.push([op, path, bytes?.length ?? 0])
-    if (op === 'READ') {
+    if (op === 'read') {
       const hit = files.get(path)
       if (hit === undefined) return Promise.reject(new Error(`ENOENT ${path}`))
       return Promise.resolve(new Uint8Array(hit))
     }
-    if (op === 'WRITE') {
+    if (op === 'write') {
       files.set(path, bytes === undefined ? new Uint8Array() : new Uint8Array(bytes))
       return Promise.resolve(undefined)
     }
-    if (op === 'APPEND') {
+    if (op === 'append') {
       const base = files.get(path) ?? new Uint8Array()
       const tail = bytes ?? new Uint8Array()
       const next = new Uint8Array(base.length + tail.length)
@@ -537,7 +537,7 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
       files.set(path, next)
       return Promise.resolve(undefined)
     }
-    if (op === 'STAT') {
+    if (op === 'stat') {
       const hit = files.get(path)
       if (hit !== undefined) return Promise.resolve({ size: hit.length, isDir: false, mtimeMs: 0 })
       const dir = path.replace(/\/$/, '')
@@ -545,7 +545,7 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
       if (isDir) return Promise.resolve({ size: 0, isDir: true, mtimeMs: 0 })
       return Promise.reject(new Error(`ENOENT ${path}`))
     }
-    if (op === 'LIST') {
+    if (op === 'readdir') {
       const prefix = path.replace(/\/$/, '') + '/'
       const entries: { path: string; size: number; isDir: boolean }[] = []
       for (const [p, content] of files) {
@@ -555,15 +555,15 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
       }
       return Promise.resolve(entries)
     }
-    if (op === 'UNLINK') {
+    if (op === 'unlink') {
       files.delete(path)
       return Promise.resolve(undefined)
     }
-    if (op === 'MKDIR') {
+    if (op === 'mkdir') {
       dirs.add(path)
       return Promise.resolve(undefined)
     }
-    if (op === 'RMDIR') {
+    if (op === 'rmdir') {
       dirs.delete(path)
       return Promise.resolve(undefined)
     }
@@ -577,7 +577,7 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
   // Both spellings count: the question is how many bytes crossed the
   // transport, and a runtime that ships tails is exactly the one being
   // measured. Counting WRITE alone would score a working append as 0.
-  const isMutation = (op: string): boolean => op === 'WRITE' || op === 'APPEND'
+  const isMutation = (op: string): boolean => op === 'write' || op === 'append'
   const mutationBytes = () =>
     ops.filter(([op]) => isMutation(op)).reduce((total, [, , size]) => total + size, 0)
   const mutationOps = () =>

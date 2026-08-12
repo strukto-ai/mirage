@@ -22,7 +22,7 @@ DEFAULT_DIR_MODE = 0o755
 DEFAULT_FILE_MODE = 0o644
 
 
-def parse_mode(text: str, current: int) -> int | None:
+def parse_chmod(text: str, current: int) -> int | None:
     """Parse a chmod MODE argument (octal or symbolic).
 
     Symbolic supports the common grammar: ``[ugoa...][+-=][rwx...]``
@@ -38,9 +38,9 @@ def parse_mode(text: str, current: int) -> int | None:
 
     Example::
 
-        parse_mode("644", 0)          -> 0o644
-        parse_mode("u+x", 0o644)      -> 0o744
-        parse_mode("a=r", 0o777)      -> 0o444
+        parse_chmod("644", 0)          -> 0o644
+        parse_chmod("u+x", 0o644)      -> 0o744
+        parse_chmod("a=r", 0o777)      -> 0o444
     """
     if text and all(c in "01234567" for c in text):
         value = int(text, 8)
@@ -68,4 +68,4 @@ def parse_mode(text: str, current: int) -> int | None:
     return mode
 
 
-__all__ = ["DEFAULT_DIR_MODE", "DEFAULT_FILE_MODE", "parse_mode"]
+__all__ = ["DEFAULT_DIR_MODE", "DEFAULT_FILE_MODE", "parse_chmod"]

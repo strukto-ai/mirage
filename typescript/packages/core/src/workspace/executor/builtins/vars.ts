@@ -21,6 +21,7 @@ import type { CallStack } from '../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../shell/errors.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { parseOptionWord } from '../../../shell/options.ts'
+import { SET_OPTION_NAMES } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
@@ -632,7 +633,22 @@ export function handleSet(
       session.positionalArgs = args.slice(i)
       break
     }
-    for (const [option, enable] of word.settings) session.shellOptions[option] = enable
+    for (const [option, enable] of word.settings) {
+      // `-o` takes a name rather than a letter, and a name bash does not
+      // have is the one thing it refuses: exit 2, and the settings already
+      // applied stay applied while the rest of the line is dropped.
+      // Without this a typo — or an option mirage has yet to wire, as
+      // `physical` once was — reads as success.
+      if (!SET_OPTION_NAMES.has(option)) {
+        const err = new TextEncoder().encode(`set: ${option}: invalid option name\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 2, stderr: err }),
+          new ExecutionNode({ command: 'set', exitCode: 2, stderr: err }),
+        ]
+      }
+      session.shellOptions[option] = enable
+    }
     // A letter naming no option is ignored rather than refused: bash has
     // options mirage does not implement (`-a`, `-B`, `-H`), and `set` is
     // where a script turns those on without wanting to fail. A nested shell

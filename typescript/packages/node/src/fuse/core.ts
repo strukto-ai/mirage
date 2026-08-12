@@ -15,14 +15,17 @@
 import { posix } from 'node:path'
 import {
   type FileStat,
+  DIR_MODE,
+  FILE_MODE,
   FileTable,
   FileType,
   isMissingOp,
   mergeWrites,
+  mtimeMs,
   type OpRecord,
   rstripSlash,
+  type Ops,
   type Session,
-  type Workspace,
   compareCodePoints,
 } from '@struktoai/mirage-core'
 import { errnoError } from './errors.ts'
@@ -82,7 +85,7 @@ export interface MountCoreOptions {
  * record; reaching a backend directly would skip the door.
  */
 export class MountCore {
-  readonly ws: Workspace
+  readonly ops: Ops
   readonly session: Session | null
   private readonly now: Date
   private readonly root: string
@@ -95,8 +98,8 @@ export class MountCore {
   private readonly uid: number
   private readonly gid: number
 
-  constructor(ws: Workspace, options: MountCoreOptions = {}) {
-    this.ws = ws
+  constructor(ops: Ops, options: MountCoreOptions = {}) {
+    this.ops = ops
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
@@ -118,7 +121,7 @@ export class MountCore {
       ctime: this.now,
       nlink: 2,
       size: 0,
-      mode: 0o040755,
+      mode: DIR_MODE,
       uid: this.uid,
       gid: this.gid,
     }
@@ -131,7 +134,7 @@ export class MountCore {
       ctime: this.now,
       nlink: 1,
       size,
-      mode: 0o100644,
+      mode: FILE_MODE,
       uid: this.uid,
       gid: this.gid,
     }
@@ -151,10 +154,14 @@ export class MountCore {
     if (typeof s.uid === 'number') entry.uid = s.uid
     if (typeof s.gid === 'number') entry.gid = s.gid
     if (s.modified !== null) {
-      const ts = new Date(s.modified)
-      if (!Number.isNaN(ts.getTime())) {
-        entry.mtime = ts
-        entry.ctime = ts
+      // One translator per language: the naive-stamp-is-UTC rule lives
+      // in core's stat view, never re-parsed here with a bare Date.
+      // Null means the stamp did not parse; epoch zero is a real time
+      // and lands.
+      const ms = mtimeMs(s)
+      if (ms !== null) {
+        entry.mtime = new Date(ms)
+        entry.ctime = new Date(ms)
       }
     }
     return entry
@@ -168,7 +175,7 @@ export class MountCore {
    * resolve them against the host root and escape the mountpoint.
    */
   linkTarget(path: string): string | null {
-    const links = this.ws.fs.links
+    const links = this.ops.links
     if (links === null) return null
     const target = links.readlink(this.resolve(path))
     if (target === null) return null
@@ -229,7 +236,7 @@ export class MountCore {
     if (inflight !== undefined) return inflight
     const promise = (async (): Promise<Uint8Array | null> => {
       try {
-        const data = await this.ws.fs.readFile(this.resolve(path))
+        const data = await this.ops.readFile(this.resolve(path))
         this.prefetchCache.set(path, { data, expires: Date.now() + PREFETCH_TTL_MS })
         return data
       } catch {
@@ -244,13 +251,13 @@ export class MountCore {
 
   /** Drain and return accumulated op records (mirrors Python's drainOps). */
   drainOps(): OpRecord[] {
-    const records = [...this.ws.records]
-    this.ws.records.length = 0
+    const records = [...this.ops.records]
+    this.ops.records.length = 0
     return records
   }
 
   private async writeFile(path: string, data: Uint8Array): Promise<void> {
-    await this.ws.fs.writeFile(this.resolve(path), data)
+    await this.ops.writeFile(this.resolve(path), data)
   }
 
   /**
@@ -261,7 +268,7 @@ export class MountCore {
   private async applyWrites(path: string, writes: [number, Uint8Array][]): Promise<void> {
     let existing: Uint8Array = new Uint8Array(0)
     try {
-      existing = await this.ws.fs.readFile(this.resolve(path), { raw: true })
+      existing = await this.ops.readFile(this.resolve(path), { raw: true })
     } catch {
       // missing file: start from empty; the write creates it
     }
@@ -282,7 +289,7 @@ export class MountCore {
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
     if (target !== null) return this.linkStat(target)
-    const s = await this.ws.fs.stat(this.resolve(path))
+    const s = await this.ops.stat(this.resolve(path))
     if (s.type === FileType.DIRECTORY) {
       return this.applyStatAttrs(this.dirStat(), s)
     }
@@ -312,7 +319,7 @@ export class MountCore {
     // itself, so the core only normalizes entry shapes and drops macOS
     // metadata names.
     const names = new Set<string>()
-    const entries = await this.ws.fs.readdir(this.resolve(path))
+    const entries = await this.ops.readdir(this.resolve(path))
     for (const e of entries) {
       const part = rstripSlash(e).split('/').pop() ?? ''
       if (part !== '' && !isMacosMetadata(part)) names.add(part)
@@ -328,10 +335,9 @@ export class MountCore {
     // Matches Python's `self._ops.read(path)`, which also dispatches.
     if (ctx !== undefined && ctx.data === undefined) {
       const cached = this.cachedData(path)
-      ctx.data = cached ?? (await this.ws.fs.readFile(this.resolve(path)))
+      ctx.data = cached ?? (await this.ops.readFile(this.resolve(path)))
     }
-    const data =
-      ctx?.data ?? this.cachedData(path) ?? (await this.ws.fs.readFile(this.resolve(path)))
+    const data = ctx?.data ?? this.cachedData(path) ?? (await this.ops.readFile(this.resolve(path)))
     return data.subarray(pos, pos + len)
   }
 
@@ -351,7 +357,7 @@ export class MountCore {
     // "create empty" from "write bytes" get the right code path. Falls back
     // to writeFile(empty) when the resource doesn't expose `create`.
     try {
-      await this.ws.fs.create(this.resolve(path))
+      await this.ops.create(this.resolve(path))
     } catch (dispatchErr) {
       if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
       await this.writeFile(path, new Uint8Array(0))
@@ -360,7 +366,7 @@ export class MountCore {
   }
 
   async mkdir(path: string): Promise<void> {
-    await this.ws.fs.mkdir(this.resolve(path))
+    await this.ops.mkdir(this.resolve(path))
   }
 
   readlink(path: string): string {
@@ -377,21 +383,21 @@ export class MountCore {
    * will later follow.
    */
   async symlink(src: string, dest: string): Promise<void> {
-    const links = this.ws.fs.links
+    const links = this.ops.links
     if (links === null) throw errnoError('EROFS', 'workspace has no namespace links')
     const stored = src.startsWith('/') ? this.resolve(src) : src
     await links.symlink(this.resolve(dest), stored, Date.now() / 1000)
   }
 
   async unlink(path: string): Promise<void> {
-    const links = this.ws.fs.links
+    const links = this.ops.links
     if (links?.isLink(this.resolve(path)) === true) {
       await links.unlink(this.resolve(path))
       this.xattrs.delete(path)
       this.prefetchCache.delete(path)
       return
     }
-    await this.ws.fs.unlink(this.resolve(path))
+    await this.ops.unlink(this.resolve(path))
     this.xattrs.delete(path)
   }
 
@@ -400,7 +406,7 @@ export class MountCore {
     // which is what makes `mv` between two backends fall back to
     // copy+unlink instead of addressing the destination against the
     // source's backend.
-    await this.ws.fs.rename(this.resolve(src), this.resolve(dst))
+    await this.ops.rename(this.resolve(src), this.resolve(dst))
     const moved = this.xattrs.get(src)
     if (moved !== undefined) {
       this.xattrs.delete(src)
@@ -413,7 +419,7 @@ export class MountCore {
     // cleanly. Message-string sniffing alone is unreliable across backends;
     // check contents first.
     try {
-      const entries = await this.ws.fs.readdir(this.resolve(path))
+      const entries = await this.ops.readdir(this.resolve(path))
       if (entries.length > 0) {
         throw errnoError('ENOTEMPTY', `directory not empty: ${path}`)
       }
@@ -422,7 +428,7 @@ export class MountCore {
       // readdir failure — fall through to rmdir and let it raise the real
       // error (e.g. ENOENT for missing path).
     }
-    await this.ws.fs.rmdir(this.resolve(path))
+    await this.ops.rmdir(this.resolve(path))
     this.xattrs.delete(path)
   }
 
@@ -431,10 +437,10 @@ export class MountCore {
     // backends). Fall back to read/resize/write for resources that don't
     // expose one.
     try {
-      await this.ws.fs.truncate(this.resolve(path), size)
+      await this.ops.truncate(this.resolve(path), size)
     } catch (dispatchErr) {
       if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
-      const data = await this.ws.fs
+      const data = await this.ops
         .readFile(this.resolve(path), { raw: true })
         .catch(() => new Uint8Array(0))
       const out = new Uint8Array(size)
@@ -480,7 +486,7 @@ export class MountCore {
   }
 
   async open(path: string): Promise<number> {
-    const s = await this.ws.fs.stat(this.resolve(path))
+    const s = await this.ops.stat(this.resolve(path))
     const ctx: Handle = { path }
     if (s.size === null && s.type !== FileType.DIRECTORY) {
       const data = await this.prefetch(path)

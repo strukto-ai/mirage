@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import os
 import stat
+import time
 
 import pytest
 import pytest_asyncio
@@ -21,7 +23,8 @@ import pytest_asyncio
 from mirage.fuse.core import MountCore
 from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.stat_view import mtime_ns
 from mirage.workspace import Workspace
 
 
@@ -197,3 +200,55 @@ async def test_buffered_write_flush_merges_against_stored_bytes():
     core.release(fh)
     stored = core._run(core._ops.read("/data/books.tally", raw=True))
     assert stored == b"0123XY6789"
+
+
+@pytest.fixture
+def new_york_clock():
+    # Mirrors tests/utils/test_stat_view.py: a non-UTC host zone makes a
+    # local-time parse of an offset-less stamp visibly wrong.
+    if not hasattr(time, "tzset"):
+        pytest.skip("tzset unavailable on this platform")
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    time.tzset()
+    yield
+    if previous is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = previous
+    time.tzset()
+
+
+@pytest.mark.asyncio
+async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
+        seeded, new_york_clock):
+    # The R6 acceptance pin: the FUSE translator answers the same epoch
+    # as mirage.utils.stat_view for an offset-less stamp. Only a
+    # backend can produce one (the touch overlay always emits Z), so
+    # this is latent until a backend like nextcloud reports naive
+    # stamps; the pin is what keeps it latent.
+    naive = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="2026-01-02T03:04:05")
+    aware = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="2026-01-02T03:04:05+00:00")
+    entry = {"st_mode": 0o100644, "st_mtime": 0, "st_ctime": 0}
+    got_naive = seeded._apply_stat_attrs(dict(entry), naive)
+    got_aware = seeded._apply_stat_attrs(dict(entry), aware)
+    assert got_naive["st_mtime"] == got_aware["st_mtime"]
+    assert got_naive["st_mtime"] == mtime_ns(naive)
+
+
+@pytest.mark.asyncio
+async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
+    # 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
+    # fold keys on None, so epoch zero overwrites the construction-time
+    # default instead of leaving it in place.
+    epoch = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="1970-01-01T00:00:00Z")
+    entry = {"st_mode": 0o100644, "st_mtime": 12345, "st_ctime": 12345}
+    got = seeded._apply_stat_attrs(dict(entry), epoch)
+    assert got["st_mtime"] == 0
+    assert got["st_ctime"] == 0

@@ -94,7 +94,7 @@ import {
   reportsLink,
 } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
-import { homeDir } from '../session/shell_dirs.ts'
+import { homeDir, logicalCwd } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -108,17 +108,25 @@ function loopLevels(args: readonly string[]): number {
   return 1
 }
 
-// Split leading `cd` option flags (-L -P -e -@, clusters like -LP, and a
-// `--` terminator) from the directory operand. A bare `-` is the OLDPWD
-// operand, not an option. `bad` is the first unknown option character.
-function splitCdOptions(args: (string | PathSpec)[]): {
+// Split leading -L/-P option flags (clusters like -LP, and a `--`
+// terminator) from the operands. Shared by `cd` (which also takes -e -@)
+// and `pwd`, so the last-wins rule -- `pwd -L -P` is physical, `pwd -P
+// -L` logical -- has one implementation. A bare `-` is an operand (`cd`'s
+// OLDPWD shorthand), not an option. `bad` is the first unknown character.
+function splitModeOptions(
+  args: (string | PathSpec)[],
+  letters = 'LPe@',
+  // The mode to assume when the line names neither, which is what
+  // `set -P` changes for the whole session.
+  fallback = false,
+): {
   operands: (string | PathSpec)[]
   bad: string | null
   physical: boolean
 } {
   const operands: (string | PathSpec)[] = []
   let parsing = true
-  let physical = false
+  let physical = fallback
   for (const arg of args) {
     const s = arg instanceof PathSpec ? arg.virtual : arg
     if (parsing) {
@@ -129,7 +137,7 @@ function splitCdOptions(args: (string | PathSpec)[]): {
       if (s !== '-' && s.length >= 2 && s.startsWith('-')) {
         let bad: string | null = null
         for (const c of s.slice(1)) {
-          if (!'LPe@'.includes(c)) {
+          if (!letters.includes(c)) {
             bad = c
             break
           }
@@ -454,13 +462,34 @@ async function runArgv(
   }
 
   // Shell builtins
+  // `set -P` (`set -o physical`) is the session-wide version of the
+  // per-command flag, and GNU applies it to both `cd` and `pwd`.
+  const shellPhysical = session.shellOptions.physical === true
+
   if (name === SB.PWD) {
-    const out = new TextEncoder().encode(`${session.cwd}\n`)
+    const { bad: pwdBad, physical: pwdPhysical } = splitModeOptions(operands, 'LP', shellPhysical)
+    if (pwdBad !== null) {
+      const err = new TextEncoder().encode(
+        `pwd: -${pwdBad}: invalid option\npwd: usage: pwd [-LP]\n`,
+      )
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'pwd', exitCode: 2, stderr: err }),
+      ]
+    }
+    // GNU ignores operands entirely: `pwd extra` still prints the cwd.
+    const cwd = pwdPhysical ? session.cwd : logicalCwd(session)
+    const out = new TextEncoder().encode(`${cwd}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'pwd', exitCode: 0 })]
   }
 
   if (name === SB.CD) {
-    const { operands: cdOperands, bad, physical } = splitCdOptions(operands)
+    const {
+      operands: cdOperands,
+      bad,
+      physical,
+    } = splitModeOptions(operands, 'LPe@', shellPhysical)
     const links = namespace.symlinkTargets()
     if (bad !== null) {
       const err = new TextEncoder().encode(

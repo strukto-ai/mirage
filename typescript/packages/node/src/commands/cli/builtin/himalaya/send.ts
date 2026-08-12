@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FlagView,
   IOResult,
   materialize,
   type ByteSource,
@@ -20,7 +21,7 @@ import {
   type CommandFnResult,
 } from '@struktoai/mirage-core'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-import { sendRaw } from './smtp.ts'
+import { deliver } from './deliver.ts'
 
 const ENC = new TextEncoder()
 
@@ -38,7 +39,12 @@ export async function send(inv: CLIInvocation): Promise<CommandFnResult> {
   if (new TextDecoder().decode(raw).trim() === '') {
     throw new Error('no message provided: pass it as an argument or pipe it via standard input')
   }
-  const parsed = await sendRaw(inv.config as EmailConfig, raw)
+  const fl = new FlagView(inv.flags)
+  const { parsed, warning } = await deliver(
+    inv.config as EmailConfig,
+    raw,
+    fl.asStr('save') ?? null,
+  )
   const result = {
     status: 'sent',
     to: parsed.to
@@ -47,5 +53,5 @@ export async function send(inv: CLIInvocation): Promise<CommandFnResult> {
     subject: parsed.subject,
   }
   const out: ByteSource = ENC.encode(JSON.stringify(result))
-  return [out, new IOResult()]
+  return [out, new IOResult({ stderr: warning === '' ? null : ENC.encode(warning) })]
 }

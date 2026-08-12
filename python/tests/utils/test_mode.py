@@ -12,38 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.mode import parse_mode
+from mirage.utils.mode import parse_chmod
 
 
-def test_parse_mode_octal():
-    assert parse_mode("644", 0) == 0o644
-    assert parse_mode("0", 0o777) == 0
-    assert parse_mode("7777", 0) == 0o7777
+def test_parse_chmod_octal():
+    assert parse_chmod("644", 0) == 0o644
+    assert parse_chmod("0", 0o777) == 0
+    assert parse_chmod("7777", 0) == 0o7777
 
 
-def test_parse_mode_octal_out_of_range():
-    assert parse_mode("77777", 0) is None
+def test_parse_chmod_octal_out_of_range():
+    assert parse_chmod("77777", 0) is None
 
 
-def test_parse_mode_symbolic_add():
-    assert parse_mode("u+x", 0o644) == 0o744
-    assert parse_mode("+x", 0o644) == 0o755
+def test_parse_chmod_symbolic_add():
+    assert parse_chmod("u+x", 0o644) == 0o744
+    assert parse_chmod("+x", 0o644) == 0o755
 
 
-def test_parse_mode_symbolic_remove():
-    assert parse_mode("go-r", 0o644) == 0o600
+def test_parse_chmod_symbolic_remove():
+    assert parse_chmod("go-r", 0o644) == 0o600
 
 
-def test_parse_mode_symbolic_assign():
-    assert parse_mode("a=r", 0o777) == 0o444
-    assert parse_mode("u=rwx,go=", 0o644) == 0o700
+def test_parse_chmod_symbolic_assign():
+    assert parse_chmod("a=r", 0o777) == 0o444
+    assert parse_chmod("u=rwx,go=", 0o644) == 0o700
 
 
-def test_parse_mode_symbolic_comma_clauses():
-    assert parse_mode("u+x,g-r", 0o644) == 0o704
+def test_parse_chmod_symbolic_comma_clauses():
+    assert parse_chmod("u+x,g-r", 0o644) == 0o704
 
 
-def test_parse_mode_invalid():
-    assert parse_mode("zz", 0o644) is None
-    assert parse_mode("u~x", 0o644) is None
-    assert parse_mode("u+q", 0o644) is None
+def test_parse_chmod_invalid():
+    assert parse_chmod("zz", 0o644) is None
+    assert parse_chmod("u~x", 0o644) is None
+    assert parse_chmod("u+q", 0o644) is None

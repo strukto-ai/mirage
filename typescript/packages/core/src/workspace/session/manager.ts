@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ownRecord, Session } from './session.ts'
+import { setCwd } from './shell_dirs.ts'
 import { RAMSessionStore } from './ram.ts'
 import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
 import type { MountMode } from '../../types.ts'
@@ -84,7 +85,7 @@ export class SessionManager {
   }
 
   set cwd(value: string) {
-    this.defaultSession().cwd = value
+    setCwd(this.defaultSession(), value)
   }
 
   get env(): Record<string, string> {
@@ -115,7 +116,7 @@ export class SessionManager {
       const stored = Session.fromJSON(fields as StoredSession)
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
-        dflt.cwd = stored.cwd
+        setCwd(dflt, stored.cwd)
         dflt.env = stored.env
         dflt.createdAt = stored.createdAt
         dflt.mountModes = stored.mountModes

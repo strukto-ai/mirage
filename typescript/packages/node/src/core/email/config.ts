@@ -27,6 +27,13 @@ export interface EmailConfig {
   password: string
   useSsl: boolean
   maxMessages: number
+  /**
+   * Upstream himalaya's message.send.save-copy, whose default is true
+   * since pimalaya/himalaya#536.
+   */
+  saveCopy: boolean
+  /** Its folder.alias.sent: null means ask the server for its \Sent mailbox. */
+  sentFolder: string | null
 }
 
 export interface EmailConfigRedacted extends Omit<EmailConfig, 'password'> {
@@ -45,6 +52,8 @@ export const EmailConfigSchema = z.object({
   password: secretStr(),
   useSsl: z.boolean().default(true),
   maxMessages: z.number().default(200),
+  saveCopy: z.boolean().default(true),
+  sentFolder: z.string().nullable().default(null),
 })
 
 export function redactEmailConfig(config: EmailConfig): EmailConfigRedacted {
@@ -60,6 +69,8 @@ export interface EmailConfigInput {
   password: string
   useSsl?: boolean
   maxMessages?: number
+  saveCopy?: boolean
+  sentFolder?: string | null
 }
 
 export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
@@ -72,6 +83,8 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
     password: input.password,
     useSsl: input.useSsl ?? true,
     maxMessages: input.maxMessages ?? 200,
+    saveCopy: input.saveCopy ?? true,
+    sentFolder: input.sentFolder ?? null,
   }
 }
 
@@ -84,6 +97,8 @@ export function normalizeEmailConfig(input: Record<string, unknown>): EmailConfi
       smtp_port: 'smtpPort',
       use_ssl: 'useSsl',
       max_messages: 'maxMessages',
+      save_copy: 'saveCopy',
+      sent_folder: 'sentFolder',
     },
   })
   const built: EmailConfigInput = {
@@ -96,5 +111,7 @@ export function normalizeEmailConfig(input: Record<string, unknown>): EmailConfi
   if (typeof norm.smtpPort === 'number') built.smtpPort = norm.smtpPort
   if (typeof norm.useSsl === 'boolean') built.useSsl = norm.useSsl
   if (typeof norm.maxMessages === 'number') built.maxMessages = norm.maxMessages
+  if (typeof norm.saveCopy === 'boolean') built.saveCopy = norm.saveCopy
+  if (typeof norm.sentFolder === 'string') built.sentFolder = norm.sentFolder
   return buildEmailConfig(built)
 }

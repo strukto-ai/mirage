@@ -20,7 +20,8 @@ from mirage.commands.cli.builtin.himalaya.builder import (Attachment, Compose,
                                                           Source, build,
                                                           read_body,
                                                           split_addresses)
-from mirage.commands.cli.builtin.himalaya.smtp import send_raw
+from mirage.commands.cli.builtin.himalaya.deliver import (deliver,
+                                                          save_sent_copy)
 from mirage.commands.cli.types import CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.core.email.config import EmailConfig
@@ -117,9 +118,26 @@ async def route(
     # (or into `message send`), so serialize with the SMTP policy rather
     # than the LF-only default.
     raw = message.as_bytes(policy=SMTP)
+    save = fl.as_str("save")
     if not fl.as_bool("send"):
-        return yield_bytes(raw), IOResult()
-    await send_raw(config, raw)
+        if save is None:
+            return yield_bytes(raw), IOResult()
+        # --save without --send files the message and sends nothing, so
+        # a refused APPEND means nothing happened at all and may fail
+        # loudly: there is no delivered message a retry could duplicate.
+        folder = await save_sent_copy(config, raw, save)
+        out = json.dumps(
+            {
+                "status": "saved",
+                "mailbox": folder,
+                "to": message["To"],
+                "subject": message["Subject"],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+        return yield_bytes(out), IOResult()
+    _, warning = await deliver(config, raw, save)
     result = {
         "status": "sent",
         "to": message["To"],
@@ -127,4 +145,5 @@ async def route(
     }
     out = json.dumps(result, ensure_ascii=False,
                      separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return yield_bytes(out), IOResult(
+        stderr=warning.encode() if warning else None)

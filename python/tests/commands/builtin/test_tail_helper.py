@@ -1,4 +1,4 @@
-from mirage.commands.builtin.tail_helper import parse_counts
+from mirage.commands.builtin.tail_helper import number_flag_error, parse_counts
 
 
 def test_bare_count_counts_back_from_the_end():
@@ -37,3 +37,27 @@ def test_both_flags_are_parsed_independently():
     counts = parse_counts("+2", "5")
     assert counts.from_line == 2
     assert counts.byte_count == 5
+
+
+class TestNumberFlagError:
+
+    def test_valid_numbers_pass(self):
+        assert number_flag_error("head", "5", None) is None
+        assert number_flag_error("tail", "+3", None) is None
+        assert number_flag_error("head", None, "-2") is None
+
+    def test_invalid_lines(self):
+        assert number_flag_error(
+            "head", "abc", None) == "head: invalid number of lines: 'abc'\n"
+
+    def test_invalid_bytes(self):
+        assert number_flag_error(
+            "tail", None, "xyz") == "tail: invalid number of bytes: 'xyz'\n"
+
+    def test_unicode_digits_are_invalid(self):
+        # python's \d also matches Unicode digits (int('١٢') is 12), which
+        # JS /\d/ and GNU's C-locale parsers reject.
+        assert number_flag_error(
+            "head", "١٢", None) == "head: invalid number of lines: '١٢'\n"
+        assert number_flag_error("tail", None,
+                                 "٥") == "tail: invalid number of bytes: '٥'\n"

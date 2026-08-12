@@ -33,7 +33,7 @@ function makeBridge(seed: Record<string, Uint8Array>): {
   const writes: [string, Uint8Array][] = []
   const mutations: string[] = []
   const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
-    if (op === 'READ') {
+    if (op === 'read') {
       const data = files.get(path)
       if (data === undefined) {
         // The real dispatcher rejects with coded fs errors (ENOENT et
@@ -42,24 +42,24 @@ function makeBridge(seed: Record<string, Uint8Array>): {
       }
       return Promise.resolve(data)
     }
-    if (op === 'WRITE') {
+    if (op === 'write') {
       const data = bytes ?? new Uint8Array()
       files.set(path, data)
       writes.push([path, data])
       return Promise.resolve(undefined)
     }
-    if (op === 'MKDIR' || op === 'RMDIR' || op === 'UNLINK') {
-      if (op === 'UNLINK') files.delete(path)
+    if (op === 'mkdir' || op === 'rmdir' || op === 'unlink') {
+      if (op === 'unlink') files.delete(path)
       mutations.push(`${op} ${path}`)
       return Promise.resolve(undefined)
     }
-    if (op === 'RENAME') {
+    if (op === 'rename') {
       const data = files.get(path)
       if (data !== undefined && dst !== undefined) {
         files.delete(path)
         files.set(dst, data)
       }
-      mutations.push(`RENAME ${path} ${dst ?? ''}`)
+      mutations.push(`rename ${path} ${dst ?? ''}`)
       return Promise.resolve(undefined)
     }
     const prefix = path
@@ -272,7 +272,7 @@ describe('MontyRuntime', () => {
       "from pathlib import Path\nPath('/s3/sub').mkdir()\nPath('/s3/a.txt').unlink()\nPath('/s3/sub').rmdir()",
     )
     expect(result.exitCode).toBe(0)
-    expect(mutations).toEqual(['MKDIR /s3/sub', 'UNLINK /s3/a.txt', 'RMDIR /s3/sub'])
+    expect(mutations).toEqual(['mkdir /s3/sub', 'unlink /s3/a.txt', 'rmdir /s3/sub'])
     expect(files.has('/s3/a.txt')).toBe(false)
   }, 30_000)
 
@@ -284,7 +284,7 @@ describe('MontyRuntime', () => {
       "from pathlib import Path\nPath('/s3/a.txt').rename('/s3/b.txt')\nPath('/s3/b.txt').unlink()",
     )
     expect(result.exitCode).toBe(0)
-    expect(mutations).toEqual(['RENAME /s3/a.txt /s3/b.txt', 'UNLINK /s3/b.txt'])
+    expect(mutations).toEqual(['rename /s3/a.txt /s3/b.txt', 'unlink /s3/b.txt'])
     expect(files.has('/s3/b.txt')).toBe(false)
   }, 30_000)
 
@@ -293,7 +293,7 @@ describe('MontyRuntime', () => {
     const rt = make(dispatch)
     const result = await run(rt, "from pathlib import Path\nPath('/s3/a.txt').rename('/s3/b.txt')")
     expect(result.exitCode).toBe(0)
-    expect(mutations).toEqual(['RENAME /s3/a.txt /s3/b.txt'])
+    expect(mutations).toEqual(['rename /s3/a.txt /s3/b.txt'])
     expect(files.has('/s3/b.txt')).toBe(true)
   }, 30_000)
 
@@ -314,7 +314,7 @@ describe('MontyRuntime', () => {
     const rt = make(dispatch, () => ['/a/', '/b/'])
     const result = await run(rt, "from pathlib import Path\nPath('/a/f.txt').rename('/a/g.txt')")
     expect(result.exitCode).toBe(0)
-    expect(mutations).toEqual(['RENAME /a/f.txt /a/g.txt'])
+    expect(mutations).toEqual(['rename /a/f.txt /a/g.txt'])
   }, 30_000)
 
   it('a rename leaving the mount view never reaches the bridge', async () => {
@@ -402,7 +402,7 @@ describe('MontyRuntime', () => {
     const failing =
       (code: string): BridgeDispatchFn =>
       (op, path) => {
-        if (op === 'LIST') return Promise.resolve([])
+        if (op === 'readdir') return Promise.resolve([])
         return Promise.reject(Object.assign(new Error(path), { code }))
       }
     const missing = await run(

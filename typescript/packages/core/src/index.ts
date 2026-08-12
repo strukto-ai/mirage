@@ -136,6 +136,7 @@ export {
   type RegisteredOp,
   registerOp,
 } from './ops/registry.ts'
+export { Ops } from './ops/ops.ts'
 export { RAM_OPS } from './ops/ram/index.ts'
 export { makeGenericOps } from './ops/generic/factory.ts'
 export { extractWriteData } from './ops/write_args.ts'
@@ -540,6 +541,16 @@ export {
   type RuntimeConfig,
 } from './runtime/config.ts'
 export { CrossMountError, EvalError } from './runtime/errors.ts'
+export { contentSize, DIR_MODE, FILE_MODE, mtimeMs } from './utils/stat_view.ts'
+export {
+  classify,
+  FS_CONDITIONS,
+  type FsCondition,
+  gnuPhrase,
+  POSIX,
+  posixErrno,
+  type PosixErrno,
+} from './errors/index.ts'
 export { RuntimeVFS, type VFSEntry, type VFSStat } from './runtime/vfs.ts'
 export { FileTable, mergeWrites, planFlush, type FlushKind } from './runtime/handles/index.ts'
 export {

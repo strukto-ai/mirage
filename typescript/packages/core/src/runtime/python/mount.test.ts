@@ -29,11 +29,11 @@ function makeBridge(): {
     const entry: { op: string; path: string; bytes?: Uint8Array } =
       normalizedBytes !== undefined ? { op, path, bytes: normalizedBytes } : { op, path }
     calls.push(entry)
-    if (op === 'WRITE') {
+    if (op === 'write') {
       files.set(path, normalizedBytes ?? new Uint8Array())
       return Promise.resolve(undefined)
     }
-    if (op === 'APPEND') {
+    if (op === 'append') {
       const base = files.get(path) ?? new Uint8Array()
       const tail = normalizedBytes ?? new Uint8Array()
       const next = new Uint8Array(base.length + tail.length)
@@ -42,7 +42,7 @@ function makeBridge(): {
       files.set(path, next)
       return Promise.resolve(undefined)
     }
-    if (op === 'READ') return Promise.resolve(files.get(path) ?? new Uint8Array())
+    if (op === 'read') return Promise.resolve(files.get(path) ?? new Uint8Array())
     const prefix = path
     const entries: { path: string; size: number; isDir: boolean }[] = []
     const dirs = new Set<string>()
@@ -93,7 +93,7 @@ describe('PyodideRuntime mount visibility', () => {
       env: {},
       stdin: new Uint8Array(),
     })
-    const writes = calls.filter((c) => c.op === 'WRITE')
+    const writes = calls.filter((c) => c.op === 'write')
     expect(writes).toHaveLength(1)
     const w0 = writes[0]
     if (w0?.bytes === undefined) throw new Error('unreachable')
@@ -120,7 +120,7 @@ describe('PyodideRuntime mount visibility', () => {
       env: {},
       stdin: new Uint8Array(),
     })
-    expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
+    expect(calls.filter((c) => c.op === 'write')).toHaveLength(0)
     await rt.close()
   }, 60_000)
 
@@ -144,7 +144,7 @@ describe('PyodideRuntime mount visibility', () => {
       stdin: new Uint8Array(),
     })
     expect(new TextDecoder().decode(result.stdout)).toContain('lazy')
-    expect(calls.some((c) => c.op === 'LIST' && c.path === '/ram/')).toBe(true)
+    expect(calls.some((c) => c.op === 'readdir' && c.path === '/ram/')).toBe(true)
     await rt.close()
   }, 60_000)
 
@@ -167,7 +167,7 @@ describe('PyodideRuntime mount visibility', () => {
         stdin: new Uint8Array(),
       })
       expect(result.exitCode).toBe(0)
-      expect(calls.filter((c) => c.op === 'WRITE')).toHaveLength(0)
+      expect(calls.filter((c) => c.op === 'write')).toHaveLength(0)
       expect(warnings.some((w) => w.includes("cannot serve a mount at '/'"))).toBe(true)
       // Reported once, not once per run.
       await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
@@ -201,8 +201,8 @@ describe('PyodideRuntime mount visibility', () => {
 
   it('a failed flush surfaces on stderr and flips a clean exit to 1', async () => {
     const dispatch: BridgeDispatchFn = (op) => {
-      if (op === 'WRITE') return Promise.reject(new Error('mount is read-only'))
-      if (op === 'READ') return Promise.resolve(new Uint8Array())
+      if (op === 'write') return Promise.reject(new Error('mount is read-only'))
+      if (op === 'read') return Promise.resolve(new Uint8Array())
       return Promise.resolve([])
     }
     const rt = new PyodideRuntime()
@@ -237,9 +237,9 @@ describe('PyodideRuntime mount visibility', () => {
     const attempted: string[] = []
     const dispatch: BridgeDispatchFn = (op, path) => {
       attempted.push(`${op} ${path}`)
-      if (op === 'WRITE') return Promise.reject(new Error('backend hiccup'))
-      if (op === 'READ') return Promise.resolve(new Uint8Array())
-      if (op === 'LIST') return Promise.resolve([])
+      if (op === 'write') return Promise.reject(new Error('backend hiccup'))
+      if (op === 'read') return Promise.resolve(new Uint8Array())
+      if (op === 'readdir') return Promise.resolve([])
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
@@ -256,7 +256,7 @@ describe('PyodideRuntime mount visibility', () => {
     })
     // The rename must not run: its prerequisite write never landed, so
     // replaying it could move a stale backend copy onto the destination.
-    expect(attempted.filter((c) => c.startsWith('RENAME'))).toHaveLength(0)
+    expect(attempted.filter((c) => c.startsWith('rename'))).toHaveLength(0)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
     expect(stderr).toContain('failed to write /ram/tmp.txt')
     expect(stderr).toContain('skipped 1 later mutation(s)')
@@ -270,14 +270,14 @@ describe('PyodideRuntime mount visibility', () => {
     // content. Leaving it out of the guest's tree would read as absence,
     // and the append would then ship its tail as the whole file.
     const dispatch: BridgeDispatchFn = (op, path, bytes) => {
-      if (op === 'READ' && path === '/ram/log.txt') {
+      if (op === 'read' && path === '/ram/log.txt') {
         return Promise.reject(new Error('backend unavailable'))
       }
-      if (op === 'READ') return Promise.resolve(new Uint8Array())
-      if (op === 'LIST') {
+      if (op === 'read') return Promise.resolve(new Uint8Array())
+      if (op === 'readdir') {
         return Promise.resolve([{ path: '/ram/log.txt', size: 4, isDir: false }])
       }
-      if (op === 'WRITE' && bytes !== undefined) writes.push(new Uint8Array(bytes))
+      if (op === 'write' && bytes !== undefined) writes.push(new Uint8Array(bytes))
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()

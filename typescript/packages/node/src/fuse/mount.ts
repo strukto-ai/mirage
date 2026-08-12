@@ -164,7 +164,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
     mountpoint = mkdtempSync(join(tmpdir(), 'mirage-fuse-'))
     ownsMountpoint = true
   }
-  const mfs = new MirageFS(ws, {
+  const mfs = new MirageFS(ws.fs, {
     ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
     ...(options.session !== undefined ? { session: options.session } : {}),
   })

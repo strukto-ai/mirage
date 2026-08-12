@@ -25,6 +25,37 @@ ws.registerCli('himalaya', HIMALAYA, config)
 Two installs under different names are two accounts. In YAML, the same
 install rides the `clis:` section; see the [CLI overview](/typescript/cli/index).
 
+## Sent copies
+
+Sending is SMTP and keeps no record of itself, so the copy in your own
+Sent mailbox is a second, separate IMAP `APPEND` that mail clients make
+on your behalf. mirage makes it too, `\Seen`, on every `--send`.
+
+Which mailbox it lands in is asked, not guessed: a server that
+implements RFC 6154 tags one of its mailboxes `\Sent` in its folder
+listing, which is `[Gmail]/Sent Mail` on Gmail and `Sent Items` on
+Exchange. Set `sentFolder` to pin a name and skip the probe, or
+`saveCopy=False` to file nothing.
+
+```ts
+const config = {
+  imapHost: 'imap.example.com',
+  smtpHost: 'smtp.example.com',
+  username: 'agent@example.com',
+  password: 'app-password',
+  saveCopy: true, // the default
+  sentFolder: 'Sent', // unset asks the server
+}
+```
+
+`--save <MAILBOX>` overrides both for one line, and on its own (without
+`--send`) it files the message without sending it, which is how a draft
+is written. The two failure modes differ on purpose: a copy that fails
+*after* a successful send is a warning on stderr and exit 0, because
+the mail is already gone and a non-zero exit invites a retry that would
+send it twice; a `--save` that sends nothing fails loudly, because
+nothing happened yet.
+
 ## Verbs
 
 The verbs follow the [himalaya](https://github.com/pimalaya/himalaya)
@@ -123,6 +154,7 @@ himalaya message compose --to you@example.org --subject Report --body 'see attac
 | `--attach`      | no       | Attachment file path, repeatable               |
 | `--signature`   | no       | Signature appended after a `-- ` line          |
 | `--send`        | no       | Send through SMTP instead of writing to stdout |
+| `--save`        | no       | File a copy in this mailbox (see above)        |
 
 ### `himalaya message send`
 
@@ -131,8 +163,14 @@ is the sink a composer chain feeds.
 
 ```bash
 himalaya message send < message.eml
+himalaya message send --save Sent < message.eml
 himalaya message compose --to you@example.org --subject Hi --body yo | himalaya message send
 ```
+
+| Option    | Required | Description                            |
+| --------- | -------- | -------------------------------------- |
+| `<ID>`    | no       | The message itself, inline             |
+| `--save`  | no       | File a copy in this mailbox            |
 
 ### `himalaya message reply`
 
@@ -174,9 +212,15 @@ Deliberate gaps, all of which fail loudly rather than silently:
   download`, `mailbox` and the protocol-specific subgroups (`imap`,
   `jmap`, `gmail`, `msgraph`, `smtp`) are not implemented. An unknown
   verb exits 1 with git's wording.
-- `--save <MAILBOX>` is absent because the email backend has no IMAP
-  `APPEND`, and `message read --seen` is absent because the mount is
-  read-only and never flips `\Seen`.
+- `message read --seen` is absent because the mount is read-only and
+  never flips `\Seen`.
+- The account-level sent copy is mirage's own, and defaults on. Upstream
+  v2 files a copy only when `--save <MAILBOX>` names one; a mirage agent
+  that never learned the flag still leaves the record a human sender
+  would. Turn it off with `saveCopy` per account.
+- Resolving the sent mailbox from the server's RFC 6154 `\Sent` tag is
+  ahead of upstream, whose own IMAP backend still pins `INBOX` alone
+  while it waits on `LIST RETURN (SPECIAL-USE)` support in io-imap.
 - `envelope list` renders JSON, not a table, so its table flags
   (`--max-width`, `--recipient`, `--has-attachment`) do not exist.
 - Body and signature files (`--body-file`, `--signature-file`) are

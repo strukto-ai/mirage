@@ -12,15 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import time
+
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.timeutil import now_iso
+from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
 async def truncate(accessor: RAMAccessor, path: PathSpec, length: int) -> None:
     store = accessor.store
+    start_ms = int(time.monotonic() * 1000)
     p = norm(path.mount_path)
     if p in store.files:
         data = store.files[p]
@@ -28,4 +32,5 @@ async def truncate(accessor: RAMAccessor, path: PathSpec, length: int) -> None:
         data = b""
     store.files[p] = data[:length].ljust(length, b"\0")
     store.modified[p] = now_iso()
+    record("truncate", path.mount_path, "ram", 0, start_ms)
     await invalidate_after_write(path)

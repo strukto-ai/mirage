@@ -30,6 +30,17 @@ class OperationNotSupportedError(OSError):
     """
 
 
+class NoMountError(ValueError):
+    """A path no mount owns: the registry's miss, and nothing else.
+
+    A ValueError subclass so every existing catch keeps working, but
+    typed so ``mirage.errors.classify`` can name the miss ENOENT
+    without swallowing the bare ValueErrors backends raise for
+    refusals that are not absence (an oversized read, a rename into
+    the source's own subtree). Mirrors the TS ``noMount`` stamp.
+    """
+
+
 _FS_STRERROR: list[tuple[type[OSError], str]] = [
     (FileNotFoundError, "No such file or directory"),
     (NotADirectoryError, "Not a directory"),
@@ -80,6 +91,32 @@ def eexist(path: str | PathSpec) -> FileExistsError:
 
 def eisdir(path: str | PathSpec) -> IsADirectoryError:
     return IsADirectoryError(_virtual_of(path))
+
+
+def eacces(path: str | PathSpec) -> PermissionError:
+    return PermissionError(_virtual_of(path))
+
+
+def no_mount(path: str | PathSpec) -> NoMountError:
+    return NoMountError(f"no mount matches path: {str(path)!r}")
+
+
+# The three conditions below have no typed builtin, so their errno is
+# the stamp (mirage.errors.classify reads it); the strerror rides along
+# for raw tracebacks and `filename` carries the operand, like enotsup.
+
+
+def enotempty(path: str | PathSpec) -> OSError:
+    return OSError(errno.ENOTEMPTY, "Directory not empty", _virtual_of(path))
+
+
+def exdev(path: str | PathSpec) -> OSError:
+    return OSError(errno.EXDEV, "Invalid cross-device link", _virtual_of(path))
+
+
+def eloop(path: str | PathSpec) -> OSError:
+    return OSError(errno.ELOOP, "Too many levels of symbolic links",
+                   _virtual_of(path))
 
 
 async def readdir_error(path: str | PathSpec, key: str,

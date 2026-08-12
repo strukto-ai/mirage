@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '@struktoai/mirage-core'
+import { ResourceName, record, type PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { destError, isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
 
@@ -21,6 +21,7 @@ export async function truncate(
   path: PathSpec,
   length: number,
 ): Promise<void> {
+  const start = performance.now()
   const root = accessor.rootHandle
   const virtual = path.mountPath
   let handle: FileSystemFileHandle
@@ -46,4 +47,5 @@ export async function truncate(
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(out))
   await writable.close()
+  record('truncate', virtual, ResourceName.OPFS, 0, start)
 }

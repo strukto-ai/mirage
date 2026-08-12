@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.types import VFSEntry
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -49,7 +50,7 @@ class MontyVFS:
             self._missing.add(virtual)
             return None
 
-    def readdir(self, virtual: str) -> list[str] | None:
+    def readdir(self, virtual: str) -> list[VFSEntry] | None:
         """The directory's entries, or None when it is not a directory."""
         if self._core is None:
             return None
@@ -76,6 +77,18 @@ class MontyVFS:
         if self._core is None:
             return
         self._core.append(virtual, data, whole)
+        self._missing.discard(virtual)
+
+    def create(self, virtual: str) -> None:
+        if self._core is None:
+            return
+        self._core.create(virtual)
+        self._missing.discard(virtual)
+
+    def truncate(self, virtual: str) -> None:
+        if self._core is None:
+            return
+        self._core.truncate(virtual)
         self._missing.discard(virtual)
 
     def mkdir(self, virtual: str, parents: bool) -> None:

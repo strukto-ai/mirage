@@ -17,7 +17,7 @@ import { PolicyDenied } from '../../../policy/index.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { fsStrerror, isEnoent, isFsError, isMissingOp } from '../../../utils/errors.ts'
-import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
+import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -354,7 +354,7 @@ export async function handleChmod(
   const first = operands[0]
   if (first === undefined) return errorResult('chmod', 'chmod: missing operand\n', 2)
   const modeText = first instanceof PathSpec ? first.virtual : first
-  if (parseMode(modeText, 0) === null) {
+  if (parseChmod(modeText, 0) === null) {
     return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
   }
 
@@ -395,7 +395,7 @@ export async function handleChmod(
       const current =
         pathStat.mode ??
         (pathStat.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
-      const newMode = parseMode(modeText, current)
+      const newMode = parseChmod(modeText, current)
       if (newMode === null) {
         return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
       }

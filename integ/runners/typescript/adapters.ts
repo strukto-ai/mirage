@@ -363,6 +363,7 @@ const EMAIL_SMTP_PORT = Number(process.env.EMAIL_SMTP_PORT ?? '3025')
 const EMAIL_API_PORT = Number(process.env.EMAIL_API_PORT ?? '8080')
 const EMAIL_USERNAME = 'integ@example.com'
 const EMAIL_PASSWORD = 'secret'
+const EMAIL_SENT_FOLDER = 'Sent'
 // Doubles as the workspace id on the fake notion server.
 const NOTION_TOKEN = 'integ-test'
 
@@ -388,7 +389,12 @@ async function openEmail(target: Target): Promise<Open> {
       logger: false,
     })
     await imap.connect()
-    const known = new Set(['INBOX'])
+    // GreenMail hands a new account nothing but an INBOX, where every
+    // real provider ships a sent mailbox already made. himalaya files a
+    // copy of each sent message into one, so create it here rather than
+    // leave the copy with nowhere to land.
+    await imap.mailboxCreate(EMAIL_SENT_FOLDER)
+    const known = new Set(['INBOX', EMAIL_SENT_FOLDER])
     for (const entry of entries) {
       const folder = entry.folder ?? 'INBOX'
       if (!known.has(folder)) {

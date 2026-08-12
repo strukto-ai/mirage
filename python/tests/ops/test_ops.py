@@ -463,3 +463,44 @@ class TestAttachedOpsOneDoor:
             assert await ws.ops.read("/a/y.txt") == b"body"
         finally:
             await ws.close()
+
+
+class TestProbesAndConveniences:
+    """The surface union with the TS facade (R7b).
+
+    Only a genuine missing path reads back False from the probes; an
+    auth failure or a backend bug propagates, since acting on a false
+    "missing" means overwriting or recreating data that is there.
+    """
+
+    def test_exists_answers_the_three_cases(self):
+        ops, _ = make_ops()
+        run(ops.write("/data/a.txt", b"x"))
+        run(ops.mkdir("/data/dir"))
+        assert run(ops.exists("/data/a.txt")) is True
+        assert run(ops.exists("/data/dir")) is True
+        assert run(ops.exists("/data/nope.txt")) is False
+        assert run(ops.exists("/nowhere/x.txt")) is False
+
+    def test_is_dir_and_is_file_split_on_the_stat_type(self):
+        ops, _ = make_ops()
+        run(ops.mkdir("/data/dir"))
+        run(ops.write("/data/dir/f.txt", b"x"))
+        assert run(ops.is_dir("/data/dir")) is True
+        assert run(ops.is_file("/data/dir")) is False
+        assert run(ops.is_file("/data/dir/f.txt")) is True
+        assert run(ops.is_dir("/data/dir/f.txt")) is False
+        assert run(ops.is_dir("/data/nope")) is False
+        assert run(ops.is_file("/data/nope")) is False
+
+    def test_cat_decodes_utf8(self):
+        ops, _ = make_ops()
+        run(ops.write("/data/a.txt", "héllo".encode()))
+        assert run(ops.cat("/data/a.txt")) == "héllo"
+
+    def test_list_files_keeps_files_only_as_basenames(self):
+        ops, _ = make_ops()
+        run(ops.mkdir("/data/dir"))
+        run(ops.write("/data/dir/a.txt", b"1"))
+        run(ops.mkdir("/data/dir/sub"))
+        assert run(ops.list_files("/data/dir")) == ["a.txt"]

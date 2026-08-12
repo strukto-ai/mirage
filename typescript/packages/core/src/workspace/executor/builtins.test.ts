@@ -113,7 +113,8 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new Session({ sessionId: 'test', env: { FOO: 'bar' } })
     const [out, io] = handleExport([], s)
     expect(io.exitCode).toBe(0)
-    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\n')
+    // $PWD is exported like any other variable, so bash lists it here too.
+    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\ndeclare -x PWD="/"\n')
   })
 
   it('export -z is invalid option exit 2', () => {
@@ -183,7 +184,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new Session({ sessionId: 'test', env: { FOO: 'bar' } })
     const [out, io] = handleExport(['-p', '--'], s)
     expect(io.exitCode).toBe(0)
-    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\n')
+    expect(decode(out as Uint8Array)).toBe('declare -x FOO="bar"\ndeclare -x PWD="/"\n')
   })
 
   it('export -f lists no variables', () => {
@@ -328,7 +329,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
   it('printenv with no name lists sorted KEY=VAL', () => {
     const s = new Session({ sessionId: 'test', env: { B: '2', A: '1' } })
     const [out] = handlePrintenv(null, s)
-    expect(decode(out as Uint8Array)).toBe('A=1\nB=2\n')
+    expect(decode(out as Uint8Array)).toBe('A=1\nB=2\nPWD=/\n')
   })
 })
 
@@ -1028,7 +1029,7 @@ describe('handleSet', () => {
   it('no args → print env', () => {
     const s = new Session({ sessionId: 'test', env: { A: '1' } })
     const [out] = handleSet([], s)
-    expect(decode(out as Uint8Array)).toBe('A=1\n')
+    expect(decode(out as Uint8Array)).toBe('A=1\nPWD=/\n')
   })
 
   it('"-- a b" sets positional args', () => {

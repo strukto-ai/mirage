@@ -45,6 +45,9 @@ export class EvalError extends Error {
 export class CrossMountError extends Error {
   readonly src: string
   readonly dst: string
+  // The condition's own number, not EXDEV: each boundary's table decides
+  // the number (posix says EXDEV, the WASI wire deliberately ENOENT).
+  readonly code = 'CROSS_MOUNT'
 
   constructor(src: string, dst: string) {
     super(`cross-mount rename: ${src} -> ${dst}`)

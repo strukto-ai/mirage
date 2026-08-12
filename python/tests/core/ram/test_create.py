@@ -16,6 +16,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.create import create
+from mirage.observe.context import RecordingScope
 from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
 
@@ -47,6 +48,23 @@ async def test_create_normalizes_path():
     a = RAMAccessor(s)
     await create(a, PathSpec.from_str_path("file.txt"))
     assert "/file.txt" in s.files
+
+
+@pytest.mark.asyncio
+async def test_create_records_its_own_op():
+    # A guest creating a file must land in the ledger as 'create', not
+    # as a zero-byte 'write' (the TS core's old shape) and not as
+    # nothing at all (this core's old shape): anything keyed on op
+    # names — policy, snapshots, integ truth — reads the same world in
+    # both languages.
+    s = RAMStore()
+    a = RAMAccessor(s)
+    scope = RecordingScope()
+    await create(a, PathSpec.from_str_path("/new.txt"))
+    scope.close()
+    assert [r.op for r in scope.records] == ["create"]
+    assert scope.records[0].bytes == 0
+    assert scope.records[0].source == "ram"
 
 
 @pytest.mark.asyncio

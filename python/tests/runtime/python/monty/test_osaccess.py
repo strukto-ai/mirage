@@ -18,6 +18,7 @@ import errno
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import RunArgs
+from mirage.types import FileStat, FileType
 from mirage.utils.errors import OperationNotSupportedError
 
 
@@ -31,6 +32,8 @@ class FakeDispatch:
         self.supports_append = supports_append
         self.writes: list[tuple[str, bytes]] = []
         self.appends: list[tuple[str, bytes]] = []
+        self.created: list[str] = []
+        self.truncated: list[str] = []
         self.unlinked: list[str] = []
         self.dirs: list[str] = []
         self.renamed: list[tuple[str, str]] = []
@@ -42,12 +45,19 @@ class FakeDispatch:
             if virtual not in self.files:
                 raise FileNotFoundError(virtual)
             return self.files[virtual], None
+        if op == "stat":
+            if virtual in self.files:
+                return FileStat(name=virtual,
+                                size=len(self.files[virtual]),
+                                type=FileType.TEXT), None
+            raise FileNotFoundError(virtual)
         if op == "readdir":
+            # Full virtual paths, the door's own shape.
             prefix = virtual.rstrip("/") + "/"
             names = set()
             for p in self.files:
                 if p.startswith(prefix):
-                    names.add(p[len(prefix):].split("/")[0])
+                    names.add(prefix + p[len(prefix):].split("/")[0])
             if not names and virtual.rstrip("/") not in ("", "/"):
                 raise FileNotFoundError(virtual)
             return sorted(names), None
@@ -65,6 +75,14 @@ class FakeDispatch:
             data = kwargs["data"]
             self.files[virtual] = self.files.get(virtual, b"") + data
             self.appends.append((virtual, data))
+            return None, None
+        if op == "create":
+            self.files[virtual] = b""
+            self.created.append(virtual)
+            return None, None
+        if op == "truncate":
+            self.files[virtual] = b""
+            self.truncated.append(virtual)
             return None, None
         if op == "unlink":
             self.files.pop(virtual, None)
@@ -111,6 +129,54 @@ def test_monty_missing_virtual_file():
     result = asyncio.run(runtime.run(RunArgs(code="open('/s3/missing.txt')")))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in result.stderr
+
+
+def test_monty_open_w_creates_a_missing_file_at_open():
+    # CPython's open('w') leaves an empty file even when nothing is
+    # written; before the establishing op fired at open, the file only
+    # ever reached the mount through a later flush, so a bare
+    # open/close left nothing behind. The seed keeps /s3 listable,
+    # which is what the fake calls an existing directory.
+    dispatch = FakeDispatch({"/s3/seed.txt": b"x"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, PrefixResolver(lambda: []))
+    result = asyncio.run(
+        runtime.run(RunArgs(code="open('/s3/new.txt', 'w').close()")))
+    assert result.exit_code == 0
+    assert dispatch.created == ["/s3/new.txt"]
+    assert dispatch.files["/s3/new.txt"] == b""
+
+
+def test_monty_open_w_truncates_an_existing_file_at_open():
+    dispatch = FakeDispatch({"/s3/keep.txt": b"old-bytes"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, PrefixResolver(lambda: []))
+    result = asyncio.run(
+        runtime.run(RunArgs(code="open('/s3/keep.txt', 'w').close()")))
+    assert result.exit_code == 0
+    assert dispatch.truncated == ["/s3/keep.txt"]
+    assert dispatch.files["/s3/keep.txt"] == b""
+
+
+def test_monty_open_a_creates_a_missing_file_at_open():
+    dispatch = FakeDispatch({"/s3/seed.txt": b"x"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, PrefixResolver(lambda: []))
+    result = asyncio.run(
+        runtime.run(RunArgs(code="open('/s3/log.txt', 'a').close()")))
+    assert result.exit_code == 0
+    assert dispatch.created == ["/s3/log.txt"]
+
+
+def test_monty_open_r_establishes_nothing():
+    dispatch = FakeDispatch({"/s3/a.txt": b"x"})
+    runtime = MontyRuntime()
+    runtime.attach(dispatch, PrefixResolver(lambda: []))
+    result = asyncio.run(runtime.run(
+        RunArgs(code="open('/s3/a.txt').close()")))
+    assert result.exit_code == 0
+    assert dispatch.created == []
+    assert dispatch.truncated == []
 
 
 def test_monty_write_flushes_through_dispatch():

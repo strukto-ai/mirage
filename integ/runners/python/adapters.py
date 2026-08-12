@@ -118,6 +118,7 @@ EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
 EMAIL_USERNAME = "integ@example.com"
 EMAIL_PASSWORD = "secret"
+EMAIL_SENT_FOLDER = "Sent"
 # Doubles as the workspace id on the fake notion server.
 NOTION_TOKEN = "integ-test"
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
@@ -738,7 +739,12 @@ class EmailService:
         # before the workspace opens, not backend code.
         imap = imaplib.IMAP4(host, EMAIL_IMAP_PORT)
         imap.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-        known = {"INBOX"}
+        # GreenMail hands a new account nothing but an INBOX, where every
+        # real provider ships a sent mailbox already made. himalaya files
+        # a copy of each sent message into one, so create it here rather
+        # than leave the copy with nowhere to land.
+        imap.create(EMAIL_SENT_FOLDER)
+        known = {"INBOX", EMAIL_SENT_FOLDER}
         for entry in entries:
             folder = entry["folder"]
             if folder not in known:

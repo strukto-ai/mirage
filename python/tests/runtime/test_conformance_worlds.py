@@ -652,3 +652,88 @@ async def test_guest_resolves_relative_path_against_cwd(
         assert "top" in out
     finally:
         await ws.close()
+
+
+# ── Group 5: an exclusive open refuses an existing file (R7a) ──
+#
+# fopen's `x`: the open must fail on an existing file and leave it
+# untouched, and must create a missing one. CPython raises
+# FileExistsError, qjs-wasi's std.open returns null (EEXIST under the
+# hood), and the TS quickjs shim answers the same by consuming
+# `OpenMode.exclusive` (its twin pin lives in workspace_js_mount.test.ts).
+# monty has no spelling: it refuses mode 'x' outright ("exclusive
+# creation mode is not supported"), which is its own honest answer.
+
+
+def exclusive_world(runtime: str) -> Workspace:
+    """One mount, one existing file the exclusive open must not touch.
+
+    Args:
+        runtime (str): registry name of the guest runtime to attach.
+    """
+    return Workspace(
+        {"/w": _seed({"/keep.txt": b"keep"})},
+        mode=MountMode.EXEC,
+        runtimes=[runtime, "vfs"],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "runtime,line",
+    _guest_cases({
+        "wasi":
+        "python3 -c \"\ntry:\n    open('/w/keep.txt', 'x')\n"
+        "except FileExistsError:\n    print('refused')\"",
+        "quickjs":
+        "node -e \"console.log(std.open('/w/keep.txt', 'wx') === null "
+        "? 'refused' : 'OPENED')\"",
+    }),
+)
+async def test_guest_exclusive_open_refuses_existing(runtime: str, line: str):
+    """An exclusive open over an existing file refuses and leaves it be.
+
+    Args:
+        runtime (str): guest runtime under test.
+        line (str): the exclusive-open line in that runtime's idiom.
+    """
+    ws = exclusive_world(runtime)
+    try:
+        code, out, err = await _sh(ws, line)
+        assert code == 0, err
+        assert "refused" in out
+        code, out, _ = await _sh(ws, "cat /w/keep.txt")
+        assert code == 0
+        assert out == "keep"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "runtime,line",
+    _guest_cases({
+        "wasi":
+        "python3 -c \"f = open('/w/made.txt', 'x'); f.write('made'); "
+        "f.close()\"",
+        "quickjs":
+        "node -e \"const f = std.open('/w/made.txt', 'wx'); "
+        "f.puts('made'); f.close()\"",
+    }),
+)
+async def test_guest_exclusive_open_creates_missing(runtime: str, line: str):
+    """The same mode on a missing file creates it.
+
+    Args:
+        runtime (str): guest runtime under test.
+        line (str): the exclusive-create line in that runtime's idiom.
+    """
+    ws = exclusive_world(runtime)
+    try:
+        code, _, err = await _sh(ws, line)
+        assert code == 0, err
+        code, out, _ = await _sh(ws, "cat /w/made.txt")
+        assert code == 0
+        assert out == "made"
+    finally:
+        await ws.close()

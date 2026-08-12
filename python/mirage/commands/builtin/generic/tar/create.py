@@ -1,4 +1,4 @@
-from mirage.commands.builtin.generic.archive.types import MemberKind
+from mirage.commands.builtin.generic.archive.types import Entry, MemberKind
 from mirage.commands.builtin.generic.archive.walk import (OTHER_FILESYSTEM,
                                                           DirProbe, StatFn,
                                                           WalkFn, scan_operand)
@@ -15,7 +15,6 @@ USAGE_HINT = "Try 'tar --help' for more information."
 EMPTY_ARCHIVE = "tar: Cowardly refusing to create an empty archive"
 FATAL_TRAILER = "tar: Error is not recoverable: exiting now"
 ERROR_TRAILER = "tar: Exiting with failure status due to previous errors"
-LEADING_SLASH = "tar: Removing leading `/' from member names"
 SELF_DUMP = "archive cannot contain itself; not dumped"
 # The exit GNU gives an operand it could not read, and a -C it could not
 # enter. Both are fatal for the whole run, not per-operand.
@@ -82,20 +81,85 @@ def pruned(names: list[str], pattern: str | None) -> list[str]:
     return kept
 
 
+def strip_prefix(spelled: str) -> tuple[str, str]:
+    """Split a spelled path into the name tar stores and what it drops.
+
+    tar stores no name that could climb out of the directory it is
+    extracted into, so it removes everything through the *last* ``..``
+    segment: ``x/../y/f3`` is stored as ``y/f3`` and
+    ``/data/sub/../file`` as ``file``. Only when the path has no ``..``
+    does the leading slash become the thing removed. A ``.`` segment
+    escapes nothing and survives, so ``./file`` is stored verbatim.
+    Info-ZIP makes the opposite choice and keeps ``..`` in the member
+    name, which is why `zip_cmd` does not share this.
+
+    Args:
+        spelled (str): the path as the operand spelled it.
+
+    Returns:
+        tuple[str, str]: the name to store, and the prefix removed to
+        get it (empty when nothing was removed). Each distinct prefix
+        earns one notice naming it.
+    """
+    segments = spelled.split("/")
+    last = -1
+    for i, segment in enumerate(segments):
+        if segment == "..":
+            last = i
+    if last >= 0:
+        rest = "/".join(segments[last + 1:])
+        prefix = "/".join(segments[:last + 1])
+        return rest, prefix + "/" if rest else prefix
+    if spelled.startswith("/"):
+        return spelled.lstrip("/"), "/"
+    return spelled, ""
+
+
+def removing_leading(prefix: str) -> str:
+    """GNU's notice for a prefix it refused to store.
+
+    Args:
+        prefix (str): the prefix `strip_prefix` removed.
+    """
+    return f"tar: Removing leading `{prefix}' from member names"
+
+
+def _announce_prefix(prefix: str, dropped: list[str],
+                     notices: list[str]) -> None:
+    """Announce a removed prefix the first time this run drops it.
+
+    Emitted in place rather than collected and prepended, because GNU
+    interleaves these with the per-operand errors in operand order.
+
+    Args:
+        prefix (str): the prefix `strip_prefix` removed, or "" for none.
+        dropped (list[str]): prefixes already announced; appended to.
+        notices (list[str]): the run's diagnostics; appended to in order.
+    """
+    if not prefix or prefix in dropped:
+        return
+    dropped.append(prefix)
+    notices.append(removing_leading(prefix))
+
+
 def member_name(spelled: str, kind: MemberKind) -> str:
     """The name tar records for a path spelled as the operand was typed.
 
-    A leading slash is stripped (tar refuses to store absolute names, and
-    says so once per run), and a directory carries the trailing slash
-    that tells an extractor it holds no content.
+    The traversal prefix is dropped (see `strip_prefix`) and a directory
+    carries the trailing slash that tells an extractor it holds no
+    content. An operand that is all traversal -- ``tar -cf a.tar ..`` --
+    leaves nothing to name, and GNU stores that directory as ``./``.
 
     Args:
         spelled (str): the path as the operand spelled it.
         kind (MemberKind): what the entry is.
     """
-    name = spelled.lstrip("/")
-    if kind == "dir" and name and not name.endswith("/"):
-        return name + "/"
+    name, _ = strip_prefix(spelled)
+    if kind == "dir":
+        if not name:
+            return "./"
+        if not name.endswith("/"):
+            return name + "/"
     return name
 
 
@@ -151,7 +215,7 @@ async def plan_create(
             ])
     members: list[Member] = []
     notices: list[str] = []
-    absolute_seen = False
+    dropped: list[str] = []
     exit_code = 0
     for path in paths:
         raw = path.raw_path
@@ -163,6 +227,21 @@ async def plan_create(
                                   mounts=mounts,
                                   dereference=dereference,
                                   recurse=True)
+        # GNU announces the prefix it refuses to store before it reports
+        # what it could not read, and keeps both in operand order -- a
+        # later operand's notice must not jump ahead of an earlier
+        # operand's error. The operand's own spelling carries the prefix
+        # even when nothing under it can be archived, which is why
+        # `tar -cf a.tar sub/../missing` still announces `sub/../`.
+        _announce_prefix(strip_prefix(raw)[1], dropped, notices)
+        # Each name is then stripped on its own, so one operand can owe
+        # two notices: `tar -cf a.tar ..` drops `..` from the directory
+        # and `../` from everything under it.
+        named: list[tuple[str, Entry]] = []
+        for entry in scan.entries:
+            spelled = respell_one(entry.name_path, base, raw)
+            _announce_prefix(strip_prefix(spelled)[1], dropped, notices)
+            named.append((member_name(spelled, entry.kind), entry))
         for problem in scan.problems:
             shown = respell_one(problem.path, base, raw)
             if not problem.fatal:
@@ -175,12 +254,6 @@ async def plan_create(
         for crossing in scan.crossings:
             shown = member_name(respell_one(crossing, base, raw), "dir")
             notices.append(f"tar: {shown}: {OTHER_FILESYSTEM}")
-        # Every descendant is spelled under the operand's own base, so
-        # the operand alone decides whether this run stored an absolute
-        # name and owes GNU's one-per-run warning.
-        absolute_seen = absolute_seen or raw.startswith("/")
-        named = [(member_name(respell_one(entry.name_path, base, raw),
-                              entry.kind), entry) for entry in scan.entries]
         keep = set(pruned([name for name, _ in named], exclude))
         for name, entry in named:
             if name not in keep:
@@ -194,8 +267,6 @@ async def plan_create(
                        kind=entry.kind,
                        path=entry.read,
                        target=entry.target))
-    if absolute_seen:
-        notices.insert(0, LEADING_SLASH)
     if exit_code:
         # GNU closes a run that failed an operand with one trailer, after
         # everything it did manage to name.

@@ -31,6 +31,7 @@ from mirage.types import MountMode
 INHERITED_FIELDS: tuple[str, ...] = (
     "session_id",
     "cwd",
+    "logical_cwd",
     "env",
     "created_at",
     "functions",
@@ -70,6 +71,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
 # reports back.
 CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "cwd",
+    "logical_cwd",
     "source_depth",
     "env",
     "functions",
@@ -103,6 +105,12 @@ def copy_state(value: Any) -> Any:
 class Session:
     session_id: str
     cwd: str = "/"
+    # The spelling `cd` arrived at: `..` simplified textually, symlinks
+    # left alone. bash reports it as `$PWD` and `pwd -L`, and applies the
+    # next `cd`'s `..` to it. None whenever it would equal `cwd`, which is
+    # every session that has not walked through a symlink. `cwd` stays
+    # physical because it is what every operand resolves against.
+    logical_cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     functions: dict[str, FunctionBody] = field(default_factory=dict)
@@ -185,6 +193,13 @@ class Session:
         """
         return SHELL_ARGV0 if self.script_name is None else self.script_name
 
+    def __post_init__(self) -> None:
+        # bash exports `$PWD` from startup, so a session that has never
+        # run `cd` still has one. Seeding here rather than at lookup time
+        # is what makes it an ordinary variable: assignable, unsettable,
+        # and listed by `env`.
+        self.env.setdefault("PWD", self.cwd)
+
     def fork(self, **overrides: Any) -> "Session":
         """Return a copy of this session with overrides applied.
 
@@ -192,6 +207,14 @@ class Session:
         the fork do not leak back into the source. The field list is
         INHERITED_FIELDS rather than a literal written out here, so a
         field added to the dataclass is propagated by construction.
+
+        A caller that moves the fork with ``cwd`` supplies a physical
+        path with no typed spelling behind it, so the source's logical
+        name is dropped rather than left describing where the fork is
+        not -- the same reasoning as `shell_dirs.set_cwd`. Deciding it
+        here rather than at each call site is what keeps
+        ``execute(cwd=...)`` from reporting the persistent session's old
+        directory from ``pwd``.
 
         Args:
             **overrides: Field-name kwargs to override on the copy.
@@ -201,6 +224,11 @@ class Session:
             for name in INHERITED_FIELDS
         }
         defaults.update(overrides)
+        if "cwd" in overrides and "logical_cwd" not in overrides:
+            defaults["logical_cwd"] = None
+            # `$PWD` names where the session is, so it follows the move
+            # even when the caller also supplied an env to layer on.
+            defaults["env"] = {**defaults["env"], "PWD": overrides["cwd"]}
         return Session(**defaults)
 
     def snapshot(self) -> dict[str, Any]:

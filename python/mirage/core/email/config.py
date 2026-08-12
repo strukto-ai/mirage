@@ -24,3 +24,8 @@ class EmailConfig(BaseModel):
     password: SecretStr
     use_ssl: bool = True
     max_messages: int = 200
+    # Upstream himalaya's message.send.save-copy, whose default is true
+    # since pimalaya/himalaya#536. sent_folder is its folder.alias.sent:
+    # unset means ask the server for its \Sent mailbox.
+    save_copy: bool = True
+    sent_folder: str | None = None

@@ -26,6 +26,7 @@ from mirage.shell.array import array_extent, array_unset
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.options import parse_option_word
+from mirage.shell.types import SET_OPTION_NAMES
 from mirage.workspace.executor.builtins.text import _PRINTF_TARGET_RE
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.expand.variable import _array_index
@@ -719,6 +720,17 @@ async def handle_set(
             session.positional_args = args[i:]
             break
         for option, enable in word.settings:
+            # `-o` takes a name rather than a letter, and a name bash does
+            # not have is the one thing it refuses: exit 2, and the
+            # settings already applied stay applied while the rest of the
+            # line is dropped. Without this a typo -- or an option mirage
+            # has yet to wire, as `physical` once was -- reads as success.
+            if option not in SET_OPTION_NAMES:
+                err = f"set: {option}: invalid option name\n".encode()
+                return None, IOResult(exit_code=2,
+                                      stderr=err), ExecutionNode(command="set",
+                                                                 exit_code=2,
+                                                                 stderr=err)
             session.shell_options[option] = enable
         # A letter naming no option is ignored rather than refused: bash
         # has options mirage does not implement (`-a`, `-B`, `-H`), and

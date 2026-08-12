@@ -94,11 +94,11 @@ async def test_installed_tree_composes_mime_without_sending():
 async def test_the_write_alias_reaches_compose(monkeypatch):
     sent = {}
 
-    async def fake_send_raw(config, raw):
+    async def fake_deliver(config, raw, save=None):
         sent["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw)
+        return BytesParser(policy=default_policy).parsebytes(raw), ""
 
-    monkeypatch.setattr(util_module, "send_raw", fake_send_raw)
+    monkeypatch.setattr(util_module, "deliver", fake_deliver)
     ws = Workspace({})
     ws.register_cli("himalaya", HIMALAYA, CONFIG)
     io = await ws.execute(

@@ -15,6 +15,7 @@
 from mirage.runtime.python.monty.vfs import MontyVFS
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS
+from mirage.types import FileStat, FileType
 
 
 class CountingCore(RuntimeVFS):
@@ -37,10 +38,17 @@ class CountingCore(RuntimeVFS):
             if path not in self.files:
                 raise FileNotFoundError(path)
             return self.files[path]
+        if op == "stat":
+            if path not in self.files:
+                raise FileNotFoundError(path)
+            return FileStat(name=path,
+                            size=len(self.files[path]),
+                            type=FileType.TEXT)
         if op == "readdir":
+            # Full virtual paths, the door's own shape.
             prefix = path.rstrip("/") + "/"
             names = {
-                p[len(prefix):].split("/")[0]
+                prefix + p[len(prefix):].split("/")[0]
                 for p in self.files if p.startswith(prefix)
             }
             if not names:
@@ -114,7 +122,7 @@ def test_a_listing_miss_is_not_cached_because_a_directory_may_gain_entries():
     vfs = MontyVFS(core)
     assert vfs.readdir("/s3/d") is None
     core.files["/s3/d/a.txt"] = b"1"
-    assert vfs.readdir("/s3/d") == ["a.txt"]
+    assert [e.path for e in vfs.readdir("/s3/d")] == ["/s3/d/a.txt"]
 
 
 def test_an_unwired_view_answers_none_and_swallows_no_mutation():
