@@ -12,33 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CODE_ARMS } from './constants.ts'
 import type { FsCondition } from './types.ts'
-
-// Every code spelling the vocabulary names. Identity for the vocabulary's own
-// names (which is what the utils/errors constructors, CycleError and
-// CrossMountError stamp), plus the aliases other raisers use:
-// EOPNOTSUPP is ENOTSUP's second POSIX spelling, and ENODATA/ENOATTR
-// are the two platform names for one "attribute not set" condition.
-const CODE_ARMS: Record<string, FsCondition> = {
-  ENOENT: 'ENOENT',
-  ENOTDIR: 'ENOTDIR',
-  EISDIR: 'EISDIR',
-  EEXIST: 'EEXIST',
-  EACCES: 'EACCES',
-  EPERM: 'EPERM',
-  ENOTEMPTY: 'ENOTEMPTY',
-  EXDEV: 'EXDEV',
-  CROSS_MOUNT: 'CROSS_MOUNT',
-  ENOTSUP: 'ENOTSUP',
-  EOPNOTSUPP: 'ENOTSUP',
-  ELOOP: 'ELOOP',
-  EINVAL: 'EINVAL',
-  EIO: 'EIO',
-  EBUSY: 'EBUSY',
-  EROFS: 'EROFS',
-  ENODATA: 'NO_XATTR',
-  ENOATTR: 'NO_XATTR',
-}
 
 /**
  * Name the condition an error reports, if the vocabulary names one.
