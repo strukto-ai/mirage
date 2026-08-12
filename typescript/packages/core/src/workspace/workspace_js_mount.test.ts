@@ -154,6 +154,20 @@ describe('node/js: std.open dispatches the real establishing op', () => {
     expect(check.exitCode).not.toBe(0)
     await ws.close()
   }, 60_000)
+
+  it('a garbage mode throws the engine refusal, not a silent read-only open', async () => {
+    // qjs-libc validates the mode before touching the filesystem and
+    // throws TypeError("invalid file mode"); the lenient parser used
+    // to read 'zz' as 'r' and hand back a live fd.
+    const { ws } = await makeWorkspace()
+    await ws.execute('echo x > /ram/g.txt')
+    const io = await ws.execute(
+      "js -e \"try { std.open('/ram/g.txt', 'zz') } catch (e) { console.log(e instanceof TypeError, e.message) }\"",
+    )
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('true invalid file mode\n')
+    await ws.close()
+  }, 60_000)
 })
 
 // The os.* mutation surface, pinned against the real qjs-wasi engine

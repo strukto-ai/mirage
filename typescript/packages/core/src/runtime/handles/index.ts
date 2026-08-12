@@ -13,6 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { NO_WRITE, planFlush, type FlushKind } from './flush.ts'
-export { parseMode } from './mode.ts'
+export { parseMode, type OpenMode } from './mode.ts'
 export { FileHandle, mergeWrites } from './file_handle.ts'
 export { FileTable } from './file_table.ts'

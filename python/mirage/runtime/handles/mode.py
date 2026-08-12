@@ -14,6 +14,8 @@
 
 from dataclasses import dataclass
 
+_VALID = frozenset("rwaxbt+")
+
 
 @dataclass(frozen=True, slots=True)
 class OpenMode:
@@ -21,35 +23,63 @@ class OpenMode:
 
     One vocabulary for every dialect that opens by mode: quickjs's
     ``std.open`` and monty's ``path_open`` pass these strings verbatim,
-    and preview1's oflags/rights/fdflags translate onto the same five
-    facts in ``WasiFs.path_open``.
+    ``MirageFile`` takes one from embedding code, and preview1's
+    oflags/rights/fdflags translate onto the same facts in
+    ``WasiFs.path_open``.
 
     Args:
+        readable (bool): the handle may read (r, +).
         writable (bool): the handle may mutate its buffer (w, a, x, +).
         truncate (bool): opening discards existing content (w).
         append (bool): the position starts at the end (a).
         create (bool): a missing file is created (w, a, x).
         exclusive (bool): an existing file refuses the open (x).
+        binary (bool): the handle carries bytes, not text (b).
     """
 
+    readable: bool
     writable: bool
     truncate: bool
     append: bool
     create: bool
     exclusive: bool
+    binary: bool
+
+
+_BASES = ({"r"}, {"w"}, {"a"}, {"x"}, {"w", "x"})
 
 
 def parse_mode(mode: str) -> OpenMode:
-    """Read an fopen-style mode string into its five facts.
+    """Read an fopen-style mode string into its facts, validating it.
+
+    The rule is CPython's, the stricter of the two parsers this
+    replaced — one base, at most one each of ``+``, ``b``, ``t``, and
+    never ``b`` together with ``t`` — widened by one C-dialect
+    spelling: ``wx``, fopen's exclusive create, which CPython spells
+    as a bare ``x``. Both dialects open by mode through this one
+    parser, so it accepts the union. A guest engine that tolerates
+    looser spellings still (C fopen reads ``rr`` as ``r``) renders
+    this refusal in its own dialect at its own boundary.
 
     Args:
-        mode (str): the mode as the guest spelled it (``r``, ``w+b``,
-            ``a``, ...); unknown letters are ignored, matching fopen.
+        mode (str): the mode as the caller spelled it (``r``, ``w+b``,
+            ``a``, ``wx``, ...).
+
+    Raises:
+        ValueError: the mode does not parse, in CPython's own wording.
     """
+    if (not mode or any(char not in _VALID for char in mode)
+            or any(mode.count(char) > 1 for char in _VALID)
+            or ("b" in mode and "t" in mode)
+            or set(mode) & set("rwax") not in _BASES):
+        raise ValueError(f"invalid mode: {mode!r}")
+    plus = "+" in mode
     return OpenMode(
-        writable=any(c in mode for c in "wax+"),
+        readable="r" in mode or plus,
+        writable="r" not in mode or plus,
         truncate="w" in mode,
         append="a" in mode,
-        create=any(c in mode for c in "wax"),
+        create=any(char in mode for char in "wax"),
         exclusive="x" in mode,
+        binary="b" in mode,
     )

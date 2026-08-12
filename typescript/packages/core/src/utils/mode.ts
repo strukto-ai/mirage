@@ -22,7 +22,7 @@ export const DEFAULT_FILE_MODE = 0o644
 // common grammar: `[ugoa...][+-=][rwx...]` clauses joined by commas
 // (`u+x`, `go-w`, `a=r`, `+x`). Special bits (s, t, X) are not supported.
 // Returns the new mode, or null when the text does not parse.
-export function parseMode(text: string, current: number): number | null {
+export function parseChmod(text: string, current: number): number | null {
   if (/^[0-7]+$/.test(text)) {
     const value = parseInt(text, 8)
     return value <= 0o7777 ? value : null

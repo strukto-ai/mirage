@@ -22,22 +22,10 @@ from typing import Self, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.ops import Ops
+from mirage.runtime.handles.mode import parse_mode
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
-
-
-def _parse_mode(mode: str) -> tuple[str, bool, bool, bool]:
-    valid = set("rwaxbt+")
-    if (not mode or any(char not in valid for char in mode)
-            or sum(mode.count(char) for char in "rwax") != 1
-            or mode.count("+") > 1 or mode.count("b") > 1
-            or mode.count("t") > 1 or ("b" in mode and "t" in mode)):
-        raise ValueError(f"invalid mode: {mode!r}")
-    base = next(char for char in "rwax" if char in mode)
-    readable = base == "r" or "+" in mode
-    writable = base != "r" or "+" in mode
-    return base, "b" in mode, readable, writable
 
 
 class MirageFile:
@@ -57,8 +45,10 @@ class MirageFile:
         self._path = path
         self._mode = mode
         self._loop = loop
-        self._base_mode, self._binary, self._readable, self._writable = \
-            _parse_mode(mode)
+        self._facts = parse_mode(mode)
+        self._binary = self._facts.binary
+        self._readable = self._facts.readable
+        self._writable = self._facts.writable
         if self._binary:
             if encoding is not None:
                 raise ValueError(
@@ -76,16 +66,16 @@ class MirageFile:
         self._closed = False
         self._dirty = False
         self._buf: io.BytesIO | io.StringIO | None = None
-        if self._base_mode == "w":
+        if self._facts.truncate:
             self._run(self._ops.create(self._path))
-        elif self._base_mode == "x":
+        elif self._facts.exclusive:
             try:
                 self._run(self._ops.stat(self._path))
             except FileNotFoundError:
                 self._run(self._ops.create(self._path))
             else:
                 raise FileExistsError(self._path)
-        elif self._base_mode == "a":
+        elif self._facts.append:
             try:
                 self._run(self._ops.stat(self._path))
             except FileNotFoundError:
@@ -97,13 +87,13 @@ class MirageFile:
     def _load(self) -> io.BytesIO | io.StringIO:
         if self._buf is not None:
             return self._buf
-        if self._base_mode in ("w", "x"):
+        if self._facts.truncate or self._facts.exclusive:
             if self._binary:
                 self._buf = io.BytesIO()
             else:
                 self._buf = io.StringIO(newline=self._newline)
             return self._buf
-        if self._base_mode == "a":
+        if self._facts.append:
             data = self._run(self._ops.read(self._path))
             if self._binary:
                 self._buf = io.BytesIO(data)

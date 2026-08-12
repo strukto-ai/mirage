@@ -15,7 +15,7 @@
 import { classify } from '../../errors/index.ts'
 import { WASI } from './wasi.ts'
 import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
-import { FileHandle, FileTable, parseMode } from '../handles/index.ts'
+import { FileHandle, FileTable, parseMode, type OpenMode } from '../handles/index.ts'
 import type { RuntimeVFS, VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -54,6 +54,7 @@ function wasiErrno(err: unknown): number {
 export const MIRAGE_FS_BOOTSTRAP = `
 std.open = (path, mode) => {
   const fd = __mirage_open(String(path), String(mode === undefined ? 'r' : mode));
+  if (fd === -2) throw new TypeError('invalid file mode');
   if (fd < 0) return null;
   return {
     readAsString: (max) => __mirage_read(fd, max === undefined ? -1 : (max | 0)),
@@ -114,7 +115,18 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = ctx.getString(pathH)
-    const mode = parseMode(ctx.getString(modeH))
+    // The engine validates the mode before touching the filesystem
+    // (qjs-libc throws TypeError before any open); -2 tells the
+    // bootstrap to raise that refusal, since a host throw would not
+    // arrive typed. The shared parser is stricter than qjs-libc's
+    // character scan ('rr' passes strspn but not CPython's one-base
+    // rule); the strict answer is the one both guests can agree on.
+    let mode: OpenMode
+    try {
+      mode = parseMode(ctx.getString(modeH))
+    } catch {
+      return ctx.newNumber(-2)
+    }
     if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
     let st: VFSStat | null = null
     try {

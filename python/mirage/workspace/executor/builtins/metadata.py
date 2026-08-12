@@ -21,7 +21,8 @@ from mirage.io import IOResult
 from mirage.policy import PolicyDenied
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
-from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_mode
+from mirage.utils.mode import (DEFAULT_DIR_MODE, DEFAULT_FILE_MODE,
+                              parse_chmod)
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
                                                        fail, finish,
@@ -403,7 +404,7 @@ async def handle_chmod(
     if len(operands) < 2:
         return fail("chmod", "chmod: missing operand\n", 2)
     mode_text = operand_text(operands[0])
-    if parse_mode(mode_text, 0) is None:
+    if parse_chmod(mode_text, 0) is None:
         return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
 
     recursive = "R" in flags
@@ -426,7 +427,7 @@ async def handle_chmod(
             else:
                 current = (DEFAULT_DIR_MODE if path_stat.type
                            == FileType.DIRECTORY else DEFAULT_FILE_MODE)
-            new_mode = parse_mode(mode_text, current)
+            new_mode = parse_chmod(mode_text, current)
             if new_mode is None:
                 return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n",
                             1)

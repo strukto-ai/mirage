@@ -22,7 +22,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
                                  operand_spelling)
-from mirage.utils.mode import DEFAULT_DIR_MODE, parse_mode
+from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 
 
 async def mkdir(
@@ -44,7 +44,7 @@ async def mkdir(
     if mode_text is not None:
         # Symbolic clauses build on what mirage renders for a new
         # directory, since there is no umask to subtract from.
-        mode = parse_mode(mode_text, DEFAULT_DIR_MODE)
+        mode = parse_chmod(mode_text, DEFAULT_DIR_MODE)
         if mode is None:
             raise ValueError(f"mkdir: invalid mode '{mode_text}'")
         if ops.set_attrs is None:
