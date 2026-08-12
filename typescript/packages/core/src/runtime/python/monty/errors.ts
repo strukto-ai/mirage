@@ -12,24 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify, type FsCondition, guestSeat } from '../../../errors/index.ts'
 import type { MontyDisplayableError } from './binding.ts'
 
-// fs error codes -> the python exception the guest should catch, with
-// CPython's errno message shape.
-const CODE_TO_GUEST_EXC = {
-  ENOENT: { name: 'FileNotFoundError', errno: 2, phrase: 'No such file or directory' },
-  EISDIR: { name: 'IsADirectoryError', errno: 21, phrase: 'Is a directory' },
-  ENOTDIR: { name: 'NotADirectoryError', errno: 20, phrase: 'Not a directory' },
-  EACCES: { name: 'PermissionError', errno: 13, phrase: 'Permission denied' },
-  EEXIST: { name: 'FileExistsError', errno: 17, phrase: 'File exists' },
-  EXDEV: { name: 'OSError', errno: 18, phrase: 'Invalid cross-device link' },
-} as const
-
-export type GuestCode = keyof typeof CODE_TO_GUEST_EXC
-
-function isGuestCode(code: string | undefined): code is GuestCode {
-  return code !== undefined && code in CODE_TO_GUEST_EXC
-}
+// The guest rendering (which python exception, which errno, which
+// phrase) is the shared guest seat table's; this module only formats
+// CPython's message shape around it. GuestCode survives as the name
+// this encoder's callers know the vocabulary by.
+export type GuestCode = FsCondition
 
 /** The traceback monty renders for one of its own errors. */
 export function displayError(err: unknown): string {
@@ -39,19 +29,19 @@ export function displayError(err: unknown): string {
 }
 
 /**
- * Build the guest-side exception for one fs code, in CPython's message
- * shape.
+ * Build the guest-side exception for one condition, in CPython's
+ * message shape.
  *
  * Args:
- *   code: the fs error code, e.g. ENOENT.
+ *   code: the condition, e.g. ENOENT.
  *   path: the path the operation names.
  *   target: rename's destination, when there is one.
  */
 export function guestError(code: GuestCode, path: string, target?: string): Error {
-  const mapped = CODE_TO_GUEST_EXC[code]
+  const seat = guestSeat(code)
   const where = target === undefined ? `'${path}'` : `'${path}' -> '${target}'`
-  const guest = new Error(`[Errno ${String(mapped.errno)}] ${mapped.phrase}: ${where}`)
-  guest.name = mapped.name
+  const guest = new Error(`[Errno ${String(seat.errno)}] ${seat.phrase}: ${where}`)
+  guest.name = seat.name
   return guest
 }
 
@@ -59,14 +49,16 @@ export function guestError(code: GuestCode, path: string, target?: string): Erro
  * Re-throw a mount failure under its python exception name: the monty
  * binding raises `err.name` as the matching guest exception type
  * (PYTHON_EXC_NAMES), so agent code can `except FileNotFoundError`
- * exactly as it does on the python host.
+ * exactly as it does on the python host. Every seated condition
+ * converts (a non-empty rmdir is an OSError with errno 39, not a raw
+ * JS error); an unseated failure passes through untouched.
  *
  * Args:
  *   err: whatever the mount op rejected with.
  *   path: the path the operation names.
  */
 export function asGuestError(err: unknown, path: string): unknown {
-  const code = (err as { code?: string }).code
-  if (!isGuestCode(code)) return err
-  return guestError(code, path)
+  const condition = classify(err)
+  if (condition === null) return err
+  return guestError(condition, path)
 }

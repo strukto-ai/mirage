@@ -540,6 +540,20 @@ export {
   type RuntimeConfig,
 } from './runtime/config.ts'
 export { CrossMountError, EvalError } from './runtime/errors.ts'
+export {
+  classify,
+  FS_CONDITIONS,
+  type FsCondition,
+  gnuPhrase,
+  GUEST,
+  guestSeat,
+  type GuestSeat,
+  POSIX,
+  posixErrno,
+  type PosixSeat,
+  WASI,
+  wasiErrno,
+} from './errors/index.ts'
 export { RuntimeVFS, type VFSEntry, type VFSStat } from './runtime/vfs.ts'
 export { FileTable, mergeWrites, planFlush, type FlushKind } from './runtime/handles/index.ts'
 export {

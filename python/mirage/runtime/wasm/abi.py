@@ -12,28 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno as host_errno
 import struct
 
-from mirage.runtime.errors import CrossMountError
+from mirage.errors import FsCondition, classify, wasi_errno
 
-# WASI preview1 wire constants. These are NOT the host's POSIX values:
-# preview1 numbers its errnos and open flags independently (ENOENT is 44
-# on the wire, 2 in Python's errno module), so nothing here can be
-# reused from `errno`/`os`.
+# WASI preview1 wire constants. The errno numbering lives in
+# mirage.errors.wasi (it is NOT the host's: ENOENT is 44 on the wire, 2
+# in Python's errno module); the host re-exports the seats it names in
+# its own code paths. EBADF stays a local literal because a bad guest
+# fd is the fd table's condition, never a mount's, so it has no seat in
+# the shared vocabulary.
 
 # errno
 OK = 0
-EACCES = 2
+EACCES = wasi_errno(FsCondition.EACCES)
 EBADF = 8
-EXDEV = 18
-EEXIST = 20
-EINVAL = 28
-EIO = 29
-EISDIR = 31
-ENOENT = 44
-ENOTDIR = 54
-ENOTSUP = 58
+EXDEV = wasi_errno(FsCondition.EXDEV)
+EEXIST = wasi_errno(FsCondition.EEXIST)
+EINVAL = wasi_errno(FsCondition.EINVAL)
+EIO = wasi_errno(FsCondition.EIO)
+EISDIR = wasi_errno(FsCondition.EISDIR)
+ENOENT = wasi_errno(FsCondition.ENOENT)
+ENOTDIR = wasi_errno(FsCondition.ENOTDIR)
+ENOTSUP = wasi_errno(FsCondition.ENOTSUP)
 
 # filetypes
 FT_UNKNOWN = 0
@@ -63,31 +64,18 @@ WHENCE_END = 2
 def errno_for(exc: BaseException) -> int:
     """Map a host/dispatch exception to its preview1 errno.
 
+    The naming lives in ``mirage.errors.classify`` and the numbering in
+    the wasi seat table, where the cross-mount-rename-is-ENOENT decision
+    now also lives. An OSError with no seat degrades to EIO and anything
+    else to EINVAL, matching the arms this function carried by hand.
+
     Args:
         exc (BaseException): exception raised by a WasmVFS operation.
     """
-    if isinstance(exc, CrossMountError):
-        # Each mount is its own preopen to a WASI guest, so a rename
-        # between two of them reads as a destination that is not there.
-        # pathlib's answer (EXDEV) is the other tier's; see CrossMountError.
-        return ENOENT
-    if isinstance(exc, FileNotFoundError):
-        return ENOENT
-    if isinstance(exc, FileExistsError):
-        return EEXIST
-    if isinstance(exc, IsADirectoryError):
-        return EISDIR
-    if isinstance(exc, NotADirectoryError):
-        return ENOTDIR
-    if isinstance(exc, PermissionError):
-        return EACCES
-    if isinstance(exc, NotImplementedError):
-        return ENOTSUP
+    condition = classify(exc)
+    if condition is not None:
+        return wasi_errno(condition)
     if isinstance(exc, OSError):
-        if exc.errno == host_errno.EXDEV:
-            return EXDEV
-        if exc.errno == host_errno.ENOTSUP:
-            return ENOTSUP
         return EIO
     return EINVAL
 

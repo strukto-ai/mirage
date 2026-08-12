@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.errors import FsCondition, guest_seat
+
 MISSING_EXTRA_HINT = (
     "the monty runtime requires the 'monty' extra. Install with: "
     "pip install mirage-ai[monty], or select the 'local' runtime")
@@ -28,7 +30,8 @@ INCOMPLETE_MARKERS = ("unexpected EOF", "Expected an indented block")
 
 # POSIX's answer for a rename across filesystems. Monty ships no shutil,
 # so guest code writes the copy-and-delete fallback by hand; the errno
-# is what tells it to.
-EXDEV_MESSAGE = "Invalid cross-device link"
+# is what tells it to. The phrase is the guest seat's, so the py and ts
+# encoders cannot drift apart on it.
+EXDEV_MESSAGE = guest_seat(FsCondition.CROSS_MOUNT).phrase
 
 FILE_EXISTS_MESSAGE = "[Errno 17] File exists: {path!r}"

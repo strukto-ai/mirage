@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { constants as osConstants } from 'node:os'
+
 import { describe, expect, it } from 'vitest'
 import {
   classifyErrno,
@@ -42,7 +44,7 @@ describe('classifyErrno', () => {
     // filesystem" and mv falls back to copy+unlink, so this may not
     // degrade to EIO on the way out of the mount.
     ['EXDEV', EXDEV],
-  ])('maps the %s code property', (code, expected) => {
+  ] as const)('maps the %s code property', (code, expected) => {
     expect(classifyErrno(errnoError(code, 'boom'))).toBe(expected)
   })
 
@@ -83,5 +85,35 @@ describe('classifyError', () => {
   it('stays in sync with classifyErrno', () => {
     const err = new Error('permission denied')
     expect(classifyError(err)).toBe(-classifyErrno(err))
+  })
+})
+
+describe('the shared vocabulary', () => {
+  // The stamps below are what CycleError and CrossMountError carry
+  // (pinned by core's errors/classify.test.ts); the adapter's contract
+  // is the code, so the tests construct stamped errors rather than
+  // reaching into core's unexported classes.
+  it('maps a symlink loop to ELOOP, not EIO', () => {
+    // Before the shared vocabulary CycleError carried no code, no
+    // needle matched its message, and a loop reached the kernel as
+    // "Input/output error".
+    const loop = Object.assign(new Error('too many levels of symbolic links: /a'), {
+      code: 'ELOOP',
+    })
+    expect(classifyErrno(loop)).toBe(process.platform === 'darwin' ? 62 : 40)
+  })
+
+  it('maps a cross-mount rename to EXDEV', () => {
+    const cross = Object.assign(new Error('cross-mount rename: /a/x -> /b/x'), {
+      code: 'CROSS_MOUNT',
+    })
+    expect(classifyErrno(cross)).toBe(EXDEV)
+  })
+
+  it('passes a stamped code outside the vocabulary through', () => {
+    // Python's twin forwards a raw OSError errno untouched; the node
+    // adapter reads the host's own numbering for the same passthrough.
+    const err = Object.assign(new Error('x'), { code: 'ENAMETOOLONG' })
+    expect(classifyErrno(err)).toBe(osConstants.errno.ENAMETOOLONG)
   })
 })

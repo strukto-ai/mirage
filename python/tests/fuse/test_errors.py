@@ -18,6 +18,8 @@ import os
 import pytest
 
 from mirage.fuse.errors import NO_XATTR, classify_error
+from mirage.runtime.errors import CrossMountError
+from mirage.utils.path import CycleError
 
 
 @pytest.mark.parametrize("err,expected", [
@@ -52,6 +54,20 @@ def test_missing_path_in_rmdir_is_enoent_not_enotempty():
 
 def test_unrecognised_error_is_eio():
     assert classify_error(RuntimeError("something else entirely")) == errno.EIO
+
+
+def test_symlink_loop_is_eloop_not_eio():
+    # CycleError is documented as POSIX ELOOP and raised as
+    # CycleError(path), so no needle can match its message. Before the
+    # shared vocabulary it fell through every arm and a symlink loop
+    # reached the kernel as "Input/output error".
+    assert classify_error(CycleError("/a")) == errno.ELOOP
+
+
+def test_cross_mount_rename_is_exdev():
+    # EXDEV is what tells the kernel "not one filesystem", which is what
+    # makes mv fall back to copy+unlink over a FUSE mount.
+    assert classify_error(CrossMountError("/a/x", "/b/x")) == errno.EXDEV
 
 
 def test_message_matching_is_case_insensitive():

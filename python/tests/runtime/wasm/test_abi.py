@@ -15,11 +15,11 @@
 import errno as host_errno
 import struct
 
-from mirage.runtime.wasm.abi import (EACCES, EEXIST, EINVAL, EIO, EISDIR,
-                                     ENOENT, ENOTDIR, ENOTSUP, EXDEV, FT_DIR,
-                                     FT_REG, errno_for, pack_dirent,
-                                     pack_fdstat, pack_filestat, pack_prestat,
-                                     unpack_iovs)
+from mirage.runtime.wasm.abi import (EACCES, EEXIST, EIO, EISDIR, ENOENT,
+                                     ENOTDIR, ENOTSUP, EXDEV, FT_DIR, FT_REG,
+                                     errno_for, pack_dirent, pack_fdstat,
+                                     pack_filestat, pack_prestat, unpack_iovs)
+from mirage.utils.path import CycleError
 
 
 def test_errno_map_covers_fs_exceptions():
@@ -31,7 +31,9 @@ def test_errno_map_covers_fs_exceptions():
     assert errno_for(NotImplementedError("x")) == ENOTSUP
     assert errno_for(OSError(host_errno.EXDEV, "x")) == EXDEV
     assert errno_for(OSError("boom")) == EIO
-    assert errno_for(ValueError("no mount matches")) == EINVAL
+    # A path outside every mount is a miss, the same answer the FUSE
+    # classifier gives the kernel; EINVAL was the unhandled fallback.
+    assert errno_for(ValueError("no mount matches")) == ENOENT
 
 
 def test_errno_values_are_preview1_not_posix():
@@ -40,6 +42,20 @@ def test_errno_values_are_preview1_not_posix():
     assert ENOENT == 44
     assert EACCES == 2
     assert host_errno.ENOENT == 2
+
+
+def test_exdev_is_wasi_libc_75_not_the_host_18():
+    # wasi-libc numbers alphabetically: 18 on this wire is EDOM, and a
+    # real cross-device rename forwarded from a disk backend arrived as
+    # a math-domain error in the guest. Same numbering-bug family as
+    # pyodide's EXDEV=75 fix.
+    assert EXDEV == 75
+
+
+def test_symlink_loop_is_wire_eloop():
+    # preview1 seat 32; CycleError is not an OSError, so before the
+    # shared vocabulary it fell to the EINVAL fallback.
+    assert errno_for(CycleError("/a")) == 32
 
 
 def test_record_sizes_match_the_preview1_layouts():

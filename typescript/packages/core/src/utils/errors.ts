@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { gnuPhrase } from '../errors/posix.ts'
 import { dropTrailingSegments, respellOne } from './path.ts'
 import { rstripSlash } from './slash.ts'
 
@@ -191,15 +192,20 @@ export function enoentWithMessage(
   return err
 }
 
+// The phrases live once, in the posix seat table. The DOMAIN here stays
+// deliberately narrower than the vocabulary: these are the per-operand
+// codes a read-family command skips-and-reports, and widening it (say
+// to ELOOP or EIO) would widen isFsError's swallow set, which mirrors
+// python's typed FS_ERRORS tuple, not the whole condition enum.
 const STRERROR: Record<string, string> = {
-  ENOENT: 'No such file or directory',
-  ENOTDIR: 'Not a directory',
-  EISDIR: 'Is a directory',
-  EACCES: 'Permission denied',
-  EEXIST: 'File exists',
-  ENOTEMPTY: 'Directory not empty',
-  ENOTSUP: 'Operation not supported',
-  EXDEV: 'Invalid cross-device link',
+  ENOENT: gnuPhrase('ENOENT'),
+  ENOTDIR: gnuPhrase('ENOTDIR'),
+  EISDIR: gnuPhrase('EISDIR'),
+  EACCES: gnuPhrase('EACCES'),
+  EEXIST: gnuPhrase('EEXIST'),
+  ENOTEMPTY: gnuPhrase('ENOTEMPTY'),
+  ENOTSUP: gnuPhrase('ENOTSUP'),
+  EXDEV: gnuPhrase('EXDEV'),
 }
 
 // GNU strerror text for a POSIX error code, or null if not a recognized

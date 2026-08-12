@@ -82,6 +82,28 @@ def eisdir(path: str | PathSpec) -> IsADirectoryError:
     return IsADirectoryError(_virtual_of(path))
 
 
+def eacces(path: str | PathSpec) -> PermissionError:
+    return PermissionError(_virtual_of(path))
+
+
+# The three conditions below have no typed builtin, so their errno is
+# the stamp (mirage.errors.classify reads it); the strerror rides along
+# for raw tracebacks and `filename` carries the operand, like enotsup.
+
+
+def enotempty(path: str | PathSpec) -> OSError:
+    return OSError(errno.ENOTEMPTY, "Directory not empty", _virtual_of(path))
+
+
+def exdev(path: str | PathSpec) -> OSError:
+    return OSError(errno.EXDEV, "Invalid cross-device link", _virtual_of(path))
+
+
+def eloop(path: str | PathSpec) -> OSError:
+    return OSError(errno.ELOOP, "Too many levels of symbolic links",
+                   _virtual_of(path))
+
+
 async def readdir_error(path: str | PathSpec, key: str,
                         is_file: Callable[[str], Awaitable[bool]],
                         is_dir: Callable[[str], Awaitable[bool]]) -> OSError:

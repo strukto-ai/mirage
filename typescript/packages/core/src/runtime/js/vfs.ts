@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify, WASI } from '../../errors/index.ts'
 import { FileHandle, FileTable, parseMode } from '../handles/index.ts'
 import type { RuntimeVFS, VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
@@ -20,36 +21,23 @@ import { compareCodePoints } from '../../utils/sort.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-// WASI preview1 errnos, the numbers the real qjs-wasi engine reports
-// (python/mirage/runtime/wasm/abi.py is the reference table): guests
-// compare against these, so host errno numbering must not leak.
-const EACCES = 2
-const EEXIST = 20
-const EIO = 29
-const EISDIR = 31
-const ENOENT = 44
-const ENOTDIR = 54
-const ENOTSUP = 58
+// WASI preview1 errnos this shim answers with directly. The numbering
+// lives in the shared seat table (errors/wasi.ts, the same numbers
+// python's abi.py re-exports): guests compare against these, so host
+// errno numbering must not leak.
+const EIO = WASI.EIO
+const ENOENT = WASI.ENOENT
 
 // stat mode bits (matching qjs-wasi's synthesized st_mode)
 const S_IFDIR = 16384
 const S_IFREG = 32768
 
-// Mirror of the python errno_for table, keyed on the error's `code`.
-const CODE_TO_WASI: Record<string, number> = {
-  ENOENT: ENOENT,
-  EEXIST: EEXIST,
-  EISDIR: EISDIR,
-  ENOTDIR: ENOTDIR,
-  EACCES: EACCES,
-  EPERM: EACCES,
-  ENOTSUP: ENOTSUP,
-}
-
 function wasiErrno(err: unknown): number {
-  const code = (err as { code?: string }).code
-  if (code !== undefined && code in CODE_TO_WASI) return CODE_TO_WASI[code] ?? EIO
-  return EIO
+  // Naming is the shared classifier's; this boundary only renders the
+  // condition in preview1 numbers. EIO is the same everything-else
+  // fallback the python host keeps for an unnamed OSError.
+  const condition = classify(err)
+  return condition !== null ? WASI[condition] : EIO
 }
 
 // The `std.open`/`os.readdir` surface that qjs-wasi exposes natively,
