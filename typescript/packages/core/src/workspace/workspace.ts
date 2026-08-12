@@ -363,6 +363,12 @@ export class Workspace {
             mtimeMs: mtimeMs(st) ?? 0,
           }
         }
+        case 'create':
+          await this.dispatch('create', path)
+          return undefined
+        case 'truncate':
+          await this.dispatch('truncate', path, [0])
+          return undefined
         case 'unlink':
           await this.dispatch('unlink', path)
           return undefined

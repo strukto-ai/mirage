@@ -93,6 +93,69 @@ describe('node/js: workspace mount access', () => {
   }, 60_000)
 })
 
+// Open's establishing op is the real one — create for a new file,
+// truncate for an existing one — mirroring the python wasi host's
+// path_open, so the op ledger, policy, and a backend with a native
+// truncate all see the same op from both languages' guests.
+describe('node/js: std.open dispatches the real establishing op', () => {
+  it('creating a file records create, not write', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute("js -e \"const f = std.open('/ram/new.txt', 'w'); f.close()\"")
+    expect(io.exitCode).toBe(0)
+    const ops = ws.records.filter((r) => r.path.endsWith('/new.txt')).map((r) => r.op)
+    expect(ops).toContain('create')
+    expect(ops).not.toContain('write')
+    await ws.close()
+  }, 60_000)
+
+  it('truncating an existing file records truncate and empties it', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('echo previous > /ram/t.txt')
+    const io = await ws.execute("js -e \"const f = std.open('/ram/t.txt', 'w'); f.close()\"")
+    expect(io.exitCode).toBe(0)
+    const ops = ws.records.filter((r) => r.path.endsWith('/t.txt')).map((r) => r.op)
+    expect(ops).toContain('truncate')
+    expect(ops).not.toContain('create')
+    const wc = await ws.execute('wc -c < /ram/t.txt')
+    expect(stdoutStr(wc).trim()).toBe('0')
+    await ws.close()
+  }, 60_000)
+
+  it("'wx' refuses an existing file and leaves it untouched", async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('echo keep > /ram/x.txt')
+    const io = await ws.execute(
+      "js -e \"console.log(std.open('/ram/x.txt', 'wx') === null)\"",
+    )
+    expect(stdoutStr(io)).toBe('true\n')
+    const still = await ws.execute('cat /ram/x.txt')
+    expect(stdoutStr(still)).toBe('keep\n')
+    await ws.close()
+  }, 60_000)
+
+  it("'wx' creates a missing file", async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      "js -e \"const f = std.open('/ram/nx.txt', 'wx'); f.puts('made'); f.close()\"",
+    )
+    expect(io.exitCode).toBe(0)
+    const back = await ws.execute('cat /ram/nx.txt')
+    expect(stdoutStr(back)).toBe('made')
+    await ws.close()
+  }, 60_000)
+
+  it("'r+' does not create a missing file", async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute(
+      "js -e \"console.log(std.open('/ram/absent.txt', 'r+') === null)\"",
+    )
+    expect(stdoutStr(io)).toBe('true\n')
+    const check = await ws.execute('cat /ram/absent.txt')
+    expect(check.exitCode).not.toBe(0)
+    await ws.close()
+  }, 60_000)
+})
+
 // The os.* mutation surface, pinned against the real qjs-wasi engine
 // through the python runtime: 0 / -errno in WASI numbering, os.stat
 // answers [obj, errno], os.remove takes files and empty directories.

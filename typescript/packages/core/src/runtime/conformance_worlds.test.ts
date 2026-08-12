@@ -18,6 +18,7 @@ import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { QuickJsRuntime } from './js/quickjs.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 
 // One world, three surfaces, one door: the TS half of the conformance
@@ -381,4 +382,60 @@ describe('scoped world', () => {
       await ws.close()
     }
   })
+})
+
+// ── Group 5: an exclusive open refuses an existing file (R7a) ──
+//
+// The python half runs the same world over the real qjs-wasi engine
+// and CPython-wasm (test_conformance_worlds.py, guarded); this half
+// runs it over the synthesized quickjs shim, which consumes
+// `OpenMode.exclusive` for the refusal. monty has no spelling for the
+// fact: it refuses mode 'x' outright ("exclusive creation mode is not
+// supported").
+
+async function exclusiveWorld(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ops = new OpsRegistry()
+  const w = new RAMResource()
+  ops.registerResource(w)
+  const ws = new Workspace(
+    {},
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new QuickJsRuntime(), 'vfs'] },
+  )
+  ws.addMount('/w', w, MountMode.WRITE)
+  await ws.fs.writeFile('/w/keep.txt', 'keep')
+  return ws
+}
+
+describe('exclusive-open world', () => {
+  it("a js guest's 'wx' refuses an existing file and leaves it untouched", async () => {
+    const ws = await exclusiveWorld()
+    try {
+      const [code, out, err] = await run(
+        ws,
+        "js -e \"console.log(std.open('/w/keep.txt', 'wx') === null ? 'refused' : 'OPENED')\"",
+      )
+      expect(code, err).toBe(0)
+      expect(out).toContain('refused')
+      const [, keep] = await run(ws, 'cat /w/keep.txt')
+      expect(keep).toBe('keep')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it("a js guest's 'wx' creates a missing file", async () => {
+    const ws = await exclusiveWorld()
+    try {
+      const [code, , err] = await run(
+        ws,
+        "js -e \"const f = std.open('/w/made.txt', 'wx'); f.puts('made'); f.close()\"",
+      )
+      expect(code, err).toBe(0)
+      const [, made] = await run(ws, 'cat /w/made.txt')
+      expect(made).toBe('made')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
 })

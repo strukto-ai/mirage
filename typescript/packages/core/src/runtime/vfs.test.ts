@@ -86,9 +86,23 @@ describe('RuntimeVFS transport', () => {
     )
   })
 
-  it('throws TypeError when STAT returns a bad shape', async () => {
+  it('throws TypeError when stat returns a bad shape', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve({ size: 1 }))
     await expect(new RuntimeVFS(dispatch).stat('/x')).rejects.toThrow(TypeError)
+  })
+
+  it('forwards create and truncate as their own ops, never a write', async () => {
+    // The bridge used to lack both verbs, so quickjs faked them with
+    // write: the ledger recorded the wrong op and a backend with a
+    // native truncate got a whole-file write instead.
+    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
+    const vfs = new RuntimeVFS(dispatch)
+    await vfs.create('/ram/new.txt')
+    await vfs.truncate('/ram/old.txt')
+    expect(dispatch.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ['create', '/ram/new.txt'],
+      ['truncate', '/ram/old.txt'],
+    ])
   })
 })
 

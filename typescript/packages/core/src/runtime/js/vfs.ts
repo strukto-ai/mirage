@@ -116,26 +116,35 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
     const path = ctx.getString(pathH)
     const mode = parseMode(ctx.getString(modeH))
     if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
-    let buf: Uint8Array = new Uint8Array()
-    let existed = false
-    if (!mode.truncate) {
-      try {
-        buf = await vfs.read(path)
-        existed = true
-      } catch {
-        if (!mode.writable) return ctx.newNumber(-1)
-      }
+    let st: VFSStat | null = null
+    try {
+      st = await vfs.stat(path)
+    } catch {
+      st = null
     }
-    // Truncate or create writes through the mount at open, mirroring
-    // the Python runtime: this enforces write modes (a read-only mount
-    // or a read-narrowed session throws here, so the guest gets null)
-    // and establishes the file before the buffered writes.
-    if (mode.truncate || (mode.writable && !existed)) {
-      try {
-        await vfs.write(path, buf)
-      } catch {
-        return ctx.newNumber(-1)
+    // The same ladder as the python wasi host's path_open, so the two
+    // engines refuse the same opens: a directory, an exclusive open
+    // over an existing file (EEXIST in the real engine), and a missing
+    // file whose mode does not create.
+    if (st !== null && st.isDir) return ctx.newNumber(-1)
+    if (st !== null && mode.exclusive) return ctx.newNumber(-1)
+    if (st === null && !mode.create) return ctx.newNumber(-1)
+    // The establishing op goes through the mount at open as the op it
+    // is — create for a missing file, truncate for a discarded one —
+    // so write modes and a read-narrowed session refuse here (the
+    // guest gets null), the ledger records the real op, and a backend
+    // with a native truncate receives it.
+    let buf: Uint8Array = new Uint8Array()
+    try {
+      if (st === null) {
+        await vfs.create(path)
+      } else if (mode.truncate) {
+        await vfs.truncate(path)
+      } else {
+        buf = await vfs.read(path)
       }
+    } catch {
+      return ctx.newNumber(-1)
     }
     const fd = table.add(FileHandle.opened(path, buf, mode))
     return ctx.newNumber(fd)

@@ -47,9 +47,9 @@ export function concatBytes(head: Uint8Array, tail: Uint8Array): Uint8Array {
 /**
  * The mount-facing op vocabulary a sandboxed runtime encodes into.
  *
- * One instruction set (read/write/append/stat/readdir/unlink/mkdir/
- * rmdir/rename), one routing table, one place that knows an append may
- * have to become a whole-file write. Encoders hold one of these; they
+ * One instruction set (read/write/append/stat/readdir/create/truncate/
+ * unlink/mkdir/rmdir/rename), one routing table, one place that knows
+ * an append may have to become a whole-file write. Encoders hold one of these; they
  * never inherit it, because a monty encoder is the binding's own `os`
  * callback and a quickjs encoder is a table of host functions.
  *
@@ -141,6 +141,24 @@ export class RuntimeVFS {
       }
     }
     return out as VFSEntry[]
+  }
+
+  /**
+   * Establish an empty file at `path` through the mount, so write
+   * modes and a missing parent answer at open time and the ledger
+   * records the op a create is.
+   */
+  async create(path: string): Promise<void> {
+    await this.dispatch('create', path)
+  }
+
+  /**
+   * Discard `path`'s content. Only ever a truncate-to-zero: the guest
+   * surfaces that reach this are fopen-style opens, and a guest
+   * ftruncate to a length operates on its open handle's buffer.
+   */
+  async truncate(path: string): Promise<void> {
+    await this.dispatch('truncate', path)
   }
 
   async unlink(path: string): Promise<void> {
