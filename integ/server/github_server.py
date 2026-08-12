@@ -192,75 +192,95 @@ def _repo_json(repo: "FakeRepo") -> dict:
     }
 
 
-def _commit_list(repo: "FakeRepo") -> list[dict]:
-    """Commits newest first, with a synthetic root for a fresh repository.
+def _commit_list(repo: "FakeRepo", branch: str = "") -> list[dict]:
+    """One branch's commits, newest first, with a synthetic root.
+
+    Every branch has a root commit so that "the latest commit" is
+    answerable before anything is written, and the two branches of a
+    fixture do not share a head.
 
     Args:
         repo (FakeRepo): the repository.
+        branch (str): the branch, or "" for the default one.
 
     Returns:
         list[dict]: the commit list.
     """
+    target = branch or repo.default_branch
     root = {
-        "sha": _commit_sha(repo.full_name),
+        "sha": _commit_sha(f"{repo.full_name}@{target}"),
         "commit": {
             "message": "Initial commit"
         },
         "files": [],
     }
-    return [*reversed(repo.commits), root]
+    written = repo.commits_by_branch.get(target, [])
+    return [*reversed(written), root]
 
 
-def _record_commit(repo: "FakeRepo", message: str, paths: list[str]) -> dict:
-    """Append a commit for a write and return it.
+def _record_commit(repo: "FakeRepo",
+                   message: str,
+                   paths: list[str],
+                   branch: str = "") -> dict:
+    """Append a commit for a write to one branch and return it.
 
     Args:
         repo (FakeRepo): the repository written to.
         message (str): the commit message.
         paths (list[str]): the paths the commit touched.
+        branch (str): the branch written to, or "" for the default one.
 
     Returns:
         dict: the recorded commit.
     """
+    target = branch or repo.default_branch
+    written = repo.commits_by_branch.setdefault(target, [])
     commit = {
-        "sha": _commit_sha(f"{repo.full_name}:{len(repo.commits)}:{message}"),
+        "sha":
+        _commit_sha(f"{repo.full_name}@{target}:{len(written)}:{message}"),
         "commit": {
             "message": message
         },
         "files": list(paths),
     }
-    repo.commits.append(commit)
+    written.append(commit)
     return commit
 
 
-def _branch_json(repo: "FakeRepo") -> dict:
-    """The default branch, pointing at the newest commit.
+def _branch_json(repo: "FakeRepo", branch: str = "") -> dict:
+    """One branch, pointing at its newest commit.
 
     Args:
         repo (FakeRepo): the repository.
+        branch (str): the branch, or "" for the default one.
 
     Returns:
         dict: the branch object.
     """
+    target = branch or repo.default_branch
     return {
-        "name": repo.default_branch,
+        "name": target,
         "commit": {
-            "sha": _commit_list(repo)[0]["sha"]
+            "sha": _commit_list(repo, target)[0]["sha"]
         },
     }
 
 
-def _content_json(repo: "FakeRepo", path: str) -> dict:
+def _content_json(repo: "FakeRepo",
+                  path: str,
+                  files: dict[str, bytes] | None = None) -> dict:
     """One file as a contents object.
 
     Args:
         repo (FakeRepo): the repository.
         path (str): path within it.
+        files (dict[str, bytes] | None): the branch's files, or None for
+            the default branch's.
 
     Returns:
         dict: the base64-encoded content object.
     """
-    data = repo.files[path]
+    data = (repo.files if files is None else files)[path]
     return {
         "type": "file",
         "name": path.rsplit("/", 1)[-1],
@@ -272,21 +292,27 @@ def _content_json(repo: "FakeRepo", path: str) -> dict:
     }
 
 
-def _directory_json(repo: "FakeRepo", path: str) -> list[dict] | None:
+def _directory_json(
+        repo: "FakeRepo",
+        path: str,
+        files: dict[str, bytes] | None = None) -> list[dict] | None:
     """A directory listing, or None when the path is not a directory.
 
     Args:
         repo (FakeRepo): the repository.
         path (str): directory path, "" for the root.
+        files (dict[str, bytes] | None): the branch's files, or None for
+            the default branch's.
 
     Returns:
         list[dict] | None: the entries, or None.
     """
+    at = repo.files if files is None else files
     prefix = f"{path}/" if path else ""
-    if path and path not in repo.directories():
+    if path and path not in repo.directories(at):
         return None
     entries: dict[str, dict] = {}
-    for candidate in repo.files:
+    for candidate in at:
         if not candidate.startswith(prefix):
             continue
         rest = candidate[len(prefix):]
@@ -301,7 +327,7 @@ def _directory_json(repo: "FakeRepo", path: str) -> list[dict] | None:
                     "size": 0,
                 })
         else:
-            data = repo.files[candidate]
+            data = at[candidate]
             entries[head] = {
                 "type": "file",
                 "name": head,
@@ -341,7 +367,14 @@ class FakeRepo:
         # rather than reading inside one. Anything a fixture does not set
         # keeps GitHub's own value for a fresh repository.
         self.meta: dict = {}
-        self.files: dict[str, bytes] = {}
+        # One file map and one commit list per branch. `files` and `commits`
+        # below stay bound to the default branch, so every route that does
+        # not name a ref keeps reading what it always read; a route that
+        # does name one goes through `tree_of` / `commits_of`.
+        self.trees_by_branch: dict[str, dict[str, bytes]] = {
+            default_branch: {}
+        }
+        self.commits_by_branch: dict[str, list[dict]] = {default_branch: []}
         self.terms: dict[str, set[str]] = {}
         self.blobs: dict[str, bytes] = {}
         self.submodules: set[str] = set()
@@ -351,7 +384,6 @@ class FakeRepo:
         # visible to the next read, so both live here rather than being
         # accepted and dropped.
         self.issues: list[dict] = []
-        self.commits: list[dict] = []
         # Staged trees, and which one each commit points at. A multi-file
         # write builds a tree, commits it and then moves the branch, and
         # only that last step is allowed to change what a read returns.
@@ -362,22 +394,79 @@ class FakeRepo:
     def full_name(self) -> str:
         return f"{self.owner}/{self.name}"
 
-    def seed_path(self, path: str, data: bytes) -> None:
-        key = path.strip("/")
-        self.files[key] = data
-        self.blobs[_blob_sha(data)] = data
-        self._index(key, data)
+    @property
+    def files(self) -> dict[str, bytes]:
+        return self.trees_by_branch[self.default_branch]
 
-    def replace_files(self, files: dict[str, bytes]) -> None:
-        """Make a staged tree the repository's contents.
+    @files.setter
+    def files(self, value: dict[str, bytes]) -> None:
+        self.trees_by_branch[self.default_branch] = value
+
+    @property
+    def commits(self) -> list[dict]:
+        return self.commits_by_branch.setdefault(self.default_branch, [])
+
+    @property
+    def branch_names(self) -> list[str]:
+        """Branches, the default one first and the rest in name order."""
+        rest = sorted(b for b in self.trees_by_branch
+                      if b != self.default_branch)
+        return [self.default_branch, *rest]
+
+    def branch_for(self, ref: str | None) -> str | None:
+        """The branch a ref names, or None if it names nothing.
+
+        A ref is a branch name, HEAD, the empty string, or a commit sha
+        belonging to one branch's history.
+
+        Args:
+            ref (str | None): the ref as the caller spelled it.
+
+        Returns:
+            str | None: the branch name, or None.
+        """
+        if not ref or ref == "HEAD":
+            return self.default_branch
+        if ref in self.trees_by_branch:
+            return ref
+        for branch in self.trees_by_branch:
+            if any(c["sha"] == ref for c in _commit_list(self, branch)):
+                return branch
+        return None
+
+    def tree_of(self, ref: str | None) -> dict[str, bytes] | None:
+        """The file map at a ref, or None if the ref is unknown.
+
+        Args:
+            ref (str | None): the ref as the caller spelled it.
+
+        Returns:
+            dict[str, bytes] | None: that branch's files.
+        """
+        branch = self.branch_for(ref)
+        return None if branch is None else self.trees_by_branch[branch]
+
+    def seed_path(self, path: str, data: bytes, branch: str = "") -> None:
+        key = path.strip("/")
+        target = branch or self.default_branch
+        self.trees_by_branch.setdefault(target, {})[key] = data
+        self.blobs[_blob_sha(data)] = data
+        if target == self.default_branch:
+            self._index(key, data)
+
+    def replace_files(self, files: dict[str, bytes], branch: str = "") -> None:
+        """Make a staged tree a branch's contents.
 
         Args:
             files (dict[str, bytes]): the tree to check out.
+            branch (str): the branch to move, or "" for the default one.
         """
-        self.files = {}
-        self.terms = {}
+        target = branch or self.default_branch
+        self.trees_by_branch[target] = {}
+        if target == self.default_branch:
+            self.terms = {}
         for path, data in files.items():
-            self.seed_path(path, data)
+            self.seed_path(path, data, target)
 
     def seed_submodule(self, path: str) -> None:
         """Register a submodule gitlink: a tree entry of type "commit"
@@ -393,9 +482,9 @@ class FakeRepo:
         for token in TOKEN_RE.findall(text):
             self.terms.setdefault(token, set()).add(path)
 
-    def directories(self) -> set[str]:
+    def directories(self, files: dict[str, bytes] | None = None) -> set[str]:
         dirs: set[str] = set()
-        for path in self.files:
+        for path in (self.files if files is None else files):
             parts = path.split("/")[:-1]
             for i in range(1, len(parts) + 1):
                 dirs.add("/".join(parts[:i]))
@@ -404,19 +493,25 @@ class FakeRepo:
     def blob(self, sha: str) -> bytes | None:
         return self.blobs.get(sha)
 
-    def tree_items(self, scope: str = "") -> list[dict[str, object]]:
+    def tree_items(
+            self,
+            scope: str = "",
+            files: dict[str, bytes] | None = None) -> list[dict[str, object]]:
         """Recursive tree entries, optionally rooted at a subdirectory.
 
         Args:
             scope (str): directory to root at, or "" for the whole repo.
+            files (dict[str, bytes] | None): the branch's files, or None
+                for the default branch's.
 
         Returns:
             list[dict[str, object]]: entries in git's path order, blobs
             carrying a size and trees carrying none.
         """
+        at = self.files if files is None else files
         prefix = f"{scope}/" if scope else ""
         items: list[dict[str, object]] = []
-        for path in sorted(self.directories()):
+        for path in sorted(self.directories(at)):
             if not path.startswith(prefix) or path == scope:
                 continue
             items.append({
@@ -425,7 +520,7 @@ class FakeRepo:
                 "type": "tree",
                 "sha": _tree_sha(path),
             })
-        for path, data in sorted(self.files.items()):
+        for path, data in sorted(at.items()):
             if not path.startswith(prefix):
                 continue
             items.append({
@@ -509,6 +604,17 @@ class GitHubServer:
 
     def _authed(self, request: web.Request) -> bool:
         return bool(request.headers.get("Authorization"))
+
+    def _ref(self, request: web.Request) -> str:
+        """The ref a request names, from `?ref=` or a `branch` body field.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            str: the ref, or "" for the default branch.
+        """
+        return request.query.get("ref", "")
 
     def _lookup(self, request: web.Request) -> FakeRepo | None:
         owner = request.match_info["owner"]
@@ -639,12 +745,15 @@ class GitHubServer:
         fork = self.state.repo(self.state.login, name)
         fork.default_branch = source.default_branch
         fork.submodules = set(source.submodules)
-        for path, data in source.files.items():
-            fork.seed_path(path, data)
+        fork.meta.update(source.meta)
+        for branch, files in source.trees_by_branch.items():
+            fork.trees_by_branch.setdefault(branch, {})
+            for path, data in files.items():
+                fork.seed_path(path, data, branch)
         return web.json_response(_repo_json(fork), status=202)
 
     async def branches(self, request: web.Request) -> web.Response:
-        """List branches. The fake keeps exactly the default one.
+        """List branches, the default one first.
 
         Args:
             request (web.Request): the incoming request.
@@ -657,7 +766,8 @@ class GitHubServer:
         repo = self._lookup(request)
         if repo is None:
             return _error(404, "Not Found")
-        return web.json_response([_branch_json(repo)])
+        return web.json_response(
+            [_branch_json(repo, b) for b in repo.branch_names])
 
     async def branch(self, request: web.Request) -> web.Response:
         """One branch by name.
@@ -673,9 +783,10 @@ class GitHubServer:
         repo = self._lookup(request)
         if repo is None:
             return _error(404, "Not Found")
-        if request.match_info["branch"] != repo.default_branch:
+        name = request.match_info["branch"]
+        if name not in repo.trees_by_branch:
             return _error(404, "Branch not found")
-        return web.json_response(_branch_json(repo))
+        return web.json_response(_branch_json(repo, name))
 
     async def commits(self, request: web.Request) -> web.Response:
         """Commit history, newest first.
@@ -694,7 +805,11 @@ class GitHubServer:
         repo = self._lookup(request)
         if repo is None:
             return _error(404, "Not Found")
-        return web.json_response(_commit_list(repo))
+        return web.json_response(
+            _commit_list(
+                repo,
+                repo.branch_for(request.query.get("sha", ""))
+                or repo.default_branch))
 
     async def commit(self, request: web.Request) -> web.Response:
         """One commit by sha or by ref, with the paths it touched.
@@ -715,8 +830,9 @@ class GitHubServer:
         if repo is None:
             return _error(404, "Not Found")
         ref = request.match_info["ref"]
-        history = _commit_list(repo)
-        if ref in (repo.default_branch, "HEAD"):
+        branch = repo.branch_for(ref)
+        history = _commit_list(repo, branch or repo.default_branch)
+        if ref in (*repo.trees_by_branch, "HEAD"):
             return web.json_response(history[0])
         for entry in history:
             if entry["sha"] == ref:
@@ -738,10 +854,13 @@ class GitHubServer:
         repo = self._lookup(request)
         if repo is None:
             return _error(404, "Not Found")
+        files = repo.tree_of(self._ref(request))
+        if files is None:
+            return _error(404, "No commit found for the ref")
         path = request.match_info.get("path", "").strip("/")
-        if path in repo.files:
-            return web.json_response(_content_json(repo, path))
-        listing = _directory_json(repo, path)
+        if path in files:
+            return web.json_response(_content_json(repo, path, files))
+        listing = _directory_json(repo, path, files)
         if listing is None:
             return _error(404, "Not Found")
         return web.json_response(listing)
@@ -774,20 +893,24 @@ class GitHubServer:
             data = base64.b64decode(str(raw), validate=True)
         except Exception:  # noqa: BLE001
             return _error(422, "Invalid request.\n\n\"content\" is invalid.")
-        existing = repo.files.get(path)
+        branch = repo.branch_for(str(body.get("branch") or ""))
+        if branch is None:
+            return _error(404, "Branch not found")
+        files = repo.trees_by_branch[branch]
+        existing = files.get(path)
         given = body.get("sha")
         if existing is not None and given != _blob_sha(existing):
             return _error(409, f"{path} does not match")
         if existing is None and given:
             return _error(422, "Invalid request.\n\n\"sha\" wasn't supplied.")
         created = existing is None
-        repo.seed_path(path, data)
+        repo.seed_path(path, data, branch)
         commit = _record_commit(repo,
                                 str(body.get("message") or f"Update {path}"),
-                                [path])
+                                [path], branch)
         return web.json_response(
             {
-                "content": _content_json(repo, path),
+                "content": _content_json(repo, path, files),
                 "commit": commit,
             },
             status=201 if created else 200)
@@ -966,14 +1089,15 @@ class GitHubServer:
         if repo is None:
             return _error(404, "Not Found")
         ref = request.match_info["ref"].strip("/")
-        if ref != f"heads/{repo.default_branch}":
+        name = ref[len("heads/"):] if ref.startswith("heads/") else ""
+        if name not in repo.trees_by_branch:
             return _error(422, "Reference does not exist")
         body = await _json_body(request)
         sha = str(body.get("sha") or "")
         tree = repo.commit_trees.get(sha)
         if tree is None:
             return _error(422, "Invalid request.\n\n\"sha\" is invalid.")
-        repo.replace_files(repo.trees[tree])
+        repo.replace_files(repo.trees[tree], name)
         return web.json_response({
             "ref": f"refs/{ref}",
             "object": {
@@ -1001,10 +1125,13 @@ class GitHubServer:
         repo = self._lookup(request)
         if repo is None:
             return _error(404, "Not Found")
+        files = repo.tree_of(self._ref(request))
+        if files is None:
+            return _error(404, "Not Found")
         for name in ("README.md", "README", "README.rst", "README.txt",
                      "readme.md"):
-            if name in repo.files:
-                return web.json_response(_content_json(repo, name))
+            if name in files:
+                return web.json_response(_content_json(repo, name, files))
         return _error(404, "Not Found")
 
     async def delete_contents(self, request: web.Request) -> web.Response:
@@ -1025,18 +1152,22 @@ class GitHubServer:
         if repo is None:
             return _error(404, "Not Found")
         path = request.match_info.get("path", "").strip("/")
-        existing = repo.files.get(path)
+        body = await _json_body(request)
+        branch = repo.branch_for(str(body.get("branch") or ""))
+        if branch is None:
+            return _error(404, "Branch not found")
+        files = repo.trees_by_branch[branch]
+        existing = files.get(path)
         if existing is None:
             return _error(404, "Not Found")
-        body = await _json_body(request)
         if body.get("sha") != _blob_sha(existing):
             return _error(409, f"{path} does not match")
-        remaining = dict(repo.files)
+        remaining = dict(files)
         remaining.pop(path)
-        repo.replace_files(remaining)
+        repo.replace_files(remaining, branch)
         commit = _record_commit(repo,
                                 str(body.get("message") or f"Delete {path}"),
-                                [path])
+                                [path], branch)
         return web.json_response({"content": None, "commit": commit})
 
     async def list_issues(self, request: web.Request) -> web.Response:
@@ -1167,8 +1298,11 @@ class GitHubServer:
         repo = self._lookup(request)
         if repo is None:
             return _error(404, "Not Found")
+        files = repo.tree_of(request.match_info.get("ref", ""))
+        if files is None:
+            return _error(404, "Not Found")
         path = request.match_info["path"].strip("/")
-        data = repo.files.get(path)
+        data = files.get(path)
         if data is None:
             return _error(404, "Not Found")
         try:
@@ -1219,12 +1353,13 @@ class GitHubServer:
         if repo is None:
             return _error(404, "Not Found")
         ref = request.match_info["ref"].strip("/")
-        if ref != f"heads/{repo.default_branch}":
+        name = ref[len("heads/"):] if ref.startswith("heads/") else ""
+        if name not in repo.trees_by_branch:
             return _error(404, "Not Found")
         return web.json_response({
             "ref": f"refs/{ref}",
             "object": {
-                "sha": _commit_list(repo)[0]["sha"],
+                "sha": _commit_list(repo, name)[0]["sha"],
                 "type": "commit",
             },
         })
@@ -1238,14 +1373,16 @@ class GitHubServer:
         ref = request.match_info["ref"]
         # The backend passes either a ref name (recursive whole-tree fetch) or
         # a tree sha from a previous listing (the truncation fallback path).
+        # A ref is also resolved through `branch_for`, which accepts a commit
+        # sha, because a client that resolves a ref to a commit first then
+        # asks for the tree by that sha -- git accepts it, since a commit
+        # names its root tree.
         scope = ""
-        # A client that resolves a ref to a commit first then asks for the
-        # tree by that commit's sha, which git accepts because a commit
-        # names its root tree. Accepting only the branch name reads to it as
-        # "the repository has no tree".
-        commits = {c["sha"] for c in _commit_list(repo)}
-        if ref not in (repo.default_branch, "HEAD") and ref not in commits:
-            matches = [d for d in repo.directories() if _tree_sha(d) == ref]
+        files = repo.tree_of(ref)
+        if files is None:
+            matches = [
+                d for d in repo.directories(repo.files) if _tree_sha(d) == ref
+            ]
             if not matches:
                 return _error(404, "Not Found")
             scope = matches[0]
@@ -1259,7 +1396,7 @@ class GitHubServer:
                 "tree": items,
                 "truncated": False,
             })
-        items = repo.tree_items(scope)
+        items = repo.tree_items(scope, files)
         if repo.truncated:
             # A truncated recursive tree keeps only the top-level entries,
             # like git dropping deep paths past its entry cap.
@@ -1561,17 +1698,24 @@ async def start_fake_github(
 def seed_from_dir(state: FakeGitHub,
                   full_name: str,
                   source: Path,
-                  default_branch: str = DEFAULT_BRANCH) -> None:
-    """Load every file under a fixture directory into one repository.
+                  default_branch: str = DEFAULT_BRANCH,
+                  branch: str = "") -> None:
+    """Load every file under a fixture directory into one branch.
+
+    Called once per branch, so a two-branch fixture is two directories and
+    two `--repo` flags naming the same repository.
 
     Args:
         state (FakeGitHub): the store to seed.
         full_name (str): "owner/name" of the repository to create.
         source (Path): fixture directory to walk.
         default_branch (str): branch the repository reports as default.
+        branch (str): branch to load into, or "" for the default one.
     """
     owner, _, name = full_name.partition("/")
     repo = state.repo(owner, name, default_branch)
+    if branch:
+        repo.trees_by_branch.setdefault(branch, {})
     for path in sorted(source.rglob("*")):
         if not path.is_file():
             continue
@@ -1583,7 +1727,7 @@ def seed_from_dir(state: FakeGitHub,
                 if line.strip():
                     repo.seed_submodule(line.strip())
             continue
-        repo.seed_path(relative, path.read_bytes())
+        repo.seed_path(relative, path.read_bytes(), branch)
 
 
 def seed_metadata(state: FakeGitHub, source: Path) -> None:
@@ -1613,13 +1757,17 @@ async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
         # "branch=<name>" for a template whose default is not `main`.
         fixture, _, rest = fixture.partition(":")
         flags = [f for f in rest.split(":") if f]
-        branch = DEFAULT_BRANCH
+        default_branch = DEFAULT_BRANCH
+        into = ""
         for flag in flags:
             if flag.startswith("branch="):
-                branch = flag.split("=", 1)[1]
+                default_branch = flag.split("=", 1)[1]
+            elif flag.startswith("into="):
+                into = flag.split("=", 1)[1]
         # A task outside this tree seeds from its own directory, so an
         # absolute fixture path has to win over the bundled one.
-        seed_from_dir(state, full_name, fixtures / fixture, branch)
+        seed_from_dir(state, full_name, fixtures / fixture, default_branch,
+                      into)
         if "truncated" in flags:
             state.repos[full_name].truncated = True
     for spec in metadata:
@@ -1642,7 +1790,8 @@ def main() -> None:
         action="append",
         default=[],
         help="owner/name=<fixture dir under integ/fixtures>[:truncated]"
-        "[:branch=<name>], repeatable")
+        "[:branch=<default>][:into=<branch>], repeatable; repeat with "
+        "into= to add a second branch to the same repository")
     parser.add_argument(
         "--metadata",
         action="append",
