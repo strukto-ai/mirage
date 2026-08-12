@@ -727,14 +727,43 @@ function parseCell(ref: string): { row: number | null; col: number | null } {
   return { row, col }
 }
 
+// A quoted tab name is quoted whether or not a !cells part follows it, and
+// an apostrophe inside it is doubled: gspread sends 'Jun-Jul_2025' for a
+// whole worksheet, which lastIndexOf('!') alone cannot see.
+function splitRange(range: string): { tabName: string; cells: string } | null {
+  if (range.startsWith("'")) {
+    let at = 1
+    let name = ''
+    while (at < range.length && range[at] !== "'") {
+      name += range[at]
+      at += 1
+    }
+    while (range[at] === "'" && range[at + 1] === "'") {
+      name += "'"
+      at += 2
+      while (at < range.length && range[at] !== "'") {
+        name += range[at]
+        at += 1
+      }
+    }
+    if (at >= range.length) return null
+    const rest = range.slice(at + 1)
+    if (rest === '') return { tabName: name, cells: '' }
+    if (!rest.startsWith('!')) return null
+    return { tabName: name, cells: rest.slice(1) }
+  }
+  const bang = range.lastIndexOf('!')
+  if (bang === -1) return null
+  return { tabName: range.slice(0, bang), cells: range.slice(bang + 1) }
+}
+
 function parseA1(sheet: Spreadsheet, range: string): A1Range | null {
   let tabName = ''
   let cells = range
-  const bang = range.lastIndexOf('!')
-  if (bang !== -1) {
-    tabName = range.slice(0, bang)
-    cells = range.slice(bang + 1)
-    if (tabName.startsWith("'") && tabName.endsWith("'")) tabName = tabName.slice(1, -1)
+  const split = splitRange(range)
+  if (split !== null) {
+    tabName = split.tabName
+    cells = split.cells
   } else if (
     // A bare range names a sheet tab first ("Sheet1" is a tab, not the
     // cell SHEET1), matching the real API's resolution order.
@@ -959,6 +988,34 @@ interface RawDimensionRange {
   endIndex?: number
 }
 
+interface RawGridRange {
+  sheetId?: number
+  startRowIndex?: number
+  endRowIndex?: number
+  startColumnIndex?: number
+  endColumnIndex?: number
+}
+
+interface RawCellData {
+  userEnteredValue?: {
+    stringValue?: string
+    numberValue?: number
+    boolValue?: boolean
+    formulaValue?: string
+  }
+}
+
+interface RawRowData {
+  values?: RawCellData[]
+}
+
+interface RawUpdateCells {
+  range?: RawGridRange
+  start?: { sheetId?: number; rowIndex?: number; columnIndex?: number }
+  rows?: RawRowData[]
+  fields?: string
+}
+
 // A DimensionRange with no endIndex is unbounded to the end of the grid,
 // and no startIndex means index 0, matching the real API's optional fields.
 function resolveDimensionRange(
@@ -994,6 +1051,48 @@ function remapCells(
     )
   }
   tab.cells = next
+}
+
+// One cell of an UpdateCellsRequest, rendered the way values.update would
+// have stored it. Only userEnteredValue is kept: the fake stores strings,
+// so formatting has nowhere to go.
+function cellText(cell: RawCellData | undefined): string | null {
+  const value = cell?.userEnteredValue
+  if (value === undefined) return null
+  if (value.stringValue !== undefined) return value.stringValue
+  if (value.numberValue !== undefined) return String(value.numberValue)
+  if (value.boolValue !== undefined) return value.boolValue ? 'TRUE' : 'FALSE'
+  if (value.formulaValue !== undefined) return value.formulaValue
+  return null
+}
+
+// updateCells writes a rectangle by grid index rather than by A1 range, and
+// clears whatever the supplied rows do not cover -- which is how a caller
+// shortens a sheet it previously wrote longer.
+function updateCells(sheet: Spreadsheet, request: RawUpdateCells): [number, object] | null {
+  const grid = request.range ?? request.start
+  const tab = sheet.tabs.find((t) => t.sheetId === (grid?.sheetId ?? 0))
+  if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+  const rows = request.rows ?? []
+  const startRow = request.range?.startRowIndex ?? request.start?.rowIndex ?? 0
+  const startCol = request.range?.startColumnIndex ?? request.start?.columnIndex ?? 0
+  if (request.range !== undefined) {
+    const endRow = Math.min(request.range.endRowIndex ?? tab.rows, tab.rows)
+    const endCol = Math.min(request.range.endColumnIndex ?? tab.cols, tab.cols)
+    for (let r = startRow; r < endRow; r += 1) {
+      for (let c = startCol; c < endCol; c += 1) tab.cells.delete(`${String(r)},${String(c)}`)
+    }
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const values = (rows[i] as RawRowData).values ?? []
+    for (let j = 0; j < values.length; j += 1) {
+      const text = cellText(values[j])
+      const key = `${String(startRow + i)},${String(startCol + j)}`
+      if (text === null) tab.cells.delete(key)
+      else tab.cells.set(key, text)
+    }
+  }
+  return null
 }
 
 function growGrid(tab: SheetTab, dimension: Dimension, by: number): void {
@@ -1114,6 +1213,10 @@ function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
       const range = resolveDimensionRange(sheet, r.source)
       if (range === null) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
       moveDimension(range, r.destinationIndex ?? 0)
+      replies.push({})
+    } else if ('updateCells' in request) {
+      const failed = updateCells(sheet, request.updateCells as RawUpdateCells)
+      if (failed !== null) return failed
       replies.push({})
     } else if ('updateSpreadsheetProperties' in request) {
       const r = request.updateSpreadsheetProperties as { properties?: { title?: string } }
