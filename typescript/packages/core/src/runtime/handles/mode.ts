@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const VALID = new Set('rwaxbt+')
+const VALID = 'rwaxbt+'
 
 /**
  * What an fopen-style mode string says about a handle.
@@ -60,11 +60,14 @@ const BASES = ['r', 'w', 'a', 'x', 'wx']
  */
 export function parseMode(mode: string): OpenMode {
   const count = (char: string): number => mode.split(char).length - 1
-  const bases = [...'rwax'].filter((char) => mode.includes(char)).join('')
+  let bases = ''
+  for (const char of 'rwax') if (mode.includes(char)) bases += char
+  let duplicated = false
+  for (const char of VALID) if (count(char) > 1) duplicated = true
   if (
     mode.length === 0 ||
-    [...mode].some((char) => !VALID.has(char)) ||
-    [...VALID].some((char) => count(char) > 1) ||
+    /[^rwaxbt+]/.test(mode) ||
+    duplicated ||
     (mode.includes('b') && mode.includes('t')) ||
     !BASES.includes(bases)
   ) {
@@ -76,7 +79,7 @@ export function parseMode(mode: string): OpenMode {
     writable: !mode.includes('r') || plus,
     truncate: mode.includes('w'),
     append: mode.includes('a'),
-    create: [...'wax'].some((char) => mode.includes(char)),
+    create: /[wax]/.test(mode),
     exclusive: mode.includes('x'),
     binary: mode.includes('b'),
   }

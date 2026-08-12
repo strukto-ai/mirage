@@ -133,8 +133,7 @@ def test_readdir_lifts_names_into_entries():
     vfs = ListingVFS(
         listing=["/data/sub/", "/data/a.txt", "/data/ghost.txt"],
         stats={
-            "/data/a.txt":
-            FileStat(name="a.txt", size=4, type=FileType.TEXT),
+            "/data/a.txt": FileStat(name="a.txt", size=4, type=FileType.TEXT),
         },
     )
     assert vfs.readdir("/data/") == [
@@ -154,8 +153,7 @@ def test_readdir_stats_unmarked_directories():
     vfs = ListingVFS(
         listing=["/data/sub"],
         stats={
-            "/data/sub":
-            FileStat(name="sub", type=FileType.DIRECTORY),
+            "/data/sub": FileStat(name="sub", type=FileType.DIRECTORY),
         },
     )
     assert vfs.readdir("/data/") == [

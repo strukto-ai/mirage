@@ -124,9 +124,7 @@ describe('node/js: std.open dispatches the real establishing op', () => {
   it("'wx' refuses an existing file and leaves it untouched", async () => {
     const { ws } = await makeWorkspace()
     await ws.execute('echo keep > /ram/x.txt')
-    const io = await ws.execute(
-      "js -e \"console.log(std.open('/ram/x.txt', 'wx') === null)\"",
-    )
+    const io = await ws.execute("js -e \"console.log(std.open('/ram/x.txt', 'wx') === null)\"")
     expect(stdoutStr(io)).toBe('true\n')
     const still = await ws.execute('cat /ram/x.txt')
     expect(stdoutStr(still)).toBe('keep\n')
@@ -146,9 +144,7 @@ describe('node/js: std.open dispatches the real establishing op', () => {
 
   it("'r+' does not create a missing file", async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
-      "js -e \"console.log(std.open('/ram/absent.txt', 'r+') === null)\"",
-    )
+    const io = await ws.execute("js -e \"console.log(std.open('/ram/absent.txt', 'r+') === null)\"")
     expect(stdoutStr(io)).toBe('true\n')
     const check = await ws.execute('cat /ram/absent.txt')
     expect(check.exitCode).not.toBe(0)

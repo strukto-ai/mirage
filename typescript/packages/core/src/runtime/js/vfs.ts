@@ -138,7 +138,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
     // engines refuse the same opens: a directory, an exclusive open
     // over an existing file (EEXIST in the real engine), and a missing
     // file whose mode does not create.
-    if (st !== null && st.isDir) return ctx.newNumber(-1)
+    if (st?.isDir === true) return ctx.newNumber(-1)
     if (st !== null && mode.exclusive) return ctx.newNumber(-1)
     if (st === null && !mode.create) return ctx.newNumber(-1)
     // The establishing op goes through the mount at open as the op it

@@ -69,8 +69,8 @@ def parse_mode(mode: str) -> OpenMode:
         ValueError: the mode does not parse, in CPython's own wording.
     """
     if (not mode or any(char not in _VALID for char in mode)
-            or any(mode.count(char) > 1 for char in _VALID)
-            or ("b" in mode and "t" in mode)
+            or any(mode.count(char) > 1
+                   for char in _VALID) or ("b" in mode and "t" in mode)
             or set(mode) & set("rwax") not in _BASES):
         raise ValueError(f"invalid mode: {mode!r}")
     plus = "+" in mode
