@@ -17,6 +17,7 @@ import asyncio
 import base64
 import hashlib
 import io
+import json
 import re
 import sys
 import zipfile
@@ -173,6 +174,21 @@ def _repo_json(repo: "FakeRepo") -> dict:
         "owner": {
             "login": repo.owner
         },
+        "html_url": f"https://github.com/{repo.full_name}",
+        "description": None,
+        "stargazers_count": 0,
+        "forks_count": 0,
+        "open_issues_count": 0,
+        "language": None,
+        "topics": [],
+        "archived": False,
+        "fork": False,
+        # A fixture's own values win: `default_branch` is decided by seeding
+        # and the rest is metadata only a fixture knows.
+        **{
+            k: v
+            for k, v in repo.meta.items() if k != "default_branch"
+        },
     }
 
 
@@ -321,6 +337,10 @@ class FakeRepo:
         self.owner = owner
         self.name = name
         self.default_branch = default_branch
+        # Repository metadata, for a task that picks between repositories
+        # rather than reading inside one. Anything a fixture does not set
+        # keeps GitHub's own value for a fresh repository.
+        self.meta: dict = {}
         self.files: dict[str, bytes] = {}
         self.terms: dict[str, set[str]] = {}
         self.blobs: dict[str, bytes] = {}
@@ -790,12 +810,33 @@ class GitHubServer:
             return _error(401, "Requires authentication")
         query = request.query.get("q", "").lower()
         # Qualifiers (`user:x`, `in:name`) are dropped rather than honoured;
-        # what is left is matched against the full name.
-        terms = [t for t in query.split() if ":" not in t]
-        items = [
-            _repo_json(repo) for name, repo in sorted(self.state.repos.items())
-            if all(t in name.lower() for t in terms)
-        ]
+        # what is left is matched against the name and the description,
+        # because a repository is found by what it says it does at least as
+        # often as by what it is called. Terms OR together rather than AND,
+        # which is looser than GitHub and errs towards showing a caller the
+        # row it is looking for; a hyphenated term also matches its parts.
+        terms: list[str] = []
+        for word in query.split():
+            if ":" in word:
+                continue
+            terms.append(word)
+            terms.extend(p for p in re.split(r"[-_]", word) if len(p) > 2)
+        matched = []
+        for name, repo in self.state.repos.items():
+            haystack = f"{name} {repo.meta.get('description') or ''}".lower()
+            if not terms or any(t in haystack for t in terms):
+                matched.append(repo)
+        # GitHub's default is relevance, which is not modelled; `sort=stars`
+        # is, because a task that asks for "the most starred" is asking for
+        # exactly this ordering.
+        reverse = request.query.get("order", "desc") != "asc"
+        if request.query.get("sort") == "stars":
+            matched.sort(
+                key=lambda r: int(r.meta.get("stargazers_count") or 0),
+                reverse=reverse)
+        else:
+            matched.sort(key=lambda r: r.full_name)
+        items = [_repo_json(repo) for repo in matched]
         return web.json_response({
             "total_count": len(items),
             "incomplete_results": False,
@@ -940,6 +981,31 @@ class GitHubServer:
                 "type": "commit"
             },
         })
+
+    async def readme(self, request: web.Request) -> web.Response:
+        """The repository's README as a contents object.
+
+        GitHub picks the first of several spellings; the fake checks the
+        same ones. A repository seeded as metadata only has no files, so
+        this answers 404 -- which is what GitHub says for a repository with
+        no README, and now means that rather than "no such endpoint".
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the README, or 404.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        for name in ("README.md", "README", "README.rst", "README.txt",
+                     "readme.md"):
+            if name in repo.files:
+                return web.json_response(_content_json(repo, name))
+        return _error(404, "Not Found")
 
     async def delete_contents(self, request: web.Request) -> web.Response:
         """Delete a file, the way `DELETE /contents` does.
@@ -1376,6 +1442,8 @@ def _add_routes(app: web.Application, server: "GitHubServer",
                           server.delete_repo)
     app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/forks",
                         server.fork_repo)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/readme",
+                       server.readme)
     app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/branches",
                        server.branches)
     app.router.add_get(
@@ -1518,7 +1586,25 @@ def seed_from_dir(state: FakeGitHub,
         repo.seed_path(relative, path.read_bytes())
 
 
-async def _serve(port: int, repos: list[str]) -> None:
+def seed_metadata(state: FakeGitHub, source: Path) -> None:
+    """Create repositories that are metadata only, from one JSON file.
+
+    A task that picks *between* repositories reads their descriptions, star
+    counts and languages and never opens one, so the fixture is a map of
+    "owner/name" to the fields the search and repo endpoints report. Any
+    that a file tree is also seeded for keeps both.
+
+    Args:
+        state (FakeGitHub): the store to seed.
+        source (Path): a JSON object keyed by full name.
+    """
+    for full_name, meta in json.loads(source.read_text()).items():
+        owner, _, name = str(full_name).partition("/")
+        branch = str(meta.get("default_branch") or DEFAULT_BRANCH)
+        state.repo(owner, name, branch).meta.update(meta)
+
+
+async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
     state = FakeGitHub()
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     for spec in repos:
@@ -1536,6 +1622,8 @@ async def _serve(port: int, repos: list[str]) -> None:
         seed_from_dir(state, full_name, fixtures / fixture, branch)
         if "truncated" in flags:
             state.repos[full_name].truncated = True
+    for spec in metadata:
+        seed_metadata(state, fixtures / spec)
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
     await runner.setup()
@@ -1553,10 +1641,16 @@ def main() -> None:
         "--repo",
         action="append",
         default=[],
-        help="owner/name=<fixture dir under integ/fixtures>[:truncated], "
-        "repeatable")
+        help="owner/name=<fixture dir under integ/fixtures>[:truncated]"
+        "[:branch=<name>], repeatable")
+    parser.add_argument(
+        "--metadata",
+        action="append",
+        default=[],
+        help="JSON file of repositories that exist as metadata only, keyed "
+        "by owner/name; repeatable")
     args = parser.parse_args()
-    asyncio.run(_serve(args.port, args.repo))
+    asyncio.run(_serve(args.port, args.repo, args.metadata))
 
 
 if __name__ == "__main__":
