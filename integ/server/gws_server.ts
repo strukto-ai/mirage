@@ -727,6 +727,13 @@ function parseCell(ref: string): { row: number | null; col: number | null } {
   return { row, col }
 }
 
+// What an unquoted range with no `!` has to look like before it is read as
+// cells rather than as a tab name. Every A1 form the real API takes with a
+// half open side is here: `A1`, `A1:G9`, a whole column span `A:Z`, and a
+// whole row span `1:5`. gspread asks for `A:Z` to mean "every row of the
+// first sheet", which `^[A-Z]+\d` used to reject for want of a digit.
+const A1_ONLY = /^([A-Z]+\d*|\d+)(:([A-Z]+\d*|\d+))?$/i
+
 // A quoted tab name is quoted whether or not a !cells part follows it, and
 // an apostrophe inside it is doubled: gspread sends 'Jun-Jul_2025' for a
 // whole worksheet, which lastIndexOf('!') alone cannot see.
@@ -768,8 +775,7 @@ function parseA1(sheet: Spreadsheet, range: string): A1Range | null {
     // A bare range names a sheet tab first ("Sheet1" is a tab, not the
     // cell SHEET1), matching the real API's resolution order.
     sheet.tabs.some((t) => t.title === range) ||
-    !/^[A-Z]+\d/.test(range.toUpperCase()) ||
-    range.includes(' ')
+    !A1_ONLY.test(range)
   ) {
     tabName = range
     cells = ''

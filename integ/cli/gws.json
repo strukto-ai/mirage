@@ -884,6 +884,19 @@
         "stdout": "[[\"emea\",\"120\",\"TRUE\"]]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_sheets_whole_column_range_reads_every_row",
+      "seq": 563071,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Column Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"region\",\"revenue\"],[\"emea\",120]]' > /dev/null; gws sheets read --spreadsheet $SID --range A:Z | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"region\",\"revenue\"],[\"emea\",\"120\"]]\n",
+        "stderr": ""
+      }
     }
   ]
 }
