@@ -89,7 +89,7 @@ describe('MontyVFS values', () => {
       Promise.resolve([{ path: '/ram/d/a', size: 1, isDir: false }]),
     )
     const entries = await viewOn(dispatch).readdir('/ram/d')
-    expect(dispatch).toHaveBeenCalledWith('LIST', '/ram/d/')
+    expect(dispatch).toHaveBeenCalledWith('readdir', '/ram/d/')
     expect(entries).toHaveLength(1)
   })
 
@@ -106,7 +106,7 @@ describe('MontyVFS values', () => {
 describe('MontyVFS negative cache', () => {
   const listing = () =>
     vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'LIST') return Promise.resolve([{ path: '/ram/a', size: 1, isDir: false }])
+      if (op === 'readdir') return Promise.resolve([{ path: '/ram/a', size: 1, isDir: false }])
       return Promise.resolve(undefined)
     })
 
@@ -117,7 +117,7 @@ describe('MontyVFS negative cache', () => {
     const vfs = viewOn(dispatch)
     expect(await vfs.entryFor('/ram/nope')).toBeNull()
     expect(await vfs.entryFor('/ram/nope')).toBeNull()
-    expect(dispatch.mock.calls.filter((c) => c[0] === 'LIST')).toHaveLength(1)
+    expect(dispatch.mock.calls.filter((c) => c[0] === 'readdir')).toHaveLength(1)
   })
 
   it('answers a remembered absence from read without dispatching', async () => {
@@ -125,7 +125,7 @@ describe('MontyVFS negative cache', () => {
     const vfs = viewOn(dispatch)
     await vfs.entryFor('/ram/nope')
     await expect(vfs.read('/ram/nope')).rejects.toMatchObject({ name: 'FileNotFoundError' })
-    expect(dispatch.mock.calls.filter((c) => c[0] === 'READ')).toHaveLength(0)
+    expect(dispatch.mock.calls.filter((c) => c[0] === 'read')).toHaveLength(0)
   })
 
   it('forgets the absence once the path is written, so the guest sees its own write', async () => {
@@ -134,7 +134,7 @@ describe('MontyVFS negative cache', () => {
     expect(await vfs.entryFor('/ram/new.txt')).toBeNull()
     await vfs.write('/ram/new.txt', 'hi')
     await vfs.entryFor('/ram/new.txt')
-    expect(dispatch.mock.calls.filter((c) => c[0] === 'LIST')).toHaveLength(2)
+    expect(dispatch.mock.calls.filter((c) => c[0] === 'readdir')).toHaveLength(2)
   })
 
   it('remembers a path it removed, and forgets a rename destination', async () => {
@@ -142,7 +142,7 @@ describe('MontyVFS negative cache', () => {
     const vfs = viewOn(dispatch)
     await vfs.unlink('/ram/a')
     expect(await vfs.entryFor('/ram/a')).toBeNull()
-    expect(dispatch.mock.calls.filter((c) => c[0] === 'LIST')).toHaveLength(0)
+    expect(dispatch.mock.calls.filter((c) => c[0] === 'readdir')).toHaveLength(0)
     await vfs.rename('/ram/b', '/ram/a')
     expect(await vfs.entryFor('/ram/a')).toMatchObject({ isDir: false })
   })
@@ -169,7 +169,7 @@ describe('MontyVFS negative cache', () => {
     let down = true
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (down) return Promise.reject(new Error('transport down'))
-      if (op === 'READ') return Promise.resolve(new TextEncoder().encode('back'))
+      if (op === 'read') return Promise.resolve(new TextEncoder().encode('back'))
       return Promise.resolve(undefined)
     })
     const vfs = viewOn(dispatch)

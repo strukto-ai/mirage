@@ -33,7 +33,7 @@ function makeBridge(seed: Record<string, Uint8Array>): {
   const writes: [string, Uint8Array][] = []
   const mutations: string[] = []
   const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
-    if (op === 'READ') {
+    if (op === 'read') {
       const data = files.get(path)
       if (data === undefined) {
         // The real dispatcher rejects with coded fs errors (ENOENT et
@@ -42,18 +42,18 @@ function makeBridge(seed: Record<string, Uint8Array>): {
       }
       return Promise.resolve(data)
     }
-    if (op === 'WRITE') {
+    if (op === 'write') {
       const data = bytes ?? new Uint8Array()
       files.set(path, data)
       writes.push([path, data])
       return Promise.resolve(undefined)
     }
-    if (op === 'MKDIR' || op === 'RMDIR' || op === 'UNLINK') {
-      if (op === 'UNLINK') files.delete(path)
+    if (op === 'mkdir' || op === 'rmdir' || op === 'unlink') {
+      if (op === 'unlink') files.delete(path)
       mutations.push(`${op} ${path}`)
       return Promise.resolve(undefined)
     }
-    if (op === 'RENAME') {
+    if (op === 'rename') {
       const data = files.get(path)
       if (data !== undefined && dst !== undefined) {
         files.delete(path)
@@ -402,7 +402,7 @@ describe('MontyRuntime', () => {
     const failing =
       (code: string): BridgeDispatchFn =>
       (op, path) => {
-        if (op === 'LIST') return Promise.resolve([])
+        if (op === 'readdir') return Promise.resolve([])
         return Promise.reject(Object.assign(new Error(path), { code }))
       }
     const missing = await run(

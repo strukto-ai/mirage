@@ -32,15 +32,15 @@ function mkWorld(): { ws: Workspace; ops: OpsRegistry; resource: RAMResource } {
   return { ws, ops, resource }
 }
 
-// The bridge LIST is the sandboxed runtimes' directory read: what it
+// The bridge readdir is the sandboxed runtimes' directory read: what it
 // swallows, a guest can never see, and what it fails, pyodide's
 // syncMounts treats as the whole tree.
-describe('workspace bridge LIST', () => {
+describe('workspace bridge readdir', () => {
   it('a dangling link degrades to a zero row instead of failing the listing', async () => {
     const { ws } = mkWorld()
     await ws.fs.writeFile('/data/a.txt', 'hi')
     await ws.namespace.symlink('/data/lnk', '/data/gone', 1)
-    const entries = (await bridgeOn(ws)('LIST', '/data')) as VFSEntry[]
+    const entries = (await bridgeOn(ws)('readdir', '/data')) as VFSEntry[]
     const row = entries.find((e) => e.path.endsWith('/lnk'))
     expect(row).toMatchObject({ size: 0, isDir: false, isLink: true })
   })
@@ -61,6 +61,6 @@ describe('workspace bridge LIST', () => {
       },
       write: false,
     })
-    await expect(bridgeOn(ws)('LIST', '/data')).rejects.toThrow('401 Unauthorized')
+    await expect(bridgeOn(ws)('readdir', '/data')).rejects.toThrow('401 Unauthorized')
   })
 })

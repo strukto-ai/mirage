@@ -29,7 +29,7 @@ export type RuntimeLanguage = 'python' | 'js'
  * imports no workspace module (Python's DispatchFn in runtime/types).
  */
 export type BridgeDispatchFn = (
-  op: 'READ' | 'WRITE' | 'APPEND' | 'LIST' | 'STAT' | 'UNLINK' | 'MKDIR' | 'RMDIR' | 'RENAME',
+  op: 'read' | 'write' | 'append' | 'readdir' | 'stat' | 'unlink' | 'mkdir' | 'rmdir' | 'rename',
   path: string,
   bytes?: Uint8Array,
   dst?: string,

@@ -95,22 +95,22 @@ export class RuntimeVFS {
   }
 
   async read(path: string): Promise<Uint8Array> {
-    const out = await this.dispatch('READ', path)
+    const out = await this.dispatch('read', path)
     if (!(out instanceof Uint8Array)) {
-      throw new TypeError(`runtime vfs: READ ${path} expected Uint8Array, got ${typeof out}`)
+      throw new TypeError(`runtime vfs: read ${path} expected Uint8Array, got ${typeof out}`)
     }
     return out
   }
 
   async write(path: string, bytes: Uint8Array): Promise<void> {
-    const out = await this.dispatch('WRITE', path, bytes)
+    const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
-      throw new TypeError(`runtime vfs: WRITE ${path} expected void, got ${typeof out}`)
+      throw new TypeError(`runtime vfs: write ${path} expected void, got ${typeof out}`)
     }
   }
 
   async stat(path: string): Promise<VFSStat> {
-    const out = await this.dispatch('STAT', path)
+    const out = await this.dispatch('stat', path)
     const st = out as VFSStat | null
     if (
       st === null ||
@@ -119,15 +119,15 @@ export class RuntimeVFS {
       typeof st.isDir !== 'boolean' ||
       typeof st.mtimeMs !== 'number'
     ) {
-      throw new TypeError(`runtime vfs: STAT ${path} bad shape`)
+      throw new TypeError(`runtime vfs: stat ${path} bad shape`)
     }
     return st
   }
 
   async readdir(path: string): Promise<VFSEntry[]> {
-    const out = await this.dispatch('LIST', path)
+    const out = await this.dispatch('readdir', path)
     if (!Array.isArray(out)) {
-      throw new TypeError(`runtime vfs: LIST ${path} expected array`)
+      throw new TypeError(`runtime vfs: readdir ${path} expected array`)
     }
     for (const e of out) {
       if (
@@ -137,22 +137,22 @@ export class RuntimeVFS {
         typeof (e as VFSEntry).size !== 'number' ||
         typeof (e as VFSEntry).isDir !== 'boolean'
       ) {
-        throw new TypeError(`runtime vfs: LIST ${path} bad entry shape`)
+        throw new TypeError(`runtime vfs: readdir ${path} bad entry shape`)
       }
     }
     return out as VFSEntry[]
   }
 
   async unlink(path: string): Promise<void> {
-    await this.dispatch('UNLINK', path)
+    await this.dispatch('unlink', path)
   }
 
   async mkdir(path: string): Promise<void> {
-    await this.dispatch('MKDIR', path)
+    await this.dispatch('mkdir', path)
   }
 
   async rmdir(path: string): Promise<void> {
-    await this.dispatch('RMDIR', path)
+    await this.dispatch('rmdir', path)
   }
 
   /**
@@ -167,7 +167,7 @@ export class RuntimeVFS {
    */
   async rename(src: string, dst: string): Promise<void> {
     if (this.mountOf(src) !== this.mountOf(dst)) throw new CrossMountError(src, dst)
-    await this.dispatch('RENAME', src, undefined, dst)
+    await this.dispatch('rename', src, undefined, dst)
   }
 
   /**
@@ -211,7 +211,7 @@ export class RuntimeVFS {
     const mount = this.mountOf(path) ?? path
     if (this.noAppend.has(mount)) return false
     try {
-      await this.dispatch('APPEND', path, tail)
+      await this.dispatch('append', path, tail)
     } catch (err) {
       if (!isMissingOp(err, 'append')) throw err
       this.noAppend.add(mount)

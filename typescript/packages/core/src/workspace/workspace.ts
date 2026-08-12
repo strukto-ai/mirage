@@ -335,23 +335,23 @@ export class Workspace {
   private buildWorkspaceBridge(): BridgeDispatchFn {
     return async (op, path, bytes, dst) => {
       switch (op) {
-        case 'READ':
+        case 'read':
           return (await this.dispatch('read', path)) as Uint8Array
-        case 'WRITE': {
-          if (bytes === undefined) throw new Error('WRITE op requires bytes')
+        case 'write': {
+          if (bytes === undefined) throw new Error('write op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
           await this.dispatch('write', path, [buf])
           return undefined
         }
-        case 'APPEND': {
-          if (bytes === undefined) throw new Error('APPEND op requires bytes')
+        case 'append': {
+          if (bytes === undefined) throw new Error('append op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
           await this.dispatch('append', path, [buf])
           return undefined
         }
-        case 'STAT': {
+        case 'stat': {
           const st = (await this.dispatch('stat', path)) as FileStat
           // One translator: bare Date.parse read an offset-less stamp
           // as LOCAL time here while the fuse fold read it as UTC.
@@ -363,21 +363,21 @@ export class Workspace {
             mtimeMs: mtimeMs(st) ?? 0,
           }
         }
-        case 'UNLINK':
+        case 'unlink':
           await this.dispatch('unlink', path)
           return undefined
-        case 'MKDIR':
+        case 'mkdir':
           await this.dispatch('mkdir', path)
           return undefined
-        case 'RMDIR':
+        case 'rmdir':
           await this.dispatch('rmdir', path)
           return undefined
-        case 'RENAME': {
-          if (dst === undefined) throw new Error('RENAME op requires dst')
+        case 'rename': {
+          if (dst === undefined) throw new Error('rename op requires dst')
           await this.dispatch('rename', path, [PathSpec.fromStrPath(dst)])
           return undefined
         }
-        case 'LIST': {
+        case 'readdir': {
           const entries = ((await this.dispatch('readdir', path)) as string[] | null) ?? []
           return await Promise.all(
             entries.map(async (entry): Promise<VFSEntry> => {
