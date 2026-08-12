@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_UNKNOWN
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
@@ -220,8 +220,9 @@ class WasmVFS:
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.
 
-        Core entries whose kind the backend does not report come back
-        FT_UNKNOWN; guests stat lazily when they care.
+        Core entries arrive kind-resolved (the door stats what the
+        backend does not slash-mark), so a guest's ``d_type`` is real
+        instead of FT_UNKNOWN paid off with one lazy stat per entry.
 
         Args:
             path (str): guest-absolute path.
@@ -234,14 +235,12 @@ class WasmVFS:
         return self._readdir_core(path)
 
     def _readdir_core(self, path: str) -> list[tuple[str, int]]:
-        names = self._core_call("readdir", path)
         entries: dict[str, int] = {}
-        for raw in names:
-            base = raw.rstrip("/").rsplit("/", 1)[-1]
+        for entry in self._require_core().readdir(path):
+            base = entry.path.rstrip("/").rsplit("/", 1)[-1]
             if not base:
                 continue
-            kind = FT_DIR if raw.endswith("/") else FT_UNKNOWN
-            entries[base] = kind
+            entries[base] = FT_DIR if entry.is_dir else FT_REG
         return sorted(entries.items())
 
     def _readdir_root(self) -> list[tuple[str, int]]:
@@ -249,7 +248,7 @@ class WasmVFS:
 
         The core's readdir already carries mount structure (the door
         merges child mounts and links), so no prefix synthesis happens
-        here; mount entries arrive kind-unknown and guests stat lazily,
+        here; mount entries arrive kind-resolved by the core listing,
         which the door also answers for structure-only directories.
         """
         entries: dict[str, int] = {}

@@ -62,6 +62,32 @@ PrefixSource: TypeAlias = Callable[[], list[str]]
 
 
 @dataclass(frozen=True, slots=True)
+class VFSEntry:
+    """One directory entry as the mounts report it (TS ``VFSEntry``).
+
+    Resolved once at the door off the stat index the readdir just
+    populated, so no guest pays one stat per entry for a fact the door
+    already had.
+
+    Args:
+        path (str): the entry's virtual path, in the door's own
+            spelling (a backend that slash-marks directories keeps the
+            trailing slash).
+        size (int): rendered content bytes, 0 for directories and for
+            entries whose stat answered absent.
+        is_dir (bool): the entry is a directory.
+        is_link (bool): the entry is a namespace symlink. The TS
+            bridge marks it from its namespace; python rows carry
+            False until links enter dispatch (R8).
+    """
+
+    path: str
+    size: int
+    is_dir: bool
+    is_link: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ScriptSource:
     """Script source arriving from a workspace config, not from code.
 

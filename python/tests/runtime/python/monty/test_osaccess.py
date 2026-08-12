@@ -18,6 +18,7 @@ import errno
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import RunArgs
+from mirage.types import FileStat, FileType
 from mirage.utils.errors import OperationNotSupportedError
 
 
@@ -42,12 +43,19 @@ class FakeDispatch:
             if virtual not in self.files:
                 raise FileNotFoundError(virtual)
             return self.files[virtual], None
+        if op == "stat":
+            if virtual in self.files:
+                return FileStat(name=virtual,
+                                size=len(self.files[virtual]),
+                                type=FileType.TEXT), None
+            raise FileNotFoundError(virtual)
         if op == "readdir":
+            # Full virtual paths, the door's own shape.
             prefix = virtual.rstrip("/") + "/"
             names = set()
             for p in self.files:
                 if p.startswith(prefix):
-                    names.add(p[len(prefix):].split("/")[0])
+                    names.add(prefix + p[len(prefix):].split("/")[0])
             if not names and virtual.rstrip("/") not in ("", "/"):
                 raise FileNotFoundError(virtual)
             return sorted(names), None

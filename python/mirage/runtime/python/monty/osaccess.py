@@ -69,7 +69,10 @@ class MirageOSAccess(OSAccess):
         return self._vfs.read(virtual)
 
     def _list_remote(self, virtual: str) -> list[str] | None:
-        return self._vfs.readdir(virtual)
+        entries = self._vfs.readdir(virtual)
+        if entries is None:
+            return None
+        return [entry.path for entry in entries]
 
     def _tree_bytes(self, path: PurePosixPath) -> bytes | None:
         entry = self._get_entry(path)

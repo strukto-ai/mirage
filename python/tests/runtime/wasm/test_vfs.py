@@ -21,7 +21,7 @@ import pytest
 from mirage.ops.namespace_view import merge_readdir
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.types import GuestStat
 from mirage.runtime.wasm.vfs import WasmVFS
@@ -57,7 +57,10 @@ class FakeVFS(RuntimeVFS):
                                 size=len(self.files[path]),
                                 modified=self.modified,
                                 type=FileType.TEXT)
-            if path in self.dirs or path == "/":
+            # The real door answers a directory for a structure-only
+            # path (a mount prefix with no backend object behind it).
+            roots = {p.rstrip("/") or "/" for p in self.prefixes()}
+            if path in self.dirs or path == "/" or path in roots:
                 return FileStat(name=path, type=FileType.DIRECTORY)
             raise FileNotFoundError(path)
         if op == "read":
@@ -152,12 +155,15 @@ def test_stat_maps_filestat_fields():
     assert fs.stat_or_none("/data/nope") is None
 
 
-def test_readdir_bridge_marks_kind_from_trailing_slash():
+def test_readdir_bridge_resolves_kind_from_slash_or_stat():
+    # A slash-marked entry is a directory without a stat; an unmarked
+    # one is classified by the stat the same readdir populated, so a
+    # guest's d_type is real instead of FT_UNKNOWN.
     bridge = FakeVFS(files={"/data/f.txt": b""},
                      dirs={"/data/sub"},
                      prefixes=["/data/"])
     fs = WasmVFS(core=bridge)
-    assert fs.readdir("/data") == [("f.txt", FT_UNKNOWN), ("sub", FT_DIR)]
+    assert fs.readdir("/data") == [("f.txt", FT_REG), ("sub", FT_DIR)]
 
 
 def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
@@ -166,14 +172,14 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     bridge = FakeVFS(files={"/root.txt": b""}, prefixes=["/data/", "/logs/"])
     fs = WasmVFS(WasmFsConfig(host_root=str(tmp_path)), bridge)
     # Mount entries arrive through the core readdir (the door merges
-    # them), so their kind is unknown here; guests stat lazily and the
-    # door answers a directory for a structure-only path.
+    # them) and resolve as directories through the door's stat, which
+    # answers for a structure-only path.
     assert fs.readdir("/") == [
-        ("data", FT_UNKNOWN),
+        ("data", FT_DIR),
         ("lib", FT_DIR),
-        ("logs", FT_UNKNOWN),
+        ("logs", FT_DIR),
         ("python.wasm", FT_REG),
-        ("root.txt", FT_UNKNOWN),
+        ("root.txt", FT_REG),
     ]
 
 

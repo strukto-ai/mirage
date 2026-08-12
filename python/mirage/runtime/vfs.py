@@ -21,9 +21,11 @@ from mirage.context import (get_current_session, reset_current_session,
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import plan_flush
 from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import VFSEntry
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import norm
+from mirage.utils.stat_view import content_size, is_dir
 
 
 class RuntimeVFS:
@@ -149,8 +151,32 @@ class RuntimeVFS:
     def stat(self, path: str) -> FileStat:
         return self.call("stat", path)
 
-    def readdir(self, path: str) -> list[str]:
-        return list(self.call("readdir", path))
+    def readdir(self, path: str) -> list[VFSEntry]:
+        """List a directory as resolved entries (the TS bridge's shape).
+
+        A backend that slash-marks directories skips the stat; every
+        other entry is classified by the stat the readdir just
+        populated the index with, so the lookup is RAM, not another
+        API call. An entry that vanished between list and stat (or a
+        dangling link) rides as a size-0 file instead of failing the
+        whole listing: the guest's own open reports the miss.
+
+        Args:
+            path (str): guest-absolute virtual path.
+        """
+        entries: list[VFSEntry] = []
+        for raw in self.call("readdir", path):
+            if raw.endswith("/"):
+                entries.append(VFSEntry(path=raw, size=0, is_dir=True))
+                continue
+            try:
+                st = self.call("stat", raw)
+            except FileNotFoundError:
+                entries.append(VFSEntry(path=raw, size=0, is_dir=False))
+                continue
+            entries.append(
+                VFSEntry(path=raw, size=content_size(st), is_dir=is_dir(st)))
+        return entries
 
     def create(self, path: str) -> None:
         self.call("create", path)
