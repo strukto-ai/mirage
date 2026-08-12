@@ -676,6 +676,33 @@ class GitHubServer:
             return _error(404, "Not Found")
         return web.json_response(_commit_list(repo))
 
+    async def commit(self, request: web.Request) -> web.Response:
+        """One commit by sha or by ref, with the paths it touched.
+
+        `/commits/{ref}` and `/git/commits/{sha}` are different endpoints:
+        this one takes a branch name as well as a sha and reports the file
+        list, which is what a caller asking "what changed" reads.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the commit, or 404.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        ref = request.match_info["ref"]
+        history = _commit_list(repo)
+        if ref in (repo.default_branch, "HEAD"):
+            return web.json_response(history[0])
+        for entry in history:
+            if entry["sha"] == ref:
+                return web.json_response(entry)
+        return _error(404, "Not Found")
+
     async def contents(self, request: web.Request) -> web.Response:
         """Read a file or list a directory.
 
@@ -913,6 +940,38 @@ class GitHubServer:
                 "type": "commit"
             },
         })
+
+    async def delete_contents(self, request: web.Request) -> web.Response:
+        """Delete a file, the way `DELETE /contents` does.
+
+        GitHub requires the current blob sha here as it does for a replace,
+        and answers 404 for a path that is not there.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the deleting commit, or an error.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        path = request.match_info.get("path", "").strip("/")
+        existing = repo.files.get(path)
+        if existing is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        if body.get("sha") != _blob_sha(existing):
+            return _error(409, f"{path} does not match")
+        remaining = dict(repo.files)
+        remaining.pop(path)
+        repo.replace_files(remaining)
+        commit = _record_commit(repo,
+                                str(body.get("message") or f"Delete {path}"),
+                                [path])
+        return web.json_response({"content": None, "commit": commit})
 
     async def list_issues(self, request: web.Request) -> web.Response:
         """List issues, newest first, filtered by state.
@@ -1324,12 +1383,17 @@ def _add_routes(app: web.Application, server: "GitHubServer",
         server.branch)
     app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/commits",
                        server.commits)
+    app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/commits/{{ref}}",
+                       server.commit)
     app.router.add_get(
         f"{prefix}/repos/{{owner}}/{{repo}}/contents/{{path:.*}}",
         server.contents)
     app.router.add_put(
         f"{prefix}/repos/{{owner}}/{{repo}}/contents/{{path:.*}}",
         server.put_contents)
+    app.router.add_delete(
+        f"{prefix}/repos/{{owner}}/{{repo}}/contents/{{path:.*}}",
+        server.delete_contents)
     app.router.add_get(f"{prefix}/repos/{{owner}}/{{repo}}/issues",
                        server.list_issues)
     app.router.add_post(f"{prefix}/repos/{{owner}}/{{repo}}/issues",

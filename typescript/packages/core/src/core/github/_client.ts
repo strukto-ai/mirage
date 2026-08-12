@@ -17,6 +17,12 @@ export const GITHUB_API_VERSION = '2022-11-28'
 
 export interface GitHubTransport {
   get(path: string, params?: Record<string, string>): Promise<unknown>
+  request(
+    method: string,
+    path: string,
+    body?: unknown,
+    params?: Record<string, string>,
+  ): Promise<unknown>
 }
 
 export class HttpGitHubTransport implements GitHubTransport {
@@ -28,23 +34,39 @@ export class HttpGitHubTransport implements GitHubTransport {
     this.baseUrl = opts.baseUrl ?? GITHUB_API_BASE
   }
 
-  async get(path: string, params?: Record<string, string>): Promise<unknown> {
+  get(path: string, params?: Record<string, string>): Promise<unknown> {
+    return this.request('GET', path, undefined, params)
+  }
+
+  async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    params?: Record<string, string>,
+  ): Promise<unknown> {
     const url = new URL(this.baseUrl + path)
     if (params !== undefined) {
       for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
     }
-    const r = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': GITHUB_API_VERSION,
-      },
-    })
-    if (!r.ok) {
-      const body = await r.text().catch(() => '')
-      throw new GitHubApiError(`GitHub ${path} → ${String(r.status)} ${body}`, r.status)
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': GITHUB_API_VERSION,
     }
-    return r.json()
+    const init: RequestInit = { method, headers }
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(body)
+    }
+    const r = await fetch(url.toString(), init)
+    if (!r.ok) {
+      const text = await r.text().catch(() => '')
+      throw new GitHubApiError(`GitHub ${path} → ${String(r.status)} ${text}`, r.status)
+    }
+    // 204 and an empty 202 have no body to decode; the caller gets null
+    // rather than a parse error on a call that succeeded.
+    const text = await r.text()
+    return text === '' ? null : (JSON.parse(text) as unknown)
   }
 }
 
