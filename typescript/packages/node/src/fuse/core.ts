@@ -337,8 +337,7 @@ export class MountCore {
       const cached = this.cachedData(path)
       ctx.data = cached ?? (await this.ops.readFile(this.resolve(path)))
     }
-    const data =
-      ctx?.data ?? this.cachedData(path) ?? (await this.ops.readFile(this.resolve(path)))
+    const data = ctx?.data ?? this.cachedData(path) ?? (await this.ops.readFile(this.resolve(path)))
     return data.subarray(pos, pos + len)
   }
 
