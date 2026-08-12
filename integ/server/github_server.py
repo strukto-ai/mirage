@@ -40,6 +40,7 @@ from aiohttp import web
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 SEARCH_SIZE_LIMIT = 384 * 1024
 DEFAULT_BRANCH = "main"
+DEFAULT_LOGIN = "integ-user"
 
 
 def _build_artifact_zip() -> bytes:
@@ -139,6 +140,161 @@ def _commit_sha(path: str) -> str:
     return hashlib.sha1(f"commit\0{path}".encode()).hexdigest()
 
 
+async def _json_body(request: web.Request) -> dict:
+    """Read a JSON body, treating an absent or malformed one as empty.
+
+    Args:
+        request (web.Request): the incoming request.
+
+    Returns:
+        dict: the decoded object, or {}.
+    """
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _repo_json(repo: "FakeRepo") -> dict:
+    """The repository shape every route returns.
+
+    Args:
+        repo (FakeRepo): the repository.
+
+    Returns:
+        dict: its JSON form.
+    """
+    return {
+        "name": repo.name,
+        "full_name": repo.full_name,
+        "default_branch": repo.default_branch,
+        "owner": {
+            "login": repo.owner
+        },
+    }
+
+
+def _commit_list(repo: "FakeRepo") -> list[dict]:
+    """Commits newest first, with a synthetic root for a fresh repository.
+
+    Args:
+        repo (FakeRepo): the repository.
+
+    Returns:
+        list[dict]: the commit list.
+    """
+    root = {
+        "sha": _commit_sha(repo.full_name),
+        "commit": {
+            "message": "Initial commit"
+        },
+        "files": [],
+    }
+    return [*reversed(repo.commits), root]
+
+
+def _record_commit(repo: "FakeRepo", message: str, paths: list[str]) -> dict:
+    """Append a commit for a write and return it.
+
+    Args:
+        repo (FakeRepo): the repository written to.
+        message (str): the commit message.
+        paths (list[str]): the paths the commit touched.
+
+    Returns:
+        dict: the recorded commit.
+    """
+    commit = {
+        "sha": _commit_sha(f"{repo.full_name}:{len(repo.commits)}:{message}"),
+        "commit": {
+            "message": message
+        },
+        "files": list(paths),
+    }
+    repo.commits.append(commit)
+    return commit
+
+
+def _branch_json(repo: "FakeRepo") -> dict:
+    """The default branch, pointing at the newest commit.
+
+    Args:
+        repo (FakeRepo): the repository.
+
+    Returns:
+        dict: the branch object.
+    """
+    return {
+        "name": repo.default_branch,
+        "commit": {
+            "sha": _commit_list(repo)[0]["sha"]
+        },
+    }
+
+
+def _content_json(repo: "FakeRepo", path: str) -> dict:
+    """One file as a contents object.
+
+    Args:
+        repo (FakeRepo): the repository.
+        path (str): path within it.
+
+    Returns:
+        dict: the base64-encoded content object.
+    """
+    data = repo.files[path]
+    return {
+        "type": "file",
+        "name": path.rsplit("/", 1)[-1],
+        "path": path,
+        "sha": _blob_sha(data),
+        "size": len(data),
+        "encoding": "base64",
+        "content": base64.b64encode(data).decode("ascii"),
+    }
+
+
+def _directory_json(repo: "FakeRepo", path: str) -> list[dict] | None:
+    """A directory listing, or None when the path is not a directory.
+
+    Args:
+        repo (FakeRepo): the repository.
+        path (str): directory path, "" for the root.
+
+    Returns:
+        list[dict] | None: the entries, or None.
+    """
+    prefix = f"{path}/" if path else ""
+    if path and path not in repo.directories():
+        return None
+    entries: dict[str, dict] = {}
+    for candidate in repo.files:
+        if not candidate.startswith(prefix):
+            continue
+        rest = candidate[len(prefix):]
+        head, _, tail = rest.partition("/")
+        if tail:
+            entries.setdefault(
+                head, {
+                    "type": "dir",
+                    "name": head,
+                    "path": f"{prefix}{head}",
+                    "sha": _tree_sha(f"{prefix}{head}"),
+                    "size": 0,
+                })
+        else:
+            data = repo.files[candidate]
+            entries[head] = {
+                "type": "file",
+                "name": head,
+                "path": candidate,
+                "sha": _blob_sha(data),
+                "size": len(data),
+            }
+    return [entries[name] for name in sorted(entries)]
+
+
 def _error(status: int, message: str) -> web.Response:
     return web.json_response(
         {
@@ -169,6 +325,12 @@ class FakeRepo:
         self.blobs: dict[str, bytes] = {}
         self.submodules: set[str] = set()
         self.truncated = False
+        # Write state. The read routes describe a repository as it is; a
+        # task that files an issue or commits a file needs the write to be
+        # visible to the next read, so both live here rather than being
+        # accepted and dropped.
+        self.issues: list[dict] = []
+        self.commits: list[dict] = []
 
     @property
     def full_name(self) -> str:
@@ -272,6 +434,10 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.repos: dict[str, FakeRepo] = {}
         self.base = ""
+        # Whoever the token belongs to. A task that forks or creates a
+        # repository has to be told where it landed, and every caller
+        # resolves that by asking /user first.
+        self.login = DEFAULT_LOGIN
 
     def repo(self, owner: str, name: str) -> FakeRepo:
         key = f"{owner}/{name}"
@@ -311,6 +477,316 @@ class GitHubServer:
             "owner": {
                 "login": repo.owner
             },
+        })
+
+    async def user(self, request: web.Request) -> web.Response:
+        """Who the token belongs to, which every write path resolves first.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the authenticated user.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        return web.json_response({
+            "login": self.state.login,
+            "name": self.state.login,
+            "type": "User",
+        })
+
+    async def create_repo(self, request: web.Request) -> web.Response:
+        """Create a repository under the authenticated user.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the created repository, or 422 if it exists.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        body = await _json_body(request)
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return _error(422, "Repository creation failed.")
+        key = f"{self.state.login}/{name}"
+        if key in self.state.repos:
+            return _error(422, "Repository creation failed.")
+        repo = self.state.repo(self.state.login, name)
+        return web.json_response(_repo_json(repo), status=201)
+
+    async def delete_repo(self, request: web.Request) -> web.Response:
+        """Delete a repository, as a task's preprocess does before seeding.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: 204, or 404 when there was nothing to delete.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        owner = request.match_info["owner"]
+        name = request.match_info["repo"]
+        if self.state.repos.pop(f"{owner}/{name}", None) is None:
+            return _error(404, "Not Found")
+        return web.Response(status=204)
+
+    async def fork_repo(self, request: web.Request) -> web.Response:
+        """Fork into the authenticated user's namespace.
+
+        The copy is deep: a fork the agent then commits to must not write
+        through to the source, which is what upstream's own preprocess
+        relies on when it forks an archive repository per run.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the newly created fork.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        source = self._lookup(request)
+        if source is None:
+            return _error(404, "Not Found")
+        fork = self.state.repo(self.state.login, source.name)
+        fork.default_branch = source.default_branch
+        fork.submodules = set(source.submodules)
+        for path, data in source.files.items():
+            fork.seed_path(path, data)
+        return web.json_response(_repo_json(fork), status=202)
+
+    async def branches(self, request: web.Request) -> web.Response:
+        """List branches. The fake keeps exactly the default one.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: a one-entry branch list.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        return web.json_response([_branch_json(repo)])
+
+    async def branch(self, request: web.Request) -> web.Response:
+        """One branch by name.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the branch, or 404 if it is not the default one.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        if request.match_info["branch"] != repo.default_branch:
+            return _error(404, "Branch not found")
+        return web.json_response(_branch_json(repo))
+
+    async def commits(self, request: web.Request) -> web.Response:
+        """Commit history, newest first.
+
+        Every seeded repository has one synthetic root commit so that
+        "the latest commit" is answerable before the agent writes anything.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the commit list.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        return web.json_response(_commit_list(repo))
+
+    async def contents(self, request: web.Request) -> web.Response:
+        """Read a file or list a directory.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: a content object, or a list of them for a
+                directory, matching GitHub's own shape.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        path = request.match_info.get("path", "").strip("/")
+        if path in repo.files:
+            return web.json_response(_content_json(repo, path))
+        listing = _directory_json(repo, path)
+        if listing is None:
+            return _error(404, "Not Found")
+        return web.json_response(listing)
+
+    async def put_contents(self, request: web.Request) -> web.Response:
+        """Create or update a file, the way `PUT /contents` does.
+
+        GitHub requires the current blob sha to replace an existing file
+        and refuses one for a new file; both are enforced here, because a
+        task that reads before writing is doing so for this reason.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the written content plus a synthetic commit.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        path = request.match_info.get("path", "").strip("/")
+        raw = body.get("content")
+        if raw is None:
+            return _error(422,
+                          "Invalid request.\n\n\"content\" wasn't supplied.")
+        try:
+            data = base64.b64decode(str(raw), validate=True)
+        except Exception:  # noqa: BLE001
+            return _error(422, "Invalid request.\n\n\"content\" is invalid.")
+        existing = repo.files.get(path)
+        given = body.get("sha")
+        if existing is not None and given != _blob_sha(existing):
+            return _error(409, f"{path} does not match")
+        if existing is None and given:
+            return _error(422, "Invalid request.\n\n\"sha\" wasn't supplied.")
+        created = existing is None
+        repo.seed_path(path, data)
+        commit = _record_commit(repo,
+                                str(body.get("message") or f"Update {path}"),
+                                [path])
+        return web.json_response(
+            {
+                "content": _content_json(repo, path),
+                "commit": commit,
+            },
+            status=201 if created else 200)
+
+    async def list_issues(self, request: web.Request) -> web.Response:
+        """List issues, newest first, filtered by state.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the issue list.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        wanted = request.query.get("state", "open")
+        issues = [
+            issue for issue in reversed(repo.issues)
+            if wanted == "all" or issue["state"] == wanted
+        ]
+        return web.json_response(issues)
+
+    async def create_issue(self, request: web.Request) -> web.Response:
+        """File an issue.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: the created issue.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        body = await _json_body(request)
+        title = str(body.get("title") or "").strip()
+        if not title:
+            return _error(422,
+                          "Invalid request.\n\n\"title\" wasn't supplied.")
+        labels = body.get("labels") or []
+        issue = {
+            "number":
+            len(repo.issues) + 1,
+            "title":
+            title,
+            "body":
+            body.get("body") or "",
+            "state":
+            "open",
+            "user": {
+                "login": self.state.login
+            },
+            "labels": [{
+                "name": str(name)
+            } for name in labels],
+            "html_url": (f"{self.state.base}/{repo.full_name}"
+                         f"/issues/{len(repo.issues) + 1}"),
+        }
+        repo.issues.append(issue)
+        return web.json_response(issue, status=201)
+
+    async def compare(self, request: web.Request) -> web.Response:
+        """Files changed between two refs.
+
+        The fake has one branch, so a comparison is answered from the
+        commits recorded since the base rather than from a real diff --
+        enough for "which files did the agent touch", which is what the
+        graders ask.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: a comparison carrying the changed files.
+        """
+        if not self._authed(request):
+            return _error(401, "Requires authentication")
+        repo = self._lookup(request)
+        if repo is None:
+            return _error(404, "Not Found")
+        spec = request.match_info.get("basehead", "")
+        base = spec.split("...")[0] if "..." in spec else ""
+        history = _commit_list(repo)
+        known = {commit["sha"] for commit in history}
+        # A base this repository has never heard of is an error, not an
+        # empty diff. Answering "nothing changed" to a question about an
+        # unrelated commit is the shape of wrongness that reads as success.
+        if base and base not in known and base != repo.default_branch:
+            return _error(404, "No common ancestor between the two commits")
+        # `history` is newest first, so everything *before* the base is
+        # what came after it in time. Walking past the base instead would
+        # collect the commits the base already contains.
+        touched: list[str] = []
+        for commit in history:
+            if base and commit["sha"] == base:
+                break
+            touched.extend(commit.get("files", []))
+        files = [{
+            "filename": path,
+            "status": "modified"
+        } for path in dict.fromkeys(touched)]
+        return web.json_response({
+            "status": "ahead",
+            "files": files,
+            "commits": [],
         })
 
     async def tree(self, request: web.Request) -> web.Response:
@@ -504,6 +980,24 @@ class GitHubServer:
 def build_app(server: GitHubServer) -> web.Application:
     app = web.Application()
     app.router.add_get("/repos/{owner}/{repo}", server.repo_info)
+    # Write and listing routes. Ordered before the tree routes only for
+    # readability; aiohttp matches on the full pattern, not on order.
+    app.router.add_get("/user", server.user)
+    app.router.add_post("/user/repos", server.create_repo)
+    app.router.add_delete("/repos/{owner}/{repo}", server.delete_repo)
+    app.router.add_post("/repos/{owner}/{repo}/forks", server.fork_repo)
+    app.router.add_get("/repos/{owner}/{repo}/branches", server.branches)
+    app.router.add_get("/repos/{owner}/{repo}/branches/{branch}",
+                       server.branch)
+    app.router.add_get("/repos/{owner}/{repo}/commits", server.commits)
+    app.router.add_get("/repos/{owner}/{repo}/contents/{path:.*}",
+                       server.contents)
+    app.router.add_put("/repos/{owner}/{repo}/contents/{path:.*}",
+                       server.put_contents)
+    app.router.add_get("/repos/{owner}/{repo}/issues", server.list_issues)
+    app.router.add_post("/repos/{owner}/{repo}/issues", server.create_issue)
+    app.router.add_get("/repos/{owner}/{repo}/compare/{basehead}",
+                       server.compare)
     app.router.add_get("/repos/{owner}/{repo}/git/trees/{ref}", server.tree)
     app.router.add_get("/repos/{owner}/{repo}/git/blobs/{sha}", server.blob)
     app.router.add_get("/search/code", server.search_code)
