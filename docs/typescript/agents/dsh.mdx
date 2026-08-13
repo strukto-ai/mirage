@@ -4,7 +4,7 @@ description: Register Mirage as the filesystem and shell of DeepSeek Harness (ds
 icon: /images/deepseek-logo.svg
 ---
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a plugin-based agent harness on Cordis where the filesystem and the shell are swappable capability seams. `@struktoai/mirage-dsh` provides both seams over one Mirage workspace: `ctx.fs` for dsh's read/write/edit tools and `ctx.shell` for its bash tool. Anything Mirage mounts — S3, Gmail, Slack, Notion, Postgres — becomes the world those tools operate in.
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a plugin-based agent harness on Cordis where the filesystem and the shell are swappable capability seams. `@struktoai/mirage-dsh` provides both seams over one Mirage workspace: `ctx.fs` for dsh's read/write/edit tools and `ctx.shell` for its bash tool. Anything Mirage mounts (S3, Gmail, Slack, Notion, Postgres) becomes the world those tools operate in.
 
 ## Install
 
@@ -36,7 +36,7 @@ await ctx.plugin(MirageFileSystem, {}).await()
 await ctx.plugin(MirageShellExecutor, {}).await()
 ```
 
-Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where scripts may run. dsh's bash tool now spans every source in one line (`resolve` fills a request into a spec with the defaults and `run` executes it — the same two calls dsh's own tools make):
+Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where scripts may run. dsh's bash tool now spans every source in one line (`resolve` fills a request into a spec with the defaults and `run` executes it, the same two calls dsh's own tools make):
 
 ```ts
 const shell = ctx.shell
@@ -47,7 +47,7 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 ## Run Python with monty
 
-The `runtimes` entry above sets [monty](https://github.com/pydantic/monty) — a sandboxed Python interpreter with no host access — up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
+The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
 
 ```ts
 const script = await shell.run(
@@ -59,8 +59,10 @@ const script = await shell.run(
 
 [`examples/typescript/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
 
+A concrete scenario: serving agents from a TypeScript server (an Express endpoint, say), where every request is assigned its own context and workspace, created on entry and gone with the response. What one 2 vCPU / 8 GB box holds then depends on the harness:
+
 | Harness | Where Mirage sits | A session is | Concurrent on 2 vCPU / 8 GB |
 | --- | --- | --- | --- |
-| DeepSeek Harness (this page) | its filesystem and shell | objects in your process — no subprocess, roughly 0.5 ms and 240 KB each | thousands (a couple hundred with a live Python engine, ~27 MB each) |
+| dsh | its filesystem and shell | objects in your process, no subprocess, roughly 0.5 ms and 240 KB each | thousands (a couple hundred with a live Python engine, ~27 MB each) |
 | [Codex](/typescript/agents/codex) | tools beside the CLI's native ones | a Codex CLI process plus a Node tool server | a few dozen |
-| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | MCP tools served from your process | a spawned Claude Code CLI process | about 15–20 |
+| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | MCP tools served from your process | a spawned Claude Code CLI process | about 15 to 20 |
