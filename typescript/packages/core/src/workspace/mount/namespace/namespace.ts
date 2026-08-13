@@ -23,7 +23,7 @@ import {
 import { epochToIso } from '../../../utils/dates.ts'
 import { globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { ResolveFn } from '../../dispatcher.ts'
+import type { ResolveFn } from '../../dispatcher/index.ts'
 import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
@@ -249,10 +249,6 @@ export class Namespace {
     await this.store.set(path, metaToFields(meta))
   }
 
-  // Drop overlay times after a content write. write(2) refreshes mtime,
-  // so a stored overlay time would otherwise shadow the backend's fresh
-  // one forever. Permission and ownership survive writes; a symlink entry
-  // keeps its own times.
   // Drop overlay fields that a backend has applied natively. A
   // residual-free native setattr means the real inode now holds the
   // requested value, so a stale overlay field would shadow it forever
@@ -288,6 +284,10 @@ export class Namespace {
     return true
   }
 
+  // Drop overlay times after a content write. write(2) refreshes mtime,
+  // so a stored overlay time would otherwise shadow the backend's fresh
+  // one forever. Permission and ownership survive writes; a symlink entry
+  // keeps its own times.
   async clearTimes(path: string, observed: number | null = null): Promise<void> {
     let meta = this.nodeTable.get(path)
     if (meta === undefined && observed !== null) {

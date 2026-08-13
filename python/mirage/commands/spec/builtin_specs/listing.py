@@ -105,6 +105,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c"),
             Option(short="-L"),
             Option(short="-P"),
+            Option(short="-S", long="--separate-dirs"),
         ),
         rest=Operand(type="path"),
     ),

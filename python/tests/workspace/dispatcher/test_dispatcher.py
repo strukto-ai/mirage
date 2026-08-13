@@ -105,6 +105,34 @@ async def test_setattr_classifies_as_a_write():
 
 
 @pytest.mark.asyncio
+async def test_symlink_classifies_as_a_write():
+    # A symlink create is a name-plane write the door itself answers;
+    # the policy write classification must cover it like any mutation.
+    policies = Policies()
+    policies.add(DenyWrites())
+    dispatcher, _ = _dispatcher(policies)
+    ns = dispatcher._namespace
+    ns.registry.mounts = MagicMock(return_value=[ns.mount_for.return_value])
+    ns.symlink = AsyncMock()
+    with pytest.raises(PolicyDenied):
+        await dispatcher.dispatch("symlink", _path("/data/lk"), target="x")
+    ns.symlink.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_readlink_answers_from_the_namespace():
+    # readlink is the read twin: the namespace table is the authority,
+    # never a backend, and the operand is not rewritten through follow.
+    dispatcher, _ = _dispatcher(Policies())
+    ns = dispatcher._namespace
+    ns.registry.mounts = MagicMock(return_value=[ns.mount_for.return_value])
+    ns.readlink = MagicMock(return_value="x.txt")
+    result, _ = await dispatcher.dispatch("readlink", _path("/data/lk"))
+    assert result == "x.txt"
+    ns.follow.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_spec_op_twin_holds_on_the_dispatch_door():
     policies = Policies()
     policies.add(GuardSpec(reason="frozen", paths=("/data/locked/*", )))

@@ -20,7 +20,7 @@ import mirage.commands.builtin as builtin
 from mirage.commands.config import RegisteredCommand
 
 # The families whose generics merge namespace symlinks (ls/stat/find/
-# du/file read `opts.links`). Since CommandOpts carries the fact into
+# du/file read `opts.ns.links`). Since CommandOpts carries the fact into
 # every handler, link awareness is inherited by delegating to the
 # family generic — so the invariant worth pinning is the delegation
 # itself: a bespoke wrapper that walks its own tree cannot see a link,
@@ -70,13 +70,13 @@ def _registered() -> tuple[list[RegisteredCommand], list[str]]:
 
 
 def test_link_aware_generics_read_the_links_field():
-    """The family generics consume ``opts.links``; deleting the read is
-    how link support silently dies, so the read itself is pinned."""
+    """The family generics consume ``opts.ns.links``; deleting the read
+    is how link support silently dies, so the read itself is pinned."""
     for name in LINK_AWARE:
         module = importlib.import_module(
             f"mirage.commands.builtin.generic.{name}")
-        assert "opts.links" in inspect.getsource(module), (
-            f"generic {name} no longer reads opts.links; symlinks are "
+        assert "opts.ns.links" in inspect.getsource(module), (
+            f"generic {name} no longer reads opts.ns.links; symlinks are "
             "invisible to the whole family")
 
 

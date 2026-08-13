@@ -702,22 +702,23 @@ async def ls_generic(
         stat (Stat): Bound (overlaid) stat called as ``stat(p, index)``.
     """
     parsed = parse_flags(opts.flags)
-    return await ls(paths,
-                    readdir=readdir,
-                    stat=stat,
-                    long=parsed.long,
-                    one_per_line=parsed.one_per_line,
-                    all_files=parsed.all_files,
-                    human=parsed.human,
-                    sort_by=parsed.sort_by,
-                    reverse=parsed.reverse,
-                    recursive=parsed.recursive,
-                    list_dir=parsed.list_dir,
-                    classify=parsed.classify,
-                    index=opts.index,
-                    links=opts.links,
-                    deref=parsed.deref,
-                    child_mounts=opts.child_mounts)
+    return await ls(
+        paths,
+        readdir=readdir,
+        stat=stat,
+        long=parsed.long,
+        one_per_line=parsed.one_per_line,
+        all_files=parsed.all_files,
+        human=parsed.human,
+        sort_by=parsed.sort_by,
+        reverse=parsed.reverse,
+        recursive=parsed.recursive,
+        list_dir=parsed.list_dir,
+        classify=parsed.classify,
+        index=opts.index,
+        links=opts.ns.links if opts.ns is not None else None,
+        deref=parsed.deref,
+        child_mounts=opts.ns.child_mounts if opts.ns is not None else None)
 
 
 __all__ = [

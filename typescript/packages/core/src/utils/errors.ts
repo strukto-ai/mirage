@@ -68,6 +68,12 @@ export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
 }
 
+// readlink on a path that exists but is not a symlink. Mirrors Python's
+// OSError(errno.EINVAL).
+export function einval(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EINVAL')
+}
+
 // A rename whose two ends sit on different mounts. POSIX's answer for a
 // rename across filesystems, and the one a caller reads as "copy and
 // unlink instead" (that is what makes `mv` work over a FUSE mount).

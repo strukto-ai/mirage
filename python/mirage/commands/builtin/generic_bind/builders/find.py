@@ -50,13 +50,14 @@ async def find(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     if not ops.is_mounted(accessor):
         raise ValueError("find: no resource")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
     if ops.find is None:
         # -mtime must see namespace times (touch results, observed
         # writes on mtime-less backends), same as ls.
         walk_stat: Callable[...,
                             Awaitable[FileStat]] = partial(ops.stat, accessor)
-        if opts.stat_overlay is not None:
-            walk_stat = partial(overlaid_stat, walk_stat, opts.stat_overlay)
+        if overlay is not None:
+            walk_stat = partial(overlaid_stat, walk_stat, overlay)
         return await find_walk_generic(resolved,
                                        list(texts),
                                        opts,
@@ -64,10 +65,10 @@ async def find(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                                        stat=walk_stat)
     stat: Callable[..., Awaitable[FileStat]] | None = (partial(
         ops.stat, accessor, index=opts.index) if ops.local else None)
-    if stat is not None and opts.stat_overlay is not None:
+    if stat is not None and overlay is not None:
         stat = partial(overlaid_stat,
                        partial(ops.stat, accessor),
-                       opts.stat_overlay,
+                       overlay,
                        index=opts.index)
     return await find_generic(resolved,
                               list(texts),

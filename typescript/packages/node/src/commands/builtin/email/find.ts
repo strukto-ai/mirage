@@ -57,9 +57,10 @@ async function findCommand(
           readdir: (spec, i) => emailReaddir(accessor, spec, i),
           stat: async (spec, i) => {
             const st = await emailStat(accessor, spec, i)
-            return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+            const overlay = opts.ns?.statOverlay
+            return overlay !== undefined ? overlay(spec.virtual, st) : st
           },
-          links: opts.links ?? null,
+          links: opts.ns?.links ?? null,
         },
         options,
         idx,

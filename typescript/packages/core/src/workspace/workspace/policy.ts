@@ -26,6 +26,7 @@ import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
+import { envSnapshot } from '../session/state.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
 
@@ -96,7 +97,7 @@ export class PolicyRouter {
       command: commands[0]?.command ?? '',
       builtin: commands[0]?.builtin ?? false,
       cwd: options.cwd ?? session.cwd,
-      env: { ...session.env, ...(options.env ?? {}) },
+      env: { ...envSnapshot(session), ...(options.env ?? {}) },
       sessionId,
       agentId: options.agentId ?? this.agentId ?? '',
       mounts: this.resolver.prefixes(),

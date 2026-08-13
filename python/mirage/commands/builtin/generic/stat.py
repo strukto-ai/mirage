@@ -332,4 +332,4 @@ async def stat_generic(paths, texts, opts: CommandOpts, stat_fn):
                       c=parsed.format,
                       f=parsed.file_system,
                       L=parsed.deref,
-                      links=opts.links)
+                      links=opts.ns.links if opts.ns is not None else None)

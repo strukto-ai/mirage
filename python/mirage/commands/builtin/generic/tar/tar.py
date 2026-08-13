@@ -268,5 +268,5 @@ async def tar_generic(paths, texts, opts: CommandOpts, read_bytes, write_bytes,
                      C=list(parsed.directories) or None,
                      strip_components=parsed.strip_components,
                      exclude=parsed.exclude,
-                     links=opts.links,
-                     mounts=opts.mounts)
+                     links=opts.ns.links if opts.ns is not None else None,
+                     mounts=opts.ns.mounts if opts.ns is not None else None)

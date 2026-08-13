@@ -35,11 +35,12 @@ async def mv(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     fl = FlagView(opts.flags, spec=SPECS["mv"])
     parsed = parse_mv_flags(fl)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
     return await generic_mv(
         paths,
         strategy=NativeMove(
             rename=partial(ops.require(Operation.RENAME), accessor)),
-        stat=overlayable_stat(ops, accessor, opts.index, opts.stat_overlay),
+        stat=overlayable_stat(ops, accessor, opts.index, overlay),
         flags=parsed,
         readdir=bound_op(ops.readdir, accessor, opts.index))
 

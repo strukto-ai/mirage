@@ -23,15 +23,111 @@ import { shellJoin } from '../../../shell/join.ts'
 import { parseOptionWord } from '../../../shell/options.ts'
 import { SET_OPTION_NAMES } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
+import { PolicyDenied } from '../../../policy/errors.ts'
+import {
+  arrayAppend,
+  arrayExtent,
+  arrayUnset,
+  makeArray,
+  type ShellArray,
+} from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
+import { ReadonlyVariableError } from '../../session/errors.ts'
 import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
+import { envSnapshot, sessionView } from '../../session/state.ts'
+import type { SessionView } from '../../../ops/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../control.ts'
 import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+
+/**
+ * The session view to write through. Production callers thread the
+ * workspace's gated view; a direct invocation (a unit test) gets an
+ * ungated one over the same session.
+ */
+function viewOf(session: Session, state: SessionView | null): SessionView {
+  return state ?? sessionView(session)
+}
+
+/** Render a policy denial in the builtin's own voice. */
+function doorRefusal(cmd: string, err: PolicyDenied): Result {
+  const encoded = new TextEncoder().encode(`${err.message}\n`)
+  return [
+    null,
+    new IOResult({ exitCode: 1, stderr: encoded }),
+    new ExecutionNode({ command: cmd, exitCode: 1, stderr: encoded }),
+  ]
+}
+
+/** Render the shell's own readonly refusal, checked before the door. */
+function readonlyRefusal(cmd: string, name: string): Result {
+  const encoded = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+  return [
+    null,
+    new IOResult({ exitCode: 1, stderr: encoded }),
+    new ExecutionNode({ command: cmd, exitCode: 1, stderr: encoded }),
+  ]
+}
+
+/**
+ * Store a declaration's array literals through the session door.
+ *
+ * The builtin owns the store so a refusal speaks in its own voice:
+ * readonly is the shell's rule, checked per name before the door, and
+ * the door's gate covers the policy half. Names are processed in
+ * order, so an earlier operand stays stored when a later one refuses,
+ * as bash does. Returns the refusal result, or null when every
+ * literal stored. `mark` also marks each stored name readonly (the
+ * `readonly` keyword's half). A readonly refusal of an array literal
+ * is a variable-assignment error in GNU, not a builtin failure: for
+ * `export`/`readonly` (and `declare` at top level) `fatal` abandons
+ * the rest of the line, while `local` and a function-scoped `declare`
+ * refuse in the builtin's voice and the body keeps running (pinned on
+ * bash 5.2, debian:stable-slim).
+ */
+async function storeStagedArrays(
+  cmd: string,
+  session: Session,
+  view: SessionView,
+  arrays: { name: string; append: boolean; items: string[] }[],
+  mark = false,
+  fatal = false,
+): Promise<Result | null> {
+  for (const { name, append, items } of arrays) {
+    if (view.isReadonly(name)) {
+      if (fatal) {
+        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        throw new ExitSignal(1, err, null, 1)
+      }
+      return readonlyRefusal(cmd, name)
+    }
+    noteLocalArray(session, name)
+    let base: ShellArray
+    if (append) {
+      const existing = session.arrays[name]
+      if (existing === undefined) {
+        const scalar = session.env[name]
+        base = scalar === undefined ? [] : [scalar]
+      } else {
+        base = [...existing]
+      }
+      arrayAppend(base, items)
+    } else {
+      base = makeArray(items)
+    }
+    try {
+      await view.set(name, base)
+    } catch (err) {
+      if (err instanceof PolicyDenied) return doorRefusal(cmd, err)
+      throw err
+    }
+    if (mark) session.readonlyVars.add(name)
+  }
+  return null
+}
 
 const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or export -p\n'
 const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
@@ -159,8 +255,15 @@ function readonlyLines(session: Session, flags: Set<string>): string[] {
  *
  * With no name operands, prints every entry in `session.env` as
  * `declare -x NAME="value"`. Invalid option characters fail with status 2.
+ * Writes go through the session view, so readonly refusal and the
+ * preSession policy gate fire here exactly as for any other writer.
  */
-export function handleExport(assignments: string[], session: Session): Result {
+export async function handleExport(
+  assignments: string[],
+  session: Session,
+  state: SessionView | null = null,
+  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
+): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, EXPORT_FLAGS)
   if (bad !== null) {
     const err = new TextEncoder().encode(`bash: export: -${bad}: invalid option\n${EXPORT_USAGE}`)
@@ -170,26 +273,39 @@ export function handleExport(assignments: string[], session: Session): Result {
       new ExecutionNode({ command: 'export', exitCode: 2, stderr: err }),
     ]
   }
-  if (names.length === 0) {
+  if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = exportLines(session, flags)
     const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
+  }
+  const view = viewOf(session, state)
+  if (arrays !== null && arrays.length > 0) {
+    const refused = await storeStagedArrays('export', session, view, arrays, false, true)
+    if (refused !== null) return refused
   }
   for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
-      if (session.readonlyVars.has(key)) {
-        const err = new TextEncoder().encode(`bash: ${key}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: 'export', exitCode: 1, stderr: err }),
-        ]
+      if (view.isReadonly(key)) return readonlyRefusal('export', key)
+      try {
+        await view.set(key, assign.slice(eq + 1))
+      } catch (err) {
+        if (err instanceof PolicyDenied) return doorRefusal('export', err)
+        throw err
       }
-      session.env[key] = assign.slice(eq + 1)
-    } else if (!(assign in session.env)) {
-      session.env[assign] = ''
+    } else if (!(assign in session.env) && !(assign in session.arrays)) {
+      // `export NAME` with no value writes an empty entry, which is
+      // still a session write; an existing name (scalar or array) is
+      // only re-marked for export, so nothing is written — a scalar
+      // write here would erase an array.
+      if (view.isReadonly(assign)) return readonlyRefusal('export', assign)
+      try {
+        await view.set(assign, '')
+      } catch (err) {
+        if (err instanceof PolicyDenied) return doorRefusal('export', err)
+        throw err
+      }
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
@@ -201,7 +317,12 @@ export function handleExport(assignments: string[], session: Session): Result {
  * With no name operands, prints every readonly name as `declare -r` (or
  * `declare -ar` for arrays). Invalid options fail with status 2.
  */
-export function handleReadonly(assignments: string[], session: Session): Result {
+export async function handleReadonly(
+  assignments: string[],
+  session: Session,
+  state: SessionView | null = null,
+  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
+): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
   if (bad !== null) {
     const err = new TextEncoder().encode(
@@ -213,24 +334,27 @@ export function handleReadonly(assignments: string[], session: Session): Result 
       new ExecutionNode({ command: 'readonly', exitCode: 2, stderr: err }),
     ]
   }
-  if (names.length === 0) {
+  if (names.length === 0 && (arrays === null || arrays.length === 0)) {
     const lines = readonlyLines(session, flags)
     const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
+  }
+  const view = viewOf(session, state)
+  if (arrays !== null && arrays.length > 0) {
+    const refused = await storeStagedArrays('readonly', session, view, arrays, true, true)
+    if (refused !== null) return refused
   }
   for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
-      if (session.readonlyVars.has(key)) {
-        const err = new TextEncoder().encode(`bash: ${key}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: 'readonly', exitCode: 1, stderr: err }),
-        ]
+      if (view.isReadonly(key)) return readonlyRefusal('readonly', key)
+      try {
+        await view.set(key, assign.slice(eq + 1))
+      } catch (err) {
+        if (err instanceof PolicyDenied) return doorRefusal('readonly', err)
+        throw err
       }
-      session.env[key] = assign.slice(eq + 1)
       session.readonlyVars.add(key)
     } else {
       session.readonlyVars.add(assign)
@@ -239,46 +363,54 @@ export function handleReadonly(assignments: string[], session: Session): Result 
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
 }
 
-/**
- * Remove a scalar/array variable, or one array element `name[idx]`.
- *
- * Clearing an element keeps the indices of the elements after it, as bash
- * does: it leaves a hole, which neither expands in `${arr[@]}` nor counts
- * toward `${#arr[@]}` but keeps `${arr[i]}` addressing the same values.
- * Trailing holes are dropped, so `arr+=(x)` refills the slot a trailing
- * unset freed.
- *
- * A subscript on a scalar names element 0 only: `x[0]` unsets the scalar
- * and any other subscript reports `notarray`. A subscript on a name that
- * holds nothing at all is a silent no-op, but on an existing array a
- * negative subscript still below zero after the extent is added reports
- * `subscript`.
- */
-function unsetVariable(session: Session, name: string): 'ok' | 'notarray' | 'subscript' {
-  const match = PRINTF_TARGET_RE.exec(name)
-  if (match?.[2] !== undefined) {
-    const base = match[1] ?? ''
-    const arr = sessionEntry(session.arrays, base)
-    if (arr === undefined) {
-      if (sessionEntry(session.env, base) === undefined) return 'ok'
-      if (arrayIndex(match[2], session.env) !== 0) return 'notarray'
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.env[base]
-      return 'ok'
-    }
-    let idx = arrayIndex(match[2], session.env)
-    if (idx < 0) {
-      idx += arrayExtent(arr)
-      if (idx < 0) return 'subscript'
-    }
-    arrayUnset(arr, idx)
-    return 'ok'
-  }
+/** Remove a whole scalar or array variable (no subscript). */
+function unsetVariable(session: Session, name: string): void {
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.env[name]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.arrays[name]
   if (name === 'OPTIND') session.getoptsOptind = null
+}
+
+/**
+ * Clear one array element, or a scalar addressed as `base[0]`.
+ *
+ * Clearing an element keeps the indices of the elements after it, as bash
+ * does: it leaves a hole, which neither expands in `${arr[@]}` nor counts
+ * toward `${#arr[@]}` but keeps `${arr[i]}` addressing the same values. A
+ * subscript on a scalar names element 0 only: `x[0]` unsets the scalar
+ * and any other subscript reports `notarray`. A subscript on a name that
+ * holds nothing at all is a silent no-op, but on an existing array a
+ * negative subscript still below zero after the extent is added reports
+ * `subscript`.
+ *
+ * The element mechanics are the builtin's own, but every landing write
+ * still mutates `base`'s session state, so it clears the plane's gate
+ * first: for an array base the view's env half is empty, so `view.unset`
+ * is exactly the gate, and for a scalar's element 0 it is the whole
+ * unset itself. Validation errors write nothing and so never ask.
+ */
+async function unsetElement(
+  session: Session,
+  view: SessionView,
+  base: string,
+  subscript: string,
+): Promise<'ok' | 'notarray' | 'subscript'> {
+  const arr = sessionEntry(session.arrays, base)
+  if (arr === undefined) {
+    if (sessionEntry(session.env, base) === undefined) return 'ok'
+    if (arrayIndex(subscript, session.env) !== 0) return 'notarray'
+    await view.unset(base)
+    return 'ok'
+  }
+  let idx = arrayIndex(subscript, session.env)
+  if (idx < 0) {
+    idx += arrayExtent(arr)
+    if (idx < 0) return 'subscript'
+  }
+  const next = [...arr]
+  arrayUnset(next, idx)
+  await view.set(base, next)
   return 'ok'
 }
 
@@ -292,7 +424,11 @@ function unsetVariable(session: Session, name: string): 'ok' | 'notarray' | 'sub
  * has no referent here — mirage has no nameref attribute — so it matches
  * bash on a non-nameref name and leaves it untouched.
  */
-export function handleUnset(args: string[], session: Session): Result {
+export async function handleUnset(
+  args: string[],
+  session: Session,
+  state: SessionView | null = null,
+): Promise<Result> {
   let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
   let i = 0
   while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
@@ -327,7 +463,8 @@ export function handleUnset(args: string[], session: Session): Result {
       continue
     }
     const match = PRINTF_TARGET_RE.exec(name)
-    const isElement = match?.[2] !== undefined
+    const subscript = match?.[2]
+    const isElement = subscript !== undefined
     // `readonly arr` records the base name, so an `arr[i]` operand has to
     // be resolved before the guard, as bash does (which also names the
     // base, not the element, in the error).
@@ -343,7 +480,23 @@ export function handleUnset(args: string[], session: Session): Result {
       ]
     }
     const existed = isElement || name in session.env || name in session.arrays
-    const status = unsetVariable(session, name)
+    // Both spellings clear the preSession gate for the base name: the
+    // whole-variable unset through the view's env half, an element
+    // unset inside unsetElement, so `unset 'X[0]'` cannot sidestep a
+    // policy that vetoes `unset X`.
+    let status: 'ok' | 'notarray' | 'subscript'
+    try {
+      if (subscript !== undefined) {
+        status = await unsetElement(session, viewOf(session, state), base, subscript)
+      } else {
+        await viewOf(session, state).unset(name)
+        unsetVariable(session, name)
+        status = 'ok'
+      }
+    } catch (err) {
+      if (err instanceof PolicyDenied) return doorRefusal('unset', err)
+      throw err
+    }
     if (status !== 'ok') {
       // bash names the base for "not an array variable" but prints only
       // the bracketed part for a bad subscript.
@@ -479,7 +632,7 @@ export async function handleEnv(
   }
 
   const dropSet = new Set(unset)
-  const source = ignoreEnv ? {} : session.env
+  const source = ignoreEnv ? {} : envSnapshot(session)
   const base: Record<string, string> = ownRecord()
   for (const [k, v] of Object.entries(source)) {
     if (!dropSet.has(k)) base[k] = v
@@ -550,21 +703,54 @@ export function noteLocalArray(session: Session, name: string): boolean {
   return true
 }
 
-export function handleLocal(assignments: string[], session: Session): Result {
+export async function handleLocal(
+  assignments: string[],
+  session: Session,
+  state: SessionView | null = null,
+  arrays: { name: string; append: boolean; items: string[] }[] | null = null,
+): Promise<Result> {
   const locals = session.localVars
+  const view = viewOf(session, state)
+  if (arrays !== null && arrays.length > 0) {
+    const refused = await storeStagedArrays(
+      'local',
+      session,
+      view,
+      arrays,
+      false,
+      session.localArrays === null,
+    )
+    if (refused !== null) return refused
+  }
   for (const assign of assignments) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
+      if (view.isReadonly(key)) return readonlyRefusal('local', key)
       if (locals !== null && !locals.has(key)) {
         locals.set(key, key in session.env ? (session.env[key] ?? null) : null)
       }
-      session.env[key] = assign.slice(eq + 1)
+      try {
+        await view.set(key, assign.slice(eq + 1))
+      } catch (err) {
+        if (err instanceof PolicyDenied) return doorRefusal('local', err)
+        throw err
+      }
     } else {
       if (locals !== null && !locals.has(assign)) {
         locals.set(assign, assign in session.env ? (session.env[assign] ?? null) : null)
       }
-      if (!(assign in session.env)) session.env[assign] = ''
+      if (!(assign in session.env) && !(assign in session.arrays)) {
+        // A bare declaration of an existing array re-scopes it; a
+        // scalar write here would erase it.
+        if (view.isReadonly(assign)) return readonlyRefusal('local', assign)
+        try {
+          await view.set(assign, '')
+        } catch (err) {
+          if (err instanceof PolicyDenied) return doorRefusal('local', err)
+          throw err
+        }
+      }
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'local', exitCode: 0 })]
@@ -665,8 +851,9 @@ function isValidName(name: string): boolean {
   return IDENTIFIER_RE.test(name)
 }
 
-function getoptsFinish(
+async function getoptsFinish(
   session: Session,
+  view: SessionView,
   name: string,
   optValue: string,
   optarg: string | null,
@@ -674,22 +861,36 @@ function getoptsFinish(
   newPos: number,
   exitCode: number,
   stderr: Uint8Array | null = null,
-): Result {
+): Promise<Result> {
   // The name is assigned last, exactly as bash does: OPTIND/OPTARG and
   // the hidden cursor still advance, but a bad destination fails the
-  // write and turns the call into a status-1 error.
-  if (!isValidName(name)) {
-    stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
-    exitCode = 1
-  } else if (session.readonlyVars.has(name)) {
-    stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
-    exitCode = 1
-  } else {
-    session.env[name] = optValue
+  // write and turns the call into a status-1 error. Writes go through
+  // the session view, so a preSession policy or a readonly OPTARG /
+  // OPTIND refuses here too.
+  try {
+    if (!isValidName(name)) {
+      stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
+      exitCode = 1
+    } else if (session.readonlyVars.has(name)) {
+      stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+      exitCode = 1
+    } else {
+      await view.set(name, optValue)
+    }
+    if (optarg === null) await view.unset('OPTARG')
+    else await view.set('OPTARG', optarg)
+    await view.set('OPTIND', String(newOptind))
+  } catch (err) {
+    if (err instanceof ReadonlyVariableError) {
+      stderr = new TextEncoder().encode(`bash: ${err.varName}: readonly variable\n`)
+      exitCode = 1
+    } else if (err instanceof PolicyDenied) {
+      stderr = new TextEncoder().encode(`${err.message}\n`)
+      exitCode = 1
+    } else {
+      throw err
+    }
   }
-  if (optarg === null) delete session.env.OPTARG
-  else session.env.OPTARG = optarg
-  session.env.OPTIND = String(newOptind)
   session.getoptsPos = newPos
   session.getoptsOptind = newOptind
   const io = new IOResult(stderr === null ? { exitCode } : { exitCode, stderr })
@@ -701,11 +902,12 @@ function getoptsFinish(
 }
 
 /** Parse one option per call, with bash's getopts semantics. */
-export function handleGetopts(
+export async function handleGetopts(
   args: readonly string[],
   session: Session,
   callStack: CallStack | null = null,
-): Result {
+  state: SessionView | null = null,
+): Promise<Result> {
   if (args.length < 2) {
     const err = new TextEncoder().encode('getopts: usage: getopts optstring name [arg]\n')
     return [
@@ -714,6 +916,7 @@ export function handleGetopts(
       new ExecutionNode({ command: 'getopts', exitCode: 2, stderr: err }),
     ]
   }
+  const view = viewOf(session, state)
   const optstring = args[0] ?? ''
   const name = args[1] ?? ''
   let params: readonly string[]
@@ -732,7 +935,7 @@ export function handleGetopts(
   let pos = session.getoptsPos
 
   if (optind > params.length) {
-    return getoptsFinish(session, name, '?', null, optind, 0, 1)
+    return getoptsFinish(session, view, name, '?', null, optind, 0, 1)
   }
   const word = params[optind - 1] ?? ''
   // A stale cursor left past the end of the current word (a shorter or
@@ -740,9 +943,9 @@ export function handleGetopts(
   if (pos >= word.length) pos = 0
   if (pos === 0) {
     if (!word.startsWith('-') || word === '-') {
-      return getoptsFinish(session, name, '?', null, optind, 0, 1)
+      return getoptsFinish(session, view, name, '?', null, optind, 0, 1)
     }
-    if (word === '--') return getoptsFinish(session, name, '?', null, optind + 1, 0, 1)
+    if (word === '--') return getoptsFinish(session, view, name, '?', null, optind + 1, 0, 1)
     pos = 1
   }
 
@@ -755,23 +958,23 @@ export function handleGetopts(
 
   if (!isValid) {
     const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
-    if (silent) return getoptsFinish(session, name, '?', letter, afterOptind, afterPos, 0)
+    if (silent) return getoptsFinish(session, view, name, '?', letter, afterOptind, afterPos, 0)
     const err = verbose ? enc.encode(`bash: illegal option -- ${letter}\n`) : null
-    return getoptsFinish(session, name, '?', null, afterOptind, afterPos, 0, err)
+    return getoptsFinish(session, view, name, '?', null, afterOptind, afterPos, 0, err)
   }
 
   if (!takesArg) {
     const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
-    return getoptsFinish(session, name, letter, null, afterOptind, afterPos, 0)
+    return getoptsFinish(session, view, name, letter, null, afterOptind, afterPos, 0)
   }
 
-  if (rest) return getoptsFinish(session, name, letter, rest, optind + 1, 0, 0)
+  if (rest) return getoptsFinish(session, view, name, letter, rest, optind + 1, 0, 0)
   if (optind < params.length) {
-    return getoptsFinish(session, name, letter, params[optind] ?? '', optind + 2, 0, 0)
+    return getoptsFinish(session, view, name, letter, params[optind] ?? '', optind + 2, 0, 0)
   }
-  if (silent) return getoptsFinish(session, name, ':', letter, optind + 1, 0, 0)
+  if (silent) return getoptsFinish(session, view, name, ':', letter, optind + 1, 0, 0)
   const err = verbose ? enc.encode(`bash: option requires an argument -- ${letter}\n`) : null
-  return getoptsFinish(session, name, '?', null, optind + 1, 0, 0, err)
+  return getoptsFinish(session, view, name, '?', null, optind + 1, 0, 0, err)
 }
 
 export function handleTrap(_session: Session): Result {
@@ -869,6 +1072,7 @@ export async function handleRead(
   args: string[],
   session: Session,
   stdin: ByteSource | null,
+  state: SessionView | null = null,
 ): Promise<Result> {
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
@@ -897,11 +1101,16 @@ export async function handleRead(
   if (session.stdinBuffer !== null) {
     lineBytes = await session.stdinBuffer.readline()
   }
+  const view = viewOf(session, state)
   if (lineBytes === null) {
     for (const v of variables) {
-      session.env[v] = ''
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.arrays[v]
+      if (view.isReadonly(v)) return readonlyRefusal('read', v)
+      try {
+        await view.set(v, '')
+      } catch (err) {
+        if (err instanceof PolicyDenied) return doorRefusal('read', err)
+        throw err
+      }
     }
     return [
       null,
@@ -948,11 +1157,13 @@ export async function handleRead(
   for (let i = 0; i < variables.length; i++) {
     const name = variables[i]
     if (name === undefined) continue
-    session.env[name] = parts[i] ?? ''
-    // A scalar write replaces any array of the same name, matching
-    // the variable_assignment path.
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete session.arrays[name]
+    if (view.isReadonly(name)) return readonlyRefusal('read', name)
+    try {
+      await view.set(name, parts[i] ?? '')
+    } catch (err) {
+      if (err instanceof PolicyDenied) return doorRefusal('read', err)
+      throw err
+    }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'read', exitCode: 0 })]
 }

@@ -114,4 +114,4 @@ async def file_generic(paths, texts, opts: CommandOpts, read_bytes, stat_fn):
                           stat_fn=stat_fn,
                           b=parsed.brief,
                           i=parsed.mime,
-                          links=opts.links)
+                          links=opts.ns.links if opts.ns is not None else None)

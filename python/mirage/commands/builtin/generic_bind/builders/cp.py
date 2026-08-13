@@ -92,10 +92,11 @@ async def cp(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                           find=_make_find(ops, accessor, opts.index),
                           dir_copy=dir_copy,
                           mkdir=mkdir)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
     return await generic_cp(paths,
                             strategy=strategy,
                             stat=overlayable_stat(ops, accessor, opts.index,
-                                                  opts.stat_overlay),
+                                                  overlay),
                             flags=parsed,
                             readdir=bound_op(ops.readdir, accessor,
                                              opts.index))

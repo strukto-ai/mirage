@@ -107,7 +107,7 @@ export async function applyFindActions(
           {
             stdin: null,
             cwd,
-            ...(childMounts !== null ? { childMounts } : {}),
+            ...(childMounts !== null ? { ns: { childMounts } } : {}),
             ...(statPath !== null ? { statPath } : {}),
           },
         )

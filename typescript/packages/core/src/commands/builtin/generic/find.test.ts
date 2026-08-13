@@ -267,7 +267,7 @@ describe('generic command find', () => {
         filetypeFns: null,
         cwd: '/',
         statPath: () => Promise.resolve(dirStat),
-        links,
+        ns: { links },
       } as unknown as CommandOpts
       const result = await findGeneric([root()], [], opts, noRows, undefined, () =>
         Promise.resolve(true),

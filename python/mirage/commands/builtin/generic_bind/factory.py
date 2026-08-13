@@ -99,7 +99,7 @@ async def _run_with_namespace_globs(ops: CommandIO, fn: Callable[..., Any],
     a symlink, so a glob resolved by one backend's readdir misses both,
     while the same names are already merged into a listing. The adapter
     is built once per backend and the names are session-scoped, so the
-    fact is stamped on here, per invocation, from ``opts.child_mounts``:
+    fact is stamped on here, per invocation, from ``opts.ns``:
     every builder then keeps calling ``ops.resolve_glob`` unchanged.
 
     ``ops`` stays the first bound argument, because that partial slot is
@@ -113,10 +113,11 @@ async def _run_with_namespace_globs(ops: CommandIO, fn: Callable[..., Any],
         texts (list[str]): the command's text arguments.
         opts (CommandOpts): the per-invocation option bag.
     """
-    if opts.child_mounts is None:
+    children = opts.ns.child_mounts if opts.ns is not None else None
+    if children is None:
         return await fn(ops, accessor, paths, texts, opts)
-    return await fn(replace(ops, glob_children=opts.child_mounts), accessor,
-                    paths, texts, opts)
+    return await fn(replace(ops, glob_children=children), accessor, paths,
+                    texts, opts)
 
 
 def make_generic_commands(

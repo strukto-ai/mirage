@@ -40,14 +40,16 @@ async def stat(
     fl = FlagView(opts.flags, spec=SPECS["stat"])
     paths = await resolve_glob(accessor, paths, opts.index)
     stat_fn = bound_op(stat_core, accessor, opts.index)
-    if opts.stat_overlay is not None:
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    if overlay is not None:
         stat_fn = partial(overlaid_stat,
                           partial(stat_core, accessor),
-                          opts.stat_overlay,
+                          overlay,
                           index=opts.index)
-    return await generic_stat(paths,
-                              stat_fn=stat_fn,
-                              c=fl.as_str("c"),
-                              f=fl.as_str("f"),
-                              L=fl.as_bool("L"),
-                              links=opts.links)
+    return await generic_stat(
+        paths,
+        stat_fn=stat_fn,
+        c=fl.as_str("c"),
+        f=fl.as_str("f"),
+        L=fl.as_bool("L"),
+        links=opts.ns.links if opts.ns is not None else None)

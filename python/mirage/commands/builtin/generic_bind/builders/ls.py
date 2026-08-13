@@ -42,8 +42,9 @@ async def ls(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         ]
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
     stat_fn: Callable[..., Awaitable[FileStat]] = partial(ops.stat, accessor)
-    if opts.stat_overlay is not None:
-        stat_fn = partial(overlaid_stat, stat_fn, opts.stat_overlay)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    if overlay is not None:
+        stat_fn = partial(overlaid_stat, stat_fn, overlay)
     return await ls_generic(resolved, list(texts), opts,
                             partial(ops.readdir, accessor), stat_fn)
 

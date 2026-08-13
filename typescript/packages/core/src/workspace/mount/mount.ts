@@ -21,14 +21,7 @@ import type {
   RegisteredCommand,
 } from '../../commands/config.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
-import type {
-  ChildMounts,
-  LinkView,
-  MountView,
-  ReaddirPath,
-  StatOverlay,
-  StatPath,
-} from '../../ops/types.ts'
+import type { NamespaceView, ReaddirPath, SessionView, StatPath } from '../../ops/types.ts'
 
 const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
@@ -395,14 +388,12 @@ export class MountEntry {
       dispatch?: DispatchFn
       sessionId?: string
       env?: Record<string, string>
+      sessionView?: SessionView
       execAllowed?: boolean
       runtime?: Runtime
-      statOverlay?: StatOverlay
-      links?: LinkView
+      ns?: NamespaceView
       statPath?: StatPath
       readdirPath?: ReaddirPath
-      childMounts?: ChildMounts
-      mounts?: MountView
       signal?: AbortSignal
       limitOverride?: Limit | null
     } = {},
@@ -452,14 +443,12 @@ export class MountEntry {
       ...(opts.dispatch !== undefined ? { dispatch: opts.dispatch } : {}),
       ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
       ...(opts.env !== undefined ? { env: opts.env } : {}),
+      ...(opts.sessionView !== undefined ? { sessionView: opts.sessionView } : {}),
       ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
       ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
-      ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
-      ...(opts.links !== undefined ? { links: opts.links } : {}),
+      ...(opts.ns !== undefined ? { ns: opts.ns } : {}),
       ...(opts.statPath !== undefined ? { statPath: opts.statPath } : {}),
       ...(opts.readdirPath !== undefined ? { readdirPath: opts.readdirPath } : {}),
-      ...(opts.childMounts !== undefined ? { childMounts: opts.childMounts } : {}),
-      ...(opts.mounts !== undefined ? { mounts: opts.mounts } : {}),
     }
 
     return runWithMountPrefix(mountPrefix, () =>

@@ -481,7 +481,9 @@ class MountCore:
         Relative sources are stored verbatim (resolved at follow time,
         exactly like the shell ``ln -s``); absolute sources are mapped
         into virtual space so a scoped mount stores the path it will
-        later follow.
+        later follow. The write routes through the op door like every
+        other FUSE op, so session grants and admission policies refuse
+        a scoped kernel mount exactly like a scoped shell.
 
         Args:
             target (str): mount path of the link being created.
@@ -490,11 +492,10 @@ class MountCore:
         Raises:
             OSError: EROFS when the workspace has no namespace links.
         """
-        links = self._ops.links
-        if links is None:
+        if self._ops.links is None:
             raise OSError(errno.EROFS, os.strerror(errno.EROFS), target)
         stored = self.resolve(source) if source.startswith("/") else source
-        self._run(links.symlink(self.resolve(target), stored, time.time()))
+        self._run(self._ops.symlink(self.resolve(target), stored))
 
     def unlink(self, path: str) -> None:
         links = self._ops.links

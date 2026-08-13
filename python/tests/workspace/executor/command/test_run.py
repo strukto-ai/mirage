@@ -109,11 +109,11 @@ def test_no_view_without_a_namespace():
 
 @pytest.mark.parametrize("cmd", ["ls", "stat", "find", "du", "file"])
 def test_the_symlink_aware_commands_read_the_links_field(cmd):
-    """`CommandOpts.links` reaches every handler; the family generic is
+    """`CommandOpts.ns` reaches every handler; the family generic is
     where the read lives (tests/commands/test_links_optin.py pins the
     full delegation rule), and the builder passes `opts` through."""
     module = importlib.import_module(f"mirage.commands.builtin.generic.{cmd}")
-    assert "opts.links" in inspect.getsource(module)
+    assert "opts.ns.links" in inspect.getsource(module)
 
 
 def test_stat_overlay_is_read_where_stats_render():
@@ -124,7 +124,7 @@ def test_stat_overlay_is_read_where_stats_render():
         module = inspect.getmodule(inspect.unwrap(builder.fn))
         if module is None:
             continue
-        if "opts.stat_overlay" in inspect.getsource(module):
+        if "opts.ns.stat_overlay" in inspect.getsource(module):
             named.add(builder.name)
     assert named == {"ls", "stat", "cp", "mv", "find"}
 

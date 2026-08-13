@@ -840,7 +840,7 @@ async def find_generic(
                       path=parsed.path,
                       mindepth=parsed.mindepth,
                       empty=parsed.empty,
-                      links=opts.links,
+                      links=opts.ns.links if opts.ns is not None else None,
                       follow=parsed.follow)
 
 
@@ -868,7 +868,7 @@ async def find_walk_generic(
     """
     parsed = parse_flags(opts.flags)
     stat_path = opts.stat_path
-    links = opts.links
+    links = opts.ns.links if opts.ns is not None else None
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
     ]

@@ -27,6 +27,8 @@ import { basename } from '../../core/ram/utils.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace.ts'
+import { specFlagNames } from '../../commands/spec/types.ts'
+import { specOf } from '../../commands/spec/builtins.ts'
 
 const NEVER_EXECUTE: ExecuteNodeFn = () => {
   throw new Error('executeNode should not have been called')
@@ -295,6 +297,26 @@ describe('fanOutTraversal du at a descendant mount boundary', () => {
     expect(await runLine('du -sc /base')).toBe('17\t/base\n17\ttotal\n')
   })
 
+  // `-S` reaches the merge, and the `-c` total stays recursive. Pinned on
+  // coreutils 9.7 over a tmpfs mounted at the same spot: `du -bS base`
+  // prints `7 base/inner` then `10 base` (the parent counts only the file
+  // sitting in it), and `du -bSc base` still ends `17 total`.
+  it('scopes only the rows under -S', async () => {
+    expect(await runLine('du -S /base')).toBe('7\t/base/inner\n10\t/base\n')
+    expect(await runLine('du -Sc /base')).toBe('7\t/base/inner\n10\t/base\n17\ttotal\n')
+  })
+
+  it('summarises direct files only under -Ss', async () => {
+    expect(await runLine('du -Ss /base')).toBe('10\t/base\n')
+    expect(await runLine('du -Ssc /base')).toBe('10\t/base\n17\ttotal\n')
+  })
+
+  it('lists files under -Sa across the mounts', async () => {
+    expect(await runLine('du -Sa /base')).toBe(
+      '7\t/base/inner/real.txt\n7\t/base/inner\n10\t/base/top.txt\n10\t/base\n',
+    )
+  })
+
   // Summing each mount's already-humanized total would round twice and
   // report 3.0K; the sub-runs render exact bytes and only the merge
   // humanizes.
@@ -373,6 +395,33 @@ describe('fanOutTraversal operands spanning mounts', () => {
   it('fans out inside each operand for du -c', async () => {
     expect(await runLine('du -c /base /other')).toBe(
       '9\t/base/inner\n19\t/base\n10\t/other\n29\ttotal\n',
+    )
+  })
+
+  // The du merge re-derives the whole tree centrally, so the sub-runs are
+  // asked with the presentation flags stripped and each one is then
+  // applied once, in the merge. A flag nobody classified is neither
+  // stripped nor re-applied, so it silently does nothing across a nested
+  // mount, which is exactly how -S first shipped. Adding an option to
+  // du's spec fails this until it is sorted into one of the two lists.
+  it('accounts for every du flag', () => {
+    // Applied centrally by the merge, and neutralized in the sub-runs.
+    const central = ['a', 'c', 'h', 'max_depth', 's', 'separate_dirs']
+    // Chooses whether a run counts the symlinks on its own mount, which
+    // is a per-run question; the merge only ever sees the rows.
+    const perRun = ['L', 'P']
+    expect([...specFlagNames(specOf('du'))].sort()).toEqual([...central, ...perRun].sort())
+  })
+
+  // -S has to survive both fan-outs at once: the per-operand one that
+  // splits the operands across mounts, and the traversal one that folds
+  // `/base/inner` into `/base`. GNU (coreutils 9.7, tmpfs at the nested
+  // spot) scopes -S to each printed row and keeps the grand total
+  // recursive, so `/base` reports only `top.txt` while the total still
+  // covers every byte.
+  it('keeps -S scoped to each row across both fan-outs', async () => {
+    expect(await runLine('du -Sc /base /other')).toBe(
+      '9\t/base/inner\n10\t/base\n10\t/other\n29\ttotal\n',
     )
   })
 

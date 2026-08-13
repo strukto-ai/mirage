@@ -96,7 +96,7 @@ async function runCmd(
     filetypeFns: null,
     cwd: '/',
     mountPrefix,
-    ...(links !== null ? { links } : {}),
+    ...(links !== null ? { ns: { links } } : {}),
   })
   if (result === null) {
     return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }

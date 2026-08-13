@@ -246,38 +246,29 @@ interface SetAttrFields {
   mtime?: string
 }
 
-// Apply attributes natively where the backend can hold them; store the
-// rest in the namespace overlay. A registered setattr op applies what it
-// can and returns the residual (e.g. disk: clamped mode bits, ownership).
-// Residual fields go to the overlay; fields the backend applied natively
-// are dropped from it, so a stale overlay never shadows the fresh backend
-// value. Unlike Python (which asks the mount upfront), ops resolve in the
-// workspace OpsRegistry here, so the probe is the dispatch itself: only
-// the registry's own missing-op error routes everything to the overlay.
+// Route one attribute write through the op door. The door applies what
+// the backend can hold natively and stores the residual in the namespace
+// overlay (dropping overlay fields the backend applied, so a stale
+// overlay never shadows the fresh backend value); a resource with no
+// setattr op overlays everything. Kept as a seam so every metadata
+// builtin shares one call shape.
 async function setattrVia(
-  namespace: Namespace,
   dispatch: DispatchFn,
   path: PathSpec,
   fields: SetAttrFields,
 ): Promise<void> {
-  let effective = fields
-  try {
-    const [result] = await dispatch('setattr', path, [], fields as Record<string, unknown>)
-    const residual = result as Record<string, number | string>
-    const applied = Object.entries(fields)
-      .filter(([key, value]) => value !== undefined && !(key in residual))
-      .map(([key]) => key)
-    if (applied.length > 0) await namespace.dropAttrs(path.virtual, applied)
-    if (Object.keys(residual).length === 0) return
-    effective = residual as SetAttrFields
-  } catch (err) {
-    if (!isMissingOp(err, 'setattr')) throw err
-  }
-  const { mtime, ...rest } = effective
-  await namespace.setAttrs(path.virtual, {
-    ...rest,
-    ...(mtime !== undefined ? { mtime: new Date(mtime).getTime() / 1000 } : {}),
-  })
+  await dispatch('setattr', path, [], fields as Record<string, unknown>)
+}
+
+// Setattr a link node itself (the -h family): dispatched with `nofollow`
+// so the door writes the link entry's own attrs instead of the target's;
+// a link has no backend inode, so the door stores them in the overlay.
+async function setattrLink(
+  dispatch: DispatchFn,
+  path: PathSpec,
+  fields: SetAttrFields,
+): Promise<void> {
+  await dispatch('setattr', path, [], { ...(fields as Record<string, unknown>), nofollow: true })
 }
 
 function joinedError(cmd: string, errors: string[], exitCode: number): Result {
@@ -400,7 +391,7 @@ export async function handleChmod(
         return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
       }
       try {
-        await setattrVia(namespace, dispatch, path, { mode: newMode })
+        await setattrVia(dispatch, path, { mode: newMode })
       } catch (err) {
         if (!isReadOnlyError(err)) throw err
         errors.push(readOnlyError('chmod', namespace, path))
@@ -437,7 +428,7 @@ export async function handleChown(
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
     if (noDeref && namespace.isLink(target.virtual)) {
-      await namespace.setAttrs(target.virtual, {
+      await setattrLink(dispatch, target, {
         ...(uid !== null ? { uid } : {}),
         ...(gid !== null ? { gid } : {}),
       })
@@ -472,7 +463,7 @@ export async function handleChown(
       : { paths: [resolved], links: [] as string[] }
     for (const path of paths) {
       try {
-        await setattrVia(namespace, dispatch, path, {
+        await setattrVia(dispatch, path, {
           ...(uid !== null ? { uid } : {}),
           ...(gid !== null ? { gid } : {}),
         })
@@ -483,7 +474,7 @@ export async function handleChown(
       }
     }
     for (const link of links) {
-      await namespace.setAttrs(link, {
+      await setattrLink(dispatch, PathSpec.fromStrPath(link), {
         ...(uid !== null ? { uid } : {}),
         ...(gid !== null ? { gid } : {}),
       })
@@ -519,7 +510,7 @@ export async function handleChgrp(
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
     if (noDeref && namespace.isLink(target.virtual)) {
-      await namespace.setAttrs(target.virtual, { gid })
+      await setattrLink(dispatch, target, { gid })
       continue
     }
     let virtual: string
@@ -551,7 +542,7 @@ export async function handleChgrp(
       : { paths: [resolved], links: [] as string[] }
     for (const path of paths) {
       try {
-        await setattrVia(namespace, dispatch, path, { gid })
+        await setattrVia(dispatch, path, { gid })
       } catch (err) {
         if (!isReadOnlyError(err)) throw err
         errors.push(readOnlyError('chgrp', namespace, path))
@@ -559,7 +550,7 @@ export async function handleChgrp(
       }
     }
     for (const link of links) {
-      await namespace.setAttrs(link, { gid })
+      await setattrLink(dispatch, PathSpec.fromStrPath(link), { gid })
     }
   }
   if (errors.length > 0) return joinedError('chgrp', errors, exitCode)
@@ -618,7 +609,7 @@ export async function handleTouch(
       continue
     }
     if (flags.has('h') && namespace.isLink(target.virtual)) {
-      await namespace.setAttrs(target.virtual, { mtime: new Date(stamp).getTime() / 1000 })
+      await setattrLink(dispatch, target, { mtime: stamp })
       continue
     }
     let virtual: string
@@ -654,7 +645,7 @@ export async function handleTouch(
       const fields: SetAttrFields = {}
       if (setAtime) fields.atime = stamp
       if (setMtime) fields.mtime = stamp
-      await setattrVia(namespace, dispatch, resolved, fields)
+      await setattrVia(dispatch, resolved, fields)
     } catch (err) {
       if (isReadOnlyError(err)) {
         errors.push(readOnlyError('touch', namespace, resolved))

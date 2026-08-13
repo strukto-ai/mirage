@@ -160,7 +160,6 @@ def _permission_error(cmd: str, namespace: Namespace, path: PathSpec,
 
 
 async def _setattr_via(
-    namespace: Namespace,
     dispatch: DispatchFn,
     path: PathSpec,
     *,
@@ -170,17 +169,15 @@ async def _setattr_via(
     atime: str | None = None,
     mtime: str | None = None,
 ) -> None:
-    """Apply attributes natively where the backend can hold them; store
-    the rest in the namespace overlay. None fields are left untouched.
+    """Route one attribute write through the op door.
 
-    A mount with a setattr op applies what it can and returns the
-    residual (e.g. disk: clamped mode bits, ownership). Residual fields
-    go to the overlay; fields the backend applied natively are dropped
-    from it, so a stale overlay never shadows the fresh backend value.
-    A mount without setattr (API backend) overlays everything.
+    The door applies what the backend can hold natively and stores the
+    residual in the namespace overlay (dropping overlay fields the
+    backend applied, so a stale overlay never shadows the fresh backend
+    value); a mount with no setattr op overlays everything. Kept as a
+    seam so every metadata builtin shares one call shape.
 
     Args:
-        namespace (Namespace): addressing authority (overlay home).
         dispatch (DispatchFn): op dispatcher.
         path (PathSpec): target path (already link-resolved).
         mode (int | None): permission bits (e.g. 0o644).
@@ -189,44 +186,51 @@ async def _setattr_via(
         atime (str | None): ISO access time.
         mtime (str | None): ISO modification time.
     """
-    mount = namespace.mount_for(path.virtual)
-    requested = {
-        "mode": mode,
-        "uid": uid,
-        "gid": gid,
-        "atime": atime,
-        "mtime": mtime,
-    }
-    if mount.supports_op("setattr", path.virtual):
-        residual, _ = await dispatch("setattr",
-                                     path,
-                                     mode=mode,
-                                     uid=uid,
-                                     gid=gid,
-                                     atime=atime,
-                                     mtime=mtime)
-        applied = [
-            key for key, value in requested.items()
-            if value is not None and key not in residual
-        ]
-        if applied:
-            await namespace.drop_attrs(path.virtual, applied)
-        if not residual:
-            return
-        mode = residual.get("mode")
-        uid = residual.get("uid")
-        gid = residual.get("gid")
-        atime = residual.get("atime")
-        mtime = residual.get("mtime")
-    epoch: float | None = None
-    if mtime is not None:
-        epoch = datetime.fromisoformat(mtime).timestamp()
-    await namespace.set_attrs(path.virtual,
-                              mode=mode,
-                              uid=uid,
-                              gid=gid,
-                              atime=atime,
-                              mtime=epoch)
+    await dispatch("setattr",
+                   path,
+                   mode=mode,
+                   uid=uid,
+                   gid=gid,
+                   atime=atime,
+                   mtime=mtime)
+
+
+async def _apply_link_attrs(
+    namespace: Namespace,
+    dispatch: DispatchFn,
+    cmd: str,
+    path: PathSpec,
+    errors: list[str],
+    *,
+    uid: int | str | None = None,
+    gid: int | str | None = None,
+    mtime: str | None = None,
+) -> None:
+    """Setattr a link node itself (the ``-h`` family), collecting refusals.
+
+    Dispatched with ``nofollow`` so the door writes the link entry's own
+    attrs instead of the target's; a link has no backend inode, so the
+    door stores them in the overlay.
+
+    Args:
+        namespace (Namespace): addressing authority (error rendering).
+        dispatch (DispatchFn): op dispatcher.
+        cmd (str): command name for the error message.
+        path (PathSpec): the link's own path.
+        errors (list[str]): per-operand error accumulator.
+        uid (int | str | None): owner id or name.
+        gid (int | str | None): group id or name.
+        mtime (str | None): ISO modification time.
+    """
+    try:
+        await dispatch("setattr",
+                       path,
+                       uid=uid,
+                       gid=gid,
+                       mtime=mtime,
+                       nofollow=True)
+    except PermissionError as exc:
+        errors.append(_permission_error(cmd, namespace, path, exc))
 
 
 def _follow_operand(
@@ -306,12 +310,7 @@ async def _apply_attrs(
         gid (int | str | None): group id or name.
     """
     try:
-        await _setattr_via(namespace,
-                           dispatch,
-                           resolved,
-                           mode=mode,
-                           uid=uid,
-                           gid=gid)
+        await _setattr_via(dispatch, resolved, mode=mode, uid=uid, gid=gid)
     except PermissionError as exc:
         errors.append(_permission_error(cmd, namespace, resolved, exc))
 
@@ -472,7 +471,13 @@ async def handle_chown(
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
-            await namespace.set_attrs(target.virtual, uid=uid, gid=gid)
+            await _apply_link_attrs(namespace,
+                                    dispatch,
+                                    "chown",
+                                    target,
+                                    errors,
+                                    uid=uid,
+                                    gid=gid)
             continue
         found = await _resolve_operand(namespace, dispatch, "chown", target,
                                        errors)
@@ -493,7 +498,13 @@ async def handle_chown(
                                uid=uid,
                                gid=gid)
         for link in links:
-            await namespace.set_attrs(link, uid=uid, gid=gid)
+            await _apply_link_attrs(namespace,
+                                    dispatch,
+                                    "chown",
+                                    PathSpec.from_str_path(link),
+                                    errors,
+                                    uid=uid,
+                                    gid=gid)
     return finish("chown", errors)
 
 
@@ -530,7 +541,12 @@ async def handle_chgrp(
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
-            await namespace.set_attrs(target.virtual, gid=gid)
+            await _apply_link_attrs(namespace,
+                                    dispatch,
+                                    "chgrp",
+                                    target,
+                                    errors,
+                                    gid=gid)
             continue
         found = await _resolve_operand(namespace, dispatch, "chgrp", target,
                                        errors)
@@ -550,7 +566,12 @@ async def handle_chgrp(
                                errors,
                                gid=gid)
         for link in links:
-            await namespace.set_attrs(link, gid=gid)
+            await _apply_link_attrs(namespace,
+                                    dispatch,
+                                    "chgrp",
+                                    PathSpec.from_str_path(link),
+                                    errors,
+                                    gid=gid)
     return finish("chgrp", errors)
 
 
@@ -605,8 +626,12 @@ async def handle_touch(
                           f"Is a directory\n")
             continue
         if "h" in flags and namespace.is_link(target.virtual):
-            epoch = datetime.fromisoformat(stamp).timestamp()
-            await namespace.set_attrs(target.virtual, mtime=epoch)
+            await _apply_link_attrs(namespace,
+                                    dispatch,
+                                    "touch",
+                                    target,
+                                    errors,
+                                    mtime=stamp)
             continue
         resolved = _follow_operand(namespace, "touch", "touch", target, errors)
         if resolved is None:
@@ -626,11 +651,7 @@ async def handle_touch(
                     continue
                 await dispatch("write", resolved, data=b"")
                 writes[resolved.virtual] = b""
-            await _setattr_via(namespace,
-                               dispatch,
-                               resolved,
-                               atime=atime,
-                               mtime=mtime)
+            await _setattr_via(dispatch, resolved, atime=atime, mtime=mtime)
         except PermissionError as exc:
             errors.append(_permission_error("touch", namespace, resolved, exc))
         except FS_ERRORS as exc:

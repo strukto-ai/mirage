@@ -20,15 +20,16 @@ import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type {
-  ChildMounts,
   LinkView,
   MountView,
+  NamespaceView,
   ReaddirPath,
   StatOverlay,
   StatPath,
 } from '../../../ops/types.ts'
 import { namespaceNames } from '../../../ops/namespace_view.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { envSnapshot, sessionView } from '../../session/state.ts'
 import { linkTargetStat, pathExists, pathReaddir, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
@@ -140,7 +141,7 @@ export function mountRootOf(registry: MountRegistry, virtual: string): string {
  * A command that does not read `mounts` off its context simply ignores it, so
  * there is no list of boundary-aware commands to keep in step.
  */
-export function mountView(registry: MountRegistry): MountView {
+function mountView(registry: MountRegistry): MountView {
   return {
     descendants: (path: string) =>
       registry.descendantMounts(path).map((m) => rstripSlash(m.prefix) || '/'),
@@ -249,19 +250,15 @@ export async function runOnMount(
   const realMount = registry.mountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
   const limitOverride = realMount?.commandLimits.get(cmdName) ?? null
 
-  // ls/stat render stat rows from the backend's own stat, which never sees
-  // namespace attr overlays (chmod/chown/touch on overlay backends) or the
-  // default owner; inject the merge so ls -l and stat -c agree.
-  // cp/mv -u freshness checks compare the same merged mtimes, and
-  // find -mtime filters on them (touch results, observed writes).
-  const statOverlay =
-    namespace !== undefined
-      ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
-      : null
-  // Symlinks are namespace state no backend readdir or stat can see. A
-  // command that does not read `links` off its context ignores it, so
-  // there is no list of symlink-aware commands to keep in step.
-  const links = linkViewFor(namespace ?? null, dispatch)
+  // The name plane's facts, bundled as one view: the attr overlay so
+  // ls -l and stat -c agree (cp/mv -u freshness and find -mtime compare
+  // the same merged mtimes), the symlink table no backend readdir or
+  // stat can see, the mount boundaries, and the child names the
+  // namespace owes a directory. A command that does not read `ns` off
+  // its context ignores it, so there is no list of aware commands to
+  // keep in step.
+  const ns = namespaceViewOf(registry, namespace ?? null, dispatch)
+  const statOverlay = ns.statOverlay ?? null
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
@@ -270,11 +267,7 @@ export async function runOnMount(
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a resource its own accessor cannot open.
   const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
-  // Child mounts are the other half of namespace structure beside
-  // links: the same session-filtered names the door merges into its own
-  // readdir, offered to listing commands as rows.
-  const childMounts: ChildMounts = (parent: string) =>
-    namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
+  const childMounts = ns.childMounts ?? null
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -290,15 +283,13 @@ export async function runOnMount(
       cwd: session.cwd,
       dispatch,
       sessionId: session.sessionId,
-      env: session.env,
+      env: envSnapshot(session),
+      sessionView: sessionView(session, registry.policies),
       execAllowed: registry.isExecAllowed(),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
-      ...(statOverlay !== null ? { statOverlay } : {}),
-      ...(links !== null ? { links } : {}),
+      ns,
       statPath,
       readdirPath,
-      childMounts,
-      mounts: mountView(registry),
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
     })
@@ -357,20 +348,10 @@ function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<str
   return out
 }
 
-// Append symlink entries living under the listed directory. Links are
-// namespace state, invisible to backend readdir, so `ls` surfaces them the
-// same way child mounts are surfaced. Long form renders GNU-style
-// `name -> target`.
-// The symlink facts on offer, or null when there are no links.
-//
-// Which commands actually receive this is decided by whether the
-// handler reads `links` off its context, so there is no list of
-// symlink-aware commands to keep in step here or anywhere else.
-// The symlink facts on offer, built with the namespace's own attr overlay so
-// a link's target stat carries the same rows `ls -l` renders. Exported for the
-// mount fan-out, which reaches `executeCmd` without going through
-// `runOnMount` and would otherwise run every sub-command link-blind.
-export function linkViewFor(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
+// The symlink facts on offer, or null when there are no links, built
+// with the namespace's own attr overlay so a link's target stat carries
+// the same rows `ls -l` renders.
+function linkViewFor(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
   const overlay =
     namespace !== null
       ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
@@ -391,5 +372,30 @@ function linkView(
     resolve: (path: string) => namespace.follow(path),
     exists: (path: string) => pathExists(dispatch, path),
     targetStat: (path: string) => linkTargetStat(namespace, dispatch, path, overlay),
+  }
+}
+
+// The name plane's facts on offer, bundled as one view: symlinks, mount
+// boundaries, the attr overlay, and the child names the namespace owes a
+// directory. Which commands receive it is decided by whether the handler
+// reads `ns` off its context, so there is no list of aware commands to
+// keep in step here or anywhere else. Exported for the mount fan-out,
+// which reaches `executeCmd` without going through `runOnMount` and
+// would otherwise run every sub-command name-plane-blind.
+export function namespaceViewOf(
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  dispatch: DispatchFn,
+): NamespaceView {
+  const links = linkViewFor(namespace, dispatch)
+  const statOverlay =
+    namespace !== null
+      ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
+      : null
+  return {
+    ...(links !== null ? { links } : {}),
+    mounts: mountView(registry),
+    ...(statOverlay !== null ? { statOverlay } : {}),
+    childMounts: (parent: string) => namespaceNames(registry.mountPrefixes(), namespace, parent),
   }
 }

@@ -24,8 +24,7 @@ from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import FlagValue, Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import (ChildMounts, LinkView, MountView, ReaddirPath,
-                              StatOverlay, StatPath)
+from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn
 from mirage.types import Limit, PathSpec
@@ -91,17 +90,16 @@ class CommandOpts:
         runtime_unavailable (str | None): The hint naming why the
             requested runtime is unavailable. Python-only: the TS
             runtime table refuses at resolution time instead.
-        stat_overlay (StatOverlay | None): Namespace attr merge for
-            stat-rendering commands.
-        links (LinkView | None): The namespace's symlink facts.
+        ns (NamespaceView | None): The name plane's facts (symlinks,
+            mount boundaries, attr overlay, child names the namespace
+            owes a directory), which no backend can see.
         stat_path (StatPath | None): Dispatcher-backed stat of one path,
             for a traversal command's start point.
         readdir_path (ReaddirPath | None): Dispatcher-backed readdir of
             one path, for a walker that reads past a mount boundary.
-        child_mounts (ChildMounts | None): Child names the namespace
-            owes a directory (mounts and links).
-        mounts (MountView | None): Where the mount boundaries are, for a
-            walker whose output cannot be fanned out and concatenated.
+        session_view (SessionView | None): The session plane's live,
+            gated handle (reads and gate-cleared writes); ``env`` above
+            stays the frozen process-view snapshot.
     """
 
     stdin: ByteSource | None = None
@@ -118,12 +116,10 @@ class CommandOpts:
     exec_allowed: bool = True
     runtime: Runtime | None = None
     runtime_unavailable: str | None = None
-    stat_overlay: StatOverlay | None = None
-    links: LinkView | None = None
+    ns: NamespaceView | None = None
     stat_path: StatPath | None = None
     readdir_path: ReaddirPath | None = None
-    child_mounts: ChildMounts | None = None
-    mounts: MountView | None = None
+    session_view: SessionView | None = None
 
 
 CommandFnResult = tuple[ByteSource | None, IOResult] | None

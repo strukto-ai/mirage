@@ -3,7 +3,8 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.builtin.generic.du import (DuFlags, _depth, du,
                                                 parse_depth, parse_flags,
-                                                rollup, run_du, to_virtual)
+                                                rollup, run_du, separate_total,
+                                                to_virtual)
 from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.errors import UsageError
 from mirage.ops.types import LinkView, MountView
@@ -90,6 +91,87 @@ async def test_subdirectories_get_their_own_line():
                    compute_entries=compute_entries,
                    flags=DuFlags())
     assert out.stdout == b"1\t/dir/sub/deep\n3\t/dir/sub\n6\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_excludes_subdirectory_sizes():
+    """GNU -S: parent totals omit children that are directories."""
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(S=True))
+    assert out.stdout == b"1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_with_summarize_uses_direct_files_only():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(s=True, S=True))
+    assert out.stdout == b"3\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_with_all_lists_files():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(a=True, S=True))
+    assert out.stdout == (b"3\t/dir/a.txt\n"
+                          b"2\t/dir/sub/b.txt\n"
+                          b"1\t/dir/sub/deep/c.txt\n"
+                          b"1\t/dir/sub/deep\n"
+                          b"2\t/dir/sub\n"
+                          b"3\t/dir\n")
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_keeps_the_grand_total_recursive():
+    """GNU -Sc: rows are separate, the total is not (coreutils 9.7)."""
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(c=True, S=True))
+    assert out.stdout == (b"1\t/dir/sub/deep\n"
+                          b"2\t/dir/sub\n"
+                          b"3\t/dir\n"
+                          b"6\ttotal\n")
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_summarize_still_totals_recursively():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(s=True, c=True, S=True))
+    assert out.stdout == b"3\t/dir\n6\ttotal\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_keeps_a_file_operand_in_the_total():
+    """GNU scopes -S to directories: a file operand counts itself."""
+    compute_size, compute_entries = _make_backend({"/f.txt": 7})
+    out = await du([_spec("/f.txt", "f.txt")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(c=True, S=True))
+    assert out.stdout == b"7\t/f.txt\n7\ttotal\n"
+
+
+def test_separate_total_sums_direct_children_only():
+    entries = [("/d/a.txt", 3), ("/d/sub/b.txt", 2), ("/d/sub/deep/c.txt", 1)]
+    assert separate_total(entries, "/d") == 3
 
 
 @pytest.mark.asyncio
@@ -436,6 +518,25 @@ def test_rollup_totals_are_recursive():
     assert rows["/d/sub/deep"] == 1
 
 
+def test_rollup_separate_dirs_counts_only_direct_files():
+    """GNU -S: a directory omits subdirectory sizes (pinned coreutils 9.7)."""
+    entries = [("/d/a.txt", 3), ("/d/sub/b.txt", 2), ("/d/sub/deep/c.txt", 1)]
+    rows = dict(
+        rollup(entries, "/d", a=False, max_depth=None, separate_dirs=True))
+    assert rows["/d/sub/deep"] == 1
+    assert rows["/d/sub"] == 2
+    assert "/d/a.txt" not in rows
+
+
+def test_rollup_separate_dirs_keeps_empty_ancestor_dirs():
+    """A directory with only subdirs still prints, at size 0."""
+    entries = [("/d/sub/deep/c.txt", 4)]
+    rows = dict(
+        rollup(entries, "/d", a=False, max_depth=None, separate_dirs=True))
+    assert rows["/d/sub/deep"] == 4
+    assert rows["/d/sub"] == 0
+
+
 def test_rollup_a_keeps_the_sum_over_a_directory_marker():
     entries = [("/d/sub/deep/c.txt", 5), ("/d/sub/deep", 0)]
     rows = dict(rollup(entries, "/d", a=True, max_depth=None))
@@ -579,6 +680,24 @@ async def test_fully_shadowed_operand_reports_zero():
                    flags=DuFlags(),
                    mounts=_mounts_view(("/base/inner", )))
     assert out.stdout == b"0\t/base\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", ["-S", "--separate-dirs"])
+async def test_du_separate_dirs_off_the_command_line(tmp_path, flag):
+    res = DiskResource(root=str(tmp_path))
+    ws = Workspace({"/d": res}, mode=MountMode.WRITE)
+    await ws.execute("mkdir -p /d/sub/deep")
+    await ws.execute("printf abc > /d/a.txt")
+    await ws.execute("printf de > /d/sub/b.txt")
+    await ws.execute("printf f > /d/sub/deep/c.txt")
+    result = await ws.execute(f"du {flag} -c /d")
+    assert result.exit_code == 0
+    assert await result.stdout_str() == ("1\t/d/sub/deep\n"
+                                         "2\t/d/sub\n"
+                                         "3\t/d\n"
+                                         "6\ttotal\n")
+    await ws.close()
 
 
 @pytest.mark.asyncio

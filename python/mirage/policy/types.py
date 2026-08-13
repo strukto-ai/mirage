@@ -163,9 +163,35 @@ class ExecuteResultContext:
     exit_code: int
 
 
+@dataclass(frozen=True, slots=True)
+class SessionContext:
+    """Facts about one session-state mutation, as pre_session hooks see it.
+
+    Fires on the session plane before the write lands, so it holds
+    whichever tier asked. Not an OpsContext: a session key is not a
+    path, and a path-scoped policy must never receive one dressed as a
+    path and match it by accident.
+
+    Args:
+        plane (str): the state plane being written (``env``).
+        verb (str): the mutation (``set``, ``unset``).
+        key (str): the state key (a variable name).
+        value (str | None): the value being written, None for unset.
+        session_id (str): which session is writing, so a policy can
+            scope a rule to one agent (deny ``set`` for session X).
+    """
+
+    plane: str
+    verb: str
+    key: str
+    value: str | None
+    session_id: str = ""
+
+
 VALIDITY: dict[str, frozenset[str]] = {
     "pre_command": frozenset({Deny.kind}),
     "pre_ops": frozenset({Deny.kind}),
     "post_ops": frozenset({Deny.kind, Limit.kind}),
     "post_execute": frozenset({Limit.kind}),
+    "pre_session": frozenset({Deny.kind}),
 }

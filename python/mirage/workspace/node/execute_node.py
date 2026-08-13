@@ -18,11 +18,13 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.ops.types import SessionView
+from mirage.policy import PolicyDenied
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.arith import evaluate_arith
-from mirage.shell.array import (array_append, array_extent, array_get,
-                                array_set, make_array)
+from mirage.shell.array import (ShellArray, array_append, array_extent,
+                                array_get, array_set, make_array)
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
@@ -56,6 +58,7 @@ from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
 from mirage.workspace.session import Session
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
@@ -66,6 +69,28 @@ from mirage.shell.helpers import (  # isort: skip
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset,
     note_local_array)
+
+
+async def _assign_var(view: SessionView, key: str,
+                      value: str | ShellArray) -> None:
+    """One assignment through the session door; denial is fatal.
+
+    Every assignment spelling (scalar, array literal, subscript,
+    append) computes its resulting value and stores through
+    ``view.set``, so the gate and the storage invariant live in the
+    door, not here. Denial mirrors the readonly case: a fatal
+    variable-assignment error that abandons the rest of the line.
+
+    Args:
+        view (SessionView): the session plane's gated door.
+        key (str): the variable being written.
+        value (str | ShellArray): the resulting value to store.
+    """
+    try:
+        await view.set(key, value)
+    except PolicyDenied as exc:
+        err = f"{exc.strerror}\n".encode()
+        raise ExitSignal(1, stderr=err, contained_code=1) from exc
 
 
 async def _eval_cfor_expr(
@@ -455,10 +480,22 @@ async def execute_node(
             noglob=bool(session.shell_options.get("noglob")),
             links=namespace)
         if kind == NodeKind.SELECT:
-            return await handle_select(recurse, var, classified, body, session,
-                                       stdin, cs)
-        return await handle_for(recurse, var, classified, body, session, stdin,
-                                cs)
+            return await handle_select(recurse,
+                                       var,
+                                       classified,
+                                       body,
+                                       session,
+                                       stdin,
+                                       cs,
+                                       policies=namespace.registry.policies)
+        return await handle_for(recurse,
+                                var,
+                                classified,
+                                body,
+                                session,
+                                stdin,
+                                cs,
+                                policies=namespace.registry.policies)
 
     # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
@@ -537,25 +574,7 @@ async def execute_node(
                         flag_chars.update(expanded[1:])
                 else:
                     assignments.append(expanded)
-        array_names = [name for name, _, _ in staged]
         is_readonly = keyword == "readonly" or "r" in flag_chars
-        for name in array_names:
-            if is_readonly and name in session.readonly_vars:
-                err = f"bash: {name}: readonly variable\n".encode()
-                return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                    command=keyword, exit_code=1, stderr=err)
-        for name, append, items in staged:
-            note_local_array(session, name)
-            if append:
-                base = session.arrays.get(name)
-                if base is None:
-                    scalar = session.env.get(name)
-                    base = [] if scalar is None else [scalar]
-                array_append(base, items)
-            else:
-                base = make_array(items)
-            session.arrays[name] = base
-            session.env.pop(name, None)
         if "a" in flag_chars:
             # `declare -a NAME` with no value declares an empty array, so
             # ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
@@ -570,26 +589,46 @@ async def execute_node(
                     # At top level an existing scalar becomes element 0.
                     scalar = session.env.pop(bare, None)
                     session.arrays[bare] = [] if scalar is None else [scalar]
+        # Array literals travel as data: the handler stores them through
+        # the session door and owns both refusal voices, so the executor
+        # only expands and stages.
         if is_readonly:
-            # An array assignment stores itself above, but the name still
-            # has to be marked readonly. Only the `readonly` keyword owns
-            # -p / illegal-option handling; `declare -r` keeps names only.
+            # Only the `readonly` keyword owns -p / illegal-option
+            # handling; `declare -r` keeps names only.
             if keyword == "readonly":
-                return await handle_readonly(
-                    flag_words + assignments + array_names, session)
-            return await handle_readonly(assignments + array_names, session)
+                return await handle_readonly(flag_words + assignments,
+                                             session,
+                                             session_view(
+                                                 session,
+                                                 namespace.registry.policies),
+                                             arrays=staged)
+            return await handle_readonly(assignments,
+                                         session,
+                                         session_view(
+                                             session,
+                                             namespace.registry.policies),
+                                         arrays=staged)
         # declare/typeset scope like `local` inside a function (bash
         # semantics) and assign globally at top level, which is exactly
         # handle_local's fallback when no function scope is active.
         if keyword in (NT.LOCAL, "declare", "typeset"):
-            return await handle_local(assignments, session)
+            return await handle_local(
+                assignments,
+                session,
+                session_view(session, namespace.registry.policies),
+                arrays=staged)
         # Pass export flags through so -p / bare print and bad options work.
-        return await handle_export(flag_words + assignments, session)
+        return await handle_export(flag_words + assignments,
+                                   session,
+                                   session_view(session,
+                                                namespace.registry.policies),
+                                   arrays=staged)
 
     # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:
         args = get_unset_args(node)
-        return await handle_unset(args, session)
+        return await handle_unset(
+            args, session, session_view(session, namespace.registry.policies))
 
     # ── test ([ ] or [[ ]]) ─────────────────────
     if kind == NodeKind.TEST:
@@ -651,6 +690,10 @@ async def execute_node(
             c for c in node.named_children
             if c.type not in (NT.VARIABLE_NAME, "subscript")
         ]
+        # Every branch below computes its resulting value with bash's
+        # own mechanics on a copy, then stores through the one session
+        # door, which owns the gate and the scalar/array invariant.
+        view = session_view(session, namespace.registry.policies)
         if val_nodes and val_nodes[0].type == NT.ARRAY:
             items = await _expand_array_items(val_nodes[0], session,
                                               execute_fn, registry, namespace,
@@ -658,15 +701,16 @@ async def execute_node(
             if append:
                 base = session.arrays.get(key)
                 if base is None:
-                    scalar = session.env.pop(key, None)
+                    scalar = session.env.get(key)
                     base = [] if scalar is None else [scalar]
+                else:
+                    base = list(base)
                 # `arr+=(...)` starts at the extent, so it fills the hole
                 # a trailing `unset arr[last]` left but skips interior ones.
                 array_append(base, items)
-                session.arrays[key] = base
             else:
-                session.arrays[key] = make_array(items)
-                session.env.pop(key, None)
+                base = make_array(items)
+            await _assign_var(view, key, base)
             code = assignment_status(session, sub_seq)
             return None, IOResult(exit_code=code), ExecutionNode(
                 command=text, exit_code=code)
@@ -682,8 +726,10 @@ async def execute_node(
                     break
             arr = session.arrays.get(key)
             if arr is None:
-                scalar = session.env.pop(key, None)
+                scalar = session.env.get(key)
                 arr = [] if scalar is None else [scalar]
+            else:
+                arr = list(arr)
             idx = _array_index(idx_text, session.env)
             if idx < 0:
                 idx += array_extent(arr)
@@ -696,19 +742,19 @@ async def execute_node(
                                          "bad array subscript\n").encode(),
                                  contained_code=1)
             array_set(arr, idx, array_get(arr, idx) + val if append else val)
-            session.arrays[key] = arr
+            await _assign_var(view, key, arr)
             code = assignment_status(session, sub_seq)
             return None, IOResult(exit_code=code), ExecutionNode(
                 command=text, exit_code=code)
-        if append:
-            arr = session.arrays.get(key)
-            if arr is not None:
-                array_set(arr, 0, array_get(arr, 0) + val)
-            else:
-                session.env[key] = session.env.get(key, "") + val
+        arr = session.arrays.get(key) if append else None
+        if append and arr is not None:
+            # `arr+=x` appends to element 0.
+            new_arr = list(arr)
+            array_set(new_arr, 0, array_get(new_arr, 0) + val)
+            await _assign_var(view, key, new_arr)
         else:
-            session.env[key] = val
-            session.arrays.pop(key, None)
+            new_val = session.env.get(key, "") + val if append else val
+            await _assign_var(view, key, new_val)
         # Reassigning OPTIND (even to its current value) restarts the
         # getopts scan, matching bash's internal char pointer.
         if key == "OPTIND":

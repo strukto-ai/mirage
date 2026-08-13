@@ -31,10 +31,11 @@ async def stat(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         raise ValueError("stat: no resource")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
     stat_fn = bound_op(ops.stat, accessor, opts.index)
-    if opts.stat_overlay is not None:
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    if overlay is not None:
         stat_fn = partial(overlaid_stat,
                           partial(ops.stat, accessor),
-                          opts.stat_overlay,
+                          overlay,
                           index=opts.index)
     return await stat_generic(resolved, list(texts), opts, stat_fn)
 

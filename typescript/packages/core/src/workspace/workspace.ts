@@ -57,7 +57,7 @@ import { scriptStringError, type Runtime, type RuntimeEntry } from '../runtime/b
 import { isEvaluator } from '../runtime/mixin.ts'
 import type { EvalResult } from '../runtime/types.ts'
 import { PyodideUnavailableError } from '../runtime/python/types.ts'
-import { Dispatcher } from './dispatcher.ts'
+import { Dispatcher } from './dispatcher/index.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'

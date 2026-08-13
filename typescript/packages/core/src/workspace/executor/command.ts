@@ -23,8 +23,6 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import type { ChildMounts } from '../../ops/types.ts'
-import { namespaceNames } from '../../ops/namespace_view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
@@ -53,7 +51,7 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links.ts'
-import { dropServiceCaches, linkViewFor, mountRootOf, mountView } from './command/run.ts'
+import { dropServiceCaches, mountRootOf, namespaceViewOf } from './command/run.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -261,10 +259,8 @@ export async function handleCommand(
       runSingle,
       registry,
       session.cwd,
-      mountView(registry),
-      linkViewFor(namespace ?? null, dispatch),
+      namespaceViewOf(registry, namespace ?? null, dispatch),
       ensureOpen,
-      (parent: string) => namespaceNames(registry.mountPrefixes(), namespace ?? null, parent),
       (path: string) => pathStat(dispatch, path, null),
     )
     const [csStdout, csIo, csExec] = await handleCrossMount(
@@ -394,8 +390,6 @@ export async function handleCommand(
   }
 
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
-    const fanChildMounts: ChildMounts = (parent: string) =>
-      namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
     const [fanOut, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
@@ -407,9 +401,7 @@ export async function handleCommand(
       cmdStr,
       stdin,
       ensureOpen,
-      mountView(registry),
-      linkViewFor(namespace ?? null, dispatch),
-      fanChildMounts,
+      namespaceViewOf(registry, namespace ?? null, dispatch),
       (path: string) => pathStat(dispatch, path, null),
     )
     if (warnBytes !== null) {

@@ -95,6 +95,7 @@ import {
 } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir, logicalCwd } from '../session/shell_dirs.ts'
+import { sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -597,9 +598,10 @@ async function runArgv(
   if (name === SB.BASH || name === SB.SH) {
     return handleBash(dispatch, executeFn, args, session, stdin, name)
   }
-  if (name === SB.EXPORT) return handleExport(args, session)
-  if (name === SB.UNSET) return handleUnset(args, session)
-  if (name === SB.LOCAL) return handleLocal(args, session)
+  if (name === SB.EXPORT)
+    return handleExport(args, session, sessionView(session, registry.policies))
+  if (name === SB.UNSET) return handleUnset(args, session, sessionView(session, registry.policies))
+  if (name === SB.LOCAL) return handleLocal(args, session, sessionView(session, registry.policies))
   if (name === SB.PRINTENV) {
     return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
@@ -611,7 +613,9 @@ async function runArgv(
   if (name === SB.SHIFT) {
     return handleShift(args, callStack, session)
   }
-  if (name === SB.GETOPTS) return handleGetopts(args, session, callStack)
+  if (name === SB.GETOPTS) {
+    return handleGetopts(args, session, callStack, sessionView(session, registry.policies))
+  }
   if (name === SB.TRAP) return handleTrap(session)
   if (name === SB.TEST || name === SB.BRACKET || name === SB.DOUBLE_BRACKET) {
     let testArgs = [...operands]
@@ -637,7 +641,7 @@ async function runArgv(
   if (name === SB.PRINTF) return handlePrintf(args, session)
   if (name === SB.SLEEP) return handleSleep(args, signal)
   if (name === SB.READ) {
-    return handleRead(args, session, stdin)
+    return handleRead(args, session, stdin, sessionView(session, registry.policies))
   }
   if (name === SB.SOURCE || name === SB.DOT) {
     const target = operands[0] ?? ''
@@ -679,7 +683,7 @@ async function runArgv(
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
   if (name === 'ln' && linkFlags(operands, 'sfnvrT').has('s')) {
-    return await handleLn(namespace, session, operands)
+    return await handleLn(namespace, dispatch, session, operands)
   }
   if (name === 'readlink') {
     return await handleReadlink(namespace, dispatch, session, operands)

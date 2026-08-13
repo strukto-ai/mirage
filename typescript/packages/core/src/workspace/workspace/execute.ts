@@ -24,7 +24,7 @@ import { findSyntaxError, findUnterminatedBacktick, type ShellParser } from '../
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { makeAbortError } from '../abort.ts'
-import type { Dispatcher } from '../dispatcher.ts'
+import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { PolicyDeny, type PolicyDecision } from '../../runtime/policy/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'

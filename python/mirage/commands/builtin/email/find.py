@@ -99,13 +99,14 @@ async def find(
         PathSpec(virtual="/", directory="/", resource_path="")
     ]
     results: list[str] = []
+    links = opts.ns.links if opts.ns is not None else None
     for search in searches:
         # Same start-point rule as every other find path: only a
         # directory has a subtree to walk.
         start = await resolve_start(search,
                                     args,
                                     opts.stat_path,
-                                    is_link=is_link(opts.links, search))
+                                    is_link=is_link(links, search))
         if not start.walk:
             results.extend(start.results)
             continue
@@ -114,7 +115,7 @@ async def find(
                                        stat=partial(_stat, accessor),
                                        index=opts.index,
                                        args=args,
-                                       links=opts.links,
+                                       links=links,
                                        follow=fl.as_bool("L")))
     return format_records(results), IOResult()
 

@@ -12,35 +12,45 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NOOPAccessor } from '../accessor/base.ts'
-import { applyIo } from '../cache/file/io.ts'
-import type { FileCache } from '../cache/file/mixin.ts'
-import { applyOpLimit, runWithTimeout } from '../commands/builtin/utils/limit.ts'
-import { getExtension } from '../commands/resolve.ts'
-import { IOResult, type OpReport } from '../io/types.ts'
-import { eaccesReadOnly } from '../utils/errors.ts'
-import { Policies, postOpsGate, preOpsGate } from '../policy/index.ts'
-import { mountKey } from '../utils/key_prefix.ts'
-import { rstripSlash } from '../utils/slash.ts'
-import { runWithMountPrefix, runWithRevisions } from '../observe/context.ts'
-import type { OpRecord } from '../observe/record.ts'
-import type { OpsRegistry } from '../ops/registry.ts'
-import { type OpKwargs } from '../ops/registry.ts'
-import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../ops/config.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_view.ts'
-import { isMissingPath } from '../utils/errors.ts'
-import { cachesReads, type Resource } from '../resource/base.ts'
-import { ConsistencyPolicy, FileStat, MountMode, PathSpec, ResourceName } from '../types.ts'
-import type { DispatchFn } from '../runtime/types.ts'
-import type { DriftQueue } from './snapshot/drift.ts'
-import type { Namespace } from './mount/namespace/namespace.ts'
-import { mergeOverlayStat } from './mount/namespace/overlay.ts'
-import { Reconciler } from './reconcile.ts'
-import { sliceWindow } from '../utils/ranges.ts'
-import { effectiveMountMode, MountNotAllowedError } from '../context/session_context.ts'
+import { NOOPAccessor } from '../../accessor/base.ts'
+import { applyIo } from '../../cache/file/io.ts'
+import type { FileCache } from '../../cache/file/mixin.ts'
+import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { getExtension } from '../../commands/resolve.ts'
+import { IOResult, type OpReport } from '../../io/types.ts'
+import { eaccesReadOnly, einval } from '../../utils/errors.ts'
+import { Policies, postOpsGate, preOpsGate } from '../../policy/index.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { ownerPrefix, rstripSlash } from '../../utils/slash.ts'
+import { record, runWithMountPrefix, runWithRevisions } from '../../observe/context.ts'
+import type { OpRecord } from '../../observe/record.ts'
+import type { OpsRegistry } from '../../ops/registry.ts'
+import { type OpKwargs } from '../../ops/registry.ts'
+import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
+import { isMissingPath } from '../../utils/errors.ts'
+import { cachesReads, type Resource } from '../../resource/base.ts'
+import { ConsistencyPolicy, FileStat, MountMode, PathSpec, ResourceName } from '../../types.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import type { DriftQueue } from '../snapshot/drift.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
+import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
+import { Reconciler } from '../reconcile.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import {
+  DISPATCH_READ_OPS,
+  DISPATCH_WRITE_OPS,
+  NAMESPACE_TABLE_OPS,
+  POLICY_WRITE_OPS,
+  SETATTR_KEYS,
+} from './constants.ts'
+import {
+  assertMountAllowed,
+  effectiveMountMode,
+  MountNotAllowedError,
+} from '../../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
-const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
 
 /** The byte window a read asked for, whole file when it asked none. */
 function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
@@ -49,21 +59,6 @@ function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
     typeof kwargs?.size === 'number' ? kwargs.size : null,
   ]
 }
-const DISPATCH_WRITE_OPS = new Set([
-  'write',
-  'write_bytes',
-  'append',
-  'unlink',
-  'create',
-  'truncate',
-  'mkdir',
-  'rmdir',
-  'rename',
-])
-// setattr mutates the mount but keeps its own overlay bookkeeping in
-// the metadata builtin, so it is a write for policy admission without
-// joining the dispatcher's post-write invalidation path.
-const POLICY_WRITE_OPS = new Set([...DISPATCH_WRITE_OPS, 'setattr'])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
 
@@ -141,8 +136,20 @@ export class Dispatcher {
         return stat
       })
     }
+    if (NAMESPACE_TABLE_OPS.has(opName)) {
+      return [await this.namespaceTableOp(opName, path, kwargs ?? {}, report), new IOResult()]
+    }
+    // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts on
+    // a link entry itself (chown -h writing the link's own attrs) keeps
+    // the typed path. Consumed here, never forwarded.
+    const nofollow = kwargs?.nofollow === true
+    if (nofollow) {
+      const rest = { ...kwargs }
+      delete rest.nofollow
+      kwargs = rest
+    }
     let p = path
-    if (!NO_FOLLOW_OPS.has(opName)) {
+    if (!NO_FOLLOW_OPS.has(opName) && !nofollow) {
       const followed = this.namespace.follow(path.virtual)
       if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
     }
@@ -160,6 +167,17 @@ export class Dispatcher {
       // the grant must answer, and the merged names are
       // session-filtered individually, so nothing of the mount's own
       // content leaks.
+      // A setattr with no owning mount lands in the overlay (a link
+      // above every mount still takes chown -h), gated exactly like
+      // the mounted overlay write; an ungranted mount is not that
+      // case and keeps the canonical denial.
+      if (opName === 'setattr' && isMissingPath(err)) {
+        await preOpsGate(this.policies, opName, p, true, '')
+        const stored = await this.overlaySetattr(p, kwargs ?? {})
+        memoryAnswered(report)
+        await postOpsGate(this.policies, opName, p, true, '', stored)
+        return [stored, new IOResult()]
+      }
       const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
       const fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
       if (fallback === null) throw err
@@ -266,14 +284,16 @@ export class Dispatcher {
           async () =>
             runWithTimeout(
               Promise.resolve(
-                this.opsRegistry.call(
-                  opName,
-                  resource.kind,
-                  resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                  scope,
-                  fullArgs,
-                  fullKwargs,
-                ),
+                opName === 'setattr'
+                  ? this.applySetattr(resource, scope, p, fullKwargs)
+                  : this.opsRegistry.call(
+                      opName,
+                      resource.kind,
+                      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                      scope,
+                      fullArgs,
+                      fullKwargs,
+                    ),
               ),
               opTimeout,
               opName,
@@ -316,6 +336,124 @@ export class Dispatcher {
       result = await applyOpLimit(result, bound)
     }
     return [result, new IOResult()]
+  }
+
+  /**
+   * Answer a node-table op at the door itself, gated like a backend.
+   *
+   * A symlink is namespace state with no backend behind it, so the door
+   * owns both directions. Admission still fires exactly as for a
+   * backend write: the link's turf is the longest mount prefix above it
+   * (the same ownership rule the link read filter uses), session grants
+   * and both gates run, and the write leaves an OpRecord — a scoped
+   * kernel mount refuses exactly like a scoped shell. A link above
+   * every mount is bare namespace structure and clears the gates with
+   * an empty prefix. Mirrors Python's Dispatcher._namespace_table_op.
+   */
+  private async namespaceTableOp(
+    opName: string,
+    path: PathSpec,
+    kwargs: OpKwargs,
+    report: OpReport | undefined,
+  ): Promise<string | null> {
+    const start = performance.now()
+    const owner = ownerPrefix(this.namespace.mountPrefixes(), path.virtual)
+    if (owner !== null) assertMountAllowed(owner)
+    const write = POLICY_WRITE_OPS.has(opName)
+    await preOpsGate(this.policies, opName, path, write, owner ?? '')
+    let target: string
+    let result: string | null
+    if (opName === 'symlink') {
+      target = String(kwargs.target)
+      await this.namespace.symlink(path.virtual, target, Date.now() / 1000)
+      result = null
+    } else {
+      const found = this.namespace.readlink(path.virtual)
+      if (found === null) throw einval(path)
+      target = found
+      result = found
+    }
+    record(
+      opName,
+      path.virtual,
+      ResourceName.RAM,
+      new TextEncoder().encode(target).byteLength,
+      start,
+    )
+    memoryAnswered(report)
+    const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
+    if (bound !== null) return (await applyOpLimit(result, bound)) as string | null
+    return result
+  }
+
+  /**
+   * Apply attributes natively where the backend can, overlay the rest.
+   *
+   * A resource with a registered setattr op applies what it can and
+   * returns the residual; residual fields go to the overlay and
+   * natively applied ones are dropped from it, so a stale overlay never
+   * shadows a fresh backend value. A resource without the op, and a
+   * link path (which has no backend inode), overlay everything. The
+   * overlay half is the door's own write, so it runs inside the same
+   * gates as the native half. Mirrors Python's Dispatcher._apply_setattr.
+   */
+  private async applySetattr(
+    resource: Resource,
+    scope: PathSpec,
+    p: PathSpec,
+    kwargs: OpKwargs,
+  ): Promise<Record<string, number | string>> {
+    if (
+      this.namespace.isLink(p.virtual) ||
+      this.opsRegistry.find('setattr', resource.kind) === null
+    ) {
+      return this.overlaySetattr(p, kwargs)
+    }
+    const raw = await this.opsRegistry.call(
+      'setattr',
+      resource.kind,
+      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+      scope,
+      [],
+      kwargs,
+    )
+    const residual = raw as Record<string, number | string>
+    const applied = SETATTR_KEYS.filter(
+      (key) => kwargs[key] !== undefined && kwargs[key] !== null && !(key in residual),
+    )
+    if (applied.length > 0) await this.namespace.dropAttrs(p.virtual, applied)
+    if (Object.keys(residual).length > 0) await this.writeOverlay(p.virtual, residual)
+    return residual
+  }
+
+  /** Store every requested field in the namespace overlay. */
+  private async overlaySetattr(
+    p: PathSpec,
+    kwargs: OpKwargs,
+  ): Promise<Record<string, number | string>> {
+    const start = performance.now()
+    const overlay: Record<string, number | string> = {}
+    for (const key of SETATTR_KEYS) {
+      const value = kwargs[key]
+      if (value !== undefined && value !== null) overlay[key] = value as number | string
+    }
+    await this.writeOverlay(p.virtual, overlay)
+    record('setattr', p.virtual, ResourceName.RAM, 0, start)
+    return overlay
+  }
+
+  /** Write one overlay entry, converting an ISO mtime to epoch seconds. */
+  private async writeOverlay(
+    virtual: string,
+    fields: Record<string, number | string>,
+  ): Promise<void> {
+    const { mtime, ...rest } = fields
+    await this.namespace.setAttrs(virtual, {
+      ...rest,
+      ...(mtime !== undefined
+        ? { mtime: typeof mtime === 'string' ? new Date(mtime).getTime() / 1000 : mtime }
+        : {}),
+    })
   }
 
   /** Drop the whole file cache (post-remote-line invalidation). */

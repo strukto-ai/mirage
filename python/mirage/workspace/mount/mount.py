@@ -31,8 +31,7 @@ from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
 from mirage.ops.registry import RegisteredOp
-from mirage.ops.types import (ChildMounts, LinkView, MountView, ReaddirPath,
-                              StatOverlay, StatPath)
+from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
 from mirage.policy import resolve_limit
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
@@ -444,12 +443,10 @@ class MountEntry:
         exec_allowed: bool = True,
         runtime: Runtime | None = None,
         runtime_unavailable: str | None = None,
-        stat_overlay: StatOverlay | None = None,
-        links: LinkView | None = None,
+        ns: NamespaceView | None = None,
         stat_path: StatPath | None = None,
         readdir_path: ReaddirPath | None = None,
-        child_mounts: ChildMounts | None = None,
-        mounts: MountView | None = None,
+        session_view: SessionView | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -464,22 +461,19 @@ class MountEntry:
             flag_kwargs (dict): parsed flags from upstream.
             stdin (ByteSource | None): stdin data.
             cwd (str): virtual cwd from session.
-            stat_overlay (StatOverlay | None): namespace attr merge for
-                stat-rendering commands (ls).
-            links (LinkView | None): the namespace's symlink facts.
+            ns (NamespaceView | None): the name plane's facts
+                (symlinks, mount boundaries, attr overlay, child
+                names), which no backend can see.
             stat_path (StatPath | None): dispatcher-backed stat of one
                 path, for a traversal command's start point.
             readdir_path (ReaddirPath | None): dispatcher-backed readdir
                 of one path, for a walker that has to read past a mount
                 boundary (tree).
-            child_mounts (ChildMounts | None): child names the
-                namespace owes a directory (mounts and links), for
-                listing commands.
-            mounts (MountView | None): where the mount boundaries are,
-                for a walker whose output cannot be fanned out and
-                concatenated (tar, zip).
-                All six ride ``CommandOpts``; a handler reads the fields
-                it wants, so no list of command names is kept here.
+            session_view (SessionView | None): the session plane's
+                live, gated handle, beside the frozen ``env`` snapshot.
+                All four ride ``CommandOpts``; a handler reads the
+                fields it wants, so no list of command names is kept
+                here.
         """
         extension = get_extension(paths[0].virtual) if paths else None
 
@@ -544,12 +538,10 @@ class MountEntry:
             exec_allowed=exec_allowed,
             runtime=runtime,
             runtime_unavailable=runtime_unavailable,
-            stat_overlay=stat_overlay,
-            links=links,
+            ns=ns,
             stat_path=stat_path,
             readdir_path=readdir_path,
-            child_mounts=child_mounts,
-            mounts=mounts,
+            session_view=session_view,
         )
 
         prev_prefix = push_mount_prefix(mount_prefix)

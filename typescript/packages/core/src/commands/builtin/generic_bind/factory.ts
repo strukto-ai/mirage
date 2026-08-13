@@ -81,7 +81,9 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // every builder keeps calling resolveGlobOf(ops) unchanged.
     const fn: CommandFn = (accessor, paths, texts, opts) =>
       b.fn(
-        opts.childMounts === undefined ? cmdOps : { ...cmdOps, globChildren: opts.childMounts },
+        opts.ns?.childMounts === undefined
+          ? cmdOps
+          : { ...cmdOps, globChildren: opts.ns.childMounts },
         accessor,
         paths,
         texts,

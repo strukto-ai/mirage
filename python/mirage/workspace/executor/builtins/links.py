@@ -14,7 +14,6 @@
 
 import dataclasses
 import posixpath
-import time
 
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
@@ -35,6 +34,7 @@ def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
 
 async def handle_ln(
     namespace: Namespace,
+    dispatch: DispatchFn,
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -46,8 +46,13 @@ async def handle_ln(
     a namespace link name is never dereferenced nor treated as a directory
     to descend into, so both are already the effective behavior.
 
+    The write itself is a dispatch op, so session grants and admission
+    policies fire at the door; this handler keeps only the GNU operand
+    semantics and renders a refusal in ln's own words.
+
     Args:
         namespace (Namespace): addressing authority holding the link table.
+        dispatch (DispatchFn): op dispatcher.
         session (Session): session whose cwd resolves relative operands.
         args (list[str | PathSpec]): args after the command name.
     """
@@ -82,7 +87,14 @@ async def handle_ln(
         return fail(
             "ln", f"ln: failed to create symbolic link "
             f"'{word_text(operands[1])}': File exists\n")
-    await namespace.symlink(link_abs, target_typed, time.time())
+    try:
+        await dispatch("symlink",
+                       PathSpec.from_str_path(link_abs),
+                       target=target_typed)
+    except PermissionError:
+        return fail(
+            "ln", f"ln: failed to create symbolic link "
+            f"'{word_text(operands[1])}': Permission denied\n")
     out = None
     if "v" in flags:
         out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()
@@ -234,6 +246,15 @@ async def handle_readlink(
         if canonical:
             # -f/-e/-m canonicalize: resolve every symlink (including a
             # trailing one) and normalize the path, GNU realpath-style.
+            # A link operand still clears the op door first: -m probes
+            # nothing, so without this a scoped session read an
+            # ungranted link's target out of the resolved path.
+            if namespace.is_link(abs_op):
+                try:
+                    await dispatch("readlink", PathSpec.from_str_path(abs_op))
+                except OSError:
+                    exit_code = 1
+                    continue
             try:
                 resolved = posixpath.normpath(namespace.follow(abs_op))
             except CycleError:
@@ -246,8 +267,14 @@ async def handle_readlink(
                 continue
             lines.append(resolved)
             continue
-        target = namespace.readlink(abs_op)
-        if target is None:
+        # The link entry is namespace state behind the op door: session
+        # grants and admission policies decide whether this session may
+        # read the target at all. EINVAL (not a link) and a refusal both
+        # land on GNU readlink's silent exit 1.
+        try:
+            target, _ = await dispatch("readlink",
+                                       PathSpec.from_str_path(abs_op))
+        except OSError:
             exit_code = 1
             continue
         lines.append(target)

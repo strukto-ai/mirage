@@ -55,8 +55,8 @@ from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
 from mirage.workspace.executor.command.run import (  # isort: skip
-    drop_service_caches, exec_node, link_view, mount_root_of, mount_view,
-    registry_child_mounts, run_on_mount, scalar_find_flags)
+    drop_service_caches, exec_node, mount_root_of, namespace_view_of,
+    run_on_mount, scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; route already narrowed the name.
 JOB_HANDLERS = {
@@ -228,8 +228,7 @@ async def handle_command(
         # it, exactly as the same operand would on a line of its own.
         run_operand = functools.partial(
             run_with_fanout, run_single, registry, session.cwd,
-            mount_view(registry), link_view(namespace, dispatch),
-            functools.partial(registry_child_mounts, registry, namespace),
+            namespace_view_of(registry, namespace, dispatch),
             functools.partial(path_stat, dispatch)
             if dispatch is not None else None)
         stdout, io = await handle_cross_mount(
@@ -334,13 +333,10 @@ async def handle_command(
         for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        # The child-mount names and the dispatcher-backed start-point
+        # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested
         # mount's ancestor) has no backend listing, so without them the
-        # primary run reports the operand missing. The stat overlay is
-        # still dropped here, a known seam of the fan-out.
-        child_mounts = functools.partial(registry_child_mounts, registry,
-                                         namespace)
+        # primary run reports the operand missing.
         stdout, io, node = await _fan_out_traversal(
             cmd_name,
             paths,
@@ -351,9 +347,7 @@ async def handle_command(
             session.cwd,
             cmd_str,
             stdin,
-            mounts=mount_view(registry),
-            links=link_view(namespace, dispatch),
-            child_mounts=child_mounts,
+            ns=namespace_view_of(registry, namespace, dispatch),
             stat_path=(functools.partial(path_stat, dispatch)
                        if dispatch is not None else None))
         if warn_bytes:

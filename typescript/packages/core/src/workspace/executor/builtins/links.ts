@@ -17,6 +17,8 @@ import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError, gnuBasename, gnuDirname, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { MountNotAllowedError } from '../../../context/session_context.ts'
+import { PolicyDenied } from '../../../policy/index.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -93,6 +95,7 @@ function errorResult(command: string, message: string): Result {
 // never dereferenced nor treated as a directory to descend into.
 export async function handleLn(
   namespace: Namespace,
+  dispatch: DispatchFn,
   session: Session,
   args: (string | PathSpec)[],
 ): Promise<Result> {
@@ -134,7 +137,19 @@ export async function handleLn(
       `ln: failed to create symbolic link '${wordText(linkArg)}': File exists\n`,
     )
   }
-  await namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
+  // The write itself is a dispatch op, so session grants and admission
+  // policies fire at the door; a refusal renders in ln's own words.
+  try {
+    await dispatch('symlink', PathSpec.fromStrPath(linkAbs), [], { target: targetTyped })
+  } catch (err) {
+    if (err instanceof PolicyDenied || err instanceof MountNotAllowedError) {
+      return errorResult(
+        'ln',
+        `ln: failed to create symbolic link '${wordText(linkArg)}': Permission denied\n`,
+      )
+    }
+    throw err
+  }
   let out: Uint8Array | null = null
   if (flags.has('v')) {
     out = new TextEncoder().encode(`'${wordText(linkArg)}' -> '${targetTyped}'\n`)
@@ -386,6 +401,13 @@ export async function linkTargetStat(
   return overlay(target, stat)
 }
 
+// A readlink the door refused (session scope or policy) or answered
+// EINVAL (not a link): both land on GNU readlink's silent exit 1.
+function readlinkRefused(err: unknown): boolean {
+  if (err instanceof PolicyDenied || err instanceof MountNotAllowedError) return true
+  return (err as { code?: unknown }).code === 'EINVAL'
+}
+
 // Print a symlink's target, GNU readlink semantics.
 //
 // The three canonicalizing flags differ only in how much of the resolved
@@ -409,7 +431,19 @@ export async function handleReadlink(
     const absOp = abs(op, session.cwd)
     if (canonical) {
       // -f/-e/-m canonicalize: resolve every symlink (including a trailing
-      // one) and normalize the path, GNU realpath-style.
+      // one) and normalize the path, GNU realpath-style. A link operand
+      // still clears the op door first: -m probes nothing, so without
+      // this a scoped session read an ungranted link's target out of
+      // the resolved path.
+      if (namespace.isLink(absOp)) {
+        try {
+          await dispatch('readlink', PathSpec.fromStrPath(absOp))
+        } catch (err) {
+          if (!readlinkRefused(err)) throw err
+          exitCode = 1
+          continue
+        }
+      }
       let resolved: string
       try {
         resolved = norm(namespace.follow(absOp))
@@ -430,8 +464,15 @@ export async function handleReadlink(
       lines.push(resolved)
       continue
     }
-    const target = namespace.readlink(absOp)
-    if (target === null) {
+    // The link entry is namespace state behind the op door: session
+    // grants and admission policies decide whether this session may
+    // read the target at all.
+    let target: string
+    try {
+      const [found] = await dispatch('readlink', PathSpec.fromStrPath(absOp))
+      target = found as string
+    } catch (err) {
+      if (!readlinkRefused(err)) throw err
       exitCode = 1
       continue
     }

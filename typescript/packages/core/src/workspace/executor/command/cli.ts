@@ -34,6 +34,7 @@ import {
 } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
+import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/policy/decide.ts'
@@ -218,7 +219,7 @@ export async function handleCli(
   // The environment goes into the parse, not on top of it: an option
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
-  const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd, session.env)
+  const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd, envSnapshot(session))
   const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {
     const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
@@ -279,7 +280,7 @@ export async function handleCli(
     texts,
     flags,
     stdin,
-    env: { ...session.env },
+    env: envSnapshot(session),
     ...(Object.keys(ops).length > 0 ? { ops } : {}),
   }
 

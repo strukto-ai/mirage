@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy.types import (Action, CommandContext, ExecuteResultContext,
-                                 OpsContext, OpsResultContext)
+                                 OpsContext, OpsResultContext, SessionContext)
 
 
 class Policy:
@@ -43,6 +43,19 @@ class Policy:
 
         Args:
             ctx (OpsContext): the op about to run.
+        """
+        return None
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        """Admit or refuse one session-state mutation (an env write).
+
+        Fires on the session plane, so an ``export`` from the shell, a
+        ``SessionView.set`` from a command, and any later writer clear
+        the same gate. Not path-scoped on purpose: the context carries
+        a key, never a pseudo-path.
+
+        Args:
+            ctx (SessionContext): the mutation about to land.
         """
         return None
 

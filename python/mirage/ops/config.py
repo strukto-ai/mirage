@@ -22,7 +22,7 @@ from mirage.types import FileStat, MountMode
 # Ops with lstat semantics: they act on the entry named by the path, so
 # no stat surface (dispatch, the ops facade, FUSE) may rewrite their
 # operand through the symlink table.
-NO_FOLLOW_OPS = frozenset({"unlink", "rename", "rmdir"})
+NO_FOLLOW_OPS = frozenset({"unlink", "rename", "rmdir", "symlink", "readlink"})
 
 # Content-writing ops whose completion stamps an observed mtime on the
 # namespace node (removals invalidate but must not stamp).

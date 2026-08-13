@@ -340,4 +340,4 @@ async def tree_generic(paths, texts, opts: CommandOpts, readdir, stat):
                       index=opts.index,
                       stat_path=opts.stat_path,
                       readdir_path=opts.readdir_path,
-                      mounts=opts.mounts)
+                      mounts=opts.ns.mounts if opts.ns is not None else None)

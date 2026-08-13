@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType, MountMode, mtimeMs, RAMResource } from '@struktoai/mirage-core'
+import {
+  FileStat,
+  FileType,
+  MountMode,
+  mtimeMs,
+  RAMResource,
+  runWithSession,
+} from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MountCore } from './core.ts'
@@ -30,6 +37,27 @@ async function mkCore(): Promise<MountCore> {
 }
 
 describe('MountCore', () => {
+  it('refuses a symlink on ungranted turf for a scoped session', async () => {
+    // The R8 hole: a session-scoped kernel mount could create a link on
+    // an ungranted mount's turf because the FUSE symlink path wrote the
+    // namespace table directly, at a layer no session grant covers.
+    const ws = new Workspace(
+      { '/data/': new RAMResource(), '/extra/': new RAMResource() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.execute("echo 'hello' > /data/greeting.txt")
+    const sess = ws.createSession('agent', { mounts: { '/data': MountMode.WRITE } })
+    const core = new MountCore(ws.fs, { session: sess })
+    // The fs adapter enters the session context before every kernel
+    // callback; the unit test binds the same way.
+    await runWithSession(sess, async () => {
+      await expect(core.symlink('/data/greeting.txt', '/extra/lk')).rejects.toThrow('not allowed')
+      await core.symlink('greeting.txt', '/data/lk')
+    })
+    expect(ws.namespace.isLink('/extra/lk')).toBe(false)
+    expect(ws.namespace.readlink('/data/lk')).toBe('greeting.txt')
+  })
+
   it('reports a file with its real size', async () => {
     const core = await mkCore()
     const attr = await core.getattr('/data/greeting.txt')

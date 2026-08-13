@@ -787,22 +787,25 @@ jobs:
       # Retry choco (its community feed 503s), then fall back to the
       # official GitHub release MSI, and verify the driver landed either
       # way so a bad install fails here, not as "Unable to find libfuse".
+      # Success is the DLL on disk, never choco's exit code: on a feed
+      # 504 choco reports "installed 0/0 packages" and exits 0, which
+      # skipped the fallback and failed the run at the final check.
       - name: Install WinFsp
         shell: pwsh
         run: |
-          $ok = $false
+          $dll = "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll"
           foreach ($i in 1..3) {
             choco install winfsp -y
-            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
-            Write-Host "choco attempt $i failed; retrying"
+            if (Test-Path $dll) { break }
+            Write-Host "choco attempt $i left no WinFsp; retrying"
             Start-Sleep -Seconds 10
           }
-          if (-not $ok) {
+          if (-not (Test-Path $dll)) {
             Write-Host "choco unavailable; installing from the GitHub release MSI"
             Invoke-WebRequest -Uri "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" -OutFile winfsp.msi
             Start-Process msiexec.exe -ArgumentList '/i','winfsp.msi','/qn' -Wait
           }
-          if (-not (Test-Path "C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll")) {
+          if (-not (Test-Path $dll)) {
             throw "WinFsp install failed: winfsp-x64.dll not found"
           }
 

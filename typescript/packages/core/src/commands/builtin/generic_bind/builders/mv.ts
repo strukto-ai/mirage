@@ -32,7 +32,7 @@ export const MV_BUILDER: Builder = {
     const parsed = parseMvFlags(new FlagView(opts.flags, specOf('mv')))
     return mvGeneric(
       paths,
-      overlayableStat(ops, accessor, idx, opts.statOverlay),
+      overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
       { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
       parsed,
       idx,
