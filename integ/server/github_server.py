@@ -43,6 +43,11 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 SEARCH_SIZE_LIMIT = 384 * 1024
 DEFAULT_BRANCH = "main"
 DEFAULT_LOGIN = "integ-user"
+# The synthetic root commit's timestamp. Fixed rather than "now", because a
+# client that sorts or filters by date must get the same answer on every run,
+# and the root stands for everything before the fixture rather than for a
+# moment.
+ROOT_COMMIT_DATE = "1970-01-01T00:00:00Z"
 
 
 def _build_artifact_zip() -> bytes:
@@ -192,6 +197,41 @@ def _repo_json(repo: "FakeRepo") -> dict:
     }
 
 
+def _commit_person(name: str, when: str) -> dict:
+    """The author/committer block a commit carries.
+
+    Args:
+        name (str): the person's display name.
+        when (str): an ISO 8601 timestamp.
+
+    Returns:
+        dict: the block, shaped as the REST API reports it.
+    """
+    handle = name.lower().replace(" ", "-")
+    return {
+        "name": name,
+        "email": f"{handle}@users.noreply.github.com",
+        "date": when,
+    }
+
+
+def _commit_files(paths: list[str], status: str = "added") -> list[dict]:
+    """Render a commit's touched paths the way the API reports them.
+
+    The store keeps paths as strings because that is all a write knows;
+    the endpoints that report "what changed" answer with objects, so the
+    conversion belongs here rather than in each caller.
+
+    Args:
+        paths (list[str]): the paths the commit touched.
+        status (str): the per-file status to report.
+
+    Returns:
+        list[dict]: one object per path.
+    """
+    return [{"filename": path, "status": status} for path in paths]
+
+
 def _commit_list(repo: "FakeRepo", branch: str = "") -> list[dict]:
     """One branch's commits, newest first, with a synthetic root.
 
@@ -218,7 +258,12 @@ def _commit_list(repo: "FakeRepo", branch: str = "") -> list[dict]:
     root = {
         "sha": _commit_sha("root\0" + "\0".join(f"{p}:{b}" for p, b in tree)),
         "commit": {
-            "message": "Initial commit"
+            "message": "Initial commit",
+            "author": _commit_person("mirage", ROOT_COMMIT_DATE),
+            "committer": _commit_person("mirage", ROOT_COMMIT_DATE),
+        },
+        "author": {
+            "login": "mirage"
         },
         "files": [],
     }
@@ -891,6 +936,12 @@ class GitHubServer:
         ref = request.match_info["ref"]
         branch = repo.branch_for(ref)
         history = _commit_list(repo, branch or repo.default_branch)
+        # The list endpoint reports paths and this one reports objects,
+        # which is GitHub's own split: `files` is absent from a commit in a
+        # list and carries a status per path when one commit is asked for.
+        history = [{
+            **entry, "files": _commit_files(entry["files"])
+        } for entry in history]
         if ref in (*repo.trees_by_branch, "HEAD"):
             return web.json_response(history[0])
         for entry in history:
@@ -1370,10 +1421,7 @@ class GitHubServer:
             if base and commit["sha"] == base:
                 break
             touched.extend(commit.get("files", []))
-        files = [{
-            "filename": path,
-            "status": "modified"
-        } for path in dict.fromkeys(touched)]
+        files = _commit_files(list(dict.fromkeys(touched)), "modified")
         return web.json_response({
             "status": "ahead",
             "files": files,
@@ -1875,6 +1923,51 @@ def seed_from_dir(state: FakeGitHub,
         repo.seed_path(relative, path.read_bytes(), branch)
 
 
+def seed_commits(state: FakeGitHub, full_name: str, source: Path) -> None:
+    """Give a repository's branches the history their fixture records.
+
+    Seeding a directory fills a tree and nothing else, so before this every
+    seeded branch answered `GET /commits` with one synthetic root. That is
+    fine for a task that reads files and wrong for one that asks *when*
+    something arrived: `task-tracker` wants the most recent commit on each
+    of fifteen branches that added tasks, and each branch has several, so a
+    history of one makes the question unanswerable rather than hard.
+
+    The manifest is a JSON object keyed by branch, each an array of commits
+    oldest first, matching the order a branch was actually built in. Shas
+    are derived from the content rather than carried, for the same reason
+    the root's is: a mirror of a fixture has to answer the same way twice.
+
+    Args:
+        state (FakeGitHub): the store to seed.
+        full_name (str): "owner/name" of the repository.
+        source (Path): the manifest.
+    """
+    owner, _, name = full_name.partition("/")
+    repo = state.repo(owner, name)
+    for branch, entries in json.loads(source.read_text()).items():
+        written = repo.commits_by_branch.setdefault(str(branch), [])
+        for entry in entries:
+            message = str(entry.get("message", ""))
+            when = str(entry.get("date", ROOT_COMMIT_DATE))
+            who = str(entry.get("author", DEFAULT_LOGIN))
+            paths = [str(p) for p in entry.get("files", [])]
+            written.append({
+                "sha":
+                _commit_sha(f"{full_name}@{branch}:{when}:{message}"),
+                "commit": {
+                    "message": message,
+                    "author": _commit_person(who, when),
+                    "committer": _commit_person(who, when),
+                },
+                "author": {
+                    "login": who
+                },
+                "files":
+                paths,
+            })
+
+
 def seed_metadata(state: FakeGitHub, source: Path) -> None:
     """Create repositories that are metadata only, from one JSON file.
 
@@ -1893,7 +1986,8 @@ def seed_metadata(state: FakeGitHub, source: Path) -> None:
         state.repo(owner, name, branch).meta.update(meta)
 
 
-async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
+async def _serve(port: int, repos: list[str], metadata: list[str],
+                 commits: list[str]) -> None:
     state = FakeGitHub()
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     for spec in repos:
@@ -1917,6 +2011,13 @@ async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
             state.repos[full_name].truncated = True
     for spec in metadata:
         seed_metadata(state, fixtures / spec)
+    # After the trees, always: a manifest names branches, and a branch that
+    # no directory was seeded into would otherwise be created here as an
+    # empty tree with a history, which reads as a branch whose files were
+    # all deleted.
+    for spec in commits:
+        full_name, _, fixture = spec.partition("=")
+        seed_commits(state, full_name, fixtures / fixture)
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
     await runner.setup()
@@ -1943,8 +2044,14 @@ def main() -> None:
         default=[],
         help="JSON file of repositories that exist as metadata only, keyed "
         "by owner/name; repeatable")
+    parser.add_argument(
+        "--commits",
+        action="append",
+        default=[],
+        help="owner/name=<JSON file of commits keyed by branch, each array "
+        "oldest first>; repeatable")
     args = parser.parse_args()
-    asyncio.run(_serve(args.port, args.repo, args.metadata))
+    asyncio.run(_serve(args.port, args.repo, args.metadata, args.commits))
 
 
 if __name__ == "__main__":
