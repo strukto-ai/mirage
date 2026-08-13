@@ -363,11 +363,15 @@ async def handle_cfor(
                 merged_io = await merged_io.merge(io)
                 all_stdout.append(stdout)
                 await eval_expr(exprs[2], 0)
-        except (ArithError, ReadonlyError) as exc:
+        except (ArithError, PolicyDenied, ReadonlyError) as exc:
             # bash: the loop aborts with status 1, keeping the output
-            # of iterations that already ran.
+            # of iterations that already ran. PolicyDenied is a header
+            # expression assigning a hidden name, refused by the same
+            # door as any denied assignment.
             if isinstance(exc, ReadonlyError):
                 err = f"bash: {exc}\n".encode()
+            elif isinstance(exc, PolicyDenied):
+                err = f"bash: {exc.strerror}\n".encode()
             else:
                 err = f"bash: ((: {exc}\n".encode()
             merged_io = await merged_io.merge(IOResult(exit_code=1,

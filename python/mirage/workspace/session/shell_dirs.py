@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.state import env_get
 
 
 def home_dir(session: Session) -> str | None:
@@ -24,9 +25,12 @@ def home_dir(session: Session) -> str | None:
     Returns:
         ``$HOME`` from the session env, or ``None`` when unset/empty,
         matching GNU bash (no implicit home; ``cd`` errors, ``~`` and
-        ``$HOME`` do not expand).
+        ``$HOME`` do not expand). Read through the session door, not
+        the raw env: this is HOME's own resolution channel ($HOME,
+        tilde expansion, bare ``cd``), so a hidden HOME must read as
+        unset here too.
     """
-    return session.env.get("HOME") or None
+    return env_get(session, "HOME") or None
 
 
 def logical_cwd(session: Session) -> str:

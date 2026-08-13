@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import tree_sitter
 
+from mirage.policy import PolicyDenied
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
                                 array_indices, array_slice, array_values)
@@ -28,7 +29,7 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
-from mirage.workspace.session import Session, visible_env
+from mirage.workspace.session import Session, ensure_var_visible, visible_env
 from mirage.workspace.session.shell_dirs import home_dir
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
@@ -71,6 +72,30 @@ def _unbound(var: str) -> ExitSignal:
     return ExitSignal(127,
                       stderr=f"bash: {var}: unbound variable\n".encode(),
                       contained_code=1)
+
+
+def guard_expansion_write(session: Session, *names: str) -> None:
+    """Refuse expansion-time writes that name hidden variables.
+
+    ``${X:=d}`` and ``$((X=5))`` land on the raw session env rather
+    than the async session door, so the hidden half of that door
+    (``ensure_var_visible``) is applied here, and the refusal takes the
+    fatal expansion-error shape ``${var:?}`` uses.
+
+    Args:
+        session (Session): shell session the write would land on.
+        *names (str): the variable names about to be written.
+
+    Raises:
+        ExitSignal: a name is hidden; the line dies with status 1.
+    """
+    for name in names:
+        try:
+            ensure_var_visible(session, name)
+        except PolicyDenied as exc:
+            raise ExitSignal(1,
+                             stderr=f"bash: {exc.strerror}\n".encode(),
+                             contained_code=1) from exc
 
 
 def _lookup_var(var: str,
@@ -658,8 +683,11 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                 call_stack.set_local(p.var_name, default)
             else:
                 # ${X:=} writes the raw session env, not the visible
-                # view (which is read-only): the known ungated session
-                # write, same as $((X=5)) and printf -v.
+                # view (which is read-only): the known policy-ungated
+                # session write, same as $((X=5)) and printf -v. The
+                # hidden gate still applies, or the write-back would
+                # clobber the value the host's wiring reads.
+                guard_expansion_write(session, p.var_name)
                 session.env[p.var_name] = default
         return default
     if p.op == ":-":

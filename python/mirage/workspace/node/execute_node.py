@@ -58,7 +58,8 @@ from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import (ensure_var_visible, session_view,
+                                            visible_env)
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
@@ -123,10 +124,14 @@ async def _eval_cfor_expr(
         return default
     text = await expand_arith(expr, session, execute_fn, call_stack)
     try:
-        value, updates = evaluate_arith(text, session.env)
+        # Reads resolve against the visible env so a hidden name counts
+        # as unset; a hidden write refuses through the session door
+        # (ensure_var_visible), caught by the loop beside ReadonlyError.
+        value, updates = evaluate_arith(text, visible_env(session))
     except ArithError as exc:
         raise ArithError(f"{text}: {exc}") from exc
     for name in updates:
+        ensure_var_visible(session, name)
         if name in session.readonly_vars:
             raise ReadonlyError(name)
     session.env.update(updates)
@@ -406,7 +411,10 @@ async def execute_node(
         text = get_text(node)
         expr = await expand_arith(node, session, execute_fn, cs)
         try:
-            value, updates = evaluate_arith(expr, session.env)
+            # Reads resolve against the visible env so a hidden name
+            # counts as unset; a hidden write refuses below, in this
+            # command's own voice like the readonly refusal.
+            value, updates = evaluate_arith(expr, visible_env(session))
         except ArithError as exc:
             err = f"bash: ((: {expr}: {exc}\n".encode()
             return None, IOResult(exit_code=1,
@@ -414,6 +422,14 @@ async def execute_node(
                                                              exit_code=1,
                                                              stderr=err)
         for name in updates:
+            try:
+                ensure_var_visible(session, name)
+            except PolicyDenied as exc:
+                err = f"bash: {exc.strerror}\n".encode()
+                return None, IOResult(exit_code=1,
+                                      stderr=err), ExecutionNode(command=text,
+                                                                 exit_code=1,
+                                                                 stderr=err)
             if name in session.readonly_vars:
                 err = f"bash: {name}: readonly variable\n".encode()
                 return None, IOResult(exit_code=1,

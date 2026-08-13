@@ -687,6 +687,51 @@ def test_assign_default_writes_raw_env_under_hidden_vars():
     assert ws.get_session("agent").env["NEWVAR"] == "seeded"
 
 
+def test_assign_default_of_a_hidden_var_is_refused():
+    # ${SLACK_TOKEN:=fake} observes the hidden name as unset, so
+    # without a gate the write-back would overwrite the real value
+    # the host's wiring still reads; the door refuses like any denied
+    # assignment.
+    ws = _hidden_vars_ws()
+
+    async def run():
+        return await ws.execute('echo "${SLACK_TOKEN:=fake}"',
+                                session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
+
+
+def test_arith_assign_of_a_hidden_var_is_refused():
+    # $((X=5)) and ((X=5)) write the raw env on purpose, but a hidden
+    # name is not theirs to clobber; both spellings refuse.
+    ws = _hidden_vars_ws()
+
+    async def run():
+        expansion = await ws.execute('echo "$((SLACK_TOKEN=5))"',
+                                     session_id="agent")
+        command = await ws.execute("((SLACK_TOKEN=7))", session_id="agent")
+        return expansion, command
+
+    expansion, command = asyncio.run(run())
+    assert expansion.exit_code != 0
+    assert command.exit_code != 0
+    assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
+
+
+def test_printf_v_of_a_hidden_var_is_refused():
+    ws = _hidden_vars_ws()
+
+    async def run():
+        return await ws.execute("printf -v SLACK_TOKEN fake",
+                                session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
+
+
 def test_env_builtin_omits_hidden_vars():
     ws = _hidden_vars_ws()
 
@@ -756,6 +801,27 @@ def test_unset_of_a_hidden_var_is_quiet_and_preserves_it():
     io = asyncio.run(run())
     assert io.exit_code == 0
     assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
+
+
+def test_hidden_home_reads_as_unset_everywhere():
+    # HOME has its own resolution channel (home_dir feeds $HOME, tilde
+    # expansion and bare `cd`), so hiding it must land there too, not
+    # only on the generic env lookup.
+    ws = _two_mounts()
+    sess = ws.create_session("agent", mounts={"/a": "write"})
+    sess.env["HOME"] = "/a/homedir"
+    sess.hidden_vars = HiddenVars(names=("HOME", ))
+
+    async def run():
+        home = await ws.execute('echo "[$HOME]"', session_id="agent")
+        tilde = await ws.execute("echo ~", session_id="agent")
+        cd = await ws.execute("cd", session_id="agent")
+        return await home.stdout_str(), await tilde.stdout_str(), cd
+
+    home_out, tilde_out, cd = asyncio.run(run())
+    assert home_out == "[]\n"
+    assert tilde_out == "~\n"
+    assert cd.exit_code == 1
 
 
 def test_guest_env_omits_hidden_vars():
@@ -960,6 +1026,27 @@ def test_shell_glob_never_matches_a_hidden_name():
     io, out = asyncio.run(run())
     assert io.exit_code != 0
     assert "kkk" not in out
+
+
+def test_find_predicates_evaluate_on_the_visible_tree():
+    # RAM ships a native find op, which classifies on the raw tree: a
+    # visible directory whose only child is hidden would read as
+    # nonempty there, so -empty would omit it and reveal that an
+    # unseen child exists. Under hidden paths the generic must walk
+    # through the guarded readdir instead.
+    ws = _hidden_paths_ws()
+    resource = next(m for m in ws.namespace.registry.mounts()
+                    if m.prefix.rstrip("/") == "/a").resource
+    resource._store.files["/vault/only.key"] = b"kkk\n"
+    resource._store.dirs.add("/vault")
+
+    async def run():
+        io = await ws.execute("find /a -empty", session_id="agent")
+        return await io.stdout_str()
+
+    out = asyncio.run(run())
+    assert "/a/vault" in out
+    assert "only.key" not in out
 
 
 def test_shell_redirect_into_hidden_space_fails_and_writes_nothing():

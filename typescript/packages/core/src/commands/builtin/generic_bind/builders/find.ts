@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { hiddenPathsActive } from '../../../../context/session_context.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -27,7 +28,14 @@ export const FIND_BUILDER: Builder = {
     // once, for the start point, and only when the expression mentions it.
     const dirEmpty = async (spec: PathSpec): Promise<boolean> =>
       (await ops.readdir(accessor, spec, idx)).length === 0
-    if (find !== undefined) {
+    // A native find op classifies on the raw backend tree, so under
+    // hidden paths its predicates would answer for entries the session
+    // cannot see (-empty omits a visible directory whose only child is
+    // hidden, which also reveals that the child exists). The walk
+    // classifies through the guarded readdir/stat, so it sees exactly
+    // the visible tree; same trade du makes for its summarize fast
+    // path.
+    if (find !== undefined && !hiddenPathsActive()) {
       // -mtime must see namespace times (touch results, observed
       // writes), so local backends post-filter through the overlay-
       // aware stat instead of pushing the window into the core.

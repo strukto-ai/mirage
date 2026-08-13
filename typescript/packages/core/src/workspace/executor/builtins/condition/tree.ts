@@ -16,6 +16,7 @@ import { evaluateArith } from '../../../../shell/arith.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
+import { visibleEnv } from '../../../session/state.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
 import { applyUnary } from './operators.ts'
 import { CondError } from './types.ts'
@@ -72,12 +73,13 @@ function evalCondBinary(ctx: CondContext, node: Extract<CondNode, { kind: 'binar
   const compare = INT_COMPARATORS.get(node.op)
   if (compare !== undefined) {
     // [[ evaluates numeric operands as arithmetic: variables resolve,
-    // expressions compute, bare unset words are 0.
+    // expressions compute, bare unset words are 0. The visible env,
+    // so a hidden name reads as unset here too.
     let li: bigint
     let ri: bigint
     try {
-      li = evaluateArith(node.left, ctx.session.env).value
-      ri = evaluateArith(node.right, ctx.session.env).value
+      li = evaluateArith(node.left, visibleEnv(ctx.session)).value
+      ri = evaluateArith(node.right, visibleEnv(ctx.session)).value
     } catch (exc) {
       if (!(exc instanceof ArithError)) throw exc
       throw new CondError('mirage: syntax error in conditional expression')

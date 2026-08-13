@@ -374,8 +374,16 @@ export async function handleCfor(
         await evalExpr(exprs[2] ?? null, 0)
       }
     } catch (err) {
-      if (!(err instanceof ArithError) && !(err instanceof ReadonlyError)) throw err
-      const prefix = err instanceof ReadonlyError ? 'bash: ' : 'bash: ((: '
+      // PolicyDenied is a header expression assigning a hidden name,
+      // refused by the same door as any denied assignment.
+      if (
+        !(err instanceof ArithError) &&
+        !(err instanceof ReadonlyError) &&
+        !(err instanceof PolicyDenied)
+      ) {
+        throw err
+      }
+      const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
       const errBytes = new TextEncoder().encode(`${prefix}${err.message}\n`)
       mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
       mergedIo.exitCode = 1

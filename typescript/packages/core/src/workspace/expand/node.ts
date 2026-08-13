@@ -24,7 +24,7 @@ import { evaluateArith } from '../../shell/arith.ts'
 import { ArithError } from '../../shell/errors.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { expandBraces, lookupVar } from './variable.ts'
+import { expandBraces, guardExpansionWrite, lookupVar } from './variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
 export type ExecuteFn = (
@@ -259,17 +259,20 @@ export async function expandNode(
       if (sub.length === 1 && only?.type === NT.SUBSHELL) {
         const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack)
         const expr = parenExpr.slice(1, -1)
+        let arith: { value: bigint; updates: Record<string, string> }
         try {
           // Reads resolve against the visible env, so a hidden name
-          // counts as unset; the write-back below is the known ungated
-          // $((X=5)) hole and stays raw until expansion goes async.
-          const { value, updates } = evaluateArith(expr, visibleEnv(session))
-          Object.assign(session.env, updates)
-          return prefix + value.toString()
+          // counts as unset; the write-back below lands on the raw env
+          // (policy-ungated until expansion goes async), with the
+          // hidden gate applied by guardExpansionWrite.
+          arith = evaluateArith(expr, visibleEnv(session))
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
           return prefix + rawSub
         }
+        guardExpansionWrite(session, ...Object.keys(arith.updates))
+        Object.assign(session.env, arith.updates)
+        return prefix + arith.value.toString()
       }
     }
     const innerCmds = tsNode.namedChildren.filter(
@@ -304,6 +307,7 @@ export async function expandNode(
       if (err instanceof ArithError) return tsNode.text
       throw err
     }
+    guardExpansionWrite(session, ...Object.keys(updates))
     Object.assign(session.env, updates)
     return prefix + value.toString()
   }

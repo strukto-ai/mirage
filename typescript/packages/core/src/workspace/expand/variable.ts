@@ -25,8 +25,9 @@ import {
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
 import type { Session } from '../session/session.ts'
-import { visibleEnv } from '../session/state.ts'
+import { ensureVarVisible, visibleEnv } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -102,6 +103,25 @@ const UNSET_GUARD_OPS: ReadonlySet<string> = new Set(['-', ':-', '+', ':+', '=',
 // subshell/pipeline segment reports 1 (same shape as ${var:?}).
 function unbound(name: string): ExitSignal {
   return new ExitSignal(127, new TextEncoder().encode(`bash: ${name}: unbound variable\n`), null, 1)
+}
+
+/**
+ * Refuse expansion-time writes that name hidden variables.
+ *
+ * `${X:=d}` and `$((X=5))` land on the raw session env rather than the
+ * async session door, so the hidden half of that door
+ * (`ensureVarVisible`) is applied here, and the refusal takes the
+ * fatal expansion-error shape `${var:?}` uses.
+ */
+export function guardExpansionWrite(session: Session, ...names: string[]): void {
+  for (const name of names) {
+    try {
+      ensureVarVisible(session, name)
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+    }
+  }
 }
 
 /**
@@ -768,8 +788,11 @@ export async function expandBraces(
     } else if (p.varName !== null) {
       // ${X:=} writes the raw session env, not the visible view (a
       // filtered copy under hidden vars, where the write would be
-      // silently lost): the known ungated session write, same as
-      // $((X=5)) and printf -v.
+      // silently lost): the known policy-ungated session write, same
+      // as $((X=5)) and printf -v. The hidden gate still applies, or
+      // the write-back would clobber the value the host's wiring
+      // reads.
+      guardExpansionWrite(session, p.varName)
       session.env[p.varName] = defaultVal
     }
     return defaultVal

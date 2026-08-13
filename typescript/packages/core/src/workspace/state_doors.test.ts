@@ -490,6 +490,35 @@ describe('hidden vars across the shell tier', () => {
     expect(ws.getSession('agent').env.NEWVAR).toBe('seeded')
   })
 
+  it('assign-default of a hidden var is refused', async () => {
+    // ${SLACK_TOKEN:=fake} observes the hidden name as unset, so
+    // without a gate the write-back would overwrite the real value
+    // the host's wiring still reads; the door refuses like any denied
+    // assignment.
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('echo "${SLACK_TOKEN:=fake}"', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
+  it('arithmetic assignment of a hidden var is refused', async () => {
+    // $((X=5)) and ((X=5)) write the raw env on purpose, but a hidden
+    // name is not theirs to clobber; both spellings refuse.
+    const ws = await makeHiddenVarsWs()
+    const expansion = await ws.execute('echo "$((SLACK_TOKEN=5))"', { sessionId: 'agent' })
+    expect(expansion.exitCode).not.toBe(0)
+    const command = await ws.execute('((SLACK_TOKEN=7))', { sessionId: 'agent' })
+    expect(command.exitCode).not.toBe(0)
+    expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
+  it('printf -v of a hidden var is refused', async () => {
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('printf -v SLACK_TOKEN fake', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
   it('expansion reads a hidden var as unset', async () => {
     const ws = await makeHiddenVarsWs()
     const io = await ws.execute('echo "[$SLACK_TOKEN][$PUBLIC]"', { sessionId: 'agent' })
@@ -519,6 +548,22 @@ describe('hidden vars across the shell tier', () => {
     const io = await ws.execute('unset SLACK_TOKEN', { sessionId: 'agent' })
     expect(io.exitCode).toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
+  it('a hidden HOME reads as unset everywhere', async () => {
+    // HOME has its own resolution channel (homeDir feeds $HOME, tilde
+    // expansion and bare `cd`), so hiding it must land there too, not
+    // only on the generic env lookup.
+    const ws = await makeHiddenVarsWs()
+    const sess = ws.getSession('agent')
+    sess.env.HOME = '/a/homedir'
+    sess.hiddenVars = { names: ['SLACK_TOKEN', 'HOME'] }
+    const home = await ws.execute('echo "[$HOME]"', { sessionId: 'agent' })
+    expect(stdoutStr(home)).toBe('[]\n')
+    const tilde = await ws.execute('echo ~', { sessionId: 'agent' })
+    expect(stdoutStr(tilde)).toBe('~\n')
+    const cd = await ws.execute('cd', { sessionId: 'agent' })
+    expect(cd.exitCode).toBe(1)
   })
 })
 
@@ -559,6 +604,27 @@ describe('hidden paths across the tiers', () => {
     expect(out).toContain('x.txt')
     expect(out).not.toContain('secrets')
     expect(out).not.toContain('note.key')
+  })
+
+  it('find predicates evaluate on the visible tree', async () => {
+    // RAM ships a native find op, which classifies on the raw tree: a
+    // visible directory whose only child is hidden would read as
+    // nonempty there, so -empty would omit it and reveal that an
+    // unseen child exists. Under hidden paths the generic must walk
+    // through the guarded readdir instead.
+    const parser = await getTestParser()
+    const a = new RAMResource()
+    a.store.files.set('/x.txt', ENC.encode('public\n'))
+    a.store.files.set('/vault/only.key', ENC.encode('kkk\n'))
+    a.store.dirs.add('/vault')
+    const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
+    open.push(ws)
+    const sess = ws.createSession('agent')
+    sess.hiddenPaths = { patterns: ['*.key'] }
+    const io = await ws.execute('find /a -empty', { sessionId: 'agent' })
+    const out = stdoutStr(io)
+    expect(out).toContain('/a/vault')
+    expect(out).not.toContain('only.key')
   })
 
   it('ls of a hidden dir is no such file', async () => {

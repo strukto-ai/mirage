@@ -41,7 +41,7 @@ export function envSnapshot(session: Session): Record<string, string> {
 /** The variable's value, null when unset or hidden. Sync on purpose:
  * `$X` expansion is the hot path, so a read stays a record lookup plus
  * the hidden check. */
-function envGet(session: Session, name: string): string | null {
+export function envGet(session: Session, name: string): string | null {
   if (varHidden(session.hiddenVars, name)) return null
   return sessionEntry(session.env, name) ?? null
 }
@@ -91,15 +91,29 @@ export function visibleEnv(session: Session): Record<string, string> {
  * space), ReadonlyVariableError when the name is readonly, and
  * PolicyDenied when a preSession policy refuses the write.
  */
+/**
+ * Refuse a write that names a hidden variable.
+ *
+ * The sync half of `setVar`'s hidden gate, shared with the
+ * expansion-time writers that land on the raw env (`${X:=d}`,
+ * `$((X=5))`, `printf -v`): a landed write would clobber the real
+ * value the host's wiring still reads, and a swallowed one would
+ * gaslight the writer; refuse loudly instead, the vars twin of EACCES
+ * on a create into hidden path space.
+ */
+export function ensureVarVisible(session: Session, name: string): void {
+  if (varHidden(session.hiddenVars, name)) {
+    throw new PolicyDenied(`${name}: permission denied`, name)
+  }
+}
+
 async function setVar(
   session: Session,
   policies: Policies | null,
   name: string,
   value: string | ShellArray,
 ): Promise<void> {
-  if (varHidden(session.hiddenVars, name)) {
-    throw new PolicyDenied(`${name}: permission denied`, name)
-  }
+  ensureVarVisible(session, name)
   if (session.readonlyVars.has(name)) {
     throw new ReadonlyVariableError(name)
   }

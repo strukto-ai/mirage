@@ -120,6 +120,12 @@ export class SessionManager {
         dflt.env = stored.env
         dflt.createdAt = stored.createdAt
         dflt.mountModes = stored.mountModes
+        // The hidden shapes are durable restrictions, not scratch
+        // state: dropping them here would wake a restarted daemon
+        // unrestricted and let the next flush erase them from the
+        // store.
+        dflt.hiddenPaths = stored.hiddenPaths
+        dflt.hiddenVars = stored.hiddenVars
         dflt.generation = stored.generation
         // Hydrated sessions start clean: baseline what the store
         // holds so the next flush skips them.

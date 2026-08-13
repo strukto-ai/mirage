@@ -18,10 +18,11 @@ import re
 from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_set
 from mirage.shell.bytes import byte_char, encode_text
 from mirage.workspace.expand.variable import _array_index
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, ensure_var_visible
 from mirage.workspace.types import ExecutionNode
 
 # A subscript must be non-empty: bash rejects `a[]` as an invalid
@@ -662,8 +663,14 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
         value (str): the formatted text to store.
 
     Returns:
-        str: ``"ok"``, ``"readonly"``, or ``"subscript"``.
+        str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
     """
+    try:
+        # The hidden half of the session door, in this builtin's
+        # status-string voice: a hidden name is not printf's to write.
+        ensure_var_visible(session, name)
+    except PolicyDenied:
+        return "denied"
     if name in session.readonly_vars:
         return "readonly"
     if subscript is None:
@@ -747,9 +754,13 @@ async def handle_printf(
         base, subscript = parsed.group(1), parsed.group(2)
         status = _assign_printf_target(session, base, subscript, output)
         if status != "ok":
-            err_bytes += (f"bash: {base}: readonly variable\n"
-                          if status == "readonly" else
-                          f"bash: {target}: bad array subscript\n").encode()
+            if status == "readonly":
+                refusal = f"bash: {base}: readonly variable\n"
+            elif status == "denied":
+                refusal = f"bash: {base}: permission denied\n"
+            else:
+                refusal = f"bash: {target}: bad array subscript\n"
+            err_bytes += refusal.encode()
             return None, IOResult(
                 exit_code=1, stderr=err_bytes), ExecutionNode(command="printf",
                                                               exit_code=1,

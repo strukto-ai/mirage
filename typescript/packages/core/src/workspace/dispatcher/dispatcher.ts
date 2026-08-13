@@ -67,9 +67,9 @@ function hiddenRefusal(opName: string, virtual: string): Error {
  * directory, the same normalization `mergeReaddir` dedups by.
  */
 function visibleEntries(entries: string[], parent: string): string[] {
-  const base = parent.replace(/\/+$/, '')
+  const base = rstripSlash(parent)
   return entries.filter((e) => {
-    const trimmed = e.replace(/\/+$/, '')
+    const trimmed = rstripSlash(e)
     const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
     return pathAllowed(`${base}/${name}`)
   })

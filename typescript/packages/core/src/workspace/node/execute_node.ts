@@ -89,7 +89,7 @@ import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'
-import { sessionView } from '../session/state.ts'
+import { ensureVarVisible, sessionView, visibleEnv } from '../session/state.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -145,12 +145,16 @@ async function evalCforExpr(
   let value: bigint
   let updates: Record<string, string>
   try {
-    ;({ value, updates } = evaluateArith(text, session.env))
+    // Reads resolve against the visible env so a hidden name counts as
+    // unset; a hidden write refuses through the session door
+    // (ensureVarVisible), caught by the loop beside ReadonlyError.
+    ;({ value, updates } = evaluateArith(text, visibleEnv(session)))
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
     throw new ArithError(`${text}: ${err.message}`)
   }
   for (const name of Object.keys(updates)) {
+    ensureVarVisible(session, name)
     if (session.readonlyVars.has(name)) throw new ReadonlyError(name)
   }
   Object.assign(session.env, updates)
@@ -445,7 +449,10 @@ export async function executeNode(
     let value: bigint
     let updates: Record<string, string>
     try {
-      ;({ value, updates } = evaluateArith(expr, session.env))
+      // Reads resolve against the visible env so a hidden name counts
+      // as unset; a hidden write refuses below, in this command's own
+      // voice like the readonly refusal.
+      ;({ value, updates } = evaluateArith(expr, visibleEnv(session)))
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
       const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)
@@ -456,6 +463,17 @@ export async function executeNode(
       ]
     }
     for (const name of Object.keys(updates)) {
+      try {
+        ensureVarVisible(session, name)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+        ]
+      }
       if (session.readonlyVars.has(name)) {
         const errBytes = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
         return [

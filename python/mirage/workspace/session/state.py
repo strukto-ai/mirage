@@ -122,6 +122,27 @@ def visible_env(session: Session) -> Mapping[str, str]:
     return _VisibleEnv(session)
 
 
+def ensure_var_visible(session: Session, name: str) -> None:
+    """Refuse a write that names a hidden variable.
+
+    The sync half of ``set_var``'s hidden gate, shared with the
+    expansion-time writers that land on the raw env (``${X:=d}``,
+    ``$((X=5))``, ``printf -v``): a landed write would clobber the real
+    value the host's wiring still reads, and a swallowed one would
+    gaslight the writer; refuse loudly instead, the vars twin of EACCES
+    on a create into hidden path space.
+
+    Args:
+        session (Session): the session being written.
+        name (str): variable name.
+
+    Raises:
+        PolicyDenied: the name is hidden for this session.
+    """
+    if var_hidden(session.hidden_vars, name):
+        raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
+
+
 async def set_var(session: Session, policies: Policies | None, name: str,
                   value: str | ShellArray) -> None:
     """Write one variable through the session plane's gate.
@@ -148,12 +169,7 @@ async def set_var(session: Session, policies: Policies | None, name: str,
         PolicyDenied: the name is hidden for this session, or a
             pre_session policy refused the write.
     """
-    if var_hidden(session.hidden_vars, name):
-        # A landed write would clobber the real value the host's wiring
-        # still reads, and a swallowed one would gaslight the writer;
-        # refuse loudly instead, the vars twin of EACCES on a create
-        # into hidden path space.
-        raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
+    ensure_var_visible(session, name)
     if name in session.readonly_vars:
         raise ReadonlyVariableError(name)
     rendered = value if isinstance(value, str) else " ".join(

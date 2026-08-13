@@ -22,7 +22,7 @@ import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.t
 import { ExecutionNode } from '../types.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { respellOne } from '../../utils/path.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/findEval.ts'
 import {
   FindParseError,
@@ -87,7 +87,7 @@ async function mountDirs(
 function allowedDescendants(registry: MountRegistry, path: string): MountEntry[] {
   return registry
     .descendantMounts(path)
-    .filter((m) => mountAllowed(m.prefix) && pathAllowed('/' + m.prefix.replace(/^\/+|\/+$/g, '')))
+    .filter((m) => mountAllowed(m.prefix) && pathAllowed('/' + stripSlash(m.prefix)))
 }
 
 export function shouldFanOut(

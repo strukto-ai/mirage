@@ -14,9 +14,10 @@
 
 import type { HiddenPaths, HiddenVars } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
+import { stripSlash } from './slash.ts'
 
 function normAbs(path: string): string {
-  const stripped = path.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(path)
   return stripped === '' ? '/' : '/' + stripped
 }
 

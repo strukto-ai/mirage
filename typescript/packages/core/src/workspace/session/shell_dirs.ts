@@ -13,12 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Session } from './session.ts'
+import { envGet } from './state.ts'
 
 // Returns $HOME from the session env, or null when unset/empty, matching
 // GNU bash (no implicit home; `cd` errors, `~` and $HOME do not expand).
+// Read through the session door, not the raw env: this is HOME's own
+// resolution channel ($HOME, tilde expansion, bare `cd`), so a hidden
+// HOME must read as unset here too.
 export function homeDir(session: Session): string | null {
-  const home = session.env.HOME
-  return home !== undefined && home !== '' ? home : null
+  const home = envGet(session, 'HOME')
+  return home !== null && home !== '' ? home : null
 }
 
 // The cwd as last spelled, falling back to the physical one. bash keeps

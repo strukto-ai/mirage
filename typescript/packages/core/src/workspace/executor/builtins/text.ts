@@ -18,7 +18,9 @@ import { arrayExtent, arraySet } from '../../../shell/array.ts'
 import { byteChar, encodeText } from '../../../shell/bytes.ts'
 import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
+import { PolicyDenied } from '../../../policy/errors.ts'
 import type { Session } from '../../session/session.ts'
+import { ensureVarVisible } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
@@ -855,7 +857,15 @@ function assignPrintfTarget(
   name: string,
   subscript: string | undefined,
   value: string,
-): 'ok' | 'readonly' | 'subscript' {
+): 'ok' | 'denied' | 'readonly' | 'subscript' {
+  try {
+    // The hidden half of the session door, in this builtin's
+    // status-string voice: a hidden name is not printf's to write.
+    ensureVarVisible(session, name)
+  } catch (err) {
+    if (!(err instanceof PolicyDenied)) throw err
+    return 'denied'
+  }
   if (session.readonlyVars.has(name)) return 'readonly'
   if (subscript === undefined) {
     const existing = sessionEntry(session.arrays, name)
@@ -940,7 +950,9 @@ export function handlePrintf(args: string[], session: Session): Result {
       const detail =
         status === 'readonly'
           ? `bash: ${base}: readonly variable\n`
-          : `bash: ${target}: bad array subscript\n`
+          : status === 'denied'
+            ? `bash: ${base}: permission denied\n`
+            : `bash: ${target}: bad array subscript\n`
       const err = new TextEncoder().encode(errors.join('') + detail)
       return [
         null,

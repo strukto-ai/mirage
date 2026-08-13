@@ -123,6 +123,12 @@ class SessionManager:
                     default.env = stored.env
                     default.created_at = stored.created_at
                     default.mount_modes = stored.mount_modes
+                    # The hidden shapes are durable restrictions, not
+                    # scratch state: dropping them here would wake a
+                    # restarted daemon unrestricted and let the next
+                    # flush erase them from the store.
+                    default.hidden_paths = stored.hidden_paths
+                    default.hidden_vars = stored.hidden_vars
                     default.generation = stored.generation
                     # Hydrated sessions start clean: baseline what the
                     # store holds so the next flush skips them.

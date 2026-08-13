@@ -298,7 +298,27 @@
           "backend": "redis",
           "fixture": "columnar/v1"
         }
-      ]
+      ],
+      "sessions": {
+        "narrowed": {
+          "mounts": {
+            "/data": "write",
+            "/data2": "write",
+            "/res": "read"
+          },
+          "hidden_paths": {
+            "paths": ["/data/sessvis/vault"],
+            "patterns": ["*.key"]
+          },
+          "hidden_vars": {
+            "names": ["SLACK_TOKEN"]
+          },
+          "env": {
+            "SLACK_TOKEN": "xoxb-integ",
+            "ROLE": "analyst"
+          }
+        }
+      }
     },
     {
       "id": "opfs",
@@ -353,7 +373,27 @@
           "bucket": "res",
           "fixture": "columnar/v1"
         }
-      ]
+      ],
+      "sessions": {
+        "narrowed": {
+          "mounts": {
+            "/data": "write",
+            "/data2": "write",
+            "/res": "read"
+          },
+          "hidden_paths": {
+            "paths": ["/data/sessvis/vault"],
+            "patterns": ["*.key"]
+          },
+          "hidden_vars": {
+            "names": ["SLACK_TOKEN"]
+          },
+          "env": {
+            "SLACK_TOKEN": "xoxb-integ",
+            "ROLE": "analyst"
+          }
+        }
+      }
     },
     {
       "id": "s3-prefix",
@@ -386,7 +426,27 @@
           "prefix": "team/reports/res",
           "fixture": "columnar/v1"
         }
-      ]
+      ],
+      "sessions": {
+        "narrowed": {
+          "mounts": {
+            "/data": "write",
+            "/data2": "write",
+            "/res": "read"
+          },
+          "hidden_paths": {
+            "paths": ["/data/sessvis/vault"],
+            "patterns": ["*.key"]
+          },
+          "hidden_vars": {
+            "names": ["SLACK_TOKEN"]
+          },
+          "env": {
+            "SLACK_TOKEN": "xoxb-integ",
+            "ROLE": "analyst"
+          }
+        }
+      }
     },
     {
       "id": "object-storage-prefix",
@@ -537,7 +597,27 @@
           "bucket": "res",
           "fixture": "columnar/v1"
         }
-      ]
+      ],
+      "sessions": {
+        "narrowed": {
+          "mounts": {
+            "/data": "write",
+            "/data2": "write",
+            "/res": "read"
+          },
+          "hidden_paths": {
+            "paths": ["/data/sessvis/vault"],
+            "patterns": ["*.key"]
+          },
+          "hidden_vars": {
+            "names": ["SLACK_TOKEN"]
+          },
+          "env": {
+            "SLACK_TOKEN": "xoxb-integ",
+            "ROLE": "analyst"
+          }
+        }
+      }
     },
     {
       "id": "gridfs-prefix",
