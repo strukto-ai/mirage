@@ -676,6 +676,16 @@ export async function executeNode(
       // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
       for (const bare of assignments) {
         if (bare.includes('=')) continue
+        // Both branches below write array storage raw (the top-level
+        // one migrates an existing scalar into element 0), so a hidden
+        // name refuses like any assignment spelling before either
+        // lands.
+        try {
+          ensureVarVisible(session, bare)
+        } catch (err) {
+          if (!(err instanceof PolicyDenied)) throw err
+          throw new ExitSignal(1, new TextEncoder().encode(`${err.message}\n`), null, 1)
+        }
         if (noteLocalArray(session, bare)) {
           // Inside a function this shadows whatever the caller had with a
           // fresh empty array.
@@ -832,7 +842,7 @@ export async function executeNode(
       } else {
         arr = [...existing]
       }
-      let idx = arrayIndex(idxText, session.env)
+      let idx = arrayIndex(idxText, visibleEnv(session))
       if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) {
         // bash aborts the whole line on a bad assignment subscript

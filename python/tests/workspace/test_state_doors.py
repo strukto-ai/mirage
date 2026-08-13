@@ -803,6 +803,128 @@ def test_unset_of_a_hidden_var_is_quiet_and_preserves_it():
     assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
 
 
+def _hidden_array_ws() -> Workspace:
+    ws = _two_mounts()
+    sess = ws.create_session("agent", mounts={"/a": "write"})
+    sess.arrays["SLACK_TOKEN"] = ["xoxb-real", "xoxb-two"]
+    sess.env["PUBLIC"] = "ok"
+    sess.hidden_vars = HiddenVars(names=("SLACK_TOKEN", ))
+    return ws
+
+
+def test_expansion_reads_a_hidden_array_as_unset():
+    # The embedder can seed session.arrays before narrowing, so a
+    # hidden name can hold an array; every expansion spelling must
+    # read it the way the scalar case does: as unset.
+    ws = _hidden_array_ws()
+
+    async def run():
+        io = await ws.execute(
+            'echo "[$SLACK_TOKEN][${SLACK_TOKEN[0]}]'
+            '[${SLACK_TOKEN[@]}][${#SLACK_TOKEN[@]}]"',
+            session_id="agent")
+        splat = await ws.execute(
+            'for el in "${SLACK_TOKEN[@]}"; do echo "el=$el"; done; echo end',
+            session_id="agent")
+        return io, await io.stdout_str(), splat, await splat.stdout_str()
+
+    io, out, splat, splat_out = asyncio.run(run())
+    assert io.exit_code == 0
+    assert out == "[][][][0]\n"
+    assert splat.exit_code == 0
+    assert splat_out == "end\n"
+
+
+def test_prefix_assignment_of_a_hidden_var_is_refused():
+    # SLACK_TOKEN=fake cmd writes the raw env before dispatch, and a
+    # function-call prefix deliberately never restores, so without a
+    # gate a narrowed session permanently clobbers the host value.
+    ws = _hidden_vars_ws()
+
+    async def run():
+        await ws.execute("f() { echo ran; }", session_id="agent")
+        fn = await ws.execute("SLACK_TOKEN=fake f", session_id="agent")
+        cmd = await ws.execute("SLACK_TOKEN=fake echo hi", session_id="agent")
+        bare = await ws.execute("SLACK_TOKEN=fake OTHER=x", session_id="agent")
+        return fn, cmd, bare
+
+    fn, cmd, bare = asyncio.run(run())
+    assert fn.exit_code != 0
+    assert cmd.exit_code != 0
+    assert bare.exit_code != 0
+    sess = ws.get_session("agent")
+    assert sess.env["SLACK_TOKEN"] == "xoxb-real"
+    assert "OTHER" not in sess.env
+
+
+def test_bare_declare_a_of_a_hidden_var_is_refused():
+    # `declare -a NAME` at top level migrates an existing scalar into
+    # element 0 with raw writes, which would move the hidden value
+    # into array storage; the door refuses instead.
+    ws = _hidden_vars_ws()
+
+    async def run():
+        return await ws.execute("declare -a SLACK_TOKEN", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    sess = ws.get_session("agent")
+    assert sess.env["SLACK_TOKEN"] == "xoxb-real"
+    assert "SLACK_TOKEN" not in sess.arrays
+
+
+def test_unset_of_a_hidden_array_is_a_quiet_noop():
+    # `unset name` and `unset name[i]` on a hidden array answer as
+    # they would for an unset name: exit 0, nothing said, nothing
+    # written, in either spelling.
+    ws = _hidden_array_ws()
+
+    async def run():
+        element = await ws.execute('unset "SLACK_TOKEN[1]"',
+                                   session_id="agent")
+        whole = await ws.execute("unset SLACK_TOKEN", session_id="agent")
+        return element, whole
+
+    element, whole = asyncio.run(run())
+    assert element.exit_code == 0
+    assert whole.exit_code == 0
+    sess = ws.get_session("agent")
+    assert sess.arrays["SLACK_TOKEN"] == ["xoxb-real", "xoxb-two"]
+
+
+def test_bare_export_of_a_hidden_var_is_refused():
+    # `export NAME` on a name that reads as unset writes an empty
+    # entry, so on a hidden name it refuses like the valued form;
+    # deciding from raw membership would quietly re-mark the hidden
+    # name instead.
+    ws = _hidden_vars_ws()
+
+    async def run():
+        return await ws.execute("export SLACK_TOKEN", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert ws.get_session("agent").env["SLACK_TOKEN"] == "xoxb-real"
+
+
+def test_subscript_arithmetic_resolves_against_the_visible_env():
+    # An assignment subscript evaluates as arithmetic, so a hidden
+    # numeric read there would steer a visible array's write index
+    # and leak by placement; hidden reads as unset, which is 0.
+    ws = _two_mounts()
+    sess = ws.create_session("agent", mounts={"/a": "write"})
+    sess.env["SECRET_IDX"] = "1"
+    sess.hidden_vars = HiddenVars(names=("SECRET_IDX", ))
+
+    async def run():
+        await ws.execute("b=(x y)", session_id="agent")
+        return await ws.execute("b[SECRET_IDX]=z", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert ws.get_session("agent").arrays["b"] == ["z", "y"]
+
+
 def test_hidden_home_reads_as_unset_everywhere():
     # HOME has its own resolution channel (home_dir feeds $HOME, tilde
     # expansion and bare `cd`), so hiding it must land there too, not

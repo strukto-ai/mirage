@@ -565,7 +565,101 @@ describe('hidden vars across the shell tier', () => {
     const cd = await ws.execute('cd', { sessionId: 'agent' })
     expect(cd.exitCode).toBe(1)
   })
+
+  it('expansion reads a hidden array as unset', async () => {
+    // The embedder can seed session.arrays before narrowing, so a
+    // hidden name can hold an array; every expansion spelling must
+    // read it the way the scalar case does: as unset.
+    const ws = await makeHiddenArrayWs()
+    const io = await ws.execute(
+      'echo "[$SLACK_TOKEN][${SLACK_TOKEN[0]}][${SLACK_TOKEN[@]}][${#SLACK_TOKEN[@]}]"',
+      { sessionId: 'agent' },
+    )
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('[][][][0]\n')
+    const splat = await ws.execute(
+      'for el in "${SLACK_TOKEN[@]}"; do echo "el=$el"; done; echo end',
+      { sessionId: 'agent' },
+    )
+    expect(splat.exitCode).toBe(0)
+    expect(stdoutStr(splat)).toBe('end\n')
+  })
+
+  it('a prefix assignment of a hidden var is refused', async () => {
+    // SLACK_TOKEN=fake cmd writes the raw env before dispatch, and a
+    // function-call prefix deliberately never restores, so without a
+    // gate a narrowed session permanently clobbers the host value.
+    const ws = await makeHiddenVarsWs()
+    await ws.execute('f() { echo ran; }', { sessionId: 'agent' })
+    const fn = await ws.execute('SLACK_TOKEN=fake f', { sessionId: 'agent' })
+    expect(fn.exitCode).not.toBe(0)
+    const cmd = await ws.execute('SLACK_TOKEN=fake echo hi', { sessionId: 'agent' })
+    expect(cmd.exitCode).not.toBe(0)
+    const bare = await ws.execute('SLACK_TOKEN=fake OTHER=x', { sessionId: 'agent' })
+    expect(bare.exitCode).not.toBe(0)
+    const sess = ws.getSession('agent')
+    expect(sess.env.SLACK_TOKEN).toBe('xoxb-real')
+    expect('OTHER' in sess.env).toBe(false)
+  })
+
+  it('bare declare -a of a hidden var is refused', async () => {
+    // `declare -a NAME` at top level migrates an existing scalar into
+    // element 0 with raw writes, which would move the hidden value
+    // into array storage; the door refuses instead.
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('declare -a SLACK_TOKEN', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    const sess = ws.getSession('agent')
+    expect(sess.env.SLACK_TOKEN).toBe('xoxb-real')
+    expect('SLACK_TOKEN' in sess.arrays).toBe(false)
+  })
+
+  it('unset of a hidden array is a quiet noop', async () => {
+    // `unset name` and `unset name[i]` on a hidden array answer as
+    // they would for an unset name: exit 0, nothing said, nothing
+    // written, in either spelling.
+    const ws = await makeHiddenArrayWs()
+    const element = await ws.execute('unset "SLACK_TOKEN[1]"', { sessionId: 'agent' })
+    expect(element.exitCode).toBe(0)
+    const whole = await ws.execute('unset SLACK_TOKEN', { sessionId: 'agent' })
+    expect(whole.exitCode).toBe(0)
+    expect(ws.getSession('agent').arrays.SLACK_TOKEN).toEqual(['xoxb-real', 'xoxb-two'])
+  })
+
+  it('bare export of a hidden var is refused', async () => {
+    // `export NAME` on a name that reads as unset writes an empty
+    // entry, so on a hidden name it refuses like the valued form;
+    // deciding from raw membership would quietly re-mark the hidden
+    // name instead.
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('export SLACK_TOKEN', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
+  it('subscript arithmetic resolves against the visible env', async () => {
+    // An assignment subscript evaluates as arithmetic, so a hidden
+    // numeric read there would steer a visible array's write index
+    // and leak by placement; hidden reads as unset, which is 0.
+    const ws = await makeWs()
+    const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+    sess.env.SECRET_IDX = '1'
+    sess.hiddenVars = { names: ['SECRET_IDX'] }
+    await ws.execute('b=(x y)', { sessionId: 'agent' })
+    const io = await ws.execute('b[SECRET_IDX]=z', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(ws.getSession('agent').arrays.b).toEqual(['z', 'y'])
+  })
 })
+
+async function makeHiddenArrayWs(): Promise<Workspace> {
+  const ws = await makeWs()
+  const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+  sess.arrays.SLACK_TOKEN = ['xoxb-real', 'xoxb-two']
+  sess.env.PUBLIC = 'ok'
+  sess.hiddenVars = { names: ['SLACK_TOKEN'] }
+  return ws
+}
 
 async function makeHiddenPathsWs(): Promise<Workspace> {
   const parser = await getTestParser()

@@ -22,7 +22,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_set
 from mirage.shell.bytes import byte_char, encode_text
 from mirage.workspace.expand.variable import _array_index
-from mirage.workspace.session import Session, ensure_var_visible
+from mirage.workspace.session import Session, ensure_var_visible, visible_env
 from mirage.workspace.types import ExecutionNode
 
 # A subscript must be non-empty: bash rejects `a[]` as an invalid
@@ -687,7 +687,7 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
         # An existing scalar becomes element 0, even when empty: bash
         # resolves `x[-1]` against the length-1 array that produces.
         arr = [] if scalar is None else [scalar]
-    idx = _array_index(subscript, session.env)
+    idx = _array_index(subscript, visible_env(session))
     if idx < 0:
         idx += array_extent(arr)
     if idx < 0:

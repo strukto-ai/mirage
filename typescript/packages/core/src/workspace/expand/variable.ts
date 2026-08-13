@@ -27,7 +27,7 @@ import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { Session } from '../session/session.ts'
-import { ensureVarVisible, visibleEnv } from '../session/state.ts'
+import { ensureVarVisible, visibleArrays, visibleEnv } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -182,7 +182,7 @@ export function lookupVar(
     const localVal = callStack.getLocal(name)
     if (localVal !== null) return localVal
   }
-  const fromArray = session.arrays[name]
+  const fromArray = visibleArrays(session)[name]
   if (fromArray !== undefined) {
     return arrayGet(fromArray, 0)
   }
@@ -617,7 +617,7 @@ export async function expandArrayAt(
     const params = positionalArgs(session, callStack)
     arr = p.op === ':' ? [session.argv0, ...params] : params
   } else {
-    arr = session.arrays[p.varName ?? '']
+    arr = visibleArrays(session)[p.varName ?? '']
   }
   if (arr === undefined) {
     const scalar = env[p.varName ?? '']
@@ -687,7 +687,7 @@ export async function expandBraces(
     )
   }
   const env = visibleEnv(session)
-  const arrays = session.arrays
+  const arrays = visibleArrays(session)
 
   const groups: string[] = []
   for (let gi = 0; gi < p.groups.length; gi++) {

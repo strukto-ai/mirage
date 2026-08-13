@@ -30,14 +30,16 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.options import parse_option_word
 from mirage.shell.types import SET_OPTION_NAMES
+from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.text import _PRINTF_TARGET_RE
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.session.errors import ReadonlyVariableError
-from mirage.workspace.session.state import (env_is_readonly, env_snapshot,
-                                            session_view, visible_env)
+from mirage.workspace.session.state import (env_get, env_is_readonly,
+                                            env_snapshot, session_view,
+                                            visible_arrays, visible_env)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -356,11 +358,15 @@ async def handle_export(
                 await view.set(key, val)
             except PolicyDenied as exc:
                 return _refusal("export", exc)
-        elif assign not in session.env and assign not in session.arrays:
+        elif (env_get(session, assign) is None
+              and assign not in visible_arrays(session)):
             # `export NAME` with no value writes an empty entry, which
             # is still a session write; an existing name (scalar or
             # array) is only re-marked for export, so nothing is
-            # written — a scalar write here would erase an array.
+            # written — a scalar write here would erase an array. The
+            # membership reads are visible ones: a hidden name counts
+            # as unset, so the write is attempted and the door refuses
+            # it like the valued form.
             if view.is_readonly(assign):
                 return _readonly_refusal("export", assign)
             try:
@@ -424,15 +430,17 @@ def _unset_variable(session: Session, name: str) -> None:
 
     The scalar half is the view's (``unset`` popped it, or quietly kept
     it for a hidden name — a direct pop here would undo that refusal);
-    this clears the array storage and the getopts residue. A hidden
-    name can never hold an array, because ``set_var`` refuses hidden
-    names for both shapes.
+    this clears the array storage and the getopts residue. The array
+    pop keeps a hidden name too: the embedder can seed
+    ``session.arrays`` before narrowing, so a hidden array exists and
+    is as much the host's to keep as the scalar the view protected.
 
     Args:
         session (Session): shell session state.
         name (str): a bare variable name (no subscript).
     """
-    session.arrays.pop(name, None)
+    if not var_hidden(session.hidden_vars, name):
+        session.arrays.pop(name, None)
     if name == "OPTIND":
         session._getopts_optind = None
 
@@ -470,15 +478,18 @@ async def _unset_element(session: Session, view: SessionView, base: str,
     Raises:
         PolicyDenied: a pre_session policy refused the write.
     """
-    arr = session.arrays.get(base)
+    arr = visible_arrays(session).get(base)
     if arr is None:
-        if base not in session.env:
+        # Visible reads on purpose: a hidden base answers the unset
+        # branch's silent no-op instead of a denial that would leak
+        # the name's existence.
+        if env_get(session, base) is None:
             return "ok"
-        if _array_index(subscript, session.env) != 0:
+        if _array_index(subscript, visible_env(session)) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = _array_index(subscript, session.env)
+    idx = _array_index(subscript, visible_env(session))
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:
@@ -868,9 +879,12 @@ async def handle_local(
         else:
             if local_vars is not None and assign not in local_vars:
                 local_vars[assign] = session.env.get(assign)
-            if assign not in session.env and assign not in session.arrays:
+            if (env_get(session, assign) is None
+                    and assign not in visible_arrays(session)):
                 # A bare declaration of an existing array re-scopes it;
-                # a scalar write here would erase it.
+                # a scalar write here would erase it. Visible reads: a
+                # hidden name counts as unset, so the write is
+                # attempted and the door refuses it.
                 if view.is_readonly(assign):
                     return _readonly_refusal("local", assign)
                 try:

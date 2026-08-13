@@ -29,7 +29,8 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
-from mirage.workspace.session import Session, ensure_var_visible, visible_env
+from mirage.workspace.session import (Session, ensure_var_visible,
+                                      visible_arrays, visible_env)
 from mirage.workspace.session.shell_dirs import home_dir
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
@@ -153,8 +154,8 @@ def _lookup_var(var: str,
         local_val = call_stack.get_local(var)
         if local_val is not None:
             return local_val
-    arrays = getattr(session, "arrays", None)
-    if arrays and var in arrays:
+    arrays = visible_arrays(session)
+    if var in arrays:
         return array_get(arrays[var], 0)
     # `$PWD` is deliberately absent here: `cd` writes it into the env like
     # any exported variable, so it can be assigned, unset and printed by
@@ -591,7 +592,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
         msg = f"bash: ${{{p.var_name or ''}}}: bad substitution\n"
         raise ExitSignal(2, stderr=msg.encode(), contained_code=2)
     env = visible_env(session)
-    arrays = getattr(session, "arrays", {})
+    arrays = visible_arrays(session)
 
     groups: list[str] = []
     for gi, group in enumerate(p.groups):
@@ -810,8 +811,8 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         params: list[str | None] = [*_positional_args(session, call_stack)]
         arr = [session.argv0, *params] if p.op == ":" else params
     else:
-        arrays = getattr(session, "arrays", {})
-        arr = arrays.get(p.var_name)
+        arrays = visible_arrays(session)
+        arr = arrays.get(p.var_name) if p.var_name else None
     env = visible_env(session)
     if arr is None:
         name = p.var_name or ""

@@ -122,6 +122,47 @@ def visible_env(session: Session) -> Mapping[str, str]:
     return _VisibleEnv(session)
 
 
+class _VisibleArrays(Mapping[str, ShellArray]):
+    """A live, read-only view of the session arrays minus hidden names.
+
+    The arrays twin of ``_VisibleEnv``: the embedder can seed
+    ``session.arrays`` before narrowing, so a hidden name can hold an
+    array and array reads need the same filter env reads get.
+    """
+
+    __slots__ = ("_session", )
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def __getitem__(self, name: str) -> ShellArray:
+        if var_hidden(self._session.hidden_vars, name):
+            raise KeyError(name)
+        return self._session.arrays[name]
+
+    def __iter__(self) -> Iterator[str]:
+        hidden = self._session.hidden_vars
+        for name in self._session.arrays:
+            if not var_hidden(hidden, name):
+                yield name
+
+    def __len__(self) -> int:
+        hidden = self._session.hidden_vars
+        return sum(1 for name in self._session.arrays
+                   if not var_hidden(hidden, name))
+
+
+def visible_arrays(session: Session) -> Mapping[str, ShellArray]:
+    """The arrays mapping a reader tier should resolve names against.
+
+    Args:
+        session (Session): the session holding the arrays.
+    """
+    if session.hidden_vars is None:
+        return session.arrays
+    return _VisibleArrays(session)
+
+
 def ensure_var_visible(session: Session, name: str) -> None:
     """Refuse a write that names a hidden variable.
 

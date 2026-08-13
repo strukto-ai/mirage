@@ -39,7 +39,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
 import { pathFlagScopes, positionalScopes } from '../executor/command/routing.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { resolveLimit } from '../../policy/index.ts'
+import { PolicyDenied, resolveLimit } from '../../policy/index.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -95,7 +95,7 @@ import {
 } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir, logicalCwd } from '../session/shell_dirs.ts'
-import { sessionView } from '../session/state.ts'
+import { ensureVarVisible, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -196,6 +196,22 @@ export async function executeCommand(
   }
 
   for (const [k] of prefixAssignments) {
+    // The hidden gate runs first, as in setVar: calling a hidden name
+    // "readonly" would leak that it exists. Both branches below write
+    // session.env raw (a function-call prefix on purpose never
+    // restores), so ungated they would let a narrowed session clobber
+    // the host's value.
+    try {
+      ensureVarVisible(session, k)
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      const stderr = new TextEncoder().encode(`bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr }),
+        new ExecutionNode({ command: name !== '' ? name : k, exitCode: 1, stderr }),
+      ]
+    }
     if (session.readonlyVars.has(k)) {
       const err = new TextEncoder().encode(`bash: ${k}: readonly variable\n`)
       return [

@@ -20,7 +20,8 @@ from mirage.workspace.session.profile import SessionProfile
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
 from mirage.workspace.session.state import (ensure_var_visible, env_snapshot,
-                                            session_view, visible_env)
+                                            session_view, visible_arrays,
+                                            visible_env)
 from mirage.workspace.session.store import SessionFields, SessionStore
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "ensure_var_visible",
     "SessionProfile",
     "session_view",
+    "visible_arrays",
     "visible_env",
     "RedisSessionStore",
     "S3SessionStore",

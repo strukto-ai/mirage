@@ -36,7 +36,7 @@ import { varHidden } from '../../../utils/hidden.ts'
 import { ReadonlyVariableError } from '../../session/errors.ts'
 import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
-import { envSnapshot, sessionView, visibleEnv } from '../../session/state.ts'
+import { envGet, envSnapshot, sessionView, visibleArrays, visibleEnv } from '../../session/state.ts'
 import type { SessionView } from '../../../ops/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../control.ts'
@@ -300,11 +300,13 @@ export async function handleExport(
         if (err instanceof PolicyDenied) return doorRefusal('export', err)
         throw err
       }
-    } else if (!(assign in session.env) && !(assign in session.arrays)) {
+    } else if (envGet(session, assign) === null && !(assign in visibleArrays(session))) {
       // `export NAME` with no value writes an empty entry, which is
       // still a session write; an existing name (scalar or array) is
       // only re-marked for export, so nothing is written — a scalar
-      // write here would erase an array.
+      // write here would erase an array. The membership reads are
+      // visible ones: a hidden name counts as unset, so the write is
+      // attempted and the door refuses it like the valued form.
       if (view.isReadonly(assign)) return readonlyRefusal('export', assign)
       try {
         await view.set(assign, '')
@@ -374,13 +376,16 @@ export async function handleReadonly(
  *
  * The scalar half is the view's (`unset` deleted it, or quietly kept
  * it for a hidden name — a direct delete here would undo that
- * refusal); this clears the array storage and the getopts residue. A
- * hidden name can never hold an array, because `setVar` refuses
- * hidden names for both shapes.
+ * refusal); this clears the array storage and the getopts residue.
+ * The array delete keeps a hidden name too: the embedder can seed
+ * `session.arrays` before narrowing, so a hidden array exists and is
+ * as much the host's to keep as the scalar the view protected.
  */
 function unsetVariable(session: Session, name: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.arrays[name]
+  if (!varHidden(session.hiddenVars, name)) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.arrays[name]
+  }
   if (name === 'OPTIND') session.getoptsOptind = null
 }
 
@@ -408,14 +413,17 @@ async function unsetElement(
   base: string,
   subscript: string,
 ): Promise<'ok' | 'notarray' | 'subscript'> {
-  const arr = sessionEntry(session.arrays, base)
+  const arr = sessionEntry(visibleArrays(session), base)
   if (arr === undefined) {
-    if (sessionEntry(session.env, base) === undefined) return 'ok'
-    if (arrayIndex(subscript, session.env) !== 0) return 'notarray'
+    // Visible reads on purpose: a hidden base answers the unset
+    // branch's silent no-op instead of a denial that would leak the
+    // name's existence.
+    if (envGet(session, base) === null) return 'ok'
+    if (arrayIndex(subscript, visibleEnv(session)) !== 0) return 'notarray'
     await view.unset(base)
     return 'ok'
   }
-  let idx = arrayIndex(subscript, session.env)
+  let idx = arrayIndex(subscript, visibleEnv(session))
   if (idx < 0) {
     idx += arrayExtent(arr)
     if (idx < 0) return 'subscript'
@@ -752,9 +760,11 @@ export async function handleLocal(
       if (locals !== null && !locals.has(assign)) {
         locals.set(assign, assign in session.env ? (session.env[assign] ?? null) : null)
       }
-      if (!(assign in session.env) && !(assign in session.arrays)) {
+      if (envGet(session, assign) === null && !(assign in visibleArrays(session))) {
         // A bare declaration of an existing array re-scopes it; a
-        // scalar write here would erase it.
+        // scalar write here would erase it. Visible reads: a hidden
+        // name counts as unset, so the write is attempted and the
+        // door refuses it.
         if (view.isReadonly(assign)) return readonlyRefusal('local', assign)
         try {
           await view.set(assign, '')

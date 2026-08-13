@@ -19,7 +19,7 @@ from typing import Any
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.policy import CommandContext, resolve_limit
+from mirage.policy import CommandContext, PolicyDenied, resolve_limit
 from mirage.runtime.policy import PolicyDecision
 from mirage.shell.bytes import encode_text
 from mirage.shell.types import NodeType as NT
@@ -38,7 +38,7 @@ from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.route import (NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
                                     dereferences, reports_link)
 from mirage.workspace.session.shell_dirs import home_dir, logical_cwd
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import ensure_var_visible, session_view
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
@@ -149,6 +149,19 @@ async def execute_command(
         prefix_assignments.append((key, v))
 
     for k, _ in prefix_assignments:
+        # The hidden gate runs first, as in set_var: calling a hidden
+        # name "readonly" would leak that it exists. Both branches
+        # below write session.env raw (a function-call prefix on
+        # purpose never restores), so ungated they would let a
+        # narrowed session clobber the host's value.
+        try:
+            ensure_var_visible(session, k)
+        except PolicyDenied as exc:
+            err = f"bash: {exc.strerror}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=name or k,
+                                                             exit_code=1,
+                                                             stderr=err)
         if k in session.readonly_vars:
             err = f"bash: {k}: readonly variable\n".encode()
             return None, IOResult(exit_code=1,

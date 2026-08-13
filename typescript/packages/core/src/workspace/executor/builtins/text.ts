@@ -20,7 +20,7 @@ import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
 import { PolicyDenied } from '../../../policy/errors.ts'
 import type { Session } from '../../session/session.ts'
-import { ensureVarVisible } from '../../session/state.ts'
+import { ensureVarVisible, visibleEnv } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
@@ -882,7 +882,7 @@ function assignPrintfTarget(
     const scalar = sessionEntry(session.env, name)
     arr = scalar === undefined ? [] : [scalar]
   }
-  let idx = arrayIndex(subscript, session.env)
+  let idx = arrayIndex(subscript, visibleEnv(session))
   if (idx < 0) idx += arrayExtent(arr)
   if (idx < 0) return 'subscript'
   arraySet(arr, idx, value)

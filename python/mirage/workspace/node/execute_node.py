@@ -597,6 +597,15 @@ async def execute_node(
             for bare in assignments:
                 if "=" in bare:
                     continue
+                # Both branches below write array storage raw (the
+                # top-level one migrates an existing scalar into
+                # element 0), so a hidden name refuses like any
+                # assignment spelling before either lands.
+                try:
+                    ensure_var_visible(session, bare)
+                except PolicyDenied as exc:
+                    err = f"{exc.strerror}\n".encode()
+                    raise ExitSignal(1, stderr=err, contained_code=1) from exc
                 if note_local_array(session, bare):
                     # Inside a function this shadows whatever the caller
                     # had with a fresh empty array.
@@ -746,7 +755,7 @@ async def execute_node(
                 arr = [] if scalar is None else [scalar]
             else:
                 arr = list(arr)
-            idx = _array_index(idx_text, session.env)
+            idx = _array_index(idx_text, visible_env(session))
             if idx < 0:
                 idx += array_extent(arr)
             if idx < 0:

@@ -73,6 +73,22 @@ export function visibleEnv(session: Session): Record<string, string> {
 }
 
 /**
+ * The arrays mapping a reader tier should resolve names against.
+ *
+ * The arrays twin of `visibleEnv`: the embedder can seed
+ * `session.arrays` before narrowing, so a hidden name can hold an
+ * array and array reads need the same filter env reads get.
+ */
+export function visibleArrays(session: Session): Record<string, ShellArray> {
+  if (session.hiddenVars == null) return session.arrays
+  const out = ownRecord<ShellArray>()
+  for (const [name, value] of Object.entries(session.arrays)) {
+    if (!varHidden(session.hiddenVars, name)) out[name] = value
+  }
+  return out
+}
+
+/**
  * Write one variable through the session plane's gate.
  *
  * General over variable shapes: a string stores a scalar, a ShellArray
