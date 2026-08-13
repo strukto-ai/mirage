@@ -93,15 +93,12 @@ export async function postExecuteGate(
  */
 export async function preSessionGate(
   policies: Policies | null,
-  plane: string,
-  verb: string,
-  key: string,
-  value: string | null,
+  ctx: SessionContext,
 ): Promise<void> {
   if (!policies?.wants('preSession')) return
-  const deny = await policies.preSession({ plane, verb, key, value })
+  const deny = await policies.preSession(ctx)
   if (deny !== null) {
-    throw new PolicyDenied(deny.message.replace(/\n$/, ''), key)
+    throw new PolicyDenied(deny.message.replace(/\n$/, ''), ctx.key)
   }
 }
 

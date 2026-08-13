@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ShellArray } from '../shell/array.ts'
 import type { FileStat } from '../types.ts'
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
@@ -84,7 +85,12 @@ export interface SessionView {
   // A process-view copy of the whole environment.
   snapshot(): Record<string, string>
   // Write one variable through the session plane (readonly + preSession).
-  set(name: string, value: string): Promise<void>
+  // General over variable shapes: a string stores a scalar, a ShellArray
+  // stores a whole array, and the door keeps the two storages exclusive.
+  // Writers with richer mechanics (subscripts, appends, holes) compute
+  // the resulting value on a copy and hand it here, so a denial never
+  // leaves a half-applied write.
+  set(name: string, value: string | ShellArray): Promise<void>
   // Drop one variable through the session plane; a missing name is quiet.
   unset(name: string): Promise<void>
   // Whether `readonly` has marked the name.

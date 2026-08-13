@@ -59,6 +59,48 @@ describe('sessionView', () => {
     await view.unset('NEVER_SET')
   })
 
+  it('set is general over variable shapes', async () => {
+    // One door for every write: a string stores a scalar, a list stores
+    // a whole array, and the two storages stay exclusive.
+    const [view, session] = makeView()
+    await view.set('A', ['x', 'y'])
+    expect(session.arrays.A).toEqual(['x', 'y'])
+    expect('A' in session.env).toBe(false)
+    await view.set('A', 's')
+    expect(session.env.A).toBe('s')
+    expect('A' in session.arrays).toBe(false)
+  })
+
+  it('an array write renders the gate value as words', async () => {
+    const seen: (string | null)[] = []
+    class Capture {
+      preSession(ctx: SessionContext): Action | null {
+        seen.push(ctx.value)
+        return null
+      }
+    }
+    const policies = new Policies()
+    policies.add(new Capture())
+    const [view] = makeView(policies)
+    await view.set('A', ['x', null, 'y'])
+    expect(seen).toEqual(['x y'])
+  })
+
+  it('the gate learns which session asked', async () => {
+    const seen: string[] = []
+    class CaptureSession {
+      preSession(ctx: SessionContext): Action | null {
+        seen.push(ctx.sessionId)
+        return null
+      }
+    }
+    const policies = new Policies()
+    policies.add(new CaptureSession())
+    const [view] = makeView(policies)
+    await view.set('B', '1')
+    expect(seen).toEqual(['s'])
+  })
+
   it('readonly refusal is typed', async () => {
     // The view owns the refusal so every writer states it the same way;
     // builtins catch the typed error and render their own bash wording.

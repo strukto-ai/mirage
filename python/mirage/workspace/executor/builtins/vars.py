@@ -24,7 +24,8 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.array import array_extent, array_unset
+from mirage.shell.array import (array_append, array_extent, array_unset,
+                                make_array)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.options import parse_option_word
@@ -52,30 +53,84 @@ def _view(session: Session, state: SessionView | None) -> SessionView:
     return state if state is not None else session_view(session)
 
 
-def _refusal_text(exc: ReadonlyVariableError | PolicyDenied) -> str:
-    """The stderr line a session-plane refusal renders as.
-
-    Args:
-        exc (ReadonlyVariableError | PolicyDenied): the plane's refusal.
-    """
-    if isinstance(exc, ReadonlyVariableError):
-        return f"bash: {exc.name}: readonly variable\n"
-    return f"{exc.strerror}\n"
-
-
 def _refusal(
-    cmd: str, exc: ReadonlyVariableError | PolicyDenied
+        cmd: str, exc: PolicyDenied
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Render a session-plane refusal in the builtin's own voice.
+    """Render a policy denial in the builtin's own voice.
 
     Args:
         cmd (str): builtin name for the node.
-        exc (ReadonlyVariableError | PolicyDenied): the plane's refusal.
+        exc (PolicyDenied): the gate's refusal.
     """
-    err = _refusal_text(exc).encode()
+    err = f"{exc.strerror}\n".encode()
     return None, IOResult(exit_code=1, stderr=err), ExecutionNode(command=cmd,
                                                                   exit_code=1,
                                                                   stderr=err)
+
+
+def _readonly_refusal(
+        cmd: str,
+        name: str) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Render the shell's own readonly refusal, checked before the door.
+
+    Args:
+        cmd (str): builtin name for the node.
+        name (str): the frozen variable.
+    """
+    err = f"bash: {name}: readonly variable\n".encode()
+    return None, IOResult(exit_code=1, stderr=err), ExecutionNode(command=cmd,
+                                                                  exit_code=1,
+                                                                  stderr=err)
+
+
+async def _store_staged_arrays(
+    cmd: str,
+    session: Session,
+    view: SessionView,
+    arrays: list[tuple[str, bool, list[str]]],
+    mark: bool = False,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
+    """Store a declaration's array literals through the session door.
+
+    The builtin owns the store so a refusal speaks in its own voice:
+    readonly is the shell's rule, checked per name before the door, and
+    the door's gate covers the policy half. Names are processed in
+    order, so an earlier operand stays stored when a later one refuses,
+    as bash does.
+
+    Args:
+        cmd (str): builtin name for refusal rendering.
+        session (Session): shell session state.
+        view (SessionView): the session plane's gated door.
+        arrays (list[tuple[str, bool, list[str]]]): staged
+            ``(name, append, items)`` literals from the declaration.
+        mark (bool): also mark each stored name readonly (the
+            ``readonly`` keyword's half).
+
+    Returns:
+        The refusal result, or None when every literal stored.
+    """
+    for name, append, items in arrays:
+        if view.is_readonly(name):
+            return _readonly_refusal(cmd, name)
+        note_local_array(session, name)
+        if append:
+            base = session.arrays.get(name)
+            if base is None:
+                scalar = session.env.get(name)
+                base = [] if scalar is None else [scalar]
+            else:
+                base = list(base)
+            array_append(base, items)
+        else:
+            base = make_array(items)
+        try:
+            await view.set(name, base)
+        except PolicyDenied as exc:
+            return _refusal(cmd, exc)
+        if mark:
+            session.readonly_vars.add(name)
+    return None
 
 
 _ENV_HELP_HINT = "Try 'env --help' for more information.\n"
@@ -242,6 +297,7 @@ async def handle_export(
     assignments: list[str],
     session: Session,
     state: SessionView | None = None,
+    arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Export names, or print them (``export -p`` / bare ``export``).
 
@@ -260,26 +316,35 @@ async def handle_export(
                                                          exit_code=2,
                                                          stderr=err)
     # -p with names is ignored for display; bare / -p alone print.
-    if not names:
+    if not names and not arrays:
         lines = _export_lines(session, flags)
         out = (("\n".join(lines) + "\n") if lines else "").encode()
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
     # -f/-n accepted; name path matches prior export semantics.
     view = _view(session, state)
+    if arrays:
+        refused = await _store_staged_arrays("export", session, view, arrays)
+        if refused is not None:
+            return refused
     for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
+            if view.is_readonly(key):
+                return _readonly_refusal("export", key)
             try:
                 await view.set(key, val)
-            except (ReadonlyVariableError, PolicyDenied) as exc:
+            except PolicyDenied as exc:
                 return _refusal("export", exc)
-        elif assign not in session.env:
+        elif assign not in session.env and assign not in session.arrays:
             # `export NAME` with no value writes an empty entry, which
-            # is still a session write; an existing name is only
-            # re-marked for export, so nothing is written.
+            # is still a session write; an existing name (scalar or
+            # array) is only re-marked for export, so nothing is
+            # written — a scalar write here would erase an array.
+            if view.is_readonly(assign):
+                return _readonly_refusal("export", assign)
             try:
                 await view.set(assign, "")
-            except (ReadonlyVariableError, PolicyDenied) as exc:
+            except PolicyDenied as exc:
                 return _refusal("export", exc)
     return None, IOResult(), ExecutionNode(command="export", exit_code=0)
 
@@ -288,6 +353,7 @@ async def handle_readonly(
     assignments: list[str],
     session: Session,
     state: SessionView | None = None,
+    arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Mark names readonly, or print them (``readonly -p`` / bare form).
 
@@ -302,18 +368,28 @@ async def handle_readonly(
                               stderr=err), ExecutionNode(command="readonly",
                                                          exit_code=2,
                                                          stderr=err)
-    if not names:
+    if not names and not arrays:
         lines = _readonly_lines(session, flags)
         out = (("\n".join(lines) + "\n") if lines else "").encode()
         return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
     # -a/-A/-f accepted; array shape is applied by the declaration path.
     view = _view(session, state)
+    if arrays:
+        refused = await _store_staged_arrays("readonly",
+                                             session,
+                                             view,
+                                             arrays,
+                                             mark=True)
+        if refused is not None:
+            return refused
     for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
+            if view.is_readonly(key):
+                return _readonly_refusal("readonly", key)
             try:
                 await view.set(key, val)
-            except (ReadonlyVariableError, PolicyDenied) as exc:
+            except PolicyDenied as exc:
                 return _refusal("readonly", exc)
             session.readonly_vars.add(key)
         else:
@@ -321,52 +397,68 @@ async def handle_readonly(
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
 
 
-def _unset_variable(session: Session, name: str) -> str:
-    """Remove a scalar/array variable, or one array element ``name[idx]``.
+def _unset_variable(session: Session, name: str) -> None:
+    """Remove a whole scalar or array variable.
+
+    Args:
+        session (Session): shell session state.
+        name (str): a bare variable name (no subscript).
+    """
+    session.env.pop(name, None)
+    session.arrays.pop(name, None)
+    if name == "OPTIND":
+        session._getopts_optind = None
+
+
+async def _unset_element(session: Session, view: SessionView, base: str,
+                         subscript: str) -> str:
+    """Clear one array element, or a scalar addressed as ``base[0]``.
 
     Clearing an element keeps the indices of the elements after it, as
     bash does: it leaves a hole, which neither expands in ``${arr[@]}``
     nor counts toward ``${#arr[@]}`` but keeps ``${arr[i]}`` addressing
-    the same values. Trailing holes are dropped, so ``arr+=(x)`` refills
-    the slot a trailing unset freed.
+    the same values. A subscript on a scalar names element 0 only:
+    ``x[0]`` unsets the scalar and any other subscript is an error. A
+    subscript on a name that holds nothing at all is a silent no-op,
+    but on an existing array a negative subscript still below zero
+    after the extent is added is a bad-subscript error.
 
-    A subscript on a scalar names element 0 only: ``x[0]`` unsets the
-    scalar and any other subscript is an error. A subscript on a name
-    that holds nothing at all is a silent no-op, but on an existing array
-    a negative subscript still below zero after the extent is added is a
-    bad-subscript error.
+    The element mechanics are the builtin's own, but the landing write
+    goes through the door: a scalar's element 0 is the whole unset,
+    and an array's hole punch is computed on a copy and stored with
+    ``view.set``, so a denial leaves the array untouched. Validation
+    errors write nothing and so never ask.
 
     Args:
         session (Session): shell session state.
-        name (str): a variable name or ``name[subscript]``.
+        view (SessionView): the session plane's gated door.
+        base (str): the variable name without the subscript.
+        subscript (str): the subscript text between the brackets.
 
     Returns:
         str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
             applied to a scalar, or ``"subscript"`` for a negative
             subscript outside an existing array.
+
+    Raises:
+        PolicyDenied: a pre_session policy refused the write.
     """
-    match = _PRINTF_TARGET_RE.match(name)
-    if match is not None and match.group(2) is not None:
-        base, subscript = match.group(1), match.group(2)
-        arr = session.arrays.get(base)
-        if arr is None:
-            if base not in session.env:
-                return "ok"
-            if _array_index(subscript, session.env) != 0:
-                return "notarray"
-            session.env.pop(base, None)
+    arr = session.arrays.get(base)
+    if arr is None:
+        if base not in session.env:
             return "ok"
-        idx = _array_index(subscript, session.env)
-        if idx < 0:
-            idx += array_extent(arr)
-            if idx < 0:
-                return "subscript"
-        array_unset(arr, idx)
+        if _array_index(subscript, session.env) != 0:
+            return "notarray"
+        await view.unset(base)
         return "ok"
-    session.env.pop(name, None)
-    session.arrays.pop(name, None)
-    if name == "OPTIND":
-        session._getopts_optind = None
+    idx = _array_index(subscript, session.env)
+    if idx < 0:
+        idx += array_extent(arr)
+        if idx < 0:
+            return "subscript"
+    new_arr = list(arr)
+    array_unset(new_arr, idx)
+    await view.set(base, new_arr)
     return "ok"
 
 
@@ -419,7 +511,8 @@ async def handle_unset(
             session.functions.pop(name, None)
             continue
         target = _PRINTF_TARGET_RE.match(name)
-        is_element = target is not None and target.group(2) is not None
+        subscript = target.group(2) if target is not None else None
+        is_element = subscript is not None
         # `readonly arr` records the base name, so an `arr[i]` operand has
         # to be resolved before the guard, as bash does (which also names
         # the base, not the element, in the error).
@@ -432,15 +525,20 @@ async def handle_unset(
                                                              exit_code=1,
                                                              stderr=err)
         existed = is_element or name in session.env or name in session.arrays
-        if not is_element:
-            # The env half of the unset goes through the session view,
-            # so the pre_session gate fires; the array/function mechanics
-            # below stay the builtin's own.
-            try:
+        # Both spellings clear the pre_session gate for the base name:
+        # the whole-variable unset through the view's env half, an
+        # element unset inside _unset_element, so `unset 'X[0]'` cannot
+        # sidestep a policy that vetoes `unset X`.
+        try:
+            if subscript is not None:
+                status = await _unset_element(session, _view(session, state),
+                                              base, subscript)
+            else:
                 await _view(session, state).unset(name)
-            except PolicyDenied as exc:
-                return _refusal("unset", exc)
-        status = _unset_variable(session, name)
+                _unset_variable(session, name)
+                status = "ok"
+        except PolicyDenied as exc:
+            return _refusal("unset", exc)
         if status != "ok":
             # bash names the base for "not an array variable" but prints
             # only the bracketed part for a bad subscript.
@@ -645,11 +743,12 @@ async def handle_read(
     view = _view(session, state)
     if line_bytes is None:
         for var in variables:
+            if view.is_readonly(var):
+                return _readonly_refusal("read", var)
             try:
                 await view.set(var, "")
-            except (ReadonlyVariableError, PolicyDenied) as exc:
+            except PolicyDenied as exc:
                 return _refusal("read", exc)
-            session.arrays.pop(var, None)
         return None, IOResult(exit_code=1), ExecutionNode(command="read",
                                                           exit_code=1)
 
@@ -678,13 +777,12 @@ async def handle_read(
         out.append("".join(cur))
         parts = out
     for i, var in enumerate(variables):
+        if view.is_readonly(var):
+            return _readonly_refusal("read", var)
         try:
             await view.set(var, parts[i] if i < len(parts) else "")
-        except (ReadonlyVariableError, PolicyDenied) as exc:
+        except PolicyDenied as exc:
             return _refusal("read", exc)
-        # A scalar write replaces any array of the same name, matching
-        # the variable_assignment path.
-        session.arrays.pop(var, None)
     return None, IOResult(), ExecutionNode(command="read", exit_code=0)
 
 
@@ -716,25 +814,36 @@ async def handle_local(
     assignments: list[str],
     session: Session,
     state: SessionView | None = None,
+    arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     local_vars = getattr(session, "_local_vars", None)
     view = _view(session, state)
+    if arrays:
+        refused = await _store_staged_arrays("local", session, view, arrays)
+        if refused is not None:
+            return refused
     for assign in assignments:
         if "=" in assign:
             key, _, val = assign.partition("=")
+            if view.is_readonly(key):
+                return _readonly_refusal("local", key)
             if local_vars is not None and key not in local_vars:
                 local_vars[key] = session.env.get(key)
             try:
                 await view.set(key, val)
-            except (ReadonlyVariableError, PolicyDenied) as exc:
+            except PolicyDenied as exc:
                 return _refusal("local", exc)
         else:
             if local_vars is not None and assign not in local_vars:
                 local_vars[assign] = session.env.get(assign)
-            if assign not in session.env:
+            if assign not in session.env and assign not in session.arrays:
+                # A bare declaration of an existing array re-scopes it;
+                # a scalar write here would erase it.
+                if view.is_readonly(assign):
+                    return _readonly_refusal("local", assign)
                 try:
                     await view.set(assign, "")
-                except (ReadonlyVariableError, PolicyDenied) as exc:
+                except PolicyDenied as exc:
                     return _refusal("local", exc)
     return None, IOResult(), ExecutionNode(command="local", exit_code=0)
 
@@ -859,8 +968,11 @@ async def _getopts_finish(
         else:
             await view.set("OPTARG", optarg)
         await view.set("OPTIND", str(new_optind))
-    except (ReadonlyVariableError, PolicyDenied) as exc:
-        stderr = _refusal_text(exc).encode()
+    except ReadonlyVariableError as exc:
+        stderr = f"bash: {exc.name}: readonly variable\n".encode()
+        exit_code = 1
+    except PolicyDenied as exc:
+        stderr = f"{exc.strerror}\n".encode()
         exit_code = 1
     session._getopts_pos = new_pos
     session._getopts_optind = new_optind

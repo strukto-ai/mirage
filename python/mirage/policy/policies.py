@@ -86,28 +86,26 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
     return bound
 
 
-async def pre_session_gate(policies: "Policies | None", plane: str, verb: str,
-                           key: str, value: str | None) -> None:
+async def pre_session_gate(policies: "Policies | None",
+                           ctx: SessionContext) -> None:
     """Fire pre_session on the session plane; a Deny becomes EACCES.
 
-    The one seam helper the session plane's writers call, so a refusal
+    The one seam helper the session plane's door calls, so a refusal
     is identical however the state is reached: shell builtin, command
     view, or a later tier. None policies (a view constructed outside a
     workspace) gate nothing.
 
     Args:
         policies (Policies | None): the workspace's admission policies.
-        plane (str): the state plane being written (``env``).
-        verb (str): the mutation (``set``, ``unset``).
-        key (str): the state key.
-        value (str | None): the value being written, None for unset.
+        ctx (SessionContext): the mutation, built by the door so the
+            plane, verb, rendering and session identity are stated in
+            exactly one place.
     """
     if policies is None or not policies.wants("pre_session"):
         return
-    deny = await policies.pre_session(
-        SessionContext(plane=plane, verb=verb, key=key, value=value))
+    deny = await policies.pre_session(ctx)
     if deny is not None:
-        raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"), key)
+        raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"), ctx.key)
 
 
 async def post_execute_gate(

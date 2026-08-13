@@ -107,6 +107,40 @@ describe('name-plane writes go through the door', () => {
     await expect(ws.fs.readlink('/a/x.txt')).rejects.toMatchObject({ code: 'EINVAL' })
   })
 
+  it('scoped shell readlink on ungranted turf is refused', async () => {
+    // The read twin of the scoped-ln hole: a session granted only /a
+    // must not learn /b/lk's target through the readlink builtin, which
+    // used to read the node table directly instead of dispatching.
+    const ws = await makeWs()
+    ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+    const made = await ws.execute('ln -s /b/y.txt /b/lk')
+    expect(made.exitCode).toBe(0)
+    const io = await ws.execute('readlink /b/lk', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('y.txt')
+  })
+
+  it('scoped shell readlink -m on ungranted turf is refused', async () => {
+    // -m/-f canonicalize without any existence probe, so without the
+    // gate they printed the resolved target of an ungranted link.
+    const ws = await makeWs()
+    ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+    const made = await ws.execute('ln -s /b/y.txt /b/lk')
+    expect(made.exitCode).toBe(0)
+    const io = await ws.execute('readlink -m /b/lk', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('y.txt')
+  })
+
+  it('shell readlink fires the op gates', async () => {
+    const ws = await makeWs([new DenyOp('readlink')])
+    const made = await ws.execute('ln -s x.txt /a/lk')
+    expect(made.exitCode).toBe(0)
+    const io = await ws.execute('readlink /a/lk')
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('x.txt')
+  })
+
   it('facade symlink respects session grants', async () => {
     const ws = await makeWs()
     const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
@@ -273,6 +307,110 @@ describe('the remaining session writers clear the same gate', () => {
     const io = await ws.execute('SECRET_A+=x')
     expect(io.exitCode).not.toBe(0)
     expect('SECRET_A' in ws.env).toBe(false)
+  })
+
+  it('an array assignment fires the gate', async () => {
+    // A denied name must not be writable by switching to array syntax:
+    // SECRET=(a b) lands on the same session plane as SECRET=x.
+    const ws = await makeWs([new DenySecretEnv()])
+    const io = await ws.execute('SECRET_V=(a b); echo after')
+    expect(io.exitCode).not.toBe(0)
+    expect(stderrStr(io)).toContain('refused by policy')
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect('SECRET_V' in sess.arrays).toBe(false)
+  })
+
+  it('an array append assignment fires the gate', async () => {
+    const ws = await makeWs([new DenySecretEnv()])
+    const io = await ws.execute('SECRET_VA+=(a)')
+    expect(io.exitCode).not.toBe(0)
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect('SECRET_VA' in sess.arrays).toBe(false)
+  })
+
+  it('a subscript assignment fires the gate', async () => {
+    const ws = await makeWs([new DenySecretEnv()])
+    const io = await ws.execute('SECRET_S[0]=x')
+    expect(io.exitCode).not.toBe(0)
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect('SECRET_S' in sess.arrays).toBe(false)
+    expect('SECRET_S' in ws.env).toBe(false)
+  })
+
+  it('a scalar append onto an existing array fires the gate', async () => {
+    // SECRET+=x on a name that already holds an array appends to
+    // element 0 through a branch of its own; it is still a session
+    // write.
+    const ws = await makeWs([new DenySecretEnv()])
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    sess.arrays.SECRET_E = ['a']
+    const io = await ws.execute('SECRET_E+=x')
+    expect(io.exitCode).not.toBe(0)
+    expect(sess.arrays.SECRET_E).toEqual(['a'])
+  })
+
+  it('a declaration array assignment fires the gate', async () => {
+    // export/declare with an array literal store through the staged
+    // path, not handleExport, so the gate has to fire there too.
+    const ws = await makeWs([new DenySecretEnv()])
+    const io = await ws.execute('export SECRET_D=(a)')
+    expect(io.exitCode).not.toBe(0)
+    expect(stderrStr(io)).toContain('refused by policy')
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect('SECRET_D' in sess.arrays).toBe(false)
+  })
+
+  it('a readonly name refuses a declaration array store', async () => {
+    // The staged-array store is the builtin's own; the shell's readonly
+    // rule is pre-checked there, before the door is asked.
+    const ws = await makeWs()
+    await ws.execute('readonly LOCKED')
+    const io = await ws.execute('export LOCKED=(a)')
+    expect(io.exitCode).not.toBe(0)
+    expect(stderrStr(io)).toContain('readonly variable')
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect('LOCKED' in sess.arrays).toBe(false)
+  })
+
+  it('export of an array literal prints nothing', async () => {
+    // `export ARR=(x y)` used to fall through to the bare-export print
+    // branch because the handler never learned arrays were on the line.
+    const ws = await makeWs()
+    const io = await ws.execute('export ARR=(x y)')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('')
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect(sess.arrays.ARR).toEqual(['x', 'y'])
+  })
+
+  it('a readonly loop variable refuses before the body', async () => {
+    // bash refuses a readonly loop variable and never runs the body;
+    // the loop writes go through the view now, same as any assignment.
+    const ws = await makeWs()
+    await ws.execute('readonly LV')
+    const denied = await ws.execute('for LV in a b; do echo ran; done')
+    expect(denied.exitCode).not.toBe(0)
+    expect(stdoutStr(denied)).not.toContain('ran')
+  })
+
+  it('a subscripted unset of a scalar fires the gate', async () => {
+    // `unset 'SECRET[0]'` on a scalar is the whole unset in element
+    // clothing; the element branch used to skip the view entirely.
+    const ws = await makeWs([new DenySecretEnv()])
+    ws.env.SECRET_U = 'v'
+    const io = await ws.execute("unset 'SECRET_U[0]'")
+    expect(io.exitCode).not.toBe(0)
+    expect(stderrStr(io)).toContain('refused by policy')
+    expect(ws.env.SECRET_U).toBe('v')
+  })
+
+  it('a subscripted unset of an array element fires the gate', async () => {
+    const ws = await makeWs([new DenySecretEnv()])
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    sess.arrays.SECRET_W = ['a', 'b']
+    const io = await ws.execute("unset 'SECRET_W[1]'")
+    expect(io.exitCode).not.toBe(0)
+    expect(sess.arrays.SECRET_W).toEqual(['a', 'b'])
   })
 
   it('the for-loop variable fires the gate', async () => {

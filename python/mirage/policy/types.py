@@ -177,12 +177,15 @@ class SessionContext:
         verb (str): the mutation (``set``, ``unset``).
         key (str): the state key (a variable name).
         value (str | None): the value being written, None for unset.
+        session_id (str): which session is writing, so a policy can
+            scope a rule to one agent (deny ``set`` for session X).
     """
 
     plane: str
     verb: str
     key: str
     value: str | None
+    session_id: str = ""
 
 
 VALIDITY: dict[str, frozenset[str]] = {

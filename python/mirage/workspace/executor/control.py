@@ -21,7 +21,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
-from mirage.policy import Policies, PolicyDenied, pre_session_gate
+from mirage.policy import Policies, PolicyDenied
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ReadonlyError
@@ -30,6 +30,7 @@ from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 # Safety cap on while/until iterations. Independent of stdin size:
@@ -168,6 +169,14 @@ async def handle_for(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
+    view = session_view(session, policies)
+    # The loop variable is the shell's own write: readonly is bash's
+    # rule, checked up front so the loop never starts, exactly as bash
+    # refuses `for x` on a readonly x before the first iteration.
+    if view.is_readonly(variable):
+        err = f"bash: {variable}: readonly variable\n".encode()
+        return _collect_loop_result([], IOResult(exit_code=1, stderr=err),
+                                    "for")
     saved = session.env.get(variable)
 
     # Save and materialize stdin for re-reading across iterations
@@ -180,18 +189,15 @@ async def handle_for(
         for val in values:
             # env stores strings only; bash keeps `for f in sub/*.txt`
             # matches relative, so the loop variable takes the typed form.
-            # The write is a session write, so it clears the pre_session
-            # gate; a denial aborts the loop before its body runs, like
-            # a readonly loop variable in bash.
+            # The write goes through the session door; a policy denial
+            # aborts the loop before its body runs.
             text_val = word_text(val)
             try:
-                await pre_session_gate(policies, "env", "set", variable,
-                                       text_val)
+                await view.set(variable, text_val)
             except PolicyDenied as exc:
                 merged_io = await merged_io.merge(
                     IOResult(exit_code=1, stderr=f"{exc.strerror}\n".encode()))
                 break
-            session.env[variable] = text_val
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, stdin, call_stack)
@@ -487,6 +493,7 @@ async def handle_select(
     """
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
+    view = session_view(session, policies)
     saved = session.env.get(variable)
 
     prev_buffer = session._stdin_buffer
@@ -517,18 +524,23 @@ async def handle_select(
                 idx = int(reply.strip())
                 if 1 <= idx <= len(values):
                     choice = word_text(values[idx - 1])
-            # REPLY and the select variable are session writes, so they
-            # clear the pre_session gate like the for-loop variable.
+            # REPLY and the select variable go through the session door
+            # like the for-loop variable; readonly is the shell's own
+            # rule, checked before the door is asked.
+            frozen = next(
+                (n for n in ("REPLY", variable) if view.is_readonly(n)), None)
+            if frozen is not None:
+                err = f"bash: {frozen}: readonly variable\n".encode()
+                merged_io = await merged_io.merge(
+                    IOResult(exit_code=1, stderr=err))
+                break
             try:
-                await pre_session_gate(policies, "env", "set", "REPLY", reply)
-                await pre_session_gate(policies, "env", "set", variable,
-                                       choice)
+                await view.set("REPLY", reply)
+                await view.set(variable, choice)
             except PolicyDenied as exc:
                 merged_io = await merged_io.merge(
                     IOResult(exit_code=1, stderr=f"{exc.strerror}\n".encode()))
                 break
-            session.env["REPLY"] = reply
-            session.env[variable] = choice
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, None, call_stack)

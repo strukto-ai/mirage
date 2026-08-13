@@ -14,6 +14,7 @@
 
 import type { SessionView } from '../../ops/types.ts'
 import { preSessionGate, type Policies } from '../../policy/index.ts'
+import { arrayValues, type ShellArray } from '../../shell/array.ts'
 import { ReadonlyVariableError } from './errors.ts'
 import { ownRecord, sessionEntry } from './session.ts'
 import type { Session } from './session.ts'
@@ -43,10 +44,17 @@ function envIsReadonly(session: Session, name: string): boolean {
 }
 
 /**
- * Write one variable through the session plane's gate. Semantics live
- * here once — readonly refusal, then the `preSession` policy gate — so
- * every writer states them the same way whichever tier asked. Null
- * policies gate nothing (a writer outside a workspace). Throws
+ * Write one variable through the session plane's gate.
+ *
+ * General over variable shapes: a string stores a scalar, a ShellArray
+ * stores a whole array, and the two storages stay exclusive. Semantics
+ * live here once — readonly refusal, the `preSession` policy gate
+ * (whose context value renders an array as its present elements joined
+ * by spaces), then the store — so every writer states them the same
+ * way whichever tier or spelling asked. Writers with richer mechanics
+ * (subscripts, appends, holes) compute the resulting value on a copy
+ * and hand it here, so a denial never leaves a half-applied write.
+ * Null policies gate nothing (a writer outside a workspace). Throws
  * ReadonlyVariableError when the name is readonly, PolicyDenied when a
  * preSession policy refuses the write.
  */
@@ -54,13 +62,28 @@ async function setVar(
   session: Session,
   policies: Policies | null,
   name: string,
-  value: string,
+  value: string | ShellArray,
 ): Promise<void> {
   if (session.readonlyVars.has(name)) {
     throw new ReadonlyVariableError(name)
   }
-  await preSessionGate(policies, 'env', 'set', name, value)
-  session.env[name] = value
+  const rendered = typeof value === 'string' ? value : arrayValues(value).join(' ')
+  await preSessionGate(policies, {
+    plane: 'env',
+    verb: 'set',
+    key: name,
+    value: rendered,
+    sessionId: session.sessionId,
+  })
+  if (typeof value === 'string') {
+    session.env[name] = value
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.arrays[name]
+  } else {
+    session.arrays[name] = value
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete session.env[name]
+  }
 }
 
 /**
@@ -68,15 +91,17 @@ async function setVar(
  * is quiet. Throws ReadonlyVariableError when the name is readonly,
  * PolicyDenied when a preSession policy refuses the write.
  */
-async function unsetVar(
-  session: Session,
-  policies: Policies | null,
-  name: string,
-): Promise<void> {
+async function unsetVar(session: Session, policies: Policies | null, name: string): Promise<void> {
   if (session.readonlyVars.has(name)) {
     throw new ReadonlyVariableError(name)
   }
-  await preSessionGate(policies, 'env', 'unset', name, null)
+  await preSessionGate(policies, {
+    plane: 'env',
+    verb: 'unset',
+    key: name,
+    value: null,
+    sessionId: session.sessionId,
+  })
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.env[name]
 }

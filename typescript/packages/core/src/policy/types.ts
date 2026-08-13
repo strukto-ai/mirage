@@ -119,12 +119,15 @@ export interface ExecuteResultContext {
  * whichever tier asked. Not an OpsContext: a session key is not a
  * path, and a path-scoped policy must never receive one dressed as a
  * path and match it by accident. `value` is null for an unset.
+ * `sessionId` says which session is writing, so a policy can scope a
+ * rule to one agent (deny `set` for session X).
  */
 export interface SessionContext {
   plane: string
   verb: string
   key: string
   value: string | null
+  sessionId: string
 }
 
 export const VALIDITY: Readonly<

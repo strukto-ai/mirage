@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.commands.registry import command
-from mirage.commands.spec import CommandSpec, Operand
+from mirage.commands.spec import CommandSpec
 from mirage.fuse.core import MountCore
 from mirage.io.types import IOResult
 from mirage.ops.types import SessionView
@@ -105,8 +105,7 @@ def test_ln_leaves_an_op_record():
 
     io = asyncio.run(run())
     assert io.exit_code == 0
-    assert any(r.op == "symlink" and r.path == "/a/lk"
-               for r in ws.ops.records)
+    assert any(r.op == "symlink" and r.path == "/a/lk" for r in ws.ops.records)
 
 
 def test_scoped_shell_ln_onto_ungranted_turf_is_refused():
@@ -132,6 +131,52 @@ def test_symlink_and_readlink_answer_on_the_ops_facade():
 
     assert asyncio.run(run()) == "x.txt"
     assert ws.namespace.readlink("/a/lk") == "x.txt"
+
+
+def test_scoped_shell_readlink_on_ungranted_turf_is_refused():
+    # The read twin of the scoped-ln hole: a session granted only /a
+    # must not learn /b/lk's target through the readlink builtin, which
+    # used to read the node table directly instead of dispatching.
+    ws = _two_mounts()
+    ws.create_session("agent", mounts={"/a": "write"})
+
+    async def run():
+        made = await ws.execute("ln -s /b/y.txt /b/lk")
+        assert made.exit_code == 0
+        return await ws.execute("readlink /b/lk", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"y.txt" not in (io.stdout or b"")
+
+
+def test_scoped_shell_readlink_f_on_ungranted_turf_is_refused():
+    # -m/-f canonicalize without any existence probe, so without the
+    # gate they printed the resolved target of an ungranted link.
+    ws = _two_mounts()
+    ws.create_session("agent", mounts={"/a": "write"})
+
+    async def run():
+        made = await ws.execute("ln -s /b/y.txt /b/lk")
+        assert made.exit_code == 0
+        return await ws.execute("readlink -m /b/lk", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"y.txt" not in (io.stdout or b"")
+
+
+def test_shell_readlink_fires_the_op_gates():
+    ws = _two_mounts(policies=[DenyOp("readlink")])
+
+    async def run():
+        made = await ws.execute("ln -s x.txt /a/lk")
+        assert made.exit_code == 0
+        return await ws.execute("readlink /a/lk")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"x.txt" not in (io.stdout or b"")
 
 
 def test_readlink_on_a_non_link_raises_einval():
@@ -296,6 +341,7 @@ def test_facade_symlink_respects_session_grants():
     assert ws.namespace.is_link("/a/lk")
     assert not ws.namespace.is_link("/b/lk")
 
+
 def test_bare_export_of_a_new_name_fires_the_gate():
     # `export NAME` with no value writes an empty entry, which is still
     # a session write; an existing name is re-marked, not rewritten.
@@ -355,6 +401,175 @@ def test_append_assignment_fires_the_gate():
     io = asyncio.run(run())
     assert io.exit_code != 0
     assert "SECRET_A" not in ws.env
+
+
+def test_array_assignment_fires_the_gate():
+    # A denied name must not be writable by switching to array syntax:
+    # SECRET=(a b) lands on the same session plane as SECRET=x.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+
+    async def run():
+        return await ws.execute("SECRET_V=(a b); echo after")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"refused by policy" in (io.stderr or b"")
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert "SECRET_V" not in sess.arrays
+
+
+def test_array_append_assignment_fires_the_gate():
+    ws = _two_mounts(policies=[DenySecretEnv()])
+
+    async def run():
+        return await ws.execute("SECRET_VA+=(a)")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert "SECRET_VA" not in sess.arrays
+
+
+def test_subscript_assignment_fires_the_gate():
+    ws = _two_mounts(policies=[DenySecretEnv()])
+
+    async def run():
+        return await ws.execute("SECRET_S[0]=x")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert "SECRET_S" not in sess.arrays
+    assert "SECRET_S" not in ws.env
+
+
+def test_scalar_append_onto_an_existing_array_fires_the_gate():
+    # SECRET+=x on a name that already holds an array appends to
+    # element 0 through a branch of its own; it is still a session
+    # write.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    sess.arrays["SECRET_E"] = ["a"]
+
+    async def run():
+        return await ws.execute("SECRET_E+=x")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert sess.arrays["SECRET_E"] == ["a"]
+
+
+def test_declaration_array_assignment_fires_the_gate():
+    # export/declare with an array literal store through the staged
+    # path, not handle_export, so the gate has to fire there too.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+
+    async def run():
+        return await ws.execute("export SECRET_D=(a)")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"refused by policy" in (io.stderr or b"")
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert "SECRET_D" not in sess.arrays
+
+
+def test_readonly_name_refuses_a_declaration_array_store():
+    # The staged-array store is the builtin's own; the shell's readonly
+    # rule is pre-checked there, before the door is asked.
+    ws = _two_mounts()
+
+    async def run():
+        await ws.execute("readonly LOCKED")
+        return await ws.execute("export LOCKED=(a)")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"readonly variable" in (io.stderr or b"")
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert "LOCKED" not in sess.arrays
+
+
+def test_export_of_an_array_literal_prints_nothing():
+    # `export ARR=(x y)` used to fall through to the bare-export print
+    # branch because the handler never learned arrays were on the line.
+    ws = _two_mounts()
+
+    async def run():
+        io = await ws.execute("export ARR=(x y)")
+        out = await io.stdout_str() if io.stdout else ""
+        return io, out
+
+    io, out = asyncio.run(run())
+    assert io.exit_code == 0
+    assert out == ""
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert sess.arrays.get("ARR") == ["x", "y"]
+
+
+def test_readonly_loop_variable_refuses_before_the_body():
+    # bash refuses a readonly loop variable and never runs the body;
+    # the loop writes go through the view now, same as any assignment.
+    ws = _two_mounts()
+
+    async def run():
+        await ws.execute("readonly LV")
+        denied = await ws.execute("for LV in a b; do echo ran; done")
+        out = await denied.stdout_str() if denied.stdout else ""
+        return denied, out
+
+    denied, out = asyncio.run(run())
+    assert denied.exit_code != 0
+    assert "ran" not in out
+
+
+def test_the_gate_learns_which_session_asked():
+    # `deny set for session X` is just a policy once the context says
+    # who asked; the door adds the id in one place for every spelling.
+    seen: list[str] = []
+
+    class CaptureSession(Policy):
+
+        async def pre_session(self, ctx: SessionContext) -> Action | None:
+            seen.append(ctx.session_id)
+            return None
+
+    ws = _two_mounts(policies=[CaptureSession()])
+    ws.create_session("agent", mounts={"/a": "write"})
+
+    async def run():
+        await ws.execute("X=1", session_id="agent")
+
+    asyncio.run(run())
+    assert seen == ["agent"]
+
+
+def test_subscripted_unset_of_a_scalar_fires_the_gate():
+    # `unset 'SECRET[0]'` on a scalar is the whole unset in element
+    # clothing; the element branch used to skip the view entirely.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+    ws.env["SECRET_U"] = "v"
+
+    async def run():
+        return await ws.execute("unset 'SECRET_U[0]'")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"refused by policy" in (io.stderr or b"")
+    assert ws.env.get("SECRET_U") == "v"
+
+
+def test_subscripted_unset_of_an_array_element_fires_the_gate():
+    ws = _two_mounts(policies=[DenySecretEnv()])
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    sess.arrays["SECRET_W"] = ["a", "b"]
+
+    async def run():
+        return await ws.execute("unset 'SECRET_W[1]'")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert sess.arrays["SECRET_W"] == ["a", "b"]
 
 
 def test_for_loop_variable_fires_the_gate():

@@ -59,6 +59,39 @@ def test_set_and_unset_write_the_session():
     asyncio.run(run())
 
 
+def test_set_is_general_over_variable_shapes():
+    # One door for every write: a string stores a scalar, a list stores
+    # a whole array, and the two storages stay exclusive.
+
+    async def run():
+        view, session = _view()
+        await view.set("A", ["x", "y"])
+        assert session.arrays["A"] == ["x", "y"]
+        assert "A" not in session.env
+        await view.set("A", "s")
+        assert session.env["A"] == "s"
+        assert "A" not in session.arrays
+
+    asyncio.run(run())
+
+
+def test_an_array_write_renders_the_gate_value_as_words():
+    seen: list[str | None] = []
+
+    class Capture(Policy):
+
+        async def pre_session(self, ctx: SessionContext) -> Action | None:
+            seen.append(ctx.value)
+            return None
+
+    async def run():
+        view, _session = _view(Policies([Capture()]))
+        await view.set("A", ["x", None, "y"])
+
+    asyncio.run(run())
+    assert seen == ["x y"]
+
+
 def test_unset_of_a_missing_name_is_quiet():
 
     async def run():

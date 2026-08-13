@@ -249,6 +249,15 @@ async def handle_readlink(
         if canonical:
             # -f/-e/-m canonicalize: resolve every symlink (including a
             # trailing one) and normalize the path, GNU realpath-style.
+            # A link operand still clears the op door first: -m probes
+            # nothing, so without this a scoped session read an
+            # ungranted link's target out of the resolved path.
+            if namespace.is_link(abs_op):
+                try:
+                    await dispatch("readlink", PathSpec.from_str_path(abs_op))
+                except OSError:
+                    exit_code = 1
+                    continue
             try:
                 resolved = posixpath.normpath(namespace.follow(abs_op))
             except CycleError:
@@ -261,8 +270,14 @@ async def handle_readlink(
                 continue
             lines.append(resolved)
             continue
-        target = namespace.readlink(abs_op)
-        if target is None:
+        # The link entry is namespace state behind the op door: session
+        # grants and admission policies decide whether this session may
+        # read the target at all. EINVAL (not a link) and a refusal both
+        # land on GNU readlink's silent exit 1.
+        try:
+            target, _ = await dispatch("readlink",
+                                       PathSpec.from_str_path(abs_op))
+        except OSError:
             exit_code = 1
             continue
         lines.append(target)

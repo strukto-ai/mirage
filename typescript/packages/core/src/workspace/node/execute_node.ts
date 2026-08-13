@@ -88,7 +88,7 @@ import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
 import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
-import { preSessionGate } from '../../policy/index.ts'
+import type { SessionView } from '../../ops/types.ts'
 import { sessionView } from '../session/state.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 
@@ -100,9 +100,31 @@ type Recurse = (
   callStack: CallStack | null,
 ) => Promise<Result>
 
-// Array-literal elements behave like any other shell word list: command
-// substitutions word-split and globs resolve to matches
-// (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
+/**
+ * One assignment through the session door; denial is fatal.
+ *
+ * Every assignment spelling (scalar, array literal, subscript, append)
+ * computes its resulting value and stores through `view.set`, so the
+ * gate and the storage invariant live in the door, not here. Denial
+ * mirrors the readonly case: a fatal variable-assignment error that
+ * abandons the rest of the line.
+ */
+async function assignVar(
+  view: SessionView,
+  key: string,
+  value: string | ShellArray,
+): Promise<void> {
+  try {
+    await view.set(key, value)
+  } catch (err) {
+    if (err instanceof PolicyDenied) {
+      const denied = new TextEncoder().encode(`${err.message}\n`)
+      throw new ExitSignal(1, denied, null, 1)
+    }
+    throw err
+  }
+}
+
 /**
  * Evaluate one C-style for expression slot: the slot's integer value,
  * or the default for an empty slot (1 for the condition so `for
@@ -135,6 +157,9 @@ async function evalCforExpr(
   return Number(value)
 }
 
+// Array-literal elements behave like any other shell word list: command
+// substitutions word-split and globs resolve to matches
+// (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
 async function expandArrayItems(
   arrayNode: TSNodeLike,
   session: Session,
@@ -609,37 +634,7 @@ export async function executeNode(
         }
       }
     }
-    const arrayNames = staged.map((entry) => entry.name)
     const isReadonly = keyword === 'readonly' || flagChars.has('r')
-    for (const name of arrayNames) {
-      if (isReadonly && session.readonlyVars.has(name)) {
-        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: keyword, exitCode: 1, stderr: err }),
-        ]
-      }
-    }
-    for (const { name, append, items } of staged) {
-      noteLocalArray(session, name)
-      let base: ShellArray
-      if (append) {
-        const existing = session.arrays[name]
-        if (existing === undefined) {
-          const scalar = session.env[name]
-          base = scalar === undefined ? [] : [scalar]
-        } else {
-          base = existing
-        }
-        arrayAppend(base, items)
-      } else {
-        base = makeArray(items)
-      }
-      session.arrays[name] = base
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.env[name]
-    }
     if (flagChars.has('a')) {
       // `declare -a NAME` with no value declares an empty array, so
       // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
@@ -658,34 +653,34 @@ export async function executeNode(
         }
       }
     }
+    // Array literals travel as data: the handler stores them through
+    // the session door and owns both refusal voices, so the executor
+    // only expands and stages.
     if (isReadonly) {
-      // An array assignment stores itself above, but the name still has
-      // to be marked readonly. Only the `readonly` keyword owns -p /
-      // illegal-option handling; `declare -r` keeps names only.
+      // Only the `readonly` keyword owns -p / illegal-option handling;
+      // `declare -r` keeps names only.
       if (keyword === 'readonly') {
         return handleReadonly(
-          [...flagWords, ...assignments, ...arrayNames],
+          [...flagWords, ...assignments],
           session,
           sessionView(session, registry.policies),
+          staged,
         )
       }
-      return handleReadonly(
-        [...assignments, ...arrayNames],
-        session,
-        sessionView(session, registry.policies),
-      )
+      return handleReadonly(assignments, session, sessionView(session, registry.policies), staged)
     }
     // declare/typeset scope like `local` inside a function (bash
     // semantics) and assign globally at top level, which is exactly
     // handleLocal's fallback when no function scope is active.
     if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-      return handleLocal(assignments, session, sessionView(session, registry.policies))
+      return handleLocal(assignments, session, sessionView(session, registry.policies), staged)
     }
     // Pass export flags through so -p / bare print and illegal options work.
     return handleExport(
       [...flagWords, ...assignments],
       session,
       sessionView(session, registry.policies),
+      staged,
     )
   }
 
@@ -744,26 +739,29 @@ export async function executeNode(
     const valNodes = node.namedChildren.filter(
       (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
     )
+    // Every branch below computes its resulting value with bash's own
+    // mechanics on a copy, then stores through the one session door,
+    // which owns the gate and the scalar/array invariant.
+    const view = sessionView(session, registry.policies)
     const firstVal = valNodes[0]
     if (firstVal?.type === NT.ARRAY) {
       const items = await expandArrayItems(firstVal, session, executeFn, registry, callStack)
+      let base: ShellArray
       if (append) {
-        let base = session.arrays[key]
-        if (base === undefined) {
+        const existing = session.arrays[key]
+        if (existing === undefined) {
           const scalar = session.env[key]
-          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-          delete session.env[key]
           base = scalar === undefined ? [] : [scalar]
+        } else {
+          base = [...existing]
         }
         // `arr+=(...)` starts at the extent, so it fills the hole a
         // trailing `unset arr[last]` left but skips interior ones.
         arrayAppend(base, items)
-        session.arrays[key] = base
       } else {
-        session.arrays[key] = makeArray(items)
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.env[key]
+        base = makeArray(items)
       }
+      await assignVar(view, key, base)
       const arrCode = assignmentStatus(session, subSeq)
       return [
         null,
@@ -783,12 +781,13 @@ export async function executeNode(
           break
         }
       }
-      let arr = session.arrays[key]
-      if (arr === undefined) {
+      const existing = session.arrays[key]
+      let arr: ShellArray
+      if (existing === undefined) {
         const scalar = session.env[key]
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.env[key]
         arr = scalar === undefined ? [] : [scalar]
+      } else {
+        arr = [...existing]
       }
       let idx = arrayIndex(idxText, session.env)
       if (idx < 0) idx += arrayExtent(arr)
@@ -804,7 +803,7 @@ export async function executeNode(
         )
       }
       arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
-      session.arrays[key] = arr
+      await assignVar(view, key, arr)
       const subCode = assignmentStatus(session, subSeq)
       return [
         null,
@@ -814,26 +813,13 @@ export async function executeNode(
     }
     const appendArr = append ? session.arrays[key] : undefined
     if (append && appendArr !== undefined) {
-      arraySet(appendArr, 0, arrayGet(appendArr, 0) + val)
+      // `arr+=x` appends to element 0.
+      const newArr = [...appendArr]
+      arraySet(newArr, 0, arrayGet(newArr, 0) + val)
+      await assignVar(view, key, newArr)
     } else {
-      // The scalar write is a session write, so it clears the same
-      // preSession gate as `export`; denial mirrors the readonly case
-      // above (a fatal variable-assignment error).
       const newVal = append ? (session.env[key] ?? '') + val : val
-      try {
-        await preSessionGate(registry.policies, 'env', 'set', key, newVal)
-      } catch (err) {
-        if (err instanceof PolicyDenied) {
-          const denied = new TextEncoder().encode(`${err.message}\n`)
-          throw new ExitSignal(1, denied, null, 1)
-        }
-        throw err
-      }
-      session.env[key] = newVal
-      if (!append) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.arrays[key]
-      }
+      await assignVar(view, key, newVal)
     }
     // Reassigning OPTIND (even to its current value) restarts the getopts
     // scan, matching bash's internal char pointer.

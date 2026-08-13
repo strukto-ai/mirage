@@ -16,6 +16,8 @@ import functools
 
 from mirage.ops.types import SessionView
 from mirage.policy import Policies, pre_session_gate
+from mirage.policy.types import SessionContext
+from mirage.shell.array import ShellArray, array_values
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import Session
 
@@ -59,19 +61,25 @@ def env_is_readonly(session: Session, name: str) -> bool:
 
 
 async def set_var(session: Session, policies: Policies | None, name: str,
-                  value: str) -> None:
+                  value: str | ShellArray) -> None:
     """Write one variable through the session plane's gate.
 
-    Semantics live here once — readonly refusal, then the
-    ``pre_session`` policy gate — so every writer states them the same
-    way whichever tier asked. None policies gate nothing (a writer
-    outside a workspace).
+    General over variable shapes: a string stores a scalar, a
+    ShellArray stores a whole array, and the two storages stay
+    exclusive. Semantics live here once — readonly refusal, the
+    ``pre_session`` policy gate (whose context value renders an array
+    as its present elements joined by spaces), then the store — so
+    every writer states them the same way whichever tier or spelling
+    asked. Writers with richer mechanics (subscripts, appends, holes)
+    compute the resulting value on a copy and hand it here, so a
+    denial never leaves a half-applied write. None policies gate
+    nothing (a writer outside a workspace).
 
     Args:
         session (Session): the session being written.
         policies (Policies | None): admission policies the write clears.
         name (str): variable name.
-        value (str): the value to store.
+        value (str | ShellArray): the value to store.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
@@ -79,8 +87,21 @@ async def set_var(session: Session, policies: Policies | None, name: str,
     """
     if name in session.readonly_vars:
         raise ReadonlyVariableError(name)
-    await pre_session_gate(policies, "env", "set", name, value)
-    session.env[name] = value
+    rendered = value if isinstance(value, str) else " ".join(
+        array_values(value))
+    await pre_session_gate(
+        policies,
+        SessionContext(plane="env",
+                       verb="set",
+                       key=name,
+                       value=rendered,
+                       session_id=session.session_id))
+    if isinstance(value, str):
+        session.env[name] = value
+        session.arrays.pop(name, None)
+    else:
+        session.arrays[name] = value
+        session.env.pop(name, None)
 
 
 async def unset_var(session: Session, policies: Policies | None,
@@ -99,7 +120,13 @@ async def unset_var(session: Session, policies: Policies | None,
     """
     if name in session.readonly_vars:
         raise ReadonlyVariableError(name)
-    await pre_session_gate(policies, "env", "unset", name, None)
+    await pre_session_gate(
+        policies,
+        SessionContext(plane="env",
+                       verb="unset",
+                       key=name,
+                       value=None,
+                       session_id=session.session_id))
     session.env.pop(name, None)
 
 
@@ -118,9 +145,8 @@ def session_view(session: Session,
             None gates nothing (a view constructed outside a
             workspace).
     """
-    return SessionView(
-        get=functools.partial(env_get, session),
-        snapshot=functools.partial(env_snapshot, session),
-        set=functools.partial(set_var, session, policies),
-        unset=functools.partial(unset_var, session, policies),
-        is_readonly=functools.partial(env_is_readonly, session))
+    return SessionView(get=functools.partial(env_get, session),
+                       snapshot=functools.partial(env_snapshot, session),
+                       set=functools.partial(set_var, session, policies),
+                       unset=functools.partial(unset_var, session, policies),
+                       is_readonly=functools.partial(env_is_readonly, session))
