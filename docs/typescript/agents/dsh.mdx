@@ -14,18 +14,17 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 
 ## Compose
 
-Three Cordis plugins, mirroring dsh's own E2B provider group. `MirageService` owns the workspace; the two providers inject it. Mix any resources — here Gmail and Slack beside a scratch RAM mount:
+Three Cordis plugins. `MirageService` owns the workspace; the two providers inject it. Mix any resources, such as Redis beside a scratch RAM mount:
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
-import { GmailResource, MountMode, RAMResource, SlackResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMResource, RedisResource, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
 const ws = new Workspace(
   {
     '/notes': [new RAMResource(), MountMode.EXEC],
-    '/mail': new GmailResource({ clientId, clientSecret, refreshToken }),
-    '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
+    '/redis': new RedisResource({ url: redisUrl }),
   },
   { runtimes: ['monty', 'vfs'] },
 )
@@ -40,9 +39,7 @@ Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `E
 
 ```ts
 const shell = ctx.shell
-const sweep = await shell.run(
-  shell.resolve({ command: 'grep -rln invoice /mail/INBOX /slack/channels | head' }),
-)
+const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis /notes' }))
 ```
 
 `MirageService` also accepts `mounts` instead of a live `workspace`; it then constructs the workspace itself and closes it when the plugin unloads.
@@ -59,8 +56,8 @@ const ran = await shell.run(
 )
 ```
 
-The pattern that fits monty is: **the fs seam and the shell do the file I/O, monty does the compute** — the shell's pipes and redirections file a script's stdout back into any writable mount. [`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
+The shell's pipes and redirections file a script's stdout back into any writable mount. [`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
 
 ## One execution world
 
-dsh's architecture expects the filesystem and shell providers to share one execution world, so that a path from one seam is valid in the other. Both providers here read the same `ctx.mirage` workspace: `ctx.fs.processPath(target)` returns a virtual path that `ctx.shell` commands resolve to the same file, and a file written by the shell stats and edits through `ctx.fs`.
+Both providers read the same `ctx.mirage` workspace, so the file tools and the shell see one filesystem: a path from one is valid in the other, and a file written by the shell can be read and edited through the file tools.
