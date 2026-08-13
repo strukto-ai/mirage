@@ -45,6 +45,14 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 `MirageService` also accepts `mounts` instead of a live `workspace`; it then constructs the workspace itself and closes it when the plugin unloads.
 
+Each command is a clean slate: `cd`, `export`, and function definitions inside one bash call do not survive into the next, which is the one-shot contract of dsh's bash tool. For a persistent shell instead, bind the executor to a named workspace session:
+
+```ts
+await ctx.plugin(MirageShellExecutor, { sessionId: 'agent-1' }).await()
+```
+
+A bound session keeps its cwd, exports, and functions across calls. It is created on first use (an existing session is adopted as is), and two executors bound to different sessions stay fully apart on one workspace.
+
 ## Run Python with monty
 
 The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
