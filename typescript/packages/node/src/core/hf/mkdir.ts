@@ -20,5 +20,11 @@ export async function mkdir(
   _path: PathSpec,
   _index?: IndexCacheStore,
 ): Promise<void> {
-  // Object stores don't have real directories; mkdir is a no-op.
+  // Not "object stores have no directories": s3 and gridfs are object
+  // stores too and both put a zero-byte `key/` marker, which is what keeps
+  // an empty directory visible there. OpenDAL's hf service cannot store one
+  // and refuses client-side, before any request is sent: create_dir is
+  // unsupported, and a write to a slash-terminated path is IsADirectory. So
+  // an hf directory exists only while it holds a key, and `mkdir x` then
+  // `rmdir x` is ENOENT here but fine on s3.
 }
