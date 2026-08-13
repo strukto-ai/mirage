@@ -207,6 +207,97 @@
         "stdout": "/ghost\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nest_glob_enumerates_child_mount_root",
+      "seq": 950017,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "echo /data/*",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner /data/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_glob_matching_one_name_is_installed",
+      "seq": 950018,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ls -d /data/i*",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_du_glob_reaches_child_mount",
+      "seq": 950019,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "du /data/i*",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\t/data/inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_midpath_glob_descends_child_mount",
+      "seq": 950020,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "echo /data/*/leaf.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner/leaf.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_glob_does_not_descend_into_a_file",
+      "seq": 950021,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "echo /data/t*/top.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/t*/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_glob_produced_mount_root_is_refused",
+      "seq": 950022,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "tar -c -f /data/gmount.tar /data/i*",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: /data/inner: Cannot open: Device or resource busy\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "nest_glob_follows_a_linked_directory",
+      "seq": 950023,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "ln -s /data/inner /data/dlink && echo /data/d*/leaf.txt && echo /data/dlink/* && rm /data/dlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/dlink/leaf.txt\n/data/dlink/leaf.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }
