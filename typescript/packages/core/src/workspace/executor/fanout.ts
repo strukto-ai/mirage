@@ -344,12 +344,13 @@ export async function fanOutTraversal(
     total: flagKwargs.c === true,
     human: flagKwargs.h === true,
     maxDepth: depthFlagValue(flagKwargs.max_depth ?? null),
+    separateDirs: flagKwargs.separate_dirs === true,
   }
   let flags = flagKwargs
   if (duMerge) {
     const rest = { ...flagKwargs }
     delete rest.max_depth
-    flags = { ...rest, a: true, s: false, c: false, h: false }
+    flags = { ...rest, a: true, s: false, c: false, h: false, separate_dirs: false }
   }
 
   const allStdout: Uint8Array[] = []

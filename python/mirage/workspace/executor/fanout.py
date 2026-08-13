@@ -48,6 +48,7 @@ class _DuFanFlags:
     c: bool
     human: bool
     max_depth: int | None
+    separate_dirs: bool
 
 
 def _path_segments(path: str) -> list[str]:
@@ -432,13 +433,16 @@ async def _fan_out_traversal(
                            c=flag_kwargs.get("c") is True,
                            human=flag_kwargs.get("h") is True,
                            max_depth=_depth_flag_value(
-                               flag_kwargs.get("max_depth")))
+                               flag_kwargs.get("max_depth")),
+                           separate_dirs=flag_kwargs.get("separate_dirs")
+                           is True)
     if du_merge:
         flag_kwargs = {
             **flag_kwargs, "a": True,
             "s": False,
             "c": False,
-            "h": False
+            "h": False,
+            "separate_dirs": False
         }
         flag_kwargs.pop("max_depth", None)
 
@@ -533,6 +537,7 @@ async def _fan_out_traversal(
                                    c=du_flags.c,
                                    human=du_flags.human,
                                    max_depth=du_flags.max_depth,
+                                   separate_dirs=du_flags.separate_dirs,
                                    mount_roots=await
                                    _mount_dirs(descendants, stat_path))
     elif all_stdout and cmd_name == "find" and len(paths) == 1:
