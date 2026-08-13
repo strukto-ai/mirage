@@ -9,7 +9,7 @@ from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.timeutil import iso_to_epoch
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 _STR_DIRECTIVES = frozenset("nNF")
@@ -134,8 +134,6 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
         return "%"
     if spec == "n":
         return name
-    if spec == "N":
-        return _quote_name(name)
     if spec == "s":
         return str(s.size if s.size is not None else 0)
     if spec == "F":
@@ -171,6 +169,42 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
         # major/minor, which a VFS has no truthful value for.
         return "0" if spec[1] in "rR" else "?"
     return "?"
+
+
+def _name_parts(s: FileStat, name: str, quoted: bool) -> list[str]:
+    """The fields ``%N`` renders: the name, plus a symlink's target.
+
+    Args:
+        s (FileStat): the stat being rendered.
+        name (str): the operand as it was typed.
+        quoted (bool): shell-quote each field. GNU only does so for a bare
+            ``%N``; any flag, width or precision drops the quotes.
+    """
+    parts = [name]
+    if s.type == FileType.SYMLINK:
+        target = s.extra.get(LINK_TARGET_KEY)
+        if target:
+            parts.append(str(target))
+    return [_quote_name(p) for p in parts] if quoted else parts
+
+
+def _render_directive(d: _FormatDirective, s: FileStat, name: str) -> str:
+    """Render one directive with its flags, width and precision applied.
+
+    Args:
+        d (_FormatDirective): the parsed directive.
+        s (FileStat): the stat being rendered.
+        name (str): the operand as it was typed.
+    """
+    if d.spec == "N":
+        # GNU formats the name and a symlink's target as two separate
+        # fields, so a width pads each one rather than the joined line.
+        bare = not d.flags and not d.width and d.precision is None
+        return " -> ".join(
+            _apply_flags(part, d.flags, d.width, d.precision, d.spec)
+            for part in _name_parts(s, name, bare))
+    return _apply_flags(_directive_value(d.spec, s, name), d.flags, d.width,
+                        d.precision, d.spec)
 
 
 def _is_conversion(char: str) -> bool:
@@ -236,10 +270,7 @@ def _format_stat(fmt: str, s: FileStat, name: str) -> str:
             parts.append("%")
             cursor = start + 1
             continue
-        parts.append(
-            _apply_flags(_directive_value(directive.spec, s,
-                                          name), directive.flags,
-                         directive.width, directive.precision, directive.spec))
+        parts.append(_render_directive(directive, s, name))
         cursor = directive.end
     return "".join(parts)
 

@@ -15,7 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { FileType, LINK_TARGET_KEY, type FileStat, type PathSpec } from '../../../types.ts'
 import { isoToEpoch } from '../../../utils/dates.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -107,7 +107,6 @@ function applyFlags(
 function directiveValue(spec: string, s: FileStat, name: string): string {
   if (spec === '%') return '%'
   if (spec === 'n') return name
-  if (spec === 'N') return quoteName(name)
   if (spec === 's') return String(s.size ?? 0)
   if (spec === 'F') return typeLabel(s)
   if (spec === 'a') return effectiveMode(s).toString(8)
@@ -129,6 +128,29 @@ function directiveValue(spec: string, s: FileStat, name: string): string {
     return spec[1] === 'r' || spec[1] === 'R' ? '0' : '?'
   }
   return '?'
+}
+
+// The fields %N renders: the name, plus a symlink's target. GNU shell-quotes
+// each one only for a bare %N; any flag, width or precision drops the quotes.
+function nameParts(s: FileStat, name: string, quoted: boolean): string[] {
+  const parts = [name]
+  if (s.type === FileType.SYMLINK) {
+    const target = s.extra[LINK_TARGET_KEY]
+    if (typeof target === 'string' && target !== '') parts.push(target)
+  }
+  return quoted ? parts.map(quoteName) : parts
+}
+
+function renderDirective(d: FormatDirective, s: FileStat, name: string): string {
+  if (d.spec === 'N') {
+    // GNU formats the name and a symlink's target as two separate fields,
+    // so a width pads each one rather than the joined line.
+    const bare = d.flags === '' && d.width === '' && d.precision === undefined
+    return nameParts(s, name, bare)
+      .map((part) => applyFlags(part, d.flags, d.width, d.precision, d.spec))
+      .join(' -> ')
+  }
+  return applyFlags(directiveValue(d.spec, s, name), d.flags, d.width, d.precision, d.spec)
 }
 
 function isAsciiDigit(char: string | undefined): boolean {
@@ -193,15 +215,7 @@ function formatStat(fmt: string, s: FileStat, name: string): string {
       cursor = start + 1
       continue
     }
-    parts.push(
-      applyFlags(
-        directiveValue(directive.spec, s, name),
-        directive.flags,
-        directive.width,
-        directive.precision,
-        directive.spec,
-      ),
-    )
+    parts.push(renderDirective(directive, s, name))
     cursor = directive.end
   }
   return parts.join('')
