@@ -47,7 +47,9 @@ function resolveTarget(combined: string, links: Map<string, string>, physical: b
 // nothing downstream sees the raw form.
 function joinPath(path: string, cwd: string): string {
   if (path.startsWith('/')) return path
-  return `${cwd.replace(/\/+$/, '')}/${path}`
+  let end = cwd.length
+  while (end > 0 && cwd[end - 1] === '/') end -= 1
+  return `${cwd.slice(0, end)}/${path}`
 }
 
 // The operand as typed, which is what -P has to resolve. A relative operand

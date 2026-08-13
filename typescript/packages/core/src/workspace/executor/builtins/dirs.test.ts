@@ -57,6 +57,15 @@ describe('handleCd', () => {
     expect(s.env.OLDPWD).toBe('/data')
   })
 
+  it('joins a relative target after repeated trailing slashes', async () => {
+    const { dispatch, seen } = dispatcher(['/data/sub'])
+    const s = session('/data///')
+    const [, io] = await handleCd(dispatch, noMountRoot, 'sub', s)
+    expect(io.exitCode).toBe(0)
+    expect(seen).toEqual(['/data/sub'])
+    expect(s.cwd).toBe('/data/sub')
+  })
+
   it('never consults the backend for the root', async () => {
     const { dispatch, seen } = dispatcher()
     const s = session('/data')
