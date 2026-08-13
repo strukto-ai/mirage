@@ -19,6 +19,8 @@ from mirage.commands.spec.types import Operand, Option
 from mirage.core.github.config import GhConfig
 from mirage.types import ResourceName
 
+REPO_HELP = "Select another repository, as [HOST/]OWNER/REPO"
+
 # The GitHub CLI, spelled as cli.github.com spells it. The `github` mount is
 # the read half -- a repository is a tree, so listing and reading it is `ls`
 # and `cat` -- and this is the write half plus the account-level operations a
@@ -71,8 +73,7 @@ GH = CLISpec(
                         short="-R",
                         long="--repo",
                         type="str",
-                        description=
-                        "Select another repository, as [HOST/]OWNER/REPO",
+                        description=REPO_HELP,
                     ), ),
                 ),
             ),
@@ -82,8 +83,7 @@ GH = CLISpec(
             description="Make an authenticated GitHub API request",
             fn=api,
             write=True,
-            positional=(Operand(type="str", name="ENDPOINT",
-                                required=True), ),
+            positional=(Operand(type="str", name="ENDPOINT", required=True), ),
             options=(
                 Option(
                     short="-X",

@@ -171,10 +171,11 @@ async def test_renames_the_dash_r_repository_to_the_operand():
 
 @pytest.mark.asyncio
 async def test_api_is_a_get_with_no_fields_and_sends_them_as_query():
-    await api(_inv(["repos/o/r/contents/x"], {
-        "raw_field": ["ref=master"],
-        "method": "GET"
-    }))
+    await api(
+        _inv(["repos/o/r/contents/x"], {
+            "raw_field": ["ref=master"],
+            "method": "GET"
+        }))
     assert CALLS[0] == {
         "method": "GET",
         "path": "/repos/o/r/contents/x",
@@ -193,11 +194,12 @@ async def test_api_is_a_post_once_a_field_is_given():
 @pytest.mark.asyncio
 async def test_api_sends_dash_f_verbatim_and_reads_dash_f_as_json_types():
     await api(
-        _inv(["x"], {
-            "method": "PUT",
-            "raw_field": ["a=1"],
-            "field": ["b=2", "c=true", "d=null", "e=text"],
-        }))
+        _inv(
+            ["x"], {
+                "method": "PUT",
+                "raw_field": ["a=1"],
+                "field": ["b=2", "c=true", "d=null", "e=text"],
+            }))
     assert CALLS[0]["body"] == {
         "a": "1",
         "b": 2,

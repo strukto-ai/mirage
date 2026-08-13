@@ -16,7 +16,7 @@ from mirage.commands.cli.builtin.gh.accessor import gh_repo, json_out, text_out
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.github.config import GhConfig
-from mirage.core.github.repo import (fork_repo, login, rename_repo, view_repo)
+from mirage.core.github.repo import fork_repo, login, rename_repo, view_repo
 from mirage.io.types import ByteSource, IOResult
 
 
@@ -34,8 +34,8 @@ async def fork(
     name = fl.as_str("fork_name")
     forked = await fork_repo(inv.config, source, name)
     landed = forked.get("full_name") if isinstance(forked, dict) else None
-    full = landed if isinstance(landed, str) else (
-        f"{await login(inv.config)}/{name or source.repo}")
+    full = landed if isinstance(
+        landed, str) else (f"{await login(inv.config)}/{name or source.repo}")
     return text_out(f"✓ Created fork {full}\n")
 
 

@@ -38,7 +38,7 @@ beforeEach(() => {
     SEEN.push({
       url: req.url,
       method: req.method,
-      body: init?.body === undefined || init.body === null ? null : String(init.body),
+      body: typeof init?.body === 'string' ? init.body : null,
       contentType: req.headers.get('content-type'),
     })
     return Promise.resolve(
