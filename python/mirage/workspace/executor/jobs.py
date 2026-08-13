@@ -22,7 +22,8 @@ from mirage.io.types import ByteSource, materialize
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.job_table import JobTable
-from mirage.workspace.session import Session
+from mirage.workspace.session import (Session, reset_current_session,
+                                      set_current_session)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -44,30 +45,42 @@ async def handle_background(
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
         cmd_str_inner = get_text(left) if hasattr(left, "text") else str(left)
+        # The task's context snapshot still points at the OUTER session
+        # (create_task copies the context before the fork can be bound),
+        # and the fork keeps its parent's id, so without this rebind a
+        # nested eval inside the job resolves the ambient outer session
+        # and escapes the fork.
+        token = set_current_session(bg_session)
         try:
-            stdout, io, exec_node = await execute_node(left, bg_session, None,
-                                                       call_stack)
-        except CommandTimeoutError as exc:
-            msg = (str(exc) + "\n").encode()
-            io = IOResult(exit_code=124, stderr=msg)
-            exec_node = ExecutionNode(command=cmd_str_inner,
-                                      stderr=msg,
-                                      exit_code=124)
-            return b"", io, exec_node
-        except ExitSignal as sig:
-            # A background job is its own shell: exit ends the job only.
-            io = IOResult(exit_code=sig.contained_code,
-                          stderr=sig.stderr or None)
-            exec_node = ExecutionNode(command=cmd_str_inner,
-                                      stderr=sig.stderr,
-                                      exit_code=sig.contained_code)
-            return sig.stdout or b"", io, exec_node
-        stdout = await materialize(stdout)
-        # Eagerly materialize stderr too so JobTable._refresh can read
-        # the task result synchronously without an async hop.
-        await io.materialize_stderr()
-        io.sync_exit_code()
-        return stdout, io, exec_node
+            try:
+                stdout, io, exec_node = await execute_node(
+                    left, bg_session, None, call_stack)
+            except CommandTimeoutError as exc:
+                msg = (str(exc) + "\n").encode()
+                io = IOResult(exit_code=124, stderr=msg)
+                exec_node = ExecutionNode(command=cmd_str_inner,
+                                          stderr=msg,
+                                          exit_code=124)
+                return b"", io, exec_node
+            except ExitSignal as sig:
+                # A background job is its own shell: exit ends the job
+                # only.
+                io = IOResult(exit_code=sig.contained_code,
+                              stderr=sig.stderr or None)
+                exec_node = ExecutionNode(command=cmd_str_inner,
+                                          stderr=sig.stderr,
+                                          exit_code=sig.contained_code)
+                return sig.stdout or b"", io, exec_node
+            # Materialize inside the rebind: draining the pipeline can
+            # still run ops that read the ambient session.
+            stdout = await materialize(stdout)
+            # Eagerly materialize stderr too so JobTable._refresh can
+            # read the task result synchronously without an async hop.
+            await io.materialize_stderr()
+            io.sync_exit_code()
+            return stdout, io, exec_node
+        finally:
+            reset_current_session(token)
 
     task = asyncio.create_task(_run_bg())
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)

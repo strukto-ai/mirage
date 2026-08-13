@@ -246,14 +246,13 @@ async def expand_node(
                 if arith is not None:
                     return prefix + await expand_node(arith, session,
                                                       execute_fn, call_stack)
-        inner_cmds = [
-            c for c in ts_node.named_children
-            if c.type in (NT.COMMAND, NT.PIPELINE, NT.LIST,
-                          NT.REDIRECTED_STATEMENT, NT.SUBSHELL)
-        ]
-        if not inner_cmds:
+        # The whole body goes to the evaluator: bash substitutes the
+        # full statement list, and picking child nodes dropped every
+        # statement after a `;` and every non-command statement
+        # (declarations, assignments, control flow).
+        inner = raw[2:-1]
+        if not inner.strip():
             return prefix
-        inner = get_text(inner_cmds[0])
         io = await execute_fn(inner, session_id=session.session_id)
         text = (await io.stdout_str()).rstrip("\n")
         # Record the substitution's status: an assignment-only

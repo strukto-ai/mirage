@@ -18,6 +18,7 @@ import { CommandTimeoutError } from '../../commands/builtin/utils/limit.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
+import { runWithSession } from '../../context/session_context.ts'
 import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -50,39 +51,46 @@ export async function handleBackground(
   // observes the kill, merged with any enclosing job's channel.
   bgSession.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
   const cmdStrInner = left.text
-  const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = (async () => {
-    let stdout: ByteSource | null
-    let io: IOResult
-    let execNode: ExecutionNode
-    try {
-      ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack)
-    } catch (err) {
-      if (err instanceof CommandTimeoutError) {
-        const msg = new TextEncoder().encode(`${err.message}\n`)
-        return [
-          new Uint8Array(),
-          new IOResult({ exitCode: 124, stderr: msg }),
-          new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 }),
-        ]
+  // The task inherits the OUTER ambient session from its creation
+  // context, and the fork keeps its parent's id, so without this
+  // rebind a nested eval inside the job resolves the ambient outer
+  // session and escapes the fork.
+  const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = runWithSession(
+    bgSession,
+    async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
+      let stdout: ByteSource | null
+      let io: IOResult
+      let execNode: ExecutionNode
+      try {
+        ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack)
+      } catch (err) {
+        if (err instanceof CommandTimeoutError) {
+          const msg = new TextEncoder().encode(`${err.message}\n`)
+          return [
+            new Uint8Array(),
+            new IOResult({ exitCode: 124, stderr: msg }),
+            new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 }),
+          ]
+        }
+        if (err instanceof ExitSignal) {
+          // A background job is its own shell: exit ends the job only.
+          return [
+            err.stdout ?? new Uint8Array(),
+            new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
+            new ExecutionNode({
+              command: cmdStrInner,
+              stderr: err.stderr,
+              exitCode: err.containedCode,
+            }),
+          ]
+        }
+        throw err
       }
-      if (err instanceof ExitSignal) {
-        // A background job is its own shell: exit ends the job only.
-        return [
-          err.stdout ?? new Uint8Array(),
-          new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
-          new ExecutionNode({
-            command: cmdStrInner,
-            stderr: err.stderr,
-            exitCode: err.containedCode,
-          }),
-        ]
-      }
-      throw err
-    }
-    const materialized = await materialize(stdout)
-    io.syncExitCode()
-    return [materialized, io, execNode]
-  })()
+      const materialized = await materialize(stdout)
+      io.syncExitCode()
+      return [materialized, io, execNode]
+    },
+  )
   task.catch(() => {
     // unhandled rejections silenced here; callers use jobTable.wait()
   })

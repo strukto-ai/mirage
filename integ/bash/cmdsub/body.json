@@ -1,8 +1,8 @@
 {
   "cases": [
     {
-      "id": "job_bg_then_wait",
-      "seq": 502400,
+      "id": "cmdsub_body_runs_all_statements",
+      "seq": 930320,
       "targets": [
         "ram",
         "disk",
@@ -27,16 +27,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(sleep 0.2 & wait) 2>/dev/null; echo done",
+      "command": "echo $(echo a; echo b)",
       "expect": {
         "exit": 0,
-        "stdout": "done\n",
+        "stdout": "a b\n",
         "stderr": ""
       }
     },
     {
-      "id": "job_bg_write_visible_after_wait",
-      "seq": 502402,
+      "id": "cmdsub_body_control_flow",
+      "seq": 930322,
       "targets": [
         "ram",
         "disk",
@@ -48,6 +48,8 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -59,16 +61,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(echo bgdata > /data/zjb.txt & wait) 2>/dev/null; cat /data/zjb.txt",
+      "command": "echo $(if true; then echo yes; fi)",
       "expect": {
         "exit": 0,
-        "stdout": "bgdata\n",
+        "stdout": "yes\n",
         "stderr": ""
       }
     },
     {
-      "id": "job_bg_cmdsub_reads_fork_cwd",
-      "seq": 502404,
+      "id": "cmdsub_body_assignment",
+      "seq": 930324,
       "targets": [
         "ram",
         "disk",
@@ -80,6 +82,8 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -91,16 +95,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data && echo $(pwd) > /data/zbgc.txt & wait) 2>/dev/null; cat /data/zbgc.txt",
+      "command": "echo $(X=5; echo $X)",
       "expect": {
         "exit": 0,
-        "stdout": "/data\n",
+        "stdout": "5\n",
         "stderr": ""
       }
     },
     {
-      "id": "job_bg_cmdsub_cd_no_leak",
-      "seq": 502406,
+      "id": "cmdsub_body_declaration",
+      "seq": 930326,
       "targets": [
         "ram",
         "disk",
@@ -112,6 +116,8 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
+        "hf",
+        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -123,10 +129,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(echo $(cd /data) > /data/zbgn.txt & wait) 2>/dev/null; pwd",
+      "command": "echo $(export Y=7; echo $Y)",
       "expect": {
         "exit": 0,
-        "stdout": "/\n",
+        "stdout": "7\n",
         "stderr": ""
       }
     }

@@ -275,16 +275,12 @@ export async function expandNode(
         return prefix + arith.value.toString()
       }
     }
-    const innerCmds = tsNode.namedChildren.filter(
-      (c) =>
-        c.type === NT.COMMAND ||
-        c.type === NT.PIPELINE ||
-        c.type === NT.LIST ||
-        c.type === NT.REDIRECTED_STATEMENT ||
-        c.type === NT.SUBSHELL,
-    )
-    if (innerCmds.length === 0) return prefix
-    const inner = innerCmds[0]?.text ?? ''
+    // The whole body goes to the evaluator: bash substitutes the full
+    // statement list, and picking child nodes dropped every statement
+    // after a `;` and every non-command statement (declarations,
+    // assignments, control flow).
+    const inner = rawSub.slice(2, -1)
+    if (inner.trim() === '') return prefix
     const io = await executeFn(inner, { sessionId: session.sessionId })
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement

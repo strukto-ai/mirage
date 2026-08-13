@@ -176,6 +176,28 @@ def test_expand_command_sub():
     execute_fn.assert_called_once()
 
 
+def test_expand_command_sub_runs_the_whole_body():
+    # bash substitutes the full statement list, so the whole body goes
+    # to the evaluator: filtering to the first command node dropped
+    # everything after a `;` and every non-command statement.
+    node = _first_arg("echo $(echo a; echo b)")
+    execute_fn = AsyncMock()
+    io = IOResult()
+    io.stdout = b"a\nb\n"
+    execute_fn.return_value = io
+    result = _run(expand_node(node, _session(), execute_fn))
+    assert result == "a\nb"
+    assert execute_fn.call_args.args[0] == "echo a; echo b"
+
+
+def test_expand_command_sub_runs_a_declaration():
+    node = _first_arg("echo $(export X=1)")
+    execute_fn = AsyncMock()
+    execute_fn.return_value = IOResult()
+    _run(expand_node(node, _session(), execute_fn))
+    assert execute_fn.call_args.args[0] == "export X=1"
+
+
 # ── arithmetic expansion $((expr)) ──────────────
 
 
