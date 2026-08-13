@@ -47,7 +47,16 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 ## Run Python with monty
 
-Registering `runtimes: ['monty', 'vfs']` makes the bash tool capture Python: a `python3` line — a script file, inline `-c` code, or code piped on stdin — executes with [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, while `vfs` keeps the shell commands. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`, with the Slack file ID suffixed into the name):
+Registering `runtimes` on the workspace specifies who captures what: `monty` takes every `python3` line — a script file, inline `-c` code, or code piped on stdin — and `vfs` keeps the shell commands. [monty](https://github.com/pydantic/monty) is a sandboxed Python interpreter with no host access, so the code runs inside the workspace, never on the machine:
+
+```ts
+const ws = new Workspace(mounts, { runtimes: ['monty', 'vfs'] })
+
+const inline = await shell.run(shell.resolve({ command: `python3 -c 'print(2 + 3)'` }))
+// inline.stdout.text === '5\n'
+```
+
+A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`, with the Slack file ID suffixed into the name):
 
 ```ts
 const ran = await shell.run(
