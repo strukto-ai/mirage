@@ -23,24 +23,12 @@ import {
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
-import { redactConfigWithSchema } from '../resource/secrets.ts'
+import { type ConfigOf, redactConfigWithSchema, type RedactedConfig } from '../resource/secrets.ts'
 import { normalizeFields } from '../utils/normalize.ts'
 import { stripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
 export interface SharePointConfig extends MsGraphConfig {
-  siteFilter?: string
-  site?: string
-  drive?: string
-  keyPrefix?: string
-}
-
-export interface SharePointConfigRedacted {
-  accessToken: '<REDACTED>'
-  tenantHost?: string
-  graphBaseUrl?: string
-  timeout?: number
-  maxRetries?: number
   siteFilter?: string
   site?: string
   drive?: string
@@ -54,6 +42,11 @@ export const SharePointConfigSchema = z.object({
   drive: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type SharePointConfigRedacted = RedactedConfig<
+  ConfigOf<typeof SharePointConfigSchema>,
+  'accessToken'
+>
 
 export function redactSharePointConfig(config: SharePointConfig): SharePointConfigRedacted {
   return redactConfigWithSchema(

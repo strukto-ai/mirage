@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface MinIOConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  endpoint?: string
-  region?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface MinIOConfigRedacted extends Omit<MinIOConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const MinIOConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const MinIOConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type MinIOConfig = ConfigOf<typeof MinIOConfigSchema>
+
+export type MinIOConfigRedacted = RedactedConfig<MinIOConfig, 'presignedUrlProvider'>
 
 export function minioToS3Config(config: MinIOConfig): S3Config {
   return {

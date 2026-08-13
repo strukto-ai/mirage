@@ -100,9 +100,11 @@ export {
   throwUnsupported,
 } from './resource/base.ts'
 export {
+  type ConfigOf,
   hasRedactedSecret,
   REDACTED_SECRET,
   redactConfigWithSchema,
+  type RedactedConfig,
   resourceStateRequiresOverride,
   secretSchema,
   secretStr,

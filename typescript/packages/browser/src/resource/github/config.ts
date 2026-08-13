@@ -12,23 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-
-export interface GitHubConfig {
-  token: string
-  owner: string
-  repo: string
-  ref?: string
-  baseUrl?: string
-}
-
-export interface GitHubConfigRedacted {
-  token: '<REDACTED>'
-  owner: string
-  repo: string
-  ref?: string
-  baseUrl?: string
-}
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 const GitHubConfigSchema = z.object({
   token: secretStr(),
@@ -37,6 +28,10 @@ const GitHubConfigSchema = z.object({
   ref: z.string().optional(),
   baseUrl: z.string().optional(),
 })
+
+export type GitHubConfig = ConfigOf<typeof GitHubConfigSchema>
+
+export type GitHubConfigRedacted = RedactedConfig<GitHubConfig, 'token'>
 
 export function redactGitHubConfig(config: GitHubConfig): GitHubConfigRedacted {
   return redactConfigWithSchema(GitHubConfigSchema, config) as unknown as GitHubConfigRedacted

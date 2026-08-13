@@ -26,6 +26,29 @@ interface SchemaDef {
 
 export type SecretStr = string & { readonly __mirageSecret: unique symbol }
 
+// A config's shape, read off the schema that already validates it rather
+// than declared a second time by hand. `z.infer` alone is not a drop-in:
+// it renders an optional field as `k?: T | undefined`, which under
+// `exactOptionalPropertyTypes` is wider than the `k?: T` these configs
+// were written with and stops a subclass's state from matching its base's.
+// The mapping is homomorphic, so `?` survives and only the explicit
+// `undefined` goes.
+export type ConfigOf<S extends z.ZodType> = {
+  [K in keyof z.infer<S>]: Exclude<z.infer<S>[K], undefined>
+}
+
+// The redacted twin of a config, naming only the secret fields. The
+// `secretStr`/`secretSchema` marker is runtime metadata on a plain
+// `z.ZodString`, so no type can read it back off the schema and the secret
+// list has to be written down once; what this removes is the other half of
+// the twin, which used to re-list every ordinary field by hand and drifted
+// the moment one was added. The mapping goes through `Pick` so it is
+// homomorphic and an optional secret stays optional: a bare `[P in K]` is
+// not, and made every optional secret required.
+export type RedactedConfig<T, K extends keyof T> = Omit<T, K> & {
+  [P in keyof Pick<T, K>]: typeof REDACTED_SECRET
+}
+
 export function secretStr(): z.ZodString {
   return secretSchema(z.string())
 }

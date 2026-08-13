@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { redactConfigWithSchema, secretSchema, secretStr } from '../secrets.ts'
+import {
+  type ConfigOf,
+  redactConfigWithSchema,
+  type RedactedConfig,
+  secretSchema,
+  secretStr,
+} from '../secrets.ts'
 import * as kp from '../../utils/key_prefix.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
@@ -86,16 +92,12 @@ export function normalizeKeyPrefix(v: string | undefined): string | undefined {
   return out === '' ? undefined : out
 }
 
-export interface S3ConfigRedacted extends Omit<
-  S3Config,
+// Only the redacted twin derives: `S3Config` carries a `profile` the schema
+// does not, so the schema is not this config's own shape.
+export type S3ConfigRedacted = RedactedConfig<
+  ConfigOf<typeof S3ConfigSchema>,
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'presignedUrlProvider' | 'httpAgentProvider'
-> {
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  presignedUrlProvider?: '<REDACTED>'
-  httpAgentProvider?: '<REDACTED>'
-}
+>
 
 export function redactConfig(config: S3Config): S3ConfigRedacted {
   return redactConfigWithSchema(S3ConfigSchema, config) as unknown as S3ConfigRedacted
