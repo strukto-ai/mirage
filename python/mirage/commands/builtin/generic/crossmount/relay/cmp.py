@@ -13,18 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from typing import Any, Callable
 
 from mirage.commands.builtin.generic.cmp import cmp_cmd as generic_cmp
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes, relay
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
 
 async def run_cmp(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
-                  dispatch: Callable[..., Any]) -> CrossResult:
+                  dispatch: DispatchFn) -> CrossResult:
     """Byte-compare two files on different mounts via the shared generic.
 
     Pure wiring: both sides are read through dispatch-relayed primitives.
@@ -32,7 +32,7 @@ async def run_cmp(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
     Args:
         scopes (list[PathSpec]): The two path operands.
         flag_kwargs (dict): Flags parsed against the shared cmp spec.
-        dispatch (Callable): Workspace operation dispatcher.
+        dispatch (DispatchFn): Workspace operation dispatcher.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cmp"])
     limit = fl.as_str("n")

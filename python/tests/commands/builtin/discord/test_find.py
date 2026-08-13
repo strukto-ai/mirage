@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.discord import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.discord.config import DiscordConfig
 from mirage.types import PathSpec
 
@@ -47,11 +48,9 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
     with patch("mirage.core.discord.readdir.list_guilds",
                new_callable=AsyncMock,
                return_value=GUILDS):
-        stdout, _io = await find(accessor,
-                                 paths,
-                                 *texts,
-                                 index=RAMIndexCacheStore(),
-                                 **flags)
+        stdout, _io = await find(
+            accessor, paths, list(texts),
+            CommandOpts(index=RAMIndexCacheStore(), flags={**flags}))
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 

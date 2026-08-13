@@ -21,6 +21,7 @@ import pytest
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.jq import jq as jq_builder
+from mirage.commands.config import CommandOpts
 from mirage.core.jq import jq_eval
 from mirage.types import MountMode, PathSpec
 
@@ -33,7 +34,7 @@ async def _const_bytes(data, accessor, path, index=None):
 
 
 async def _collect_jq(ops, accessor, paths, expr):
-    out, _ = await jq_builder(ops, accessor, paths, expr)
+    out, _ = await jq_builder(ops, accessor, paths, [expr], CommandOpts())
     if isinstance(out, bytes):
         return out
     if hasattr(out, "__aiter__"):

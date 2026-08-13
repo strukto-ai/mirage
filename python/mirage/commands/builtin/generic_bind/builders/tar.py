@@ -15,43 +15,28 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tar import tar_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.archive_io import is_dir_of, walk_of
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 
 
-async def tar(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def tar(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("tar: missing operand")
-    resolved = await ops.resolve_glob(accessor, paths, index)
-    return await tar_generic(resolved,
-                             list(texts),
-                             CommandOpts(stdin=stdin, flags=flags),
-                             bound_op(ops.read_bytes, accessor, index),
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    return await tar_generic(resolved, list(texts), opts,
+                             bound_op(ops.read_bytes, accessor, opts.index),
                              partial(ops.require(Operation.WRITE), accessor),
                              partial(ops.require(Operation.MKDIR), accessor),
-                             bound_op(ops.stat, accessor, index),
-                             walk_of(ops, accessor, index),
-                             is_dir_of(ops, accessor, index),
-                             links=links,
-                             mounts=mounts)
+                             bound_op(ops.stat, accessor, opts.index),
+                             walk_of(ops, accessor, opts.index),
+                             is_dir_of(ops, accessor, opts.index))
 
 
 BUILDER = Builder('tar',

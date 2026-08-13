@@ -23,7 +23,7 @@ from mirage.commands.spec.types import (CommandSpec, FlagValue,
                                         ParsedFlagValue, UsageStyle)
 from mirage.io.types import ByteSource
 from mirage.ops.types import MountRoot, StatPath
-from mirage.runtime.types import ScriptSource
+from mirage.runtime.types import DispatchFn, ScriptSource
 from mirage.types import Limit, PathSpec, ResourceName
 
 # The group-level flag bag the walk accumulates, keyed by canonical
@@ -47,7 +47,7 @@ class CLIVerbOpts:
     signature the dispatcher inspects.
 
     Args:
-        dispatch (Callable[..., Any] | None): the workspace op
+        dispatch (DispatchFn | None): the workspace op
             dispatcher. Typed loosely on purpose: the DispatchFn
             Protocol lives in ``workspace.types``, and ``commands``
             stays free of a workspace import.
@@ -57,7 +57,7 @@ class CLIVerbOpts:
             A mount boundary is a filesystem boundary, which is where
             git stops looking for a repository.
     """
-    dispatch: Callable[..., Any] | None = None
+    dispatch: DispatchFn | None = None
     stat_path: StatPath | None = None
     mount_root: MountRoot | None = None
 

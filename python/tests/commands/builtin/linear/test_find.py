@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.linear import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.linear.config import LinearConfig
 from mirage.types import PathSpec
 
@@ -55,11 +56,9 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
     with patch("mirage.core.linear.readdir.list_teams",
                new_callable=AsyncMock,
                return_value=TEAMS):
-        stdout, _io = await find(accessor,
-                                 paths,
-                                 *texts,
-                                 index=RAMIndexCacheStore(),
-                                 **flags)
+        stdout, _io = await find(
+            accessor, paths, list(texts),
+            CommandOpts(index=RAMIndexCacheStore(), flags={**flags}))
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 

@@ -15,33 +15,20 @@
 from functools import partial
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree_generic
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
 from mirage.types import PathSpec
 
 
 @command("tree", resource="history", spec=SPECS["tree"])
-async def tree(
-    accessor: HistoryAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    stat_path: StatPath | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    return await tree_generic(list(paths),
-                              list(texts),
-                              CommandOpts(stdin=stdin, flags=flags),
+async def tree(accessor: HistoryAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    return await tree_generic(list(paths), list(texts), opts,
                               partial(readdir, accessor),
-                              partial(stat, accessor),
-                              index=index,
-                              stat_path=stat_path)
+                              partial(stat, accessor))

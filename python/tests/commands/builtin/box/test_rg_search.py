@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.box.rg import _keep_visible, rg
+from mirage.commands.config import CommandOpts
 from mirage.core.box._client import BoxTokenManager
 from mirage.core.box.config import BoxConfig
 from mirage.io.types import IOResult
@@ -59,9 +60,9 @@ def harness(monkeypatch):
 
 def test_keep_visible_drops_dotfiles_below_the_scope():
     kept = _keep_visible(
-        [spec("/data/.env"),
-         spec("/data/.git/config"),
-         spec("/data/a.txt")], [scope()],
+        [spec('/data/.env'),
+         spec('/data/.git/config'),
+         spec('/data/a.txt')], [scope()],
         hidden=False)
     assert [p.virtual for p in kept] == ["/data/a.txt"]
 
@@ -75,7 +76,7 @@ def test_keep_visible_ignores_dots_in_the_scope_itself():
     hidden_scope = PathSpec(resource_path=".cfg",
                             virtual="/data/.cfg",
                             directory="/data/.cfg")
-    kept = _keep_visible([spec("/data/.cfg/a.txt")], [hidden_scope],
+    kept = _keep_visible([spec('/data/.cfg/a.txt')], [hidden_scope],
                          hidden=False)
     assert [p.virtual for p in kept] == ["/data/.cfg/a.txt"]
 
@@ -83,7 +84,7 @@ def test_keep_visible_ignores_dots_in_the_scope_itself():
 @pytest.mark.asyncio
 async def test_plain_rg_allows_narrowing(harness, index):
     narrow, _ = harness
-    await rg(make_accessor(), [scope()], "needle", index=index)
+    await rg(make_accessor(), [scope()], ['needle'], CommandOpts(index=index))
     kwargs = narrow.await_args.kwargs
     assert kwargs["recursive"]
     assert not kwargs["exact_file_set"]
@@ -92,11 +93,14 @@ async def test_plain_rg_allows_narrowing(harness, index):
 @pytest.mark.asyncio
 async def test_invert_type_and_glob_force_the_full_walk(harness, index):
     narrow, _ = harness
-    await rg(make_accessor(), [scope()], "needle", v=True, index=index)
+    await rg(make_accessor(), [scope()], ['needle'],
+             CommandOpts(index=index, flags={'v': True}))
     assert narrow.await_args.kwargs["exact_file_set"]
-    await rg(make_accessor(), [scope()], "needle", type="py", index=index)
+    await rg(make_accessor(), [scope()], ['needle'],
+             CommandOpts(index=index, flags={'type': 'py'}))
     assert narrow.await_args.kwargs["exact_file_set"]
-    await rg(make_accessor(), [scope()], "needle", glob="*.py", index=index)
+    await rg(make_accessor(), [scope()], ['needle'],
+             CommandOpts(index=index, flags={'glob': '*.py'}))
     assert narrow.await_args.kwargs["exact_file_set"]
 
 
@@ -104,7 +108,7 @@ async def test_invert_type_and_glob_force_the_full_walk(harness, index):
 async def test_narrowed_run_forces_filename_labels(harness, index):
     narrow, generic = harness
     narrow.return_value = ([spec("/data/a.txt")], True)
-    await rg(make_accessor(), [scope()], "needle", index=index)
+    await rg(make_accessor(), [scope()], ['needle'], CommandOpts(index=index))
     assert generic.await_args.args[2].get("H") is True
 
 
@@ -112,7 +116,8 @@ async def test_narrowed_run_forces_filename_labels(harness, index):
 async def test_dash_upper_i_suppression_survives_narrowing(harness, index):
     narrow, generic = harness
     narrow.return_value = ([spec("/data/a.txt")], True)
-    await rg(make_accessor(), [scope()], "needle", args_I=True, index=index)
+    await rg(make_accessor(), [scope()], ['needle'],
+             CommandOpts(index=index, flags={'args_I': True}))
     assert "H" not in generic.await_args.args[2]
 
 
@@ -120,7 +125,7 @@ async def test_dash_upper_i_suppression_survives_narrowing(harness, index):
 async def test_walk_fallback_leaves_flags_alone(harness, index):
     narrow, generic = harness
     narrow.return_value = ([scope()], False)
-    await rg(make_accessor(), [scope()], "needle", index=index)
+    await rg(make_accessor(), [scope()], ['needle'], CommandOpts(index=index))
     assert "H" not in generic.await_args.args[2]
 
 
@@ -128,7 +133,7 @@ async def test_walk_fallback_leaves_flags_alone(harness, index):
 async def test_hidden_candidates_are_pruned(harness, index):
     narrow, generic = harness
     narrow.return_value = ([spec("/data/.env"), spec("/data/a.txt")], True)
-    await rg(make_accessor(), [scope()], "needle", index=index)
+    await rg(make_accessor(), [scope()], ['needle'], CommandOpts(index=index))
     assert [p.virtual for p in generic.await_args.args[0]] == ["/data/a.txt"]
 
 
@@ -136,7 +141,8 @@ async def test_hidden_candidates_are_pruned(harness, index):
 async def test_all_hidden_narrowed_set_exits_one(harness, index):
     narrow, generic = harness
     narrow.return_value = ([spec("/data/.env")], True)
-    stdout, io = await rg(make_accessor(), [scope()], "needle", index=index)
+    stdout, io = await rg(make_accessor(), [scope()], ['needle'],
+                          CommandOpts(index=index))
     assert stdout == b""
     assert io.exit_code == 1
     generic.assert_not_awaited()

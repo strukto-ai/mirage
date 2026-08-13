@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.dropbox.grep import grep
+from mirage.commands.config import CommandOpts
 from mirage.core.dropbox._client import DropboxTokenManager
 from mirage.io.types import IOResult
 from mirage.resource.dropbox.config import DropboxConfig
@@ -56,7 +57,8 @@ def harness(monkeypatch):
 @pytest.mark.asyncio
 async def test_plain_recursive_grep_allows_narrowing(harness, index):
     narrow, _ = harness
-    await grep(make_accessor(), [scope()], "needle", r=True, index=index)
+    await grep(make_accessor(), [scope()], ['needle'],
+               CommandOpts(index=index, flags={'r': True}))
     kwargs = narrow.await_args.kwargs
     assert kwargs["recursive"]
     assert not kwargs["exact_file_set"]
@@ -66,22 +68,22 @@ async def test_plain_recursive_grep_allows_narrowing(harness, index):
 @pytest.mark.asyncio
 async def test_invert_forces_the_full_walk(harness, index):
     narrow, _ = harness
-    await grep(make_accessor(), [scope()],
-               "needle",
-               r=True,
-               v=True,
-               index=index)
+    await grep(make_accessor(), [scope()], ['needle'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'v': True
+               }))
     assert narrow.await_args.kwargs["exact_file_set"]
 
 
 @pytest.mark.asyncio
 async def test_count_forces_the_full_walk(harness, index):
     narrow, _ = harness
-    await grep(make_accessor(), [scope()],
-               "needle",
-               r=True,
-               c=True,
-               index=index)
+    await grep(make_accessor(), [scope()], ['needle'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'c': True
+               }))
     assert narrow.await_args.kwargs["exact_file_set"]
 
 
@@ -95,7 +97,8 @@ async def test_narrowed_files_reach_the_generic_grep(harness, index):
                  resolved=True)
     ]
     narrow.return_value = (hits, True)
-    await grep(make_accessor(), [scope()], "needle", r=True, index=index)
+    await grep(make_accessor(), [scope()], ['needle'],
+               CommandOpts(index=index, flags={'r': True}))
     assert generic.await_args.args[0] == hits
 
 
@@ -103,10 +106,8 @@ async def test_narrowed_files_reach_the_generic_grep(harness, index):
 async def test_empty_narrowed_set_exits_one_without_reading(harness, index):
     narrow, generic = harness
     narrow.return_value = ([], True)
-    stdout, io = await grep(make_accessor(), [scope()],
-                            "needle",
-                            r=True,
-                            index=index)
+    stdout, io = await grep(make_accessor(), [scope()], ['needle'],
+                            CommandOpts(index=index, flags={'r': True}))
     assert stdout == b""
     assert io.exit_code == 1
     generic.assert_not_awaited()

@@ -16,7 +16,6 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { Resource } from '../../../resource/base.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import {
   jsonResponse,
@@ -56,7 +55,6 @@ async function run(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
   })
   if (result === null) return { stdout: '', exitCode: 0, writes: [] }
   const [out, io] = result

@@ -323,35 +323,19 @@ they bite:
   backend, so a backend author never implements, stores, or forwards one. This
   is the whole point of keeping them in the namespace; do not push link
   awareness down into a resource or an accessor.
-- **A command opts in by naming the parameter, nothing else.** Declare
-  `links: LinkView | None = None` on the wrapper and the generic and the
-  dispatcher starts passing it; delete the parameter and it stops. `execute_cmd`
-  offers the fact to every handler and `accepts_kwarg` (`utils/params.py`)
-  decides delivery from the signature, so there is no allowlist, spec field, or
-  registry that can fall out of step. A bare `**kwargs` deliberately does not
-  count as consent: every wrapper has one, and it is the opaque bag of the
-  user's typed command-line flags, forwarded wholesale to the generic. Counting
-  it would file a live namespace object among the parsed flags of every command
-  in the repo. This is the same rule already stated for `stdin`/`index`/`prefix`
-  under "Command wrappers and flags", and `stat_overlay` is delivered the same
-  way.
-  `LinkView` bundles every link fact (`stat_at`, `children`, `subtree`,
-  `resolve`, `exists`, `target_stat`) so a command that grows a new need adds a
-  field read, not a new keyword threaded through `execute_cmd`, the builder and
-  the generic. Families wired today: `ls`, `stat`, `find`, `du`, `file`.
-  `exists` and `target_stat` answer through the op dispatcher, not one
+- **A command consumes a fact by reading the `opts` field, nothing else.**
+  Every namespace fact (`links`, `stat_overlay`, `stat_path`, `readdir_path`,
+  `child_mounts`, `mounts`) rides `CommandOpts` into every handler, identically
+  in both languages; the generic that wants one reads `opts.links` and the rest
+  ignore it, so there is no opt-in registry, spec field, or signature
+  convention that can fall out of step. `LinkView` bundles every link fact
+  (`stat_at`, `children`, `subtree`, `resolve`, `exists`, `target_stat`) so a
+  command that grows a new need adds a field read, not a new keyword threaded
+  through `execute_cmd`, the builder and the generic. Families reading links
+  today: `ls`, `stat`, `find`, `du`, `file` — in the generics, so a bespoke
+  wrapper that delegates (as all of them now do) inherits link awareness for
+  free. `exists` and `target_stat` answer through the op dispatcher, not one
   backend's stat, so a link that points into another mount resolves correctly.
-- **A bespoke command in one of those families must declare it too.** The
-  opt-in is the whole mechanism, so a backend that ships its own `find`/`ls`/
-  `du`/`stat`/`file` and omits the parameter still runs, still exits 0, and
-  simply cannot see a link, which nothing notices until someone makes one on
-  that backend. `tests/commands/test_links_optin.py` asserts it instead: it
-  derives the link-aware names from the generic builders and fails naming any
-  registered command that shadows one without accepting `links`. TypeScript
-  needs no equivalent because wrappers forward the whole `opts` object, so a
-  generic reads `opts.links` whatever the wrapper declares; the bespoke email
-  find routes through `findGeneric`/`walkFind` like the factory, so no TS
-  command walks its own tree any more.
 - **Merge links in the generic, above the native-op/walk fork.** `find` and `du`
   each have two paths: a backend with a native op (`find_core`, `du_size`/
   `du_entries`) and a backend walked by `readdir`. Link merging lives in one
@@ -632,8 +616,8 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
 - Don't add too many printings or comments in the code.
 - Don't add README.md unless I ask you to do so.
 - Use uv add to install new dependencies.
-- **Command wrappers and flags.** The dispatcher passes parsed command-line flags as keyword arguments. Wrappers must declare dispatcher-injected parameters (`stdin`, `index`, `prefix`) explicitly in their signature — never fish them out of `**flags` with `.get()`. Treat `**flags: FlagValue` as an opaque bag of true command-line flags and forward it wholesale to the generic command. A wrapper must not name a flag it cannot receive: the parser maps every spelling onto one canonical dest (the long form whenever an option declares one), so a parameter named after a short spelling with a long twin is permanently unfilled — `tests/commands/test_no_dead_flag_params.py` fails on one. When a wrapper genuinely needs a flag value itself (e.g. a search push-down), read it through `FlagView` (`fl = FlagView(flags)` then `fl.as_bool("F")`, `fl.as_int("m")`, `fl.as_str("type")`, `fl.as_list("e")`) or a shared domain accessor like `pattern_arg` — never raw `flags.get(...)` / isinstance chains, and never a raw `kwargs`/`_extra` read either (`tests/commands/test_no_raw_flag_reads.py` matches all three bag names). **A PATH-typed flag reaches a python command as a `PathSpec`, not a string** — the executor promotes it (`workspace/executor/command/flags.py`), so read it with `fl.as_paths(name)`; `as_str` reads it as absent and the operand is silently never used. TypeScript's bag carries the resolved virtual-path string instead, so its twin is `fl.asStr(name)`.
-- **Generic commands own flag interpretation.** Backend wrappers are wiring only (glob resolution, backend I/O injection, pass-through of `texts` and `flags`); all flag semantics live in the generic command for that family, mirroring the TS generics. Adding or changing a flag should touch the spec and the generic, not N wrappers.
+- **Command handlers take `(accessor, paths, texts, opts)` — the same four positionals in both languages.** The dispatcher (`Mount.execute_cmd` / `Mount.executeCmd`) constructs one `CommandOpts` per invocation carrying stdin, the flag bag, cwd, the mount prefix, the index, and every namespace fact; the provision path builds the same bag with `command`/`spec` set (`ProvisionFn` has the same four-positional shape). Handlers never declare a flag or an injected fact as a parameter — `tests/commands/test_no_dead_flag_params.py` pins the exact signature. When a wrapper genuinely needs a flag value itself (e.g. a search push-down), read it through a spec-bound `FlagView` (`fl = FlagView(opts.flags, spec=SPECS["grep"])` then `fl.as_bool("F")`, `fl.as_int("m")`, `fl.as_str("type")`, `fl.as_list("e")`) or a shared domain accessor like `pattern_arg` — never raw `flags.get(...)` / isinstance chains, and never a raw `kwargs`/`_extra` read either (`tests/commands/test_no_raw_flag_reads.py`). To override a flag before delegating, pass `dataclasses.replace(opts, flags=bag)` down, never a hand-built `CommandOpts`. **A PATH-typed flag reaches a python command as a `PathSpec`, not a string** — the executor promotes it (`workspace/executor/command/flags.py`), so read it with `fl.as_paths(name)`; `as_str` reads it as absent and the operand is silently never used. TypeScript's bag carries the resolved virtual-path string instead, so its twin is `fl.asStr(name)`.
+- **Generic commands own flag interpretation.** Backend wrappers are wiring only (glob resolution, backend I/O injection, pass-through of `texts` and `opts`); all flag semantics live in the generic command for that family, mirroring the TS generics. Adding or changing a flag should touch the spec and the generic, not N wrappers. Every literal `FlagView` query name must be a dest of a spec bound in the same module — `tests/commands/test_flag_query_names.py` and `commands/flag_query_names.test.ts` fail on a typo'd spelling without needing the code path to run.
 - **Generics parse flags once into a frozen struct.** Each generic defines a `@dataclass(frozen=True, slots=True)` flag struct plus a module-level `parse_flags(fl, ...)` (mirroring the TS `parseFlags` struct); the function body reads only struct attributes, never string keys. Construct the FlagView with the command's spec (`FlagView(flags, spec=SPECS["grep"])`) so a typo in a flag name raises KeyError instead of silently reading as False/None.
 - **Never annotate anything as `object`** — not a parameter, not a return, not a type argument (`dict[str, object]`, `Callable[..., object]`). `object` reads as "we did not decide": it accepts bytes where JSON was meant and a PathSpec where a flag value was meant, so every use site pays for it with an isinstance chain back to the set the author had in mind. Name the real type instead:
   - a parsed command-line flag is `FlagValue` (`mirage.commands.spec.types`) — `**flags: FlagValue`, `Mapping[str, FlagValue]`, `FlagValue | None` for a single raw read. The TypeScript side has always called it `FlagValue` too (`commands/spec/types.ts`); keep the two spellings identical.

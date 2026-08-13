@@ -30,15 +30,17 @@ def has_unresolved_glob(paths: list[PathSpec]) -> bool:
     return any(p.pattern for p in paths)
 
 
-def resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
+def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
     """Resolve a script operand to a fully-resolved PathSpec.
 
     Args:
         name (str): the script path as typed, absolute or cwd-relative.
-        cwd (PathSpec | None): the session working directory injected by
-            the dispatcher; None resolves against the root.
+        cwd (PathSpec | str | None): the session working directory as
+            ``CommandOpts.cwd`` carries it; None resolves against the
+            root.
     """
-    path = resolve_path(name, cwd.virtual if cwd is not None else "/")
+    base = cwd.virtual if isinstance(cwd, PathSpec) else (cwd or "/")
+    path = resolve_path(name, base)
     last_slash = path.rfind("/")
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
     return PathSpec(resource_path=path.strip("/"),
@@ -48,17 +50,22 @@ def resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
 
 
 def default_paths(paths: list[PathSpec],
-                  cwd: PathSpec | None) -> list[PathSpec]:
+                  cwd: PathSpec | str | None) -> list[PathSpec]:
     """Default a command's path operands the way the shell would.
 
     Args:
         paths (list[PathSpec]): operands as parsed; returned untouched
             when non-empty.
-        cwd (PathSpec | None): the session working directory injected by
-            the dispatcher, used when no operand was given.
+        cwd (PathSpec | str | None): the session working directory as
+            ``CommandOpts.cwd`` carries it; a plain string names a
+            root-mounted directory.
     """
     if paths:
         return paths
-    if cwd is not None:
+    if isinstance(cwd, PathSpec):
         return [cwd]
+    if isinstance(cwd, str) and cwd:
+        return [
+            PathSpec(resource_path=cwd.strip("/"), virtual=cwd, directory=cwd)
+        ]
     return [PathSpec(resource_path="", virtual="/", directory="/")]

@@ -35,7 +35,6 @@ async function runGrep(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { text: '', exitCode: 0 }
   const [out, io] = result

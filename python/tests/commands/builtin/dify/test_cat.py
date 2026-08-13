@@ -2,6 +2,7 @@ import pytest
 
 from mirage.commands.builtin.dify.cat import make_cat
 from mirage.commands.builtin.generic_bind import CommandIO, with_read_cache
+from mirage.commands.config import CommandOpts
 from mirage.core.dify import read
 from mirage.core.dify import stat as dify_stat
 from mirage.core.dify import tree
@@ -52,7 +53,8 @@ async def test_cat_reads_stream_and_records_cache(monkeypatch, dify_accessor,
     monkeypatch.setattr(dify_stat, "get_document_detail", get_basic_detail)
     monkeypatch.setattr(read, "iter_segment_pages", iter_basic_pages)
 
-    stdout, io = await cat(dify_accessor, [guide_path], index=dify_index)
+    stdout, io = await cat(dify_accessor, [guide_path], [],
+                           CommandOpts(index=dify_index))
 
     assert await materialize(stdout) == b"alpha\nbeta\ngamma"
     assert guide_path.mount_path in io.reads
@@ -76,8 +78,8 @@ async def test_cat_multifile_caches_materialized_bytes_per_file(
     readme_path = PathSpec.from_str_path(
         "/knowledge/README.md", mount_key("/knowledge/README.md",
                                           "/knowledge"))
-    stdout, io = await cat(dify_accessor, [guide_path, readme_path],
-                           index=dify_index)
+    stdout, io = await cat(dify_accessor, [guide_path, readme_path], [],
+                           CommandOpts(index=dify_index))
 
     assert io.reads[guide_path.mount_path] == b"alpha\nbeta\ngamma"
     assert io.reads[readme_path.mount_path] == b"readme"

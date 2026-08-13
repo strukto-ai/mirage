@@ -125,7 +125,6 @@ describe('postgres grep push-down and globs', () => {
       flags: { args_l: true },
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'postgres' } as never,
     })
 
     expect(result).not.toBeNull()
@@ -143,7 +142,6 @@ describe('postgres grep push-down and globs', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'postgres' } as never,
     })
 
     expect(vi.mocked(searchModule.searchEntity)).toHaveBeenCalledTimes(1)
@@ -166,7 +164,6 @@ describe('postgres grep push-down and globs', () => {
         flags,
         filetypeFns: null,
         cwd: '/',
-        resource: { kind: 'postgres' } as never,
       })
 
       expect(vi.mocked(searchModule.searchEntity)).not.toHaveBeenCalled()
@@ -186,7 +183,6 @@ describe('postgres grep push-down and globs', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'postgres' } as never,
     })
 
     expect(vi.mocked(searchModule.searchEntity)).not.toHaveBeenCalled()
@@ -212,7 +208,6 @@ describe('postgres rg push-down and globs', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'postgres' } as never,
     })
 
     expect(vi.mocked(searchModule.searchEntity)).not.toHaveBeenCalled()
@@ -229,7 +224,6 @@ describe('postgres rg push-down and globs', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'postgres' } as never,
     })
 
     expect(vi.mocked(searchModule.searchEntity)).toHaveBeenCalledTimes(1)
@@ -250,7 +244,6 @@ describe('postgres rg push-down and globs', () => {
         flags,
         filetypeFns: null,
         cwd: '/',
-        resource: { kind: 'postgres' } as never,
       })
 
       expect(vi.mocked(searchModule.searchEntity)).not.toHaveBeenCalled()

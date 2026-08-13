@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.postgres.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
@@ -58,9 +59,9 @@ async def test_rg_multi_pattern_skips_native_search(accessor):
             "mirage.commands.builtin.postgres.rg.generic_rg",
             new=fake_generic,
     ):
-        _, io = await rg(accessor, [_path()],
-                         index=NULL_INDEX,
-                         e=["ada", "ben"])
+        _, io = await rg(
+            accessor, [_path()], [],
+            CommandOpts(index=NULL_INDEX, flags={'e': ['ada', 'ben']}))
 
     assert io.exit_code == 0
     assert seen["resolved"] == ["/public/tables/books/rows.jsonl"]
@@ -77,7 +78,8 @@ async def test_rg_single_pattern_uses_native_search(accessor):
             "mirage.commands.builtin.postgres.rg.resolve_glob",
             new=AsyncMock(side_effect=AssertionError("glob ran")),
     ):
-        _, io = await rg(accessor, [_path()], "ada", index=NULL_INDEX)
+        _, io = await rg(accessor, [_path()], ['ada'],
+                         CommandOpts(index=NULL_INDEX))
 
     assert io.exit_code == 1
     search.assert_awaited_once()

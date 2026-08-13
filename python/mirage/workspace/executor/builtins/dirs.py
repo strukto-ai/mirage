@@ -14,10 +14,10 @@
 
 import posixpath
 from collections.abc import Callable
-from typing import Any
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 from mirage.utils.path import (MAX_SYMLINK_HOPS, CycleError, resolve_path,
                                resolve_symlinks)
@@ -151,7 +151,7 @@ def _cd_candidates(
 
 
 async def handle_cd(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     is_mount_root: Callable[[str], bool],
     path: str | PathSpec,
     session: Session,

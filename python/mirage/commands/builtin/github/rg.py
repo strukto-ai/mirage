@@ -13,15 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.grep_helper import pattern_arg
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as _readdir
@@ -31,15 +31,9 @@ from mirage.types import PathSpec
 
 
 @command("rg", resource="github", spec=SPECS["rg"])
-async def rg(
-    accessor: GitHubAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["rg"])
+async def rg(accessor: GitHubAccessor, paths: list[PathSpec], texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
@@ -48,7 +42,7 @@ async def rg(
         paths[0]
         paths, file_count, used_search = await narrow_scope(
             accessor,
-            index,
+            opts.index,
             paths,
             pattern_str,
             fixed_string=fl.as_bool("F"),
@@ -66,10 +60,10 @@ async def rg(
     return await generic_rg(
         paths,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(github_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(github_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )

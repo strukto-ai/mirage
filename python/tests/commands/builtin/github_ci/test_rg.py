@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.github_ci.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import FileStat, FileType, PathSpec
@@ -51,12 +52,8 @@ async def test_rg_single_file_match(accessor, index):
             patch("mirage.commands.builtin.github_ci.rg.ci_read",
                   new=AsyncMock(return_value=b"alpha\nbeta\ngamma\n")),
     ):
-        out, io = await rg(
-            accessor,
-            [_scope("/runs/wf_1/run.json")],
-            "beta",
-            index=index,
-        )
+        out, io = await rg(accessor, [_scope('/runs/wf_1/run.json')], ['beta'],
+                           CommandOpts(index=index))
         data = await materialize(out)
         assert b"beta" in data
         assert io.exit_code == 0
@@ -71,12 +68,8 @@ async def test_rg_no_match_exit_one(accessor, index):
             patch("mirage.commands.builtin.github_ci.rg.ci_read",
                   new=AsyncMock(return_value=b"abc\ndef\n")),
     ):
-        out, io = await rg(
-            accessor,
-            [_scope("/runs/wf_1/run.json")],
-            "missing",
-            index=index,
-        )
+        out, io = await rg(accessor, [_scope('/runs/wf_1/run.json')],
+                           ['missing'], CommandOpts(index=index))
         await materialize(out)
         assert io.exit_code == 1
 
@@ -109,12 +102,8 @@ async def test_rg_directory_implicit_recursive(accessor, index):
             patch("mirage.commands.builtin.github_ci.rg.ci_read",
                   new=AsyncMock(side_effect=fake_read)),
     ):
-        out, io = await rg(
-            accessor,
-            [_scope("/workflows")],
-            "Test",
-            index=index,
-        )
+        out, io = await rg(accessor, [_scope('/workflows')], ['Test'],
+                           CommandOpts(index=index))
         data = await materialize(out)
         assert b"name: Test" in data
         assert io.exit_code == 0
@@ -123,18 +112,14 @@ async def test_rg_directory_implicit_recursive(accessor, index):
 @pytest.mark.asyncio
 async def test_rg_runs_root_rejected(accessor, index):
     with pytest.raises(ValueError, match="across runs is disabled"):
-        await rg(accessor, [_scope("/runs")], "x", index=index)
+        await rg(accessor, [_scope('/runs')], ['x'], CommandOpts(index=index))
 
 
 @pytest.mark.asyncio
 async def test_rg_stdin(accessor, index):
     out, io = await rg(
-        accessor,
-        [],
-        "two",
-        stdin=b"line one\nline two\nline three\n",
-        index=index,
-    )
+        accessor, [], ['two'],
+        CommandOpts(stdin=b'line one\nline two\nline three\n', index=index))
     data = await materialize(out)
     assert b"line two" in data
     assert io.exit_code == 0

@@ -12,35 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
 from functools import partial
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import (is_link, parse_find_args,
                                                   resolve_start, walk_find)
 from mirage.commands.builtin.github_ci._provision import metadata_provision
 from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def find_provision(
-    accessor: GitHubCIAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: FlagValue,
-) -> ProvisionResult:
-    return await metadata_provision("find " + " ".join(
-        p.virtual if isinstance(p, PathSpec) else p for p in paths))
+async def find_provision(accessor: GitHubCIAccessor, paths: list[PathSpec],
+                         texts: list[str],
+                         opts: CommandOpts) -> ProvisionResult:
+    return await metadata_provision(
+        accessor, paths, texts,
+        replace(opts, command="find " + " ".join(p.virtual for p in paths)))
 
 
 @command("find",
@@ -50,48 +48,34 @@ async def find_provision(
 async def find(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    name: str | None = None,
-    type: str | None = None,
-    maxdepth: str | None = None,
-    size: str | None = None,
-    mtime: str | None = None,
-    iname: str | None = None,
-    path: str | None = None,
-    mindepth: str | None = None,
-    empty: bool = False,
-    prefix: str = "",
-    index: IndexCacheStore,
-    L: bool = False,
-    links: LinkView | None = None,
-    stat_path: StatPath | None = None,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     # The wrapper only exists for the cross-run guard: walking every run
     # would fetch every run's logs. Filtering is the shared generic walk.
-    paths = await resolve_glob(accessor, paths, index=index)
+    fl = FlagView(opts.flags, spec=SPECS["find"])
+    paths = await resolve_glob(accessor, paths, index=opts.index)
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
     ]
-    args = parse_find_args(texts,
-                           name=name,
-                           type=type,
-                           size=size,
-                           mtime=mtime,
-                           maxdepth=maxdepth,
-                           iname=iname,
-                           path=path,
-                           mindepth=mindepth,
-                           empty=empty)
+    args = parse_find_args(tuple(texts),
+                           name=fl.as_str("name"),
+                           type=fl.as_str("type"),
+                           size=fl.as_str("size"),
+                           mtime=fl.as_str("mtime"),
+                           maxdepth=fl.as_str("maxdepth"),
+                           iname=fl.as_str("iname"),
+                           path=fl.as_str("path"),
+                           mindepth=fl.as_str("mindepth"),
+                           empty=fl.as_bool("empty"))
     results: list[str] = []
     for search in searches:
         # Same start-point rule as every other find path: only a
         # directory has a subtree to walk.
         start = await resolve_start(search,
                                     args,
-                                    stat_path,
-                                    is_link=is_link(links, search))
+                                    opts.stat_path,
+                                    is_link=is_link(opts.links, search))
         if not start.walk:
             results.extend(start.results)
             continue
@@ -101,8 +85,8 @@ async def find(
         results.extend(await walk_find(search,
                                        readdir=partial(_readdir, accessor),
                                        stat=partial(_stat, accessor),
-                                       index=index,
+                                       index=opts.index,
                                        args=args,
-                                       links=links,
-                                       follow=L))
+                                       links=opts.links,
+                                       follow=fl.as_bool("L")))
     return format_records(results), IOResult()

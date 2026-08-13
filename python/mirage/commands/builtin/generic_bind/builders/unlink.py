@@ -13,29 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-async def unlink(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
+async def unlink(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str],
+                 opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise UsageError(
             "unlink: missing operand\n"
             "Try 'unlink --help' for more information.", 1)
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
     p = paths[0]

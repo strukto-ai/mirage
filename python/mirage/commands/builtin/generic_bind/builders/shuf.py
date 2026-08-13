@@ -15,31 +15,25 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.shuf import shuf as generic_shuf
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def shuf(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["shuf"])
+async def shuf(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["shuf"])
     output_flag = fl.raw("output")
     output_path = output_flag if isinstance(output_flag, PathSpec) else None
     count_value = fl.as_str("head_count")
     if paths:
-        paths = await ops.resolve_glob(accessor, paths, index)
+        paths = await ops.resolve_glob(accessor, paths, opts.index)
     elif not ops.is_mounted(accessor):
         paths = []
     # Only ``-o`` writes, so a read-only backend still serves plain shuf.
@@ -48,8 +42,8 @@ async def shuf(
     return await generic_shuf(
         paths,
         texts,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        stdin=stdin,
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        stdin=opts.stdin,
         count=int(count_value) if count_value is not None else None,
         echo=fl.as_bool("echo"),
         zero_terminated=fl.as_bool("zero_terminated"),

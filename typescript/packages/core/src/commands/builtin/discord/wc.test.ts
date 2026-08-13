@@ -38,7 +38,6 @@ async function runWc(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
     ...(options.index !== undefined ? { index: options.index } : {}),
   })
   if (result === null) return ''

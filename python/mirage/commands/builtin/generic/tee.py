@@ -153,7 +153,7 @@ async def write_output(
 
 async def tee(
     paths: list[PathSpec],
-    texts: tuple[str, ...],
+    texts: list[str],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],

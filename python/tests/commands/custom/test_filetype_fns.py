@@ -36,11 +36,11 @@ def test_filetype_fns_passed_to_generic_command():
 
     received = {}
 
-    async def my_cat(store, paths, *texts, filetype_fns=None, **kwargs):
-        received["filetype_fns"] = filetype_fns
+    async def my_cat(store, paths, texts, opts):
+        received["filetype_fns"] = opts.filetype_fns
         return b"ok", IOResult()
 
-    async def my_cat_parquet(store, paths, *texts, **kwargs):
+    async def my_cat_parquet(store, paths, texts, opts):
         return b"parquet-ok", IOResult()
 
     mount = ws._registry.mount_for("/tmp/")
@@ -72,15 +72,11 @@ def test_filetype_fns_not_passed_to_filetype_command():
 
     received = {}
 
-    async def my_cat(store, paths, *texts, filetype_fns=None, **kwargs):
+    async def my_cat(store, paths, texts, opts):
         return b"generic", IOResult()
 
-    async def my_cat_parquet(store,
-                             paths,
-                             *texts,
-                             filetype_fns=None,
-                             **kwargs):
-        received["filetype_fns"] = filetype_fns
+    async def my_cat_parquet(store, paths, texts, opts):
+        received["filetype_fns"] = opts.filetype_fns
         return b"parquet", IOResult()
 
     mount = ws._registry.mount_for("/tmp/")
@@ -111,8 +107,8 @@ def test_filetype_fns_empty_when_no_variants():
 
     received = {}
 
-    async def my_echo(store, paths, *texts, filetype_fns=None, **kwargs):
-        received["filetype_fns"] = filetype_fns
+    async def my_echo(store, paths, texts, opts):
+        received["filetype_fns"] = opts.filetype_fns
         return b"ok", IOResult()
 
     ws._registry.mount_for("/tmp/").register(

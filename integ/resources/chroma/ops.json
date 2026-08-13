@@ -610,6 +610,32 @@
         "stdout": "CHANGELOG.md\nguides\npolicies\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "chroma_find_empty",
+      "seq": 630054,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "chroma_find_empty_composes_with_name",
+      "seq": 630055,
+      "targets": [
+        "chroma"
+      ],
+      "command": "find /knowledge/ -name '*.md' -not -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/CHANGELOG.md\n/knowledge/guides/auth.md\n/knowledge/guides/quickstart.md\n/knowledge/policies/archived.md\n/knowledge/policies/privacy.md\n/knowledge/policies/refunds.md\n",
+        "stderr": ""
+      }
     }
   ]
 }

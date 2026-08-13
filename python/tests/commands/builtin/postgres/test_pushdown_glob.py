@@ -21,6 +21,7 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.postgres.grep import grep
 from mirage.commands.builtin.postgres.rg import rg
 from mirage.commands.builtin.postgres.tail import tail
+from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
@@ -81,7 +82,8 @@ async def test_grep_glob_skips_pushdown_and_expands(accessor):
             "mirage.commands.builtin.postgres.grep.generic_grep",
             new=fake_generic,
     ):
-        _, io = await grep(accessor, [_glob_path()], "ada", index=NULL_INDEX)
+        _, io = await grep(accessor, [_glob_path()], ['ada'],
+                           CommandOpts(index=NULL_INDEX))
 
     assert io.exit_code == 0
     assert seen["generic"] == [
@@ -105,11 +107,9 @@ async def test_grep_concrete_path_still_uses_pushdown(accessor):
     ):
         _, io = await grep(accessor, [
             PathSpec(virtual=CONCRETE,
-                     directory="/public/tables/books",
-                     resource_path=CONCRETE.strip("/"))
-        ],
-                           "ada",
-                           index=NULL_INDEX)
+                     directory='/public/tables/books',
+                     resource_path=CONCRETE.strip('/'))
+        ], ['ada'], CommandOpts(index=NULL_INDEX))
 
     assert io.exit_code == 1
     search.assert_awaited_once()
@@ -158,10 +158,8 @@ async def test_grep_shaping_flag_skips_pushdown(accessor, flags):
             "mirage.commands.builtin.postgres.grep.generic_grep",
             new=fake_generic,
     ):
-        await grep(accessor, [_concrete_path()],
-                   "ada",
-                   index=NULL_INDEX,
-                   **flags)
+        await grep(accessor, [_concrete_path()], ['ada'],
+                   CommandOpts(index=NULL_INDEX, flags={**flags}))
 
     assert seen["generic"] == [CONCRETE]
 
@@ -189,7 +187,8 @@ async def test_grep_regex_pattern_skips_pushdown(accessor):
             "mirage.commands.builtin.postgres.grep.generic_grep",
             new=fake_generic,
     ):
-        await grep(accessor, [_concrete_path()], "a.b", index=NULL_INDEX)
+        await grep(accessor, [_concrete_path()], ['a.b'],
+                   CommandOpts(index=NULL_INDEX))
 
     assert seen["generic"] == [CONCRETE]
 
@@ -218,7 +217,8 @@ async def test_rg_glob_skips_pushdown_and_expands(accessor):
             "mirage.commands.builtin.postgres.rg.generic_rg",
             new=fake_generic,
     ):
-        _, io = await rg(accessor, [_glob_path()], "ada", index=NULL_INDEX)
+        _, io = await rg(accessor, [_glob_path()], ['ada'],
+                         CommandOpts(index=NULL_INDEX))
 
     assert io.exit_code == 0
     assert seen["generic"] == [
@@ -248,6 +248,7 @@ async def test_tail_glob_does_not_query_a_relation_named_star(accessor):
             "mirage.commands.builtin.postgres.tail.tail_generic",
             new=fake_generic,
     ):
-        _, io = await tail(accessor, [_glob_path()], n="1", index=NULL_INDEX)
+        _, io = await tail(accessor, [_glob_path()], [],
+                           CommandOpts(index=NULL_INDEX, flags={'n': '1'}))
 
     assert io.exit_code == 0

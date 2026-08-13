@@ -13,18 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from dataclasses import replace
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.discord.io import resolve_glob
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.formatters import format_grep_results
@@ -41,39 +42,30 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def grep_provision(
-    accessor: DiscordAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: FlagValue,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)))
+async def grep_provision(accessor: DiscordAccessor, paths: list[PathSpec],
+                         texts: list[str],
+                         opts: CommandOpts) -> ProvisionResult:
+    line = "grep " + " ".join(list(texts) + [str(p) for p in paths])
+    return await file_read_provision(accessor, paths, texts,
+                                     replace(opts, command=line))
 
 
 @command("grep",
          resource="discord",
          spec=SPECS["grep"],
          provision=grep_provision)
-async def grep(
-    accessor: DiscordAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["grep"])
+async def grep(accessor: DiscordAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
     max_count = fl.as_int("m")
 
     pushdown_warnings: list[str] = []
     if paths and pattern is not None and "\n" not in pattern:
-        scope = await detect_scope(paths[0], index)
+        scope = await detect_scope(paths[0], opts.index)
         if scope.level in ("messages", "file_blob", "date"):
-            coalesced = await coalesce_scopes(paths, index)
+            coalesced = await coalesce_scopes(paths, opts.index)
             if coalesced is not None:
                 scope = coalesced
 
@@ -123,16 +115,16 @@ async def grep(
                     "falling back to per-file scan", exc)
 
     resolved = await resolve_glob(accessor, paths,
-                                  index=index) if paths else []
+                                  index=opts.index) if paths else []
     out, io = await generic_grep(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(discord_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(discord_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )
     if pushdown_warnings:
         extra = ("\n".join(pushdown_warnings) + "\n").encode()

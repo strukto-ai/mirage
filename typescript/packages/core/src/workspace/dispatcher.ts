@@ -31,7 +31,7 @@ import { mergeReaddir, namespaceListing, namespaceStat } from '../ops/namespace_
 import { isMissingPath } from '../utils/errors.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec, ResourceName } from '../types.ts'
-import type { DispatchFn } from './executor/cross_mount.ts'
+import type { DispatchFn } from '../runtime/types.ts'
 import type { DriftQueue } from './snapshot/drift.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'

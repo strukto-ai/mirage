@@ -16,7 +16,7 @@ import { CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
 import { CLAP_EXIT, clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
 import { CLISpec, type CLIInvocation, type CLIVerbOpts } from '../../../commands/cli/types.ts'
 import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
-import type { CommandDispatch } from '../../../commands/config.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { MountRoot, StatPath } from '../../../ops/types.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
@@ -160,7 +160,7 @@ export interface CliFacts {
    * installs.
    */
   entries?: readonly Runtime[]
-  dispatch?: CommandDispatch
+  dispatch?: DispatchFn
   statPath?: StatPath
   mountRoot?: MountRoot
 }
@@ -219,33 +219,28 @@ export async function handleCli(
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
   const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd, session.env)
-  const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
+  const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {
     const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
-  const refusal = optionError(
-    prog,
-    parsed[4],
-    parsed[5],
-    parsed[6],
-    parsed[7],
-    parsed[8],
-    parsed[9],
-    parsed[10],
-    parsed[11],
-    parsed[12],
-  )
+  const refusal = optionError(prog, parsed)
   let msg: Uint8Array | null = null
   let code = 0
   if (refusal !== null) {
-    ;[msg, code] = leafRefusal(style, refusal[0], parsed[4])
-  } else if (parsed[13].length > 0 && style === UsageStyle.CLAP) {
+    ;[msg, code] = leafRefusal(style, refusal[0], parsed.invalidOptions)
+  } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
     // Only clap names the empty slots. Under every other style a required
     // operand stays the leaf's own business, worded by the command, which is
     // what every mirage CLI did before this.
-    msg = clapMissingOperands(prog, parseSpec, parsed[13], parsed[14], session.env)
+    msg = clapMissingOperands(
+      prog,
+      parseSpec,
+      parsed.missingRequiredOperands,
+      parsed.typedDests,
+      session.env,
+    )
     code = CLAP_EXIT
   }
   if (msg !== null) {

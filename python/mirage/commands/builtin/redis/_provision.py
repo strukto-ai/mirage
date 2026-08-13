@@ -14,7 +14,7 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.config import CommandOpts
 from mirage.core.redis.stat import stat as redis_stat
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -52,10 +52,8 @@ async def _resolve_sizes(
 async def file_read_provision(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    *_args: str,
-    command: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Cost estimate for full file reads (cat, wc, grep) backed by Redis.
 
@@ -63,13 +61,15 @@ async def file_read_provision(
     straight from the index entry size.
     """
     if not paths:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
-    resolved, missing = await _resolve_sizes(accessor, paths, index)
+        return ProvisionResult(command=opts.command or "",
+                               precision=Precision.UNKNOWN)
+    resolved, missing = await _resolve_sizes(accessor, paths, opts.index)
     if missing > 0 or not resolved:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
+        return ProvisionResult(command=opts.command or "",
+                               precision=Precision.UNKNOWN)
     total = sum(size for _, size in resolved)
     return ProvisionResult(
-        command=command,
+        command=opts.command or "",
         network_read_low=total,
         network_read_high=total,
         read_ops=len(resolved),
@@ -80,12 +80,8 @@ async def file_read_provision(
 async def head_tail_provision(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    *_args: str,
-    command: str = "",
-    n: str | int | None = None,
-    c: str | int | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Cost estimate for partial reads (head, tail) backed by Redis.
 
@@ -94,13 +90,15 @@ async def head_tail_provision(
     the full file size, always exact.
     """
     if not paths:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
-    resolved, missing = await _resolve_sizes(accessor, paths, index)
+        return ProvisionResult(command=opts.command or "",
+                               precision=Precision.UNKNOWN)
+    resolved, missing = await _resolve_sizes(accessor, paths, opts.index)
     if missing > 0 or not resolved:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
+        return ProvisionResult(command=opts.command or "",
+                               precision=Precision.UNKNOWN)
     total = sum(size for _, size in resolved)
     return ProvisionResult(
-        command=command,
+        command=opts.command or "",
         network_read_low=total,
         network_read_high=total,
         read_ops=len(resolved),
@@ -111,15 +109,13 @@ async def head_tail_provision(
 async def metadata_provision(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    *_args: str,
-    command: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find) backed by Redis."""
     n = max(1, len(paths) if paths else 1)
     return ProvisionResult(
-        command=command,
+        command=opts.command or "",
         network_read_low=0,
         network_read_high=0,
         read_ops=n,

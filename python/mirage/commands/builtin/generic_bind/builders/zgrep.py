@@ -13,32 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def zgrep(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **flags,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = (await ops.resolve_glob(accessor, paths, index)
+async def zgrep(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                texts: list[str],
+                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = (await ops.resolve_glob(accessor, paths, opts.index)
                 if paths and ops.is_mounted(accessor) else [])
     return await generic_zgrep(
         resolved,
         texts,
-        flags,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        stdin=stdin,
+        opts.flags,
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        stdin=opts.stdin,
     )
 
 

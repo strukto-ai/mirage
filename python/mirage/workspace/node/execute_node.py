@@ -19,6 +19,7 @@ from typing import Any, Callable
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.types import DispatchFn
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (array_append, array_extent, array_get,
                                 array_set, make_array)
@@ -139,7 +140,7 @@ async def _expand_array_items(
 
 async def _recurse_reassociated(
     recurse: Callable[..., Any],
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     redirects: list[Any],
@@ -157,7 +158,7 @@ async def _recurse_reassociated(
 
     Args:
         recurse (Callable): the plain execute_node recursion.
-        dispatch (Callable): VFS op dispatcher.
+        dispatch (DispatchFn): VFS op dispatcher.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
         redirects (list): parsed redirects hoisted off the list.
@@ -185,7 +186,7 @@ async def _recurse_reassociated(
 
 async def _recurse_pipe_stderr(
     recurse: Callable[..., Any],
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     targets: list[Any],
@@ -214,7 +215,7 @@ async def _recurse_pipe_stderr(
 
 
 async def execute_node(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     registry: MountRegistry,
     namespace: Namespace,
     job_table: JobTable,
@@ -230,7 +231,7 @@ async def execute_node(
     """Walk tree-sitter AST and dispatch each node.
 
     Args:
-        dispatch (Callable): VFS op dispatcher (op, path, **kw).
+        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
         registry (MountRegistry): mount registry for path resolution.
         namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.

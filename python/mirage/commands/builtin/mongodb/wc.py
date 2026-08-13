@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 parse_flags, wc_generic)
 from mirage.commands.builtin.generic_bind.adapter import bound_op
@@ -24,7 +23,6 @@ from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb._client import count_documents
 from mirage.core.mongodb.scope import MongoDBDocumentsScope, detect_scope
 from mirage.io.types import ByteSource, IOResult
@@ -32,19 +30,14 @@ from mirage.types import PathSpec
 
 
 @command("wc", resource="mongodb", spec=SPECS["wc"])
-async def wc(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def wc(accessor: MongoDBAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
-    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
     # Line counts on collections come from a server-side count_documents
     # instead of reading every document. -l only (default prints words and
     # bytes too, which needs the content).
@@ -64,6 +57,5 @@ async def wc(
             total += count
         return format_count_rows(rows, WCCounts(lines=total), len(resolved),
                                  parsed), IOResult()
-    return await wc_generic(resolved, list(texts),
-                            CommandOpts(stdin=stdin, flags=flags),
-                            bound_op(stream_any, accessor, index))
+    return await wc_generic(resolved, list(texts), opts,
+                            bound_op(stream_any, accessor, opts.index))

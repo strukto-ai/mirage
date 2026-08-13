@@ -20,6 +20,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gdrive import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.gdrive.resolve import DriveNode
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
@@ -89,12 +90,8 @@ async def test_sed_simple_substitution(accessor, index):
             new_callable=AsyncMock,
             return_value=b"hello world\nhello again\n",
     ):
-        result, io = await sed(
-            accessor,
-            [_scope("/test/file.txt")],
-            "s/hello/bye/g",
-            index=index,
-        )
+        result, io = await sed(accessor, [_scope('/test/file.txt')],
+                               ['s/hello/bye/g'], CommandOpts(index=index))
         data = await materialize(result)
         assert data == b"bye world\nbye again\n"
         assert io.exit_code == 0
@@ -117,13 +114,8 @@ async def test_sed_print_program(accessor, index):
             new_callable=AsyncMock,
             return_value=b"one\ntwo\nthree\n",
     ):
-        result, io = await sed(
-            accessor,
-            [_scope("/test/file.txt")],
-            "2p",
-            n=True,
-            index=index,
-        )
+        result, io = await sed(accessor, [_scope('/test/file.txt')], ['2p'],
+                               CommandOpts(index=index, flags={'n': True}))
         data = await materialize(result)
         assert data == b"two\n"
         assert io.exit_code == 0
@@ -131,13 +123,8 @@ async def test_sed_print_program(accessor, index):
 
 @pytest.mark.asyncio
 async def test_sed_stdin(accessor, index):
-    result, io = await sed(
-        accessor,
-        [],
-        "s/a/b/g",
-        stdin=b"banana\n",
-        index=index,
-    )
+    result, io = await sed(accessor, [], ['s/a/b/g'],
+                           CommandOpts(stdin=b'banana\n', index=index))
     data = await materialize(result)
     assert data == b"bbnbnb\n"
     assert io.exit_code == 0
@@ -168,13 +155,9 @@ async def test_sed_in_place_writes_back(accessor, index):
             "mirage.core.gdrive.write.update_file_content",
             new_callable=AsyncMock,
     ) as update:
-        _result, io = await sed(
-            accessor,
-            [_scope("/test/file.txt")],
-            "s/hello/bye/",
-            i=True,
-            index=index,
-        )
+        _result, io = await sed(accessor, [_scope('/test/file.txt')],
+                                ['s/hello/bye/'],
+                                CommandOpts(index=index, flags={'i': True}))
         assert io.exit_code == 0
         update.assert_awaited_once()
         assert update.await_args.args[1] == "file123"
@@ -185,7 +168,7 @@ async def test_sed_in_place_writes_back(accessor, index):
 async def test_sed_missing_expression(accessor, index):
     # A missing script is reported, not raised: GNU exits 1 with a message,
     # and the TypeScript twin has always returned an IOResult here.
-    out, io = await sed(accessor, [], index=index)
+    out, io = await sed(accessor, [], [], CommandOpts(index=index))
     assert out is None
     assert io.exit_code == 1
     assert io.stderr == b"sed: missing script\n"

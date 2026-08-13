@@ -1,9 +1,9 @@
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.chroma.io import resolve_glob
 from mirage.commands.builtin.utils.paths import default_paths
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.core.chroma import search as search_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -20,27 +20,27 @@ def is_mount_root(path: PathSpec) -> bool:
 async def search(
     accessor,
     paths: list[PathSpec],
-    *texts: str,
-    top_k: str | int = 10,
-    index: IndexCacheStore,
-    cwd: PathSpec | None = None,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["search"])
     if not texts:
         raise ValueError("search: query is required")
     query = texts[0]
-    target_paths = default_paths(paths, cwd)
+    target_paths = default_paths(paths, opts.cwd)
     mount_prefix = mount_prefix_of(
         target_paths[0].virtual,
         target_paths[0].resource_path) if target_paths else ""
     if any(is_mount_root(path) for path in target_paths):
         resolved_paths: list[PathSpec] = []
     else:
-        resolved_paths = await resolve_glob(accessor, target_paths, index)
-    output = await search_core.search_segments(accessor,
-                                               query,
-                                               resolved_paths,
-                                               index,
-                                               top_k=int(top_k),
-                                               mount_prefix=mount_prefix)
+        resolved_paths = await resolve_glob(accessor, target_paths, opts.index)
+    top_k = fl.as_int("top_k")
+    output = await search_core.search_segments(
+        accessor,
+        query,
+        resolved_paths,
+        opts.index,
+        top_k=top_k if top_k is not None else 10,
+        mount_prefix=mount_prefix)
     return output, IOResult()

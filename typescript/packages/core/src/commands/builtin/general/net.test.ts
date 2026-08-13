@@ -28,7 +28,6 @@ function opts(overrides: Partial<CommandOpts> = {}): CommandOpts {
     flags: {},
     filetypeFns: null,
     cwd: '/',
-    resource: new RAMResource(),
     ...overrides,
   }
 }
@@ -40,7 +39,7 @@ async function runCurl(
   const resource = new RAMResource()
   const cmd = GENERAL_CURL[0]
   if (cmd === undefined) throw new Error('curl not registered')
-  const result = await cmd.fn(resource.accessor, [] as PathSpec[], [url], opts({ flags, resource }))
+  const result = await cmd.fn(resource.accessor, [] as PathSpec[], [url], opts({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
   if (out === null) return { out: new Uint8Array(), io }
@@ -55,7 +54,7 @@ async function runWget(
   const resource = new RAMResource()
   const cmd = GENERAL_WGET[0]
   if (cmd === undefined) throw new Error('wget not registered')
-  const result = await cmd.fn(resource.accessor, [] as PathSpec[], [url], opts({ flags, resource }))
+  const result = await cmd.fn(resource.accessor, [] as PathSpec[], [url], opts({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
   if (out === null) return { out: new Uint8Array(), io }

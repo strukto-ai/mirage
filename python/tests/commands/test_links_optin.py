@@ -13,56 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib
+import inspect
 import pkgutil
 
 import mirage.commands.builtin as builtin
-from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.config import RegisteredCommand
-from mirage.utils.params import accepts_kwarg
-from mirage.workspace.route.constants import (DEREFERENCE_FLAGS,
-                                              LAST_WINS_LINK_OPTIONS)
 
+# The families whose generics merge namespace symlinks (ls/stat/find/
+# du/file read `opts.links`). Since CommandOpts carries the fact into
+# every handler, link awareness is inherited by delegating to the
+# family generic — so the invariant worth pinning is the delegation
+# itself: a bespoke wrapper that walks its own tree cannot see a link,
+# still runs, still exits 0, and nothing notices until someone makes a
+# link on that backend.
+LINK_AWARE = ("ls", "stat", "find", "du", "file")
 
-def _link_flags(name: str) -> set[str]:
-    """The link options a command takes, read off the router's own tables.
-
-    Derived rather than listed so that teaching the router a new link
-    option (GNU's ``-H``, say) also starts requiring it here, instead of
-    leaving a flag every bespoke wrapper is free to drop.
-
-    Args:
-        name (str): command name.
-    """
-    shorts = set(DEREFERENCE_FLAGS.get(name, ("", ()))[0])
-    leading = {opt.lstrip("-") for opt in LAST_WINS_LINK_OPTIONS.get(name, {})}
-    return shorts | leading
-
-
-# Facts the dispatcher offers that a command only receives by naming the
-# parameter (the `offered` dict in mount.execute_cmd). `stat_overlay` is
-# offered the same way and has the same gaps, but closing those is not a
-# symlink or traversal change; see #688.
-INJECTED_FACTS = ("links", "stat_path")
-
-
-def _fact_aware() -> dict[str, set[str]]:
-    """Command name to the injected parameters its generic builder takes.
-
-    Two shapes are required: the dispatcher facts a generic reads
-    (``links`` for namespace symlinks, ``stat_path`` for the start point
-    a traversal command cannot stat through one backend), and the link
-    options. A wrapper that names none of them still runs and still
-    exits 0, it just answers as though no link existed and no start
-    point could be resolved, so every side is required here.
-    """
-    return {
-        b.name: ({f
-                  for f in INJECTED_FACTS if accepts_kwarg(b.fn, f)}
-                 | {f
-                    for f in _link_flags(b.name) if accepts_kwarg(b.fn, f)})
-        for b in _BUILDERS if any(
-            accepts_kwarg(b.fn, f) for f in INJECTED_FACTS)
-    }
+# The two spellings of delegation: the family's full-command generic
+# entry, or find's walk primitives for the wrappers with custom guards
+# (email pushes a folder-level -name down to IMAP search, github_ci
+# refuses cross-run walks) that still route filtering through the
+# shared walk.
+GENERIC_CALLS = {
+    "ls": ("ls_generic(", ),
+    "stat": ("stat_generic(", "generic_stat("),
+    "find": ("find_generic(", "find_walk_generic(", "resolve_start("),
+    "du": ("du_generic(", ),
+    "file": ("file_generic(", ),
+}
 
 
 def _registered() -> tuple[list[RegisteredCommand], list[str]]:
@@ -70,8 +47,8 @@ def _registered() -> tuple[list[RegisteredCommand], list[str]]:
 
     The failures are returned rather than skipped for the reason
     ``scripts/gen_specs.py`` states: a module that will not import
-    registers nothing, so a command missing its opt-in would pass this
-    check by being absent rather than by being correct.
+    registers nothing, so a command missing its delegation would pass
+    this check by being absent rather than by being correct.
     """
     found: list[RegisteredCommand] = []
     failed: list[str] = []
@@ -92,33 +69,39 @@ def _registered() -> tuple[list[RegisteredCommand], list[str]]:
     return found, failed
 
 
-def test_every_link_aware_command_accepts_links():
-    """A bespoke command may not silently opt out of symlink support.
+def test_link_aware_generics_read_the_links_field():
+    """The family generics consume ``opts.links``; deleting the read is
+    how link support silently dies, so the read itself is pinned."""
+    for name in LINK_AWARE:
+        module = importlib.import_module(
+            f"mirage.commands.builtin.generic.{name}")
+        assert "opts.links" in inspect.getsource(module), (
+            f"generic {name} no longer reads opts.links; symlinks are "
+            "invisible to the whole family")
 
-    Symlinks live in the namespace, so a command only sees them when the
-    dispatcher hands it a LinkView, and it only gets one by naming a
-    ``links`` parameter. A backend that ships its own `find`/`ls`/`du`/
-    `stat`/`file` and forgets the parameter still runs, still exits 0,
-    and simply cannot see a link. ``-L`` is the same shape: the flag is
-    parsed for every command in the family, but a wrapper that does not
-    name it drops it into its opaque flag bag and never dereferences.
-    Both failures are invisible until someone makes a link on that
-    backend, so they are asserted here instead.
+
+def test_every_link_aware_shadow_delegates_to_the_generic():
+    """A bespoke command in a link-aware family must route through it.
+
+    ``CommandOpts`` hands every handler the namespace facts, but only
+    the family generic interprets them; a wrapper that walks its own
+    tree opts the whole backend out of symlinks without failing
+    anything. Mirrors the TS state, where every bespoke find/ls routes
+    through the generic (``findGeneric``/``walkFind``).
     """
-    fact_aware = _fact_aware()
-    assert fact_aware, "no fact-aware builders found: the derivation broke"
     commands, failed = _registered()
     assert not failed, f"builtin modules would not import: {failed}"
-    missing = sorted({
-        f"{cmd.resource}/{cmd.name} is missing {sorted(gap)}"
-        for cmd in commands
-        for gap in [{
-            p
-            for p in fact_aware.get(cmd.name, ())
-            if not accepts_kwarg(cmd.fn, p)
-        }] if gap
-    })
-    assert not missing, (
-        "these commands shadow a generic without accepting the dispatcher "
-        "facts it reads, so symlinks are invisible to them and a start "
-        f"point cannot be resolved: {missing}")
+    offenders = []
+    for cmd in commands:
+        if cmd.name not in LINK_AWARE:
+            continue
+        fn = inspect.unwrap(cmd.fn)
+        source_file = inspect.getsourcefile(fn) or ""
+        if "/generic_bind/" in source_file:
+            continue
+        source = inspect.getsource(inspect.getmodule(fn))
+        if not any(call in source for call in GENERIC_CALLS[cmd.name]):
+            offenders.append(f"{cmd.resource}/{cmd.name} ({source_file})")
+    assert not offenders, (
+        "these commands shadow a link-aware family without delegating to "
+        f"its generic, so symlinks are invisible to them: {offenders}")

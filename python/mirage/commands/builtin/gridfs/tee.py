@@ -15,12 +15,11 @@
 from functools import partial
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.builtin.gridfs.io import resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.gridfs.stream import read_stream
 from mirage.core.gridfs.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -28,17 +27,12 @@ from mirage.types import PathSpec
 
 
 @command("tee", resource="gridfs", spec=SPECS["tee"], write=True)
-async def tee(
-    accessor: GridFSAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def tee(accessor: GridFSAccessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
-    paths = await resolve_glob(accessor, paths, index)
+    paths = await resolve_glob(accessor, paths, opts.index)
     # The wrapper is wiring only: every flag semantic, the write to each
     # operand and the append fallback live in the generic. This file used
     # to restate them and wrote only paths[0].
@@ -46,7 +40,7 @@ async def tee(
                              texts,
                              read_stream=partial(read_stream,
                                                  accessor,
-                                                 index=index),
+                                                 index=opts.index),
                              write_bytes=partial(write_bytes, accessor),
-                             stdin=stdin,
-                             flags=flags)
+                             stdin=opts.stdin,
+                             flags=opts.flags)

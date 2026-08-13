@@ -36,7 +36,7 @@ import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
 import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
 import { resolveGlobs } from '../expand/globs.ts'
-import type { DispatchFn } from './cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from './fanout.ts'
@@ -223,20 +223,9 @@ export async function handleCommand(
     // lets the strategy runners execute each operand natively on its
     // owning mount.
     const csParsed = parseFlags(parts.slice(1), SPECS[cmdName] ?? null, cmdName, session.cwd)
-    const csFlags = csParsed[2]
-    const csTexts = findExprTokens ?? csParsed[1]
-    const csRefusal = optionError(
-      cmdName,
-      csParsed[4],
-      csParsed[5],
-      csParsed[6],
-      csParsed[7],
-      csParsed[8],
-      csParsed[9],
-      csParsed[10],
-      csParsed[11],
-      csParsed[12],
-    )
+    const csFlags = csParsed.flagKwargs
+    const csTexts = findExprTokens ?? csParsed.texts
+    const csRefusal = optionError(cmdName, csParsed)
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
       return [
@@ -289,8 +278,10 @@ export async function handleCommand(
       cmdStr,
       makeStorageKey(registry),
     )
-    if (csParsed[3].length > 0) {
-      const csWarn = new TextEncoder().encode(csParsed[3].map((w) => `${cmdName}: ${w}\n`).join(''))
+    if (csParsed.warnings.length > 0) {
+      const csWarn = new TextEncoder().encode(
+        csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''),
+      )
       const csExisting = await materialize(csIo.stderr)
       csIo.stderr = concatBytes([csWarn, csExisting])
       csExec.stderr = concatBytes([csWarn, csExec.stderr])
@@ -369,33 +360,10 @@ export async function handleCommand(
     throw err
   }
 
-  const [
-    paths,
-    textsRaw,
-    flagKwargs,
-    parseWarnings,
-    invalidOptions,
-    ambiguousOptions,
-    optionErrorKinds,
-    needsValueOptions,
-    invalidValueOptions,
-    invalidIntOptions,
-    invalidFloatOptions,
-    missingRequiredOptions,
-    oldOptionNeedsValue,
-  ] = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
-  const refusal = optionError(
-    cmdName,
-    invalidOptions,
-    ambiguousOptions,
-    optionErrorKinds,
-    needsValueOptions,
-    invalidValueOptions,
-    invalidIntOptions,
-    invalidFloatOptions,
-    missingRequiredOptions,
-    oldOptionNeedsValue,
-  )
+  const parsedLine = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
+  const { paths, flagKwargs, warnings: parseWarnings } = parsedLine
+  const textsRaw = parsedLine.texts
+  const refusal = optionError(cmdName, parsedLine)
   if (refusal !== null) {
     const [msg, code] = refusal
     return [

@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.github_ci.find import find
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import FindParseError
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
@@ -46,22 +47,23 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
 @pytest.mark.asyncio
 async def test_find_runs_root_rejected(accessor, index):
     with pytest.raises(ValueError, match="across runs is disabled"):
-        await find(accessor, [_scope("/runs")], name="*.log", index=index)
+        await find(accessor, [_scope('/runs')], [],
+                   CommandOpts(index=index, flags={'name': '*.log'}))
 
 
 @pytest.mark.asyncio
 async def test_find_root_rejected(accessor, index):
     with pytest.raises(ValueError, match="across runs is disabled"):
-        await find(accessor, [], name="*.log", index=index)
+        await find(accessor, [], [],
+                   CommandOpts(index=index, flags={'name': '*.log'}))
 
 
 @pytest.mark.asyncio
 async def test_find_invalid_maxdepth_raises_find_parse_error(accessor, index):
     with pytest.raises(FindParseError,
                        match=r"invalid argument 'abc' to '-maxdepth'"):
-        await find(accessor, [_scope("/runs/wf_1")],
-                   maxdepth="abc",
-                   index=index)
+        await find(accessor, [_scope('/runs/wf_1')], [],
+                   CommandOpts(index=index, flags={'maxdepth': 'abc'}))
 
 
 @pytest.mark.asyncio
@@ -78,12 +80,8 @@ async def test_find_single_run_allowed(accessor, index):
                new=AsyncMock(side_effect=fake_readdir)), \
             patch("mirage.core.github_ci.stat._readdir",
                   new=AsyncMock(side_effect=fake_readdir)):
-        out, io = await find(
-            accessor,
-            [_scope("/runs/wf_1")],
-            name="*.log",
-            index=index,
-        )
+        out, io = await find(accessor, [_scope('/runs/wf_1')], [],
+                             CommandOpts(index=index, flags={'name': '*.log'}))
         data = await materialize(out)
         assert b"/runs/wf_1/jobs/build_1.log" in data
 
@@ -102,9 +100,9 @@ async def test_find_path_pattern_is_honored(accessor, index):
                new=AsyncMock(side_effect=fake_readdir)), \
             patch("mirage.core.github_ci.stat._readdir",
                   new=AsyncMock(side_effect=fake_readdir)):
-        out, _io = await find(accessor, [_scope("/runs/wf_1")],
-                              path="*jobs*",
-                              index=index)
+        out, _io = await find(
+            accessor, [_scope('/runs/wf_1')], [],
+            CommandOpts(index=index, flags={'path': '*jobs*'}))
         data = await materialize(out)
         assert data.decode().splitlines() == [
             "/runs/wf_1/jobs", "/runs/wf_1/jobs/build_1.log"
@@ -132,8 +130,7 @@ async def test_find_size_counts_sizeless_entries_as_zero(accessor, index):
                new=AsyncMock(side_effect=fake_readdir)), \
          patch("mirage.commands.builtin.github_ci.find._stat",
                new=AsyncMock(side_effect=fake_stat)):
-        out, _io = await find(accessor, [_scope("/runs/wf_1")],
-                              size="+0c",
-                              index=index)
+        out, _io = await find(accessor, [_scope('/runs/wf_1')], [],
+                              CommandOpts(index=index, flags={'size': '+0c'}))
         data = await materialize(out)
         assert data == b""

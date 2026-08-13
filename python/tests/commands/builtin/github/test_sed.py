@@ -21,6 +21,7 @@ read, write-gated -i).
 import pytest
 
 from mirage.commands.builtin.github import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
@@ -56,10 +57,8 @@ def _scope(path: str) -> PathSpec:
 
 
 async def _run(accessor, index, path, expr, **kwargs):
-    stdout, io = await sed(accessor, [_scope(path)],
-                           expr,
-                           index=index,
-                           **kwargs)
+    stdout, io = await sed(accessor, [_scope(path)], [expr],
+                           CommandOpts(index=index, flags={**kwargs}))
     data = await materialize(stdout) if stdout is not None else b""
     return data.decode(errors="replace"), io
 

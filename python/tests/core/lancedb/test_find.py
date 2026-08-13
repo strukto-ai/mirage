@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.lancedb import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 
 
@@ -34,7 +35,8 @@ def _spec(virtual: str) -> PathSpec:
 
 async def _run(accessor, paths, *texts: str, **flags) -> list[str]:
     find = _find_command()
-    stdout, _io = await find(accessor, paths, *texts, index=None, **flags)
+    stdout, _io = await find(accessor, paths, list(texts),
+                             CommandOpts(index=None, flags={**flags}))
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 

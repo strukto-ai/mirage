@@ -1,6 +1,7 @@
 import pytest
 from pydantic import SecretStr
 
+from mirage.commands.config import CommandOpts
 from mirage.resource.mem0 import Mem0Config
 from mirage.resource.mem0.mem0 import Mem0Resource
 from mirage.types import PathSpec
@@ -50,10 +51,9 @@ async def _bytes(source):
 async def test_grep_recursive_matches_content():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", resource_path="")
-    source, _io = await _command(res, "grep")(res.accessor, [p],
-                                              "bananas",
-                                              r=True,
-                                              index=res.index)
+    source, _io = await _command(res, "grep")(res.accessor, [p], ["bananas"],
+                                              CommandOpts(index=res.index,
+                                                          flags={"r": True}))
     out = await _bytes(source)
     assert b"bananas" in out
 
@@ -62,10 +62,9 @@ async def test_grep_recursive_matches_content():
 async def test_grep_matches_the_json_file_contents():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", resource_path="")
-    source, _io = await _command(res, "grep")(res.accessor, [p],
-                                              "food",
-                                              r=True,
-                                              index=res.index)
+    source, _io = await _command(res, "grep")(res.accessor, [p], ["food"],
+                                              CommandOpts(index=res.index,
+                                                          flags={"r": True}))
     assert b"food" in await _bytes(source)
 
 
@@ -73,8 +72,7 @@ async def test_grep_matches_the_json_file_contents():
 async def test_grep_bare_directory_is_a_directory():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", resource_path="")
-    source, io = await _command(res, "grep")(res.accessor, [p],
-                                             "bananas",
-                                             index=res.index)
+    source, io = await _command(res, "grep")(res.accessor, [p], ["bananas"],
+                                             CommandOpts(index=res.index))
     assert io.exit_code == 2
     assert b"Is a directory" in (io.stderr or b"")

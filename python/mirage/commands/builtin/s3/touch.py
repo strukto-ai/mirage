@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.s3.io import resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.core.s3.exists import exists
 from mirage.core.s3.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -28,20 +28,16 @@ from mirage.types import PathSpec
 async def touch(
     accessor: S3Accessor,
     paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    c: bool = False,
-    r: str | None = None,
-    d: str | None = None,
-    index: IndexCacheStore,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("touch: missing operand")
-    paths = await resolve_glob(accessor, paths, index)
+    fl = FlagView(opts.flags, spec=SPECS["touch"])
+    paths = await resolve_glob(accessor, paths, opts.index)
     writes: dict[str, ByteSource] = {}
     for p in paths:
-        if c:
+        if fl.as_bool("c"):
             continue
         if not await exists(accessor, p):
             await write_bytes(accessor, p, b"")

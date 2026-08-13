@@ -20,7 +20,7 @@ from typing import Any, Callable
 from mirage.cache.context import push_cache_manager
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import run_with_timeout
-from mirage.commands.config import RegisteredCommand
+from mirage.commands.config import CommandOpts, RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import FlagValue
@@ -36,11 +36,11 @@ from mirage.ops.types import (ChildMounts, LinkView, MountView, ReaddirPath,
 from mirage.policy import resolve_limit
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
+from mirage.runtime.types import DispatchFn
 from mirage.types import (ConsistencyPolicy, Limit, MountMode, PathSpec,
                           Producer)
 from mirage.utils.errors import enotsup
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.params import accepts_kwarg
 
 
 def _wrap_cmd_streams(
@@ -438,7 +438,7 @@ class MountEntry:
         *,
         stdin: ByteSource | None = None,
         cwd: str = "/",
-        dispatch: Callable[..., Any] | None = None,
+        dispatch: DispatchFn | None = None,
         session_id: str | None = None,
         env: dict[str, str] | None = None,
         exec_allowed: bool = True,
@@ -478,8 +478,8 @@ class MountEntry:
             mounts (MountView | None): where the mount boundaries are,
                 for a walker whose output cannot be fanned out and
                 concatenated (tar, zip).
-                All six reach only the handlers that name them as a
-                parameter, so no list of command names is kept here.
+                All six ride ``CommandOpts``; a handler reads the fields
+                it wants, so no list of command names is kept here.
         """
         extension = get_extension(paths[0].virtual) if paths else None
 
@@ -506,55 +506,51 @@ class MountEntry:
         # single grep -f) or a list of PathSpec (multiple grep -f).
         # Everything else (bools, strings, list[str] like repeated -e) is
         # not a path and passes through unchanged.
-        kw: dict[str, Any] = {}
+        flags: dict[str, FlagValue] = {}
         for k, v in flag_kwargs.items():
             if isinstance(v, PathSpec):
-                kw[k] = dataclasses.replace(v,
-                                            resource_path=mount_key(
-                                                v.virtual, mount_prefix))
+                flags[k] = dataclasses.replace(v,
+                                               resource_path=mount_key(
+                                                   v.virtual, mount_prefix))
             elif isinstance(v, list) and v and all(
                     isinstance(item, PathSpec) for item in v):
                 specs = [item for item in v if isinstance(item, PathSpec)]
-                kw[k] = [
+                flags[k] = [
                     dataclasses.replace(item,
                                         resource_path=mount_key(
                                             item.virtual, mount_prefix))
                     for item in specs
                 ]
             else:
-                kw[k] = v
-        kw["index"] = self.resource.index
-        kw["cwd"] = PathSpec(
-            virtual=cwd,
-            directory=cwd,
-            resolved=False,
-            resource_path=mount_key(cwd, mount_prefix),
+                flags[k] = v
+        # One typed bag, constructed here and nowhere else; a handler
+        # reads the fields it wants and ignores the rest, so there is no
+        # opt-in registry (mirrors Mount.executeCmd building CommandOpts).
+        opts = CommandOpts(
+            stdin=stdin,
+            flags=flags,
+            cwd=PathSpec(
+                virtual=cwd,
+                directory=cwd,
+                resolved=False,
+                resource_path=mount_key(cwd, mount_prefix),
+            ),
+            mount_prefix=mount_prefix,
+            filetype_fns=(filetype_fns if not is_filetype_cmd else None),
+            index=self.resource.index,
+            dispatch=dispatch,
+            session_id=session_id,
+            env=env,
+            exec_allowed=exec_allowed,
+            runtime=runtime,
+            runtime_unavailable=runtime_unavailable,
+            stat_overlay=stat_overlay,
+            links=links,
+            stat_path=stat_path,
+            readdir_path=readdir_path,
+            child_mounts=child_mounts,
+            mounts=mounts,
         )
-        kw["filetype_fns"] = (filetype_fns if not is_filetype_cmd else None)
-        if stdin is not None:
-            kw["stdin"] = stdin
-        if dispatch is not None:
-            kw["dispatch"] = dispatch
-        if session_id is not None:
-            kw["session_id"] = session_id
-        if env is not None:
-            kw["env"] = env
-        kw["exec_allowed"] = exec_allowed
-        # Facts the dispatcher can offer but not every command wants.
-        # A command opts in by naming the parameter; see accepts_kwarg.
-        offered = {
-            "stat_overlay": stat_overlay,
-            "links": links,
-            "stat_path": stat_path,
-            "readdir_path": readdir_path,
-            "child_mounts": child_mounts,
-            "mounts": mounts,
-        }
-        offered = {k: v for k, v in offered.items() if v is not None}
-        if runtime is not None:
-            kw["runtime"] = runtime
-        if runtime_unavailable is not None:
-            kw["runtime_unavailable"] = runtime_unavailable
 
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)
@@ -563,7 +559,8 @@ class MountEntry:
             # --help / --version short-circuit inside the handler wrapper
             # and never touch the backend, so a read-only mount answers
             # them like GNU instead of refusing them as writes.
-            info_only = (kw.get("help") is True or kw.get("version") is True)
+            info_only = (flags.get("help") is True
+                         or flags.get("version") is True)
             for cmd in handlers:
                 if (cmd.write and not info_only
                         and self.effective_mode() == MountMode.READ):
@@ -582,13 +579,8 @@ class MountEntry:
                     mount_override=self.command_limits.get(cmd_name))
                 cmd_timeout = (resolved_limit.timeout_seconds
                                if resolved_limit is not None else None)
-                call_kw = kw | {
-                    key: value
-                    for key, value in offered.items()
-                    if accepts_kwarg(cmd.fn, key)
-                }
                 result = await run_with_timeout(
-                    cmd.fn(self.resource.accessor, paths, *texts, **call_kw),
+                    cmd.fn(self.resource.accessor, paths, texts, opts),
                     cmd_timeout, cmd_name)
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,

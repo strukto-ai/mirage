@@ -13,33 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.paste import paste as generic_paste
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def paste(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["paste"])
-    paths = await resolve_or_empty(ops, accessor, paths, index)
+async def paste(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                texts: list[str],
+                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["paste"])
+    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await generic_paste(paths,
                                read_bytes=bound_op(ops.read_bytes, accessor,
-                                                   index),
-                               stdin=stdin,
+                                                   opts.index),
+                               stdin=opts.stdin,
                                delimiters=fl.as_str("delimiters") or "\t",
                                serial=fl.as_bool("serial"),
                                zero_terminated=fl.as_bool("zero_terminated"))

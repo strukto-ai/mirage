@@ -19,7 +19,7 @@ import { IndexEntry } from '../../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { Precision } from '../../../provision/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeDiscordTransport, makeFakeResource } from './_test_util.ts'
+import { FakeDiscordTransport } from './_test_util.ts'
 import { fileReadProvision, metadataProvision } from './_provision.ts'
 
 function spec(virtual: string, prefix = ''): PathSpec {
@@ -35,7 +35,6 @@ describe('fileReadProvision', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: makeFakeResource(transport),
     })
     expect(result.precision).toBe(Precision.UNKNOWN)
   })
@@ -62,7 +61,6 @@ describe('fileReadProvision', () => {
         flags: {},
         filetypeFns: null,
         cwd: '/',
-        resource: makeFakeResource(transport),
         index,
       },
     )
@@ -82,7 +80,6 @@ describe('metadataProvision', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: makeFakeResource(transport),
     })
     expect(result.precision).toBe(Precision.EXACT)
     expect(result.networkReadHigh).toBe(0)

@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
@@ -25,16 +25,10 @@ from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 
 
-async def mkdir(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["mkdir"])
+async def mkdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                texts: list[str],
+                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["mkdir"])
     parents = fl.as_bool("parents")
     verbose = fl.as_bool("verbose")
     mode_text = fl.as_str("mode")
@@ -51,7 +45,7 @@ async def mkdir(
             raise NotImplementedError(
                 "mkdir: --mode is not supported on this backend")
     mkdir_fn = ops.require(Operation.MKDIR)
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     lines: list[str] = []
     errors: list[str] = []
     for path in paths:

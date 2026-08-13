@@ -201,7 +201,6 @@ export async function handleCommandProvision(
     cwd: session.cwd,
     filetypeFns: null,
     mountPrefix,
-    resource,
     command: cmdStr,
     ...(spec !== null ? { spec } : {}),
     index: rawIndex,

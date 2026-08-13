@@ -15,9 +15,9 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
-import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
+import type { DispatchFn } from '../runtime/types.ts'
 import type {
   ChildMounts,
   LinkView,
@@ -32,29 +32,18 @@ import { renderHelp } from './spec/help.ts'
 import { CommandSpec, Option, type FlagValue } from './spec/types.ts'
 
 /**
- * Options bag passed to command functions. Mirrors Python's keyword arguments
- * (`command="", stdin=None, index=None, prefix="", **_extra`) collected into
- * a single typed object.
- *
- * Parity note: Python's `handle_command_provision` passes `command`, `prefix`,
- * and `index` as keyword arguments directly. TS surfaces them here so
- * provision functions can read them via `opts.command`, `opts.mountPrefix`,
- * and `opts.index` (matching Python's `command=`, `prefix=`, `index=`).
+ * The dispatcher context of one command invocation, as one value.
+ * `Mount.executeCmd` constructs it once and hands it to every handler
+ * as the fourth argument; the provision path builds the same bag with
+ * `command`/`spec` set. Mirrors Python's `CommandOpts`
+ * (commands/config.py) field for field.
  */
-export type CommandDispatch = (
-  op: string,
-  path: PathSpec,
-  args?: readonly unknown[],
-  kwargs?: Record<string, unknown>,
-) => Promise<[unknown, IOResult]>
-
 export interface CommandOpts {
   stdin: ByteSource | null
   flags: Record<string, FlagValue>
   filetypeFns: Record<string, CommandFn> | null
   mountPrefix?: string
   cwd: string
-  resource: Resource
   command?: string
   // The invoked command's spec, set on the provision path. A provision
   // function is shared across commands, so it cannot name a dest the way a
@@ -63,7 +52,7 @@ export interface CommandOpts {
   // keyword (`workspace/provision/command.py`).
   spec?: CommandSpec
   index?: IndexCacheStore | null
-  dispatch?: CommandDispatch
+  dispatch?: DispatchFn
   sessionId?: string
   env?: Record<string, string>
   execAllowed?: boolean

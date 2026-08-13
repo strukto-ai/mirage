@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from typing import Any, Callable
 
 from mirage.commands.cli.builtin.git.ignore import (GITIGNORE, IgnoreStack,
                                                     load_ignores)
 from mirage.commands.cli.builtin.git.io import read_names, read_optional
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.ops.types import StatPath
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
 
 GIT_DIR = ".git"
@@ -66,7 +66,7 @@ class Scanner:
     """One walk of the working tree, carrying what the walk needs.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         worktree (str): absolute virtual path of the working tree root.
         tracked (set[str]): repository-relative paths the index holds.
@@ -74,7 +74,7 @@ class Scanner:
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
     """
 
-    def __init__(self, dispatch: Callable[..., Any], stat_path: StatPath,
+    def __init__(self, dispatch: DispatchFn, stat_path: StatPath,
                  worktree: str, tracked: set[str], mode: str) -> None:
         self._dispatch = dispatch
         self._stat_path = stat_path
@@ -195,7 +195,7 @@ class Scanner:
                 self.found.untracked.append(child)
 
 
-async def scan(dispatch: Callable[..., Any], stat_path: StatPath,
+async def scan(dispatch: DispatchFn, stat_path: StatPath,
                location: RepoLocation, tracked: set[str],
                mode: str) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
@@ -207,7 +207,7 @@ async def scan(dispatch: Callable[..., Any], stat_path: StatPath,
     alone would leave the deletions unfound.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         location (RepoLocation): the discovered repository.
         tracked (set[str]): repository-relative paths the index holds.

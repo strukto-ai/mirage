@@ -36,8 +36,8 @@ def _create_directory_sync(
 async def mkdir(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     parents: bool = False,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     remote_path = backend_path(accessor.config, path)
     if parents:

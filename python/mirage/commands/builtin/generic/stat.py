@@ -325,11 +325,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> StatFlags:
     )
 
 
-async def stat_generic(paths, texts, opts: CommandOpts, stat_fn, links=None):
+async def stat_generic(paths, texts, opts: CommandOpts, stat_fn):
     parsed = parse_flags(opts.flags)
     return await stat(paths,
                       stat_fn=stat_fn,
                       c=parsed.format,
                       f=parsed.file_system,
                       L=parsed.deref,
-                      links=links)
+                      links=opts.links)

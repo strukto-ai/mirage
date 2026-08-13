@@ -16,15 +16,13 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import (ComputeEntries, ComputeSize,
                                                 DuEntries, du_generic)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn)
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 
@@ -152,18 +150,9 @@ def _budget_hit(budget: WalkBudget) -> bool:
     return budget.hit
 
 
-async def du(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    cwd: PathSpec | str = "/",
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def du(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no resource")
     budget = WalkBudget(ops.max_du_entries)
@@ -171,21 +160,21 @@ async def du(
     compute_size: ComputeSize
     compute_entries: ComputeEntries
     if native is None:
-        compute_size = partial(_walk_size, ops, accessor, index, budget)
-        compute_entries = partial(_walk_entries, ops, accessor, index, budget)
+        compute_size = partial(_walk_size, ops, accessor, opts.index, budget)
+        compute_entries = partial(_walk_entries, ops, accessor, opts.index,
+                                  budget)
     else:
-        compute_size = partial(_op_size, native.size, accessor, index)
-        compute_entries = partial(_op_entries, native.entries, accessor, index)
+        compute_size = partial(_op_size, native.size, accessor, opts.index)
+        compute_entries = partial(_op_entries, native.entries, accessor,
+                                  opts.index)
     return await du_generic(paths,
                             list(texts),
-                            CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
-                            partial(_resolve, ops, accessor, index),
-                            partial(_stat, ops, accessor, index),
+                            opts,
+                            partial(_resolve, ops, accessor, opts.index),
+                            partial(_stat, ops, accessor, opts.index),
                             compute_size,
                             compute_entries,
-                            truncated=partial(_budget_hit, budget),
-                            links=links,
-                            mounts=mounts)
+                            truncated=partial(_budget_hit, budget))
 
 
 BUILDER = Builder('du', du, None, False, None)

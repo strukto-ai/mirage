@@ -15,7 +15,6 @@
 from functools import partial
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.head import head_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.generic_bind.builders.common import \
@@ -24,23 +23,17 @@ from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.postgres.read import read as postgres_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 @command("head", resource="postgres", spec=SPECS["head"])
-async def head(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def head(accessor: PostgresAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=str(exc).encode())
     # Row reads push LIMIT into the query instead of fetching the whole
@@ -50,8 +43,7 @@ async def head(
     if parsed.bytes_ is None and n_eff > 0 and not parsed.zero_terminated:
         read_fn = partial(postgres_read,
                           limit=min(n_eff, accessor.config.default_row_limit))
-    resolved = await resolve_or_empty(IO, accessor, paths, index)
-    return await head_generic(resolved, list(texts),
-                              CommandOpts(stdin=stdin, flags=flags),
-                              bound_op(IO.stat, accessor, index),
-                              bound_op(read_fn, accessor, index))
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    return await head_generic(resolved, list(texts), opts,
+                              bound_op(IO.stat, accessor, opts.index),
+                              bound_op(read_fn, accessor, opts.index))

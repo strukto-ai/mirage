@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from typing import Any, Callable
 
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
+from mirage.runtime.types import DispatchFn
 
 LOGS_DIR = "logs"
 HEAD_LOG = "logs/HEAD"
@@ -42,7 +42,7 @@ def entry(before: bytes, after: bytes, who: bytes, when: int,
             (before, after, who, when, message.encode()))
 
 
-async def append(dispatch: Callable[..., Any], gitdir: str, path: str,
+async def append(dispatch: DispatchFn, gitdir: str, path: str,
                  line: bytes) -> None:
     """Add one line to a reflog, creating it if it is not there.
 
@@ -53,7 +53,7 @@ async def append(dispatch: Callable[..., Any], gitdir: str, path: str,
     perfectly good checkout read as ``(no branch)``.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of the git directory owning
             the log.
         path (str): log path relative to it, e.g. ``logs/HEAD``.
@@ -64,7 +64,7 @@ async def append(dispatch: Callable[..., Any], gitdir: str, path: str,
     await write_file(dispatch, target, (existing or b"") + line)
 
 
-async def record(dispatch: Callable[..., Any], gitdir: str, ref: str | None,
+async def record(dispatch: DispatchFn, gitdir: str, ref: str | None,
                  before: bytes | None, after: bytes, who: bytes, when: int,
                  message: str) -> None:
     """Record one move of HEAD, and of the branch it is on.
@@ -74,7 +74,7 @@ async def record(dispatch: Callable[..., Any], gitdir: str, ref: str | None,
     line.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of this checkout's git
             directory, which owns the logs.
         ref (str | None): the branch ref that also moved, None when

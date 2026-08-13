@@ -34,7 +34,6 @@ async function runSplit(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { exitCode: -1 }
   const [, ioResult] = result

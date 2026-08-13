@@ -31,7 +31,6 @@ async function runBasename(texts: string[]): Promise<string> {
     flags: {},
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return ''
   const [out] = result

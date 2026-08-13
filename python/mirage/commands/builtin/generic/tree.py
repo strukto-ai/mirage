@@ -327,16 +327,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags:
     )
 
 
-async def tree_generic(paths,
-                       texts,
-                       opts: CommandOpts,
-                       readdir,
-                       stat,
-                       *,
-                       index,
-                       stat_path=None,
-                       readdir_path=None,
-                       mounts=None):
+async def tree_generic(paths, texts, opts: CommandOpts, readdir, stat):
     parsed = parse_flags(opts.flags)
     return await tree(paths[0],
                       readdir=readdir,
@@ -346,7 +337,7 @@ async def tree_generic(paths,
                       ignore_pattern=parsed.ignore_pattern,
                       dirs_only=parsed.dirs_only,
                       match_pattern=parsed.match_pattern,
-                      index=index,
-                      stat_path=stat_path,
-                      readdir_path=readdir_path,
-                      mounts=mounts)
+                      index=opts.index,
+                      stat_path=opts.stat_path,
+                      readdir_path=opts.readdir_path,
+                      mounts=opts.mounts)

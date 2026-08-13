@@ -95,7 +95,6 @@ async function runCmd(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
     mountPrefix,
     ...(links !== null ? { links } : {}),
   })

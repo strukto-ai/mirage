@@ -13,33 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-async def rmdir(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    v = FlagView(flags, spec=SPECS["rmdir"]).as_bool("v")
+async def rmdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                texts: list[str],
+                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    v = FlagView(opts.flags, spec=SPECS["rmdir"]).as_bool("v")
     if not ops.is_mounted(accessor) or not paths:
         raise UsageError(
             "rmdir: missing operand\n"
             "Try 'rmdir --help' for more information.", 1)
     rmdir_fn = ops.require(Operation.RMDIR)
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     verbose_parts: list[str] = []
     errors: list[str] = []
     removed: dict[str, ByteSource] = {}
@@ -54,7 +48,7 @@ async def rmdir(
             errors.append(
                 f"rmdir: failed to remove '{p.virtual}': Not a directory")
             continue
-        if await ops.readdir(accessor, p, index=index):
+        if await ops.readdir(accessor, p, index=opts.index):
             errors.append(f"rmdir: failed to remove '{p.virtual}': "
                           "Directory not empty")
             continue

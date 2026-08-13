@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource, IOResult, OpReport } from '../../../../io/types.ts'
+import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 
@@ -76,16 +76,7 @@ export enum Cmd {
   JOIN = 'join',
 }
 
-// `report`, when a caller passes one, is stamped by the door the
-// moment the op completes, so an observer reads what ran even when a
-// later step throws the result away; combiners never pass it.
-export type DispatchFn = (
-  op: string,
-  path: PathSpec,
-  args?: readonly unknown[],
-  kwargs?: Record<string, unknown>,
-  report?: OpReport,
-) => Promise<[unknown, IOResult]>
+export type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CrossResult = [ByteSource | null, IOResult]
 

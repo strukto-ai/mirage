@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.mongodb import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import FindParseError
 from mirage.core.mongodb.types import EntityKind
 from mirage.resource.mongodb.config import MongoDBConfig
@@ -71,11 +72,9 @@ async def _run(paths: list[PathSpec], *texts: str, **flags) -> list[str]:
     accessor = MongoDBAccessor(config=MongoDBConfig(
         uri="mongodb://localhost:27017"))
     find = _find_command()
-    stdout, _io = await find(accessor,
-                             paths,
-                             *texts,
-                             index=RAMIndexCacheStore(),
-                             **flags)
+    stdout, _io = await find(
+        accessor, paths, list(texts),
+        CommandOpts(index=RAMIndexCacheStore(), flags={**flags}))
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 

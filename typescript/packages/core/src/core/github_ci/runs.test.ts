@@ -17,7 +17,7 @@ import { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { GITHUB_CI_FIND } from '../../commands/builtin/github_ci/find.ts'
 import type { CommandOpts } from '../../commands/config.ts'
-import { PathSpec, ResourceName } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { HttpCITransport, type CITransport } from './_client.ts'
 import { readdir as ciReaddir } from './readdir.ts'
 import { listRuns } from './runs.ts'
@@ -180,7 +180,6 @@ describe('find on /runs', () => {
       filetypeFns: null,
       mountPrefix: '',
       cwd: '/',
-      resource: { kind: ResourceName.GITHUB_CI } as unknown as CommandOpts['resource'],
       index,
     }
     const findCmd = GITHUB_CI_FIND[0]

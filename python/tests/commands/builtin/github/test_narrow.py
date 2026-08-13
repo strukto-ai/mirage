@@ -19,6 +19,7 @@ from mirage.commands.builtin.github.du import _du_size
 from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.github.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
@@ -71,7 +72,11 @@ async def test_subdir_narrows_and_fetches_fewer(mock_github_api, github_env,
                                                 counting_read, monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    await grep(accessor, [_subdir()], "import", r=True, w=True, index=index)
+    await grep(accessor, [_subdir()], ['import'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     # /src holds 7 files; code search narrows to the import-matching subset.
     assert 0 < len(counting_read) < 7
 
@@ -84,7 +89,11 @@ async def test_regex_scans_every_file(mock_github_api, github_env,
     # Excluded even under -w.
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    await grep(accessor, [_root()], "import.*os", r=True, w=True, index=index)
+    await grep(accessor, [_root()], ['import.*os'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     assert len(counting_read) == len(MOCK_BLOBS)
 
 
@@ -93,12 +102,14 @@ async def test_rg_shortcircuit_no_match_exit_1(mock_github_api, github_env,
                                                monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
-    stdout, io = await rg(accessor, [_root()],
-                          "import",
-                          args_l=True,
-                          glob="*.nomatch",
-                          w=True,
-                          index=index)
+    stdout, io = await rg(
+        accessor, [_root()], ['import'],
+        CommandOpts(index=index,
+                    flags={
+                        'args_l': True,
+                        'glob': '*.nomatch',
+                        'w': True
+                    }))
     body = (await materialize(stdout)).decode()
     assert io.exit_code == 1
     assert body == ""

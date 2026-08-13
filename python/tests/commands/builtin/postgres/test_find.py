@@ -20,6 +20,7 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.postgres import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
 
@@ -69,11 +70,9 @@ async def _run(paths: list[PathSpec], *texts: str, **flags) -> list[str]:
          patch("mirage.core.postgres.stat._client") as st_client:
         _fake_client(rd_client)
         _fake_client(st_client)
-        stdout, _io = await find(_accessor(),
-                                 paths,
-                                 *texts,
-                                 index=RAMIndexCacheStore(),
-                                 **flags)
+        stdout, _io = await find(
+            _accessor(), paths, list(texts),
+            CommandOpts(index=RAMIndexCacheStore(), flags={**flags}))
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 

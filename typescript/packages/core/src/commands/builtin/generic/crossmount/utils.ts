@@ -15,7 +15,6 @@
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { fsErrorLine, isFsError } from '../../../../utils/errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
-import type { Resource } from '../../../../resource/base.ts'
 import { type FileStat, PathSpec } from '../../../../types.ts'
 import type { CommandOpts } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
@@ -74,18 +73,6 @@ export async function mergeOperandIos(results: OperandRun[], exitCode: number): 
   return io
 }
 
-class CrossResourceStub implements Resource {
-  readonly kind = 'cross'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-}
-
-const CROSS_RESOURCE = new CrossResourceStub()
-
 // Drop each mount prefix so a generic sees one flat namespace of full virtual
 // paths; the relayed primitives route each full path to its owning mount. Used
 // by transfer/compare where the generic does path arithmetic; read commands
@@ -114,7 +101,6 @@ export function crossOpts(flagKwargs: Record<string, FlagValue>): CommandOpts {
     filetypeFns: null,
     mountPrefix: '',
     cwd: '/',
-    resource: CROSS_RESOURCE,
   }
 }
 

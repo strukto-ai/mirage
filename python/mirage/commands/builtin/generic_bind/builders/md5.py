@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.md5 import md5_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op,
@@ -21,25 +20,17 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def md5(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, index)
-    return await md5_generic(resolved, list(texts),
-                             CommandOpts(stdin=stdin, flags=flags),
-                             dir_aware_stat(ops, accessor, index),
-                             bound_op(ops.read_bytes, accessor, index))
+async def md5(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await md5_generic(resolved, list(texts), opts,
+                             dir_aware_stat(ops, accessor, opts.index),
+                             bound_op(ops.read_bytes, accessor, opts.index))
 
 
 BUILDER = Builder('md5', md5, None, False, None, read=True)

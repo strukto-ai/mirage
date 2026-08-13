@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib
+import inspect
+
 import pytest
 
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.resource.disk import DiskResource
 from mirage.types import MountMode, ResourceName
-from mirage.utils.params import accepts_kwarg
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.run import (drop_service_caches,
                                                    link_view,
@@ -106,24 +108,24 @@ def test_no_view_without_a_namespace():
 
 
 @pytest.mark.parametrize("cmd", ["ls", "stat", "find", "du", "file"])
-def test_the_symlink_aware_commands_name_the_links_parameter(cmd):
-    """Naming the parameter is the whole opt-in: no registry, no spec
-    field, nothing that can fall out of step with the signature."""
-    builder = next(b for b in _BUILDERS if b.name == cmd)
-    assert accepts_kwarg(builder.fn, "links") is True
+def test_the_symlink_aware_commands_read_the_links_field(cmd):
+    """`CommandOpts.links` reaches every handler; the family generic is
+    where the read lives (tests/commands/test_links_optin.py pins the
+    full delegation rule), and the builder passes `opts` through."""
+    module = importlib.import_module(f"mirage.commands.builtin.generic.{cmd}")
+    assert "opts.links" in inspect.getsource(module)
 
 
-@pytest.mark.parametrize("cmd", ["cat", "grep", "wc", "head"])
-def test_other_commands_are_not_handed_a_kwarg_they_cannot_take(cmd):
-    """A bare **kwargs must not read as consent: wrappers forward it
-    wholesale to a generic that would reject the keyword."""
-    builder = next(b for b in _BUILDERS if b.name == cmd)
-    assert accepts_kwarg(builder.fn, "links") is False
-
-
-def test_stat_overlay_is_gated_by_the_same_rule():
-    """The overlay used to carry its own list of command names."""
-    named = {b.name for b in _BUILDERS if accepts_kwarg(b.fn, "stat_overlay")}
+def test_stat_overlay_is_read_where_stats_render():
+    """The overlay used to carry its own list of command names; now the
+    builders that render stats read it off `opts`."""
+    named = set()
+    for builder in _BUILDERS:
+        module = inspect.getmodule(inspect.unwrap(builder.fn))
+        if module is None:
+            continue
+        if "opts.stat_overlay" in inspect.getsource(module):
+            named.add(builder.name)
     assert named == {"ls", "stat", "cp", "mv", "find"}
 
 

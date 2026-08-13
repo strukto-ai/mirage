@@ -15,7 +15,6 @@
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import parse_flags
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_generic
@@ -27,7 +26,6 @@ from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.postgres import _client
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
@@ -36,16 +34,11 @@ from mirage.types import PathSpec
 
 
 @command("tail", resource="postgres", spec=SPECS["tail"])
-async def tail(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def tail(accessor: PostgresAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=str(exc).encode())
     counts = parsed.counts
@@ -78,8 +71,7 @@ async def tail(
                                 c=counts.byte_count,
                                 from_line=counts.from_line,
                                 from_byte=counts.from_byte), IOResult()
-    resolved = await resolve_or_empty(IO, accessor, paths, index)
-    return await tail_generic(resolved, list(texts),
-                              CommandOpts(stdin=stdin, flags=flags),
-                              bound_op(IO.stat, accessor, index),
-                              bound_op(postgres_read, accessor, index))
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    return await tail_generic(resolved, list(texts), opts,
+                              bound_op(IO.stat, accessor, opts.index),
+                              bound_op(postgres_read, accessor, opts.index))

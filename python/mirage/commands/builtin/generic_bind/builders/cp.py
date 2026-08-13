@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.cp import parse_cp_flags
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
@@ -24,8 +24,9 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn,
                                                           bound_op,
                                                           overlaid_stat)
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatOverlay
 from mirage.types import NativeCopy, PathSpec
@@ -77,33 +78,27 @@ def overlayable_stat(ops: CommandIO, accessor: Accessor,
                    index=index)
 
 
-async def cp(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    stat_overlay: StatOverlay | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def cp(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("cp: no resource")
-    fl = FlagView(flags, spec=SPECS["cp"])
+    fl = FlagView(opts.flags, spec=SPECS["cp"])
     parsed = parse_cp_flags(fl)
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     mkdir = partial(ops.mkdir, accessor) if ops.mkdir else None
     strategy = NativeCopy(copy=partial(ops.require(Operation.COPY), accessor),
-                          find=_make_find(ops, accessor, index),
+                          find=_make_find(ops, accessor, opts.index),
                           dir_copy=dir_copy,
                           mkdir=mkdir)
     return await generic_cp(paths,
                             strategy=strategy,
-                            stat=overlayable_stat(ops, accessor, index,
-                                                  stat_overlay),
+                            stat=overlayable_stat(ops, accessor, opts.index,
+                                                  opts.stat_overlay),
                             flags=parsed,
-                            readdir=bound_op(ops.readdir, accessor, index))
+                            readdir=bound_op(ops.readdir, accessor,
+                                             opts.index))
 
 
 BUILDER = Builder('cp',

@@ -20,40 +20,16 @@ from typing import Any, Callable, Iterator
 import mirage.commands
 import mirage.commands.builtin.generic_bind.builders as builders_pkg
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandSpec, spec_flag_names
+from mirage.commands.spec.types import CommandSpec
 
-# The context the dispatcher hands a handler, none of it a command-line
-# flag. Everything except the leading positionals is set in
-# `workspace/mount/mount.py::execute_cmd`; `stat_overlay`, `links` and
-# `stat_path` reach only handlers that name them. `command`, `prefix` and
-# `spec` are the provision call's own context
-# (`workspace/provision/command.py`), `results` the aggregate's.
-DISPATCHER_PARAMS = frozenset({
-    "ops",
-    "accessor",
-    "paths",
-    "texts",
-    "results",
-    "spec",
-    "index",
-    "cwd",
-    "filetype_fns",
-    "stdin",
-    "dispatch",
-    "session_id",
-    "env",
-    "exec_allowed",
-    "runtime",
-    "runtime_unavailable",
-    "stat_overlay",
-    "links",
-    "stat_path",
-    "readdir_path",
-    "child_mounts",
-    "mounts",
-    "prefix",
-    "command",
-})
+# The dispatcher calls every handler with exactly four positional
+# arguments (`Mount.execute_cmd`), and the provision path with the same
+# four (`handle_command_provision`); everything else -- flags, stdin,
+# cwd, the namespace facts -- rides the CommandOpts bag. A handler that
+# names anything else in its signature can never receive it.
+HANDLER_PARAMS = ("accessor", "paths", "texts", "opts")
+BUILDER_PARAMS = ("ops", ) + HANDLER_PARAMS
+AGGREGATE_PARAMS = ("results", )
 
 
 def _handlers() -> Iterator[tuple[str, str, CommandSpec, Callable[..., Any]]]:
@@ -76,10 +52,12 @@ def _handlers() -> Iterator[tuple[str, str, CommandSpec, Callable[..., Any]]]:
                 source = inspect.getsourcefile(inspect.unwrap(rc.fn)) or "?"
                 label = source.split("/mirage/")[-1]
                 yield rc.name, label, rc.spec, rc.fn
-                for extra, kind in ((rc.provision_fn, "provision"),
-                                    (rc.aggregate, "aggregate")):
-                    if extra is not None:
-                        yield rc.name, f"{label} [{kind}]", rc.spec, extra
+                if rc.provision_fn is not None:
+                    yield rc.name, f"{label} [provision]", rc.spec, \
+                        rc.provision_fn
+                if rc.aggregate is not None:
+                    yield rc.name, f"{label} [aggregate]", rc.spec, \
+                        rc.aggregate
 
     for info in pkgutil.iter_modules(builders_pkg.__path__):
         module = importlib.import_module(
@@ -91,59 +69,37 @@ def _handlers() -> Iterator[tuple[str, str, CommandSpec, Callable[..., Any]]]:
         yield builder.name, f"builders/{info.name}.py", spec, builder.fn
 
 
-def test_handlers_declare_no_flag_the_parser_cannot_emit():
-    """Named parameters are canonical dests, or dispatcher context.
-
-    The parser maps every spelling of an option onto one canonical dest
-    -- the long spelling whenever the option declares one -- so a
-    parameter named after a short spelling that has a long twin can
-    never be filled. It stays False forever while reading like live
-    code, and the `x or fl.as_bool("long")` merge that usually
-    accompanies it hides the fact. The same check catches a parameter
-    the spec dropped entirely.
-    """
-    offenders = []
-    for name, label, spec, fn in _handlers():
-        allowed = spec_flag_names(spec) | DISPATCHER_PARAMS
-        try:
-            signature = inspect.signature(inspect.unwrap(fn))
-        except (TypeError, ValueError):
-            continue
-        dead = [
-            param for param, kind in signature.parameters.items()
-            if kind.kind not in (kind.VAR_KEYWORD,
-                                 kind.VAR_POSITIONAL) and param not in allowed
-        ]
-        if dead:
-            offenders.append(f"{label}: {name}({', '.join(dead)})")
-    assert not offenders, (
-        "these parameters name a flag spelling the parser never emits "
-        "(read the canonical dest through FlagView instead):\n" +
-        "\n".join(sorted(set(offenders))))
-
-
-def test_builders_declare_only_dispatcher_params():
-    """Generic-bind builders are wiring: no declared flag parameters.
-
-    Flag semantics live in the generics, which parse the forwarded bag
-    once into a frozen struct through a spec-bound FlagView (or, for a
-    builder that IS the implementation, inline through the same view).
-    A builder that names a flag in its signature is interpreting the
-    command line at the wiring layer again, which is exactly the drift
-    T2-2 removed; this pins the inversion.
-    """
-    offenders = []
-    for name, label, spec, fn in _handlers():
-        if not label.startswith("builders/"):
-            continue
+def _param_names(fn: Callable[..., Any]) -> tuple[str, ...] | None:
+    try:
         signature = inspect.signature(inspect.unwrap(fn))
-        declared = [
-            param for param, kind in signature.parameters.items()
-            if kind.kind not in (kind.VAR_KEYWORD, kind.VAR_POSITIONAL)
-            and param not in DISPATCHER_PARAMS
-        ]
-        if declared:
-            offenders.append(f"{label}: {name}({', '.join(declared)})")
+    except (TypeError, ValueError):
+        return None
+    return tuple(signature.parameters)
+
+
+def test_handlers_take_accessor_paths_texts_opts():
+    """Registered handlers and provisions have the one dispatcher shape.
+
+    Flags, stdin, cwd, and the namespace facts all ride ``CommandOpts``;
+    a parameter named after any of them is dead the moment the
+    dispatcher stops passing keywords, so the signature itself is
+    pinned. Builders carry a leading ``ops`` (the factory binds it);
+    aggregates take the fan-in result list.
+    """
+    offenders = []
+    for name, label, spec, fn in _handlers():
+        params = _param_names(fn)
+        if params is None:
+            continue
+        if label.startswith("builders/"):
+            expected: tuple[tuple[str, ...], ...] = (BUILDER_PARAMS, )
+        elif label.endswith("[aggregate]"):
+            expected = (AGGREGATE_PARAMS, )
+        else:
+            expected = (HANDLER_PARAMS, )
+        if params not in expected:
+            offenders.append(f"{label}: {name}({', '.join(params)})")
     assert not offenders, (
-        "builders are wiring only; forward **flags wholesale and parse "
-        "them in the generic:\n" + "\n".join(sorted(set(offenders))))
+        "handlers are called as fn(accessor, paths, texts, opts) — flags "
+        "and dispatcher facts ride CommandOpts, so any other parameter "
+        "is never filled:\n" + "\n".join(sorted(set(offenders))))

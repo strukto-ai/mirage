@@ -26,25 +26,25 @@ function path(virtual: string): PathSpec {
 describe('parseFlags', () => {
   it('separates by type when there is no spec', () => {
     const p = path('/data/a.txt')
-    const [paths, texts, flags] = parseFlags([p, 'hello'], null, 'unknown', '/')
-    expect(paths).toEqual([p])
-    expect(texts).toEqual(['hello'])
-    expect(flags).toEqual({})
+    const parsed = parseFlags([p, 'hello'], null, 'unknown', '/')
+    expect(parsed.paths).toEqual([p])
+    expect(parsed.texts).toEqual(['hello'])
+    expect(parsed.flagKwargs).toEqual({})
   })
 
   it('keeps the classified PathSpec over synthesis', () => {
     const p = path('/data/a.txt')
-    const [paths] = parseFlags([p], SPECS.cat ?? null, 'cat', '/')
-    expect(paths[0]).toBe(p)
+    const parsed = parseFlags([p], SPECS.cat ?? null, 'cat', '/')
+    expect(parsed.paths[0]).toBe(p)
   })
 
   it('synthesized paths leave the backend key to the mount', () => {
     // A spec-classified PATH operand the classifier left as text; the
     // mount stamps resourcePath at execute time (sentinel-proven in
     // both languages).
-    const [paths] = parseFlags(['b.txt'], SPECS.cat ?? null, 'cat', '/data')
-    expect(paths.length).toBe(1)
-    expect(paths[0]?.resourcePath).toBe('')
+    const parsed = parseFlags(['b.txt'], SPECS.cat ?? null, 'cat', '/data')
+    expect(parsed.paths.length).toBe(1)
+    expect(parsed.paths[0]?.resourcePath).toBe('')
   })
 })
 
@@ -55,35 +55,11 @@ describe('optionError scan order', () => {
     })
     const dec = new TextDecoder()
     const ambiguousFirst = parseFlags(['--c', '--bogus', 'x'], spec, 'grep', '/')
-    const refusal = optionError(
-      'grep',
-      ...([
-        ambiguousFirst[4],
-        ambiguousFirst[5],
-        ambiguousFirst[6],
-        ambiguousFirst[7],
-        ambiguousFirst[8],
-        ambiguousFirst[9],
-        ambiguousFirst[10],
-        ambiguousFirst[11],
-      ] as const),
-    )
+    const refusal = optionError('grep', ambiguousFirst)
     expect(refusal).not.toBeNull()
     expect(dec.decode(refusal?.[0]).startsWith("grep: option '--c' is ambiguous")).toBe(true)
     const invalidFirst = parseFlags(['--bogus', '--c', 'x'], spec, 'grep', '/')
-    const flipped = optionError(
-      'grep',
-      ...([
-        invalidFirst[4],
-        invalidFirst[5],
-        invalidFirst[6],
-        invalidFirst[7],
-        invalidFirst[8],
-        invalidFirst[9],
-        invalidFirst[10],
-        invalidFirst[11],
-      ] as const),
-    )
+    const flipped = optionError('grep', invalidFirst)
     expect(flipped).not.toBeNull()
     expect(dec.decode(flipped?.[0]).startsWith("grep: unrecognized option '--bogus'")).toBe(true)
   })
@@ -96,19 +72,7 @@ describe('optionError scan order', () => {
       options: [new Option({ long: '--ratio', type: 'float', choices: ['0.5', '1.0'] })],
     })
     const parsed = parseFlags(['--ratio', '5x', 'p'], spec, 'cmd', '/')
-    const refusal = optionError(
-      'cmd',
-      ...([
-        parsed[4],
-        parsed[5],
-        parsed[6],
-        parsed[7],
-        parsed[8],
-        parsed[9],
-        parsed[10],
-        parsed[11],
-      ] as const),
-    )
+    const refusal = optionError('cmd', parsed)
     expect(refusal).not.toBeNull()
     expect(new TextDecoder().decode(refusal?.[0])).toContain("invalid float value: '5x'")
   })
@@ -120,20 +84,7 @@ describe("optionError — tar's old option style", () => {
     // letter, so `tar Qf` and `tar fQ` both name f.
     for (const argv of [['Qf'], ['fQ']]) {
       const parsed = parseFlags(argv, specOf('tar'), 'tar', '/')
-      const refusal = optionError(
-        'tar',
-        ...([
-          parsed[4],
-          parsed[5],
-          parsed[6],
-          parsed[7],
-          parsed[8],
-          parsed[9],
-          parsed[10],
-          parsed[11],
-          parsed[12],
-        ] as const),
-      )
+      const refusal = optionError('tar', parsed)
       expect(refusal).not.toBeNull()
       expect(new TextDecoder().decode(refusal?.[0])).toBe(
         "tar: Old option 'f' requires an argument.\n" + "Try 'tar --help' for more information.\n",
@@ -144,22 +95,9 @@ describe("optionError — tar's old option style", () => {
 
   it('is no refusal when the cluster has its argument', () => {
     const parsed = parseFlags(['xzf', '/data/a.tgz'], specOf('tar'), 'tar', '/')
-    const refusal = optionError(
-      'tar',
-      ...([
-        parsed[4],
-        parsed[5],
-        parsed[6],
-        parsed[7],
-        parsed[8],
-        parsed[9],
-        parsed[10],
-        parsed[11],
-        parsed[12],
-      ] as const),
-    )
+    const refusal = optionError('tar', parsed)
     expect(refusal).toBeNull()
-    expect(parsed[2].x).toBe(true)
-    expect(parsed[2].z).toBe(true)
+    expect(parsed.flagKwargs.x).toBe(true)
+    expect(parsed.flagKwargs.z).toBe(true)
   })
 })

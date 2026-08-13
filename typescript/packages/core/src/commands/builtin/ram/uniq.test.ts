@@ -35,7 +35,6 @@ async function runUniq(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { lines: [], exitCode: -1, stderr: '' }
   const [out, ioResult] = result

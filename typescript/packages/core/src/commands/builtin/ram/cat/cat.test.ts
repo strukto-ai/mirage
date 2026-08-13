@@ -33,7 +33,6 @@ async function runCat(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return ''
   const [out] = result
@@ -67,7 +66,6 @@ describe('cat', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource,
     })
     if (result === null) throw new Error('null')
     const [out] = result

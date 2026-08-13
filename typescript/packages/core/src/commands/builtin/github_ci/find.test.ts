@@ -86,7 +86,6 @@ async function runFind(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'github_ci' } as never,
   })
   if (result === null) return ''
   const [out] = result

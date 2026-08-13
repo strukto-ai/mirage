@@ -1,4 +1,3 @@
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat_generic
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.generic_bind.adapter import (bound_op,
@@ -8,7 +7,6 @@ from mirage.commands.builtin.generic_bind.builders.common import \
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -22,20 +20,15 @@ def make_cat(ops: CommandIO):
     """
 
     @command("cat", resource="dify", spec=SPECS["cat"])
-    async def cat(
-        accessor,
-        paths: list[PathSpec],
-        *texts: str,
-        stdin: ByteSource | None = None,
-        index: IndexCacheStore,
-        **flags: FlagValue,
-    ) -> tuple[ByteSource | None, IOResult]:
-        resolved = await resolve_or_empty(ops, accessor, paths, index)
+    async def cat(accessor, paths: list[PathSpec], texts: list[str],
+                  opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+        resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
         return await cat_generic(resolved,
                                  list(texts),
-                                 CommandOpts(stdin=stdin, flags=flags),
-                                 dir_aware_stat(ops, accessor, index),
-                                 bound_op(ops.read_stream, accessor, index),
+                                 opts,
+                                 dir_aware_stat(ops, accessor, opts.index),
+                                 bound_op(ops.read_stream, accessor,
+                                          opts.index),
                                  local=ops.local)
 
     return cat

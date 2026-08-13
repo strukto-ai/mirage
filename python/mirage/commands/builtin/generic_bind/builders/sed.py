@@ -15,13 +15,12 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.provision import make_sed_provision
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,20 +30,12 @@ async def _resolve(ops: CommandIO, accessor: Accessor, index: IndexCacheStore,
     return await ops.resolve_glob(accessor, targets, index)
 
 
-async def sed(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    cwd: PathSpec | str = "/",
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def sed(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     return await sed_generic(
-        paths, list(texts), CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
-        partial(_resolve, ops, accessor, index),
-        bound_op(ops.read_bytes, accessor, index),
+        paths, list(texts), opts, partial(_resolve, ops, accessor, opts.index),
+        bound_op(ops.read_bytes, accessor, opts.index),
         (partial(ops.write, accessor) if ops.write is not None else None))
 
 

@@ -16,11 +16,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -49,21 +49,21 @@ def make_rm(
     async def rm(
         accessor: Accessor,
         paths: list[PathSpec],
-        *texts: str,
-        f: bool = False,
-        v: bool = False,
-        index: IndexCacheStore = NULL_INDEX,
-        **_extra: FlagValue,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> tuple[ByteSource | None, IOResult]:
         if not paths:
             raise ValueError("rm: missing operand")
-        paths = await glob_fn(accessor, paths, index)
+        fl = FlagView(opts.flags, spec=SPECS["rm"])
+        f = fl.as_bool("f")
+        v = fl.as_bool("v")
+        paths = await glob_fn(accessor, paths, opts.index)
         verbose_parts: list[str] = []
         errors: list[str] = []
         removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
-                await unlink(accessor, p, index)
+                await unlink(accessor, p, opts.index)
             except FS_ERRORS as exc:
                 if f and isinstance(exc, FileNotFoundError):
                     continue

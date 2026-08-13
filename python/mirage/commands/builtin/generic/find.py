@@ -809,29 +809,26 @@ async def find_generic(
     *,
     find_core: Callable[..., Awaitable[list[str]]],
     stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
-    stat_path: StatPath | None = None,
     dir_empty: Callable[[PathSpec], Awaitable[bool]] | None = None,
-    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run find through a backend's native op; mirrors findGeneric.
 
     Args:
         paths (list[PathSpec]): Glob-resolved start points.
         texts (list[str]): The raw expression words.
-        opts (CommandOpts): Flags from the dispatcher.
+        opts (CommandOpts): Flags and namespace facts (stat_path, links)
+            from the dispatcher.
         find_core (Callable): The backend's native find op, bound.
         stat (Callable | None): Bound overlaid stat, when the backend
             serves local stats cheaply.
-        stat_path (StatPath | None): Dispatcher-backed stat of one path.
         dir_empty (Callable | None): Whether a directory start point is
             empty, for ``-empty``.
-        links (LinkView | None): The namespace's symlink facts.
     """
     parsed = parse_flags(opts.flags)
     return await find(paths,
                       tuple(texts),
                       find_core=find_core,
-                      stat_path=stat_path,
+                      stat_path=opts.stat_path,
                       stat=stat,
                       dir_empty=dir_empty,
                       name=parsed.name,
@@ -843,7 +840,7 @@ async def find_generic(
                       path=parsed.path,
                       mindepth=parsed.mindepth,
                       empty=parsed.empty,
-                      links=links,
+                      links=opts.links,
                       follow=parsed.follow)
 
 
@@ -854,9 +851,6 @@ async def find_walk_generic(
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
-    index: IndexCacheStore,
-    stat_path: StatPath | None = None,
-    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run find by walking readdir/stat; the no-native-op twin.
 
@@ -867,14 +861,14 @@ async def find_walk_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved start points.
         texts (list[str]): The raw expression words.
-        opts (CommandOpts): Flags from the dispatcher.
+        opts (CommandOpts): Flags, the index for the walk, and namespace
+            facts (stat_path, links) from the dispatcher.
         readdir (Callable): Bound readdir called as ``readdir(p, index)``.
         stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
-        index (IndexCacheStore): Index cache store for the walk.
-        stat_path (StatPath | None): Dispatcher-backed stat of one path.
-        links (LinkView | None): The namespace's symlink facts.
     """
     parsed = parse_flags(opts.flags)
+    stat_path = opts.stat_path
+    links = opts.links
     searches = paths if paths else [
         PathSpec(virtual="/", directory="/", resource_path="")
     ]
@@ -907,7 +901,7 @@ async def find_walk_generic(
         walked = await walk_find(search,
                                  readdir=readdir,
                                  stat=stat,
-                                 index=index,
+                                 index=opts.index,
                                  args=args,
                                  links=links,
                                  follow=parsed.follow)

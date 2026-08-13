@@ -14,11 +14,13 @@
 
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import BINARY_EXTENSIONS
+from mirage.commands.config import CommandOpts
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.constants import flag_kwarg_name
@@ -188,11 +190,11 @@ def make_file_read_provision(
     async def file_read_provision(
         accessor: Accessor,
         paths: list[PathSpec],
-        *_args: str,
-        command: str = "",
-        index: IndexCacheStore = NULL_INDEX,
-        **kwargs,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
+        command = opts.command or ""
+        index = opts.index
         if not paths:
             # Pathless invocations are stdin-driven (pipe stage, heredoc,
             # or an immediate missing-operand error): zero backend bytes.
@@ -232,12 +234,11 @@ def make_head_tail_provision(
     async def head_tail_provision(
         accessor: Accessor,
         paths: list[PathSpec],
-        *_args: str,
-        command: str = "",
-        spec: CommandSpec | None = None,
-        index: IndexCacheStore = NULL_INDEX,
-        **flags: FlagValue,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
+        command = opts.command or ""
+        index = opts.index
         if not paths:
             # Pathless invocations are stdin-driven (pipe stage, heredoc,
             # or an immediate missing-operand error): zero backend bytes.
@@ -257,7 +258,7 @@ def make_head_tail_provision(
                 precision=Precision.UNKNOWN,
             )
         # A byte-count -c only; boolean -c flags (e.g. file -c) don't cap.
-        cap = _flag_of(spec, "-c", flags)
+        cap = _flag_of(opts.spec, "-c", opts.flags)
         if isinstance(cap, (str, int)) and not isinstance(cap, bool):
             c_bytes = int(cap)
             total = sum(min(c_bytes, size) for _, size in resolved)
@@ -283,15 +284,13 @@ def make_head_tail_provision(
 async def metadata_provision(
     accessor: Accessor,
     paths: list[PathSpec],
-    *_args: str,
-    command: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find)."""
     n = max(1, len(paths) if paths else 1)
     return ProvisionResult(
-        command=command,
+        command=opts.command or "",
         network_read_low=0,
         network_read_high=0,
         read_ops=n,
@@ -299,18 +298,20 @@ async def metadata_provision(
     )
 
 
-async def exact_zero_provision(command: str = "") -> ProvisionResult:
+async def exact_zero_provision(
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+) -> ProvisionResult:
     """Zero-cost EXACT estimate for backends whose listing is in memory.
 
     Chat/KB backends materialize their virtual tree from state the mount
     already fetched, so metadata commands cost no backend I/O at all
     (unlike :func:`metadata_provision`, which charges one op per operand).
-
-    Args:
-        command (str): the shell line being estimated, for display.
     """
     return ProvisionResult(
-        command=command,
+        command=opts.command or "",
         network_read_low=0,
         network_read_high=0,
         read_ops=0,
@@ -321,8 +322,8 @@ async def exact_zero_provision(command: str = "") -> ProvisionResult:
 async def index_hit_read_provision(
     accessor: Accessor,
     paths: list[PathSpec],
-    command: str,
-    index: IndexCacheStore = NULL_INDEX,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Charge one read op per index-cached operand, zero network bytes.
 
@@ -334,15 +335,16 @@ async def index_hit_read_provision(
         accessor (Accessor): backend handle, unused but part of the
             provision call shape.
         paths (list[PathSpec]): operand paths as parsed.
-        command (str): the shell line being estimated, for display.
-        index (IndexCacheStore): the per-call cache index.
+        texts (list[str]): non-path words, unused.
+        opts (CommandOpts): provision context (command, index).
     """
+    command = opts.command or ""
     if not paths:
         return ProvisionResult(command=command, precision=Precision.UNKNOWN)
     ops = 0
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
-        lookup = await index.get(path_str)
+        lookup = await opts.index.get(path_str)
         if lookup.entry is not None:
             ops += 1
     return ProvisionResult(
@@ -359,10 +361,9 @@ def make_jq_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
 
     async def jq_provision(
         accessor: Accessor,
-        paths: list[PathSpec] | None = None,
-        *texts: str,
-        index: IndexCacheStore = NULL_INDEX,
-        **kwargs,
+        paths: list[PathSpec],
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
         if not paths:
             # A pathless jq filters stdin (or errors without an expr):
@@ -373,7 +374,7 @@ def make_jq_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
         p = paths[0]
         key = p.mount_path if isinstance(p, PathSpec) else p
         try:
-            file_stat = await stat(accessor, p, index)
+            file_stat = await stat(accessor, p, opts.index)
         except Exception as exc:
             logger.debug("provision stat failed for %s: %s", key, exc)
             return ProvisionResult(command="jq", precision=Precision.UNKNOWN)
@@ -412,14 +413,11 @@ def make_sed_provision(stat: Callable[..., Any]) -> Callable[..., Any]:
     async def sed_provision(
         accessor: Accessor,
         paths: list[PathSpec],
-        *_args: str,
-        command: str = "",
-        spec: CommandSpec | None = None,
-        index: IndexCacheStore = NULL_INDEX,
-        **flags: FlagValue,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
-        result = await base(accessor, paths, command=command, index=index)
-        if _flag_of(spec, "-i", flags) is not None:
+        result = await base(accessor, paths, texts, opts)
+        if _flag_of(opts.spec, "-i", opts.flags) is not None:
             result.precision = Precision.UNKNOWN
         return result
 
@@ -441,18 +439,17 @@ def make_search_provision(
     async def search_provision(
         accessor: Accessor,
         paths: list[PathSpec],
-        *texts: str,
-        command: str = "",
-        spec: CommandSpec | None = None,
-        index: IndexCacheStore = NULL_INDEX,
-        **flags: FlagValue,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
-        rendered = (command or ""
+        rendered = (opts.command or ""
                     ) + " " + " ".join(list(texts) + [str(p) for p in paths])
-        if _walks_a_subtree(spec, flags) and readdir is not None and paths:
-            roots = await _expand_globs(resolve_glob, accessor, paths, index)
+        if (_walks_a_subtree(opts.spec, opts.flags) and readdir is not None
+                and paths):
+            roots = await _expand_globs(resolve_glob, accessor, paths,
+                                        opts.index)
             sized, complete = await _walk_files(readdir, stat, accessor, roots,
-                                                index)
+                                                opts.index)
             total = sum(size for _, size in sized)
             if not complete or not sized:
                 return ProvisionResult(
@@ -469,7 +466,8 @@ def make_search_provision(
                 read_ops=len(sized),
                 precision=Precision.EXACT,
             )
-        return await base(accessor, paths, command=rendered, index=index)
+        return await base(accessor, paths, texts,
+                          replace(opts, command=rendered))
 
     return search_provision
 
@@ -488,12 +486,10 @@ def make_transform_provision(
     async def transform_provision(
         accessor: Accessor,
         paths: list[PathSpec],
-        *_args: str,
-        command: str = "",
-        index: IndexCacheStore = NULL_INDEX,
-        **kwargs,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
-        result = await base(accessor, paths, command=command, index=index)
+        result = await base(accessor, paths, texts, opts)
         if paths:
             # Output size (compression ratio, piece count) is unknowable.
             # A pathless transform filters stdin to stdout: exact zero.
@@ -517,18 +513,17 @@ def make_copy_provision(
     async def copy_provision(
         accessor: Accessor,
         paths: list[PathSpec],
-        *_args: str,
-        command: str = "",
-        index: IndexCacheStore = NULL_INDEX,
-        **kwargs,
+        texts: list[str],
+        opts: CommandOpts,
     ) -> ProvisionResult:
-        paths = await _expand_globs(resolve_glob, accessor, paths, index)
+        command = opts.command or ""
+        paths = await _expand_globs(resolve_glob, accessor, paths, opts.index)
         sources = paths[:-1] if len(paths) > 1 else paths
         if not sources:
             return ProvisionResult(command=command,
                                    precision=Precision.UNKNOWN)
         resolved, missing = await _resolve_sizes(stat, accessor, sources,
-                                                 index)
+                                                 opts.index)
         total = sum(size for _, size in resolved)
         precision = (Precision.UNKNOWN
                      if missing > 0 or not resolved else Precision.RANGE)
@@ -548,11 +543,8 @@ def make_copy_provision(
 async def write_metadata_provision(
     accessor: Accessor,
     paths: list[PathSpec],
-    *_args: str,
-    command: str = "",
-    spec: CommandSpec | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Provision for metadata-only writes (rm, mkdir, touch, ln).
 
@@ -561,10 +553,10 @@ async def write_metadata_provision(
     count is only a floor and precision degrades to UNKNOWN.
     """
     n = max(1, len(paths) if paths else 1)
-    precision = (Precision.UNKNOWN
-                 if _walks_a_subtree(spec, flags) else Precision.EXACT)
+    precision = (Precision.UNKNOWN if _walks_a_subtree(opts.spec, opts.flags)
+                 else Precision.EXACT)
     return ProvisionResult(
-        command=command,
+        command=opts.command or "",
         network_read_low=0,
         network_read_high=0,
         read_ops=n,
@@ -575,12 +567,12 @@ async def write_metadata_provision(
 async def pure_provision(
     accessor: Accessor,
     paths: list[PathSpec],
-    *_args: str,
-    command: str = "",
-    **kwargs,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> ProvisionResult:
     """Provision for pure local computation (seq, date, bc): zero cost."""
-    return ProvisionResult(command=command, precision=Precision.EXACT)
+    return ProvisionResult(command=opts.command or "",
+                           precision=Precision.EXACT)
 
 
 FILE_READ_COMMANDS = frozenset({

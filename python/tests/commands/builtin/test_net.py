@@ -20,6 +20,7 @@ import pytest
 from mirage import MountMode, RAMResource, Workspace
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
+from mirage.commands.config import CommandOpts
 from mirage.resource.base import BaseResource
 
 curl_mod = sys.modules["mirage.commands.builtin.general.curl"]
@@ -32,7 +33,8 @@ class TestCurl:
     def test_curl_raw_returns_html(self):
         # Use example.com (rock-solid IANA reserved host) instead of
         # httpbin.org which is flaky (502s) in CI.
-        result, _ = asyncio.run(curl(None, None, "https://example.com"))
+        result, _ = asyncio.run(
+            curl(None, None, ['https://example.com'], CommandOpts()))
         body = result.decode() if isinstance(result, bytes) else result
         assert "<html" in body.lower() or "<h1" in body.lower()
 

@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
-
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.discover import discover
@@ -23,13 +21,14 @@ from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import start_point
 from mirage.commands.spec.types import FlagView
 from mirage.ops.types import MountRoot, StatPath
+from mirage.runtime.types import DispatchFn
 
 
 async def opened(
     fl: FlagView,
     stat_path: StatPath | None,
     mount_root: MountRoot | None,
-    dispatch: Callable[..., Any] | None,
+    dispatch: DispatchFn | None,
 ) -> tuple[BaseRepo, RepoLocation]:
     """Discover and open the repository a verb was invoked against.
 

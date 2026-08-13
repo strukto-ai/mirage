@@ -4,6 +4,7 @@ from typing import Any
 
 import orjson
 
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
@@ -219,6 +220,26 @@ async def _read_stdin_bytes(stdin: ByteSource | None) -> bytes:
     async for chunk in stdin:
         raw += chunk
     return raw
+
+
+async def jq_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: Callable[..., AsyncIterator[bytes]],
+) -> tuple[ByteSource | None, IOResult]:
+    """Full-command jq entry; mirrors jqGeneric's (paths, texts, opts).
+
+    The kwargs core below keeps the historical shape; this entry is the
+    dispatcher-facing seam so the builder stays wiring.
+    """
+    return await jq(paths,
+                    *texts,
+                    read_bytes=read_bytes,
+                    read_stream=read_stream,
+                    stdin=opts.stdin,
+                    **opts.flags)
 
 
 async def jq(

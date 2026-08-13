@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.dify import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.dify import read, tree
 from mirage.io.types import materialize
 
@@ -32,9 +33,8 @@ async def test_sed_transforms_dify_document(monkeypatch, dify_accessor,
     monkeypatch.setattr(tree, "list_all_documents", list_documents)
     monkeypatch.setattr(read, "get_document_segments", get_segments)
 
-    stdout, io = await sed(dify_accessor, [guide_path],
-                           "s/alpha/gamma/",
-                           index=dify_index)
+    stdout, io = await sed(dify_accessor, [guide_path], ['s/alpha/gamma/'],
+                           CommandOpts(index=dify_index))
 
     assert await materialize(stdout) == b"gamma beta"
     assert io.exit_code == 0
@@ -47,7 +47,5 @@ async def test_sed_rejects_in_place(monkeypatch, dify_accessor, dify_index,
 
     with pytest.raises(PermissionError,
                        match="-i not supported on this backend"):
-        await sed(dify_accessor, [guide_path],
-                  "s/alpha/gamma/",
-                  i=True,
-                  index=dify_index)
+        await sed(dify_accessor, [guide_path], ['s/alpha/gamma/'],
+                  CommandOpts(index=dify_index, flags={'i': True}))

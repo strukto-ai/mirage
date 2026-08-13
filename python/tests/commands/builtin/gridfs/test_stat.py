@@ -5,6 +5,7 @@ import pytest
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.gridfs.stat import stat
+from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.ops.types import StatOverlay
 from mirage.types import FileStat, FileType, PathSpec
@@ -45,11 +46,12 @@ def patched_backend(monkeypatch):
 
 async def _render(fmt: str,
                   stat_overlay: StatOverlay | None = None) -> tuple[int, str]:
-    out, io = await stat(cast(GridFSAccessor, object()),
-                         [PathSpec.from_str_path("/gridfs/f.txt")],
-                         c=fmt,
-                         index=NULL_INDEX,
-                         stat_overlay=stat_overlay)
+    out, io = await stat(
+        cast(GridFSAccessor, object()),
+        [PathSpec.from_str_path('/gridfs/f.txt')], [],
+        CommandOpts(index=NULL_INDEX,
+                    stat_overlay=stat_overlay,
+                    flags={'c': fmt}))
     return io.exit_code, (await materialize(out)).decode()
 
 

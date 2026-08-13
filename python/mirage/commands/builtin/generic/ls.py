@@ -685,25 +685,21 @@ async def ls_generic(
     opts: CommandOpts,
     readdir: Readdir,
     stat: Stat,
-    index: IndexCacheStore = NULL_INDEX,
-    links: LinkView | None = None,
-    child_mounts: ChildMounts | None = None,
 ) -> tuple[bytes, IOResult]:
     """Run ls over resolved operands, GNU semantics; mirrors lsGeneric.
 
     The wiring resolves globs, defaults the operands from the cwd, and
     binds the backend ops (including the stat overlay); flag semantics
-    live here.
+    live here, and the namespace facts (links, child mounts) and index
+    ride ``opts``.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, cwd-defaulted.
         texts (list[str]): Non-path words, unused by ls.
-        opts (CommandOpts): Flags from the dispatcher.
+        opts (CommandOpts): Flags and namespace facts from the
+            dispatcher.
         readdir (Readdir): Bound readdir called as ``readdir(p, index)``.
         stat (Stat): Bound (overlaid) stat called as ``stat(p, index)``.
-        index (IndexCacheStore): Index cache store for the walk.
-        links (LinkView | None): The namespace's symlink facts.
-        child_mounts (ChildMounts | None): Mounts nested under this one.
     """
     parsed = parse_flags(opts.flags)
     return await ls(paths,
@@ -718,10 +714,10 @@ async def ls_generic(
                     recursive=parsed.recursive,
                     list_dir=parsed.list_dir,
                     classify=parsed.classify,
-                    index=index,
-                    links=links,
+                    index=opts.index,
+                    links=opts.links,
                     deref=parsed.deref,
-                    child_mounts=child_mounts)
+                    child_mounts=opts.child_mounts)
 
 
 __all__ = [

@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -75,11 +76,9 @@ async def test_discord_grep_with_many_concrete_paths_uses_native_search():
             "mirage.commands.builtin.discord.grep.list_channels",
             new=AsyncMock(return_value=fake_channels),
     ):
-        out, io = await grep(accessor,
-                             _concrete_paths(7),
-                             "hello",
-                             w=True,
-                             index=_fake_index())
+        out, io = await grep(
+            accessor, _concrete_paths(7), ['hello'],
+            CommandOpts(index=_fake_index(), flags={'w': True}))
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
@@ -113,11 +112,9 @@ async def test_discord_grep_falls_back_when_native_raises():
             new=AsyncMock(return_value=FileStat(name="2026-04-10.jsonl",
                                                 type=FileType.TEXT)),
     ):
-        out, io = await grep(accessor,
-                             paths,
-                             "hello",
-                             w=True,
-                             index=_fake_index())
+        out, io = await grep(
+            accessor, paths, ['hello'],
+            CommandOpts(index=_fake_index(), flags={'w': True}))
     assert fake_resolve.await_count == 1
     assert io.exit_code in (0, 1)
 
@@ -137,11 +134,9 @@ async def test_discord_grep_native_empty_does_not_trigger_fallback():
             "mirage.commands.builtin.discord.grep.discord_read",
             new=AsyncMock(return_value=b""),
     ) as fake_read:
-        out, io = await grep(accessor,
-                             _concrete_paths(7),
-                             "missing",
-                             w=True,
-                             index=_fake_index())
+        out, io = await grep(
+            accessor, _concrete_paths(7), ['missing'],
+            CommandOpts(index=_fake_index(), flags={'w': True}))
     assert fake_search.await_count == 1
     assert fake_read.await_count == 0
     assert io.exit_code == 1
@@ -179,11 +174,13 @@ async def test_discord_grep_multi_pattern_skips_native_search():
             new=AsyncMock(return_value=FileStat(name="2026-04-10.jsonl",
                                                 type=FileType.TEXT)),
     ):
-        _, io = await grep(accessor,
-                           paths,
-                           e=["ada", "ben"],
-                           w=True,
-                           index=_fake_index())
+        _, io = await grep(
+            accessor, paths, [],
+            CommandOpts(index=_fake_index(),
+                        flags={
+                            'e': ['ada', 'ben'],
+                            'w': True
+                        }))
     assert fake_search.await_count == 0
     assert fake_resolve.await_count == 1
 
@@ -209,11 +206,8 @@ async def test_discord_rg_with_many_concrete_paths_uses_native_search():
             "mirage.commands.builtin.discord.rg.list_channels",
             new=AsyncMock(return_value=fake_channels),
     ):
-        out, io = await rg(accessor,
-                           _concrete_paths(7),
-                           "hello",
-                           w=True,
-                           index=_fake_index())
+        out, io = await rg(accessor, _concrete_paths(7), ['hello'],
+                           CommandOpts(index=_fake_index(), flags={'w': True}))
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
@@ -253,11 +247,13 @@ async def test_discord_rg_multi_pattern_skips_native_search():
             new=AsyncMock(return_value=FileStat(name="2026-04-10.jsonl",
                                                 type=FileType.TEXT)),
     ):
-        _, io = await rg(accessor,
-                         paths,
-                         e=["ada", "ben"],
-                         w=True,
-                         index=_fake_index())
+        _, io = await rg(
+            accessor, paths, [],
+            CommandOpts(index=_fake_index(),
+                        flags={
+                            'e': ['ada', 'ben'],
+                            'w': True
+                        }))
     assert fake_search.await_count == 0
     assert fake_resolve.await_count == 1
 
@@ -276,8 +272,6 @@ async def test_discord_grep_without_word_flag_skips_native_search():
             new=AsyncMock(return_value=[]),
     ):
         with pytest.raises(UsageError):
-            await grep(accessor,
-                       _concrete_paths(7),
-                       "hello",
-                       index=_fake_index())
+            await grep(accessor, _concrete_paths(7), ['hello'],
+                       CommandOpts(index=_fake_index()))
     fake_search.assert_not_awaited()

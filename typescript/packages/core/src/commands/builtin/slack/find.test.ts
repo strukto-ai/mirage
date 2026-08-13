@@ -36,7 +36,6 @@ async function runFind(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
     ...(options.index !== undefined ? { index: options.index } : {}),
   })
   if (result === null) return ''

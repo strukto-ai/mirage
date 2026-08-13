@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
+from typing import Callable
 
 from mirage.commands.builtin.generic.crossmount.relay.cmp import run_cmp
 from mirage.commands.builtin.generic.crossmount.relay.comm import run_comm
@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
 from mirage.commands.builtin.generic.crossmount.relay.paste import run_paste
 from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.commands.spec.types import FlagValue
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
 
@@ -30,7 +31,7 @@ async def run_relay(
         cmd_name: str,
         scopes: list[PathSpec],
         flag_kwargs: dict[str, FlagValue],
-        dispatch: Callable[..., Any],
+        dispatch: DispatchFn,
         storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Run a command whose data must colocate across mounts.
 
@@ -42,7 +43,7 @@ async def run_relay(
         cmd_name (str): One of cp, mv, diff, cmp, paste, comm, join.
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared command spec.
-        dispatch (Callable): Workspace operation dispatcher.
+        dispatch (DispatchFn): Workspace operation dispatcher.
         storage_key (Callable | None): Maps an operand to its storage
             identity, for the transfer commands that must tell a real
             move from one whose two prefixes address a single store.

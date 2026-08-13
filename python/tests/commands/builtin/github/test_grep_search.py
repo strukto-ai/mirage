@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.narrow import narrow_scope
+from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
 
@@ -61,7 +62,11 @@ async def test_grep_root_large_tree_uses_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=narrowed)
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import", r=True, w=True, index=index)
+    await grep(accessor, [_root()], ['import'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     spy.assert_awaited_once()
 
 
@@ -72,7 +77,11 @@ async def test_grep_subdir_uses_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_subdir()], "import", r=True, w=True, index=index)
+    await grep(accessor, [_subdir()], ['import'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     spy.assert_awaited_once()
 
 
@@ -86,7 +95,11 @@ async def test_grep_regex_skips_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import.*os", r=True, w=True, index=index)
+    await grep(accessor, [_root()], ['import.*os'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     spy.assert_not_awaited()
 
 
@@ -98,11 +111,11 @@ async def test_grep_regex_without_literal_skips_search(mock_github_api,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()],
-               "import|export",
-               r=True,
-               w=True,
-               index=index)
+    await grep(accessor, [_root()], ['import|export'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     spy.assert_not_awaited()
 
 
@@ -112,7 +125,11 @@ async def test_grep_small_tree_skips_search(mock_github_api, github_env,
     accessor, index = github_env
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import", r=True, w=True, index=index)
+    await grep(accessor, [_root()], ['import'],
+               CommandOpts(index=index, flags={
+                   'r': True,
+                   'w': True
+               }))
     spy.assert_not_awaited()
 
 
@@ -121,11 +138,12 @@ async def test_grep_scope_error_when_too_many_files(mock_github_api,
                                                     github_env, monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_GLOBALS, "SCOPE_ERROR", 1)
-    stdout, io = await grep(accessor, [_root()],
-                            "import",
-                            r=True,
-                            w=True,
-                            index=index)
+    stdout, io = await grep(
+        accessor, [_root()], ['import'],
+        CommandOpts(index=index, flags={
+            'r': True,
+            'w': True
+        }))
     assert io.exit_code == 1
     assert b"narrow the path" in (io.stderr or b"")
 
@@ -140,5 +158,6 @@ async def test_grep_without_word_flag_skips_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await grep(accessor, [_root()], "import", r=True, index=index)
+    await grep(accessor, [_root()], ['import'],
+               CommandOpts(index=index, flags={'r': True}))
     spy.assert_not_awaited()
