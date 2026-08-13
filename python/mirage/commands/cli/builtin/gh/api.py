@@ -19,10 +19,12 @@ from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.github._client import github_request
 from mirage.core.github.config import GhConfig
+from mirage.core.github.placeholder import expand
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue
 
 INT_RE = re.compile(r"^-?\d+$")
+READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def typed(value: str) -> JsonValue:
@@ -79,12 +81,19 @@ async def api(
         fields[key] = value
     for pair in fl.as_list("field"):
         key, value = split(pair)
-        fields[key] = typed(value)
+        # gh expands a placeholder in a `-F` value but not in a `-f` one,
+        # which its own --help spells out and a live 2.85 confirms.
+        fields[key] = typed(expand(value, inv.config))
     # gh sends a body-bearing call as POST unless --method says otherwise,
     # and a bare one as GET.
     method = fl.as_str("method") or ("POST" if fields else "GET")
+    endpoint = expand(endpoint, inv.config)
     path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
     upper = method.upper()
+    # `api` is one leaf for both halves of the API, so whether it wrote is
+    # on the line rather than in the spec: a GET must not expire every
+    # github mount the install serves.
+    mutated = upper not in READ_METHODS
     # A GET carries its fields in the query string, everything else in a
     # JSON body; with no fields there is neither, so a bare DELETE has no
     # body.
@@ -101,7 +110,7 @@ async def api(
                                       path,
                                       fields or None,
                                       base_url=inv.config.base_url)
-    return json_out(result)
+    return json_out(result, mutated)
 
 
 def _query(value: JsonValue) -> str:

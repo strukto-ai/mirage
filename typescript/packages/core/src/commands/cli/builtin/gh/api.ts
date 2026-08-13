@@ -15,6 +15,8 @@
 import { FlagView } from '../../../spec/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
+import { expand } from '../../../../core/github/placeholder.ts'
+import type { GhConfig } from '../../../../core/github/config.ts'
 import { ghTransport, jsonOut } from './accessor.ts'
 
 /**
@@ -29,6 +31,8 @@ function typed(value: string): string | number | boolean | null {
   if (/^-?\d+$/.test(value)) return Number(value)
   return value
 }
+
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 function split(pair: string): [string, string] {
   const at = pair.indexOf('=')
@@ -45,22 +49,33 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
     const [key, value] = split(pair)
     fields[key] = value
   }
+  const config = inv.config as GhConfig
   for (const pair of fl.asList('field')) {
     const [key, value] = split(pair)
-    fields[key] = typed(value)
+    // gh expands a placeholder in a `-F` value but not in a `-f` one, which
+    // its own --help spells out and a live 2.85 confirms.
+    fields[key] = typed(expand(value, config))
   }
   // gh sends a body-bearing call as POST unless --method says otherwise,
   // and a bare one as GET.
   const method = fl.asStr('method') ?? (Object.keys(fields).length > 0 ? 'POST' : 'GET')
-  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  const expanded = expand(endpoint, config)
+  const path = expanded.startsWith('/') ? expanded : `/${expanded}`
   const upper = method.toUpperCase()
+  // `api` is one leaf for both halves of the API, so whether it wrote is on
+  // the line rather than in the spec: a GET must not expire every github
+  // mount the install serves.
+  const mutated = !READ_METHODS.has(upper)
   const empty = Object.keys(fields).length === 0
   // A GET carries its fields in the query string, everything else in a JSON
   // body; a call with no fields sends neither, so a bare DELETE has no body.
   if (upper === 'GET') {
     const params: Record<string, string> = {}
     for (const [key, value] of Object.entries(fields)) params[key] = String(value)
-    return jsonOut(await ghTransport(inv.config).request(upper, path, undefined, params))
+    return jsonOut(await ghTransport(inv.config).request(upper, path, undefined, params), mutated)
   }
-  return jsonOut(await ghTransport(inv.config).request(upper, path, empty ? undefined : fields))
+  return jsonOut(
+    await ghTransport(inv.config).request(upper, path, empty ? undefined : fields),
+    mutated,
+  )
 }

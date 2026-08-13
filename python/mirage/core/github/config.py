@@ -28,9 +28,11 @@ class GhConfig(BaseModel):
 
     `repo` is what real gh reads off the current git remote to answer a line
     that names no repository; a workspace has no remote, so the install
-    carries it.
+    carries it. `branch` stands in the same way for the checked-out branch,
+    which is what `{branch}` expands to in an endpoint.
     """
 
     token: SecretStr
     base_url: str | None = None
     repo: str | None = None
+    branch: str | None = None

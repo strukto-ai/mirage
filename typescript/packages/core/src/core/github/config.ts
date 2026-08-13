@@ -32,6 +32,7 @@ export const GhConfigSchema = z.object({
   token: secretStr(),
   baseUrl: z.string().optional(),
   repo: z.string().optional(),
+  branch: z.string().optional(),
 })
 
 export function redactGhConfig(config: GhConfig): GhConfigRedacted {
