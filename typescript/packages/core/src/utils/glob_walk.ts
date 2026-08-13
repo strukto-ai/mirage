@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ChildMounts } from '../ops/types.ts'
 import { PathSpec } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
+import { compareCodePoints } from './sort.ts'
 
 export const GLOB_CHARS = ['*', '?', '[']
 
@@ -77,6 +79,7 @@ export async function resolveGlobWith<A, I>(
   paths: readonly PathSpec[],
   index: I | undefined,
   cap?: number,
+  children?: ChildMounts,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
   for (const p of paths) {
@@ -85,7 +88,7 @@ export async function resolveGlobWith<A, I>(
       continue
     }
     if (p.pattern !== null && p.pattern !== '') {
-      const matched = await expandPattern(readdir, accessor, p, index)
+      const matched = await expandPattern(readdir, accessor, p, index, children)
       if (matched.length === 0 && isWordShaped(p)) {
         result.push(
           new PathSpec({
@@ -122,6 +125,7 @@ export async function expandPattern<A, I>(
   accessor: A,
   path: PathSpec,
   index?: I,
+  children?: ChildMounts,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.resourcePath.length)
   const segments = path.resourcePath === '' ? [] : path.resourcePath.split('/')
@@ -143,15 +147,25 @@ export async function expandPattern<A, I>(
       try {
         entries = await readdir(accessor, spec, index)
       } catch (err) {
-        if (isMissingDir(err)) continue
-        throw err
+        if (!isMissingDir(err)) throw err
+        entries = []
       }
       for (const e of entries) {
         const name = rstripSlash(e).split('/').pop() ?? ''
         if (fnmatch(name, seg)) nextLevel.push(e)
       }
+      if (children !== undefined) {
+        // A nested mount root or a link is a real child of this parent
+        // whether or not the backend could list it.
+        const baseDir = rstripSlash(parent)
+        for (const name of children(`${baseDir}/`)) {
+          if (fnmatch(name, seg)) nextLevel.push(`${baseDir}/${name}`)
+        }
+      }
     }
-    level = nextLevel
+    // bash sorts a pathname expansion, and the two sources are enumerated
+    // separately, so the union is ordered here.
+    level = [...new Set(nextLevel)].sort(compareCodePoints)
     if (level.length === 0) return []
   }
   const matches = level.map((e) =>

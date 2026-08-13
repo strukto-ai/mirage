@@ -29,6 +29,7 @@ from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_bases,
                                                 spec_word_kinds)
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.route import (WordPolicy, end_options_after_program,
                                     route, word_policy)
 from mirage.workspace.session import Session
@@ -82,6 +83,7 @@ async def expand_argv(
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     registry: MountRegistry,
+    namespace: Namespace | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -96,6 +98,9 @@ async def expand_argv(
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         registry (MountRegistry): mount registry for classification.
+        namespace (Namespace | None): addressing authority holding the
+            links, so a glob word sees links and nested mount roots the
+            way a listing does.
     """
     expanded = await expand_parts(parts, session, execute_fn, call_stack)
     if not expanded:
@@ -153,7 +158,7 @@ async def expand_argv(
     # patterns for backend pushdown; unknown names fail without
     # touching backends.
     if policy is WordPolicy.SHELL:
-        words = await resolve_globs(classified, registry)
+        words = await resolve_globs(classified, registry, links=namespace)
     else:
         words = classified
     # The text view renders words as typed (raw_path): bash hands

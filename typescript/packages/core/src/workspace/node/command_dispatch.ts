@@ -32,8 +32,8 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { classifyBarePath } from '../expand/classify/index.ts'
-import type { Argv } from '../expand/argv.ts'
-import { expandArgv } from '../expand/argv.ts'
+import { Argv, expandArgv } from '../expand/argv.ts'
+import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
@@ -329,7 +329,7 @@ async function runCommandBody(
     stdin = merged
   }
 
-  const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry)
+  const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry, namespace)
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
@@ -721,6 +721,18 @@ async function runArgv(
       }
     }
     return handleDf(registry, session, dispatch, operands)
+  }
+
+  // A glob whose directory holds a child mount cannot be pushed down to
+  // one backend: the mount root is a child of that directory but its keys
+  // live in another resource, so the backend reports "no such file" for a
+  // name its own listing shows. Expanding such a word here (before the
+  // follow policy below, so a matched link is followed exactly as a typed
+  // one is) lets the matches route per mount.
+  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  if (boundary.length !== argv.operands.length) {
+    argv = new Argv(argv.name, boundary.map(wordText), boundary)
+    operands = [...argv.operands]
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

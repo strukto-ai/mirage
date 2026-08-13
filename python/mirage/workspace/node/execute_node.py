@@ -113,6 +113,7 @@ async def _expand_array_items(
     session: Session,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
+    namespace: Namespace,
     cs: CallStack | None,
 ) -> list[str]:
     """Expand an array literal into its element words.
@@ -126,6 +127,7 @@ async def _expand_array_items(
         session (Session): shell session.
         execute_fn (Callable): workspace execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
+        namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
     """
     values = list(array_node.named_children)
@@ -134,7 +136,8 @@ async def _expand_array_items(
     resolved = await resolve_globs(classified,
                                    registry,
                                    noglob=bool(
-                                       session.shell_options.get("noglob")))
+                                       session.shell_options.get("noglob")),
+                                   links=namespace)
     return [word_text(w) for w in resolved]
 
 
@@ -449,7 +452,8 @@ async def execute_node(
         classified = await resolve_globs(
             classified,
             registry,
-            noglob=bool(session.shell_options.get("noglob")))
+            noglob=bool(session.shell_options.get("noglob")),
+            links=namespace)
         if kind == NodeKind.SELECT:
             return await handle_select(recurse, var, classified, body, session,
                                        stdin, cs)
@@ -507,7 +511,8 @@ async def execute_node(
                 if val_nodes and val_nodes[0].type == NT.ARRAY:
                     key = get_text(child).partition("=")[0]
                     items = await _expand_array_items(val_nodes[0], session,
-                                                      execute_fn, registry, cs)
+                                                      execute_fn, registry,
+                                                      namespace, cs)
                     staged.append(
                         (key.removesuffix("+"), key.endswith("+"), items))
                     continue
@@ -648,7 +653,8 @@ async def execute_node(
         ]
         if val_nodes and val_nodes[0].type == NT.ARRAY:
             items = await _expand_array_items(val_nodes[0], session,
-                                              execute_fn, registry, cs)
+                                              execute_fn, registry, namespace,
+                                              cs)
             if append:
                 base = session.arrays.get(key)
                 if base is None:

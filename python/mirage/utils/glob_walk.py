@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.ops.types import ChildMounts
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
@@ -91,6 +92,7 @@ async def expand_pattern(
     accessor: Accessor,
     path: PathSpec,
     index: IndexCacheStore,
+    children: ChildMounts | None = None,
 ) -> list[PathSpec]:
     """Expand a glob PathSpec segment-by-segment via readdir.
 
@@ -109,6 +111,10 @@ async def expand_pattern(
         path (PathSpec): unresolved spec whose ``resource_path`` still
             contains the pattern.
         index (IndexCacheStore): the per-call cache index.
+        children (ChildMounts | None): child names the namespace owes a
+            directory (nested mount roots and symlinks). No backend can
+            see either, so a walk that stops at readdir misses both; this
+            is the union ``merge_readdir`` applies to a listing.
     """
     prefix = path.virtual[:len(path.virtual.rstrip("/")) -
                           len(path.resource_path)]
@@ -130,11 +136,20 @@ async def expand_pattern(
             try:
                 entries = await readdir(accessor, spec, index)
             except (FileNotFoundError, NotADirectoryError):
-                continue
+                entries = []
             next_level.extend(
                 e for e in entries
                 if fnmatch(e.rstrip("/").rsplit("/", 1)[-1], seg))
-        level = next_level
+            if children is not None:
+                # A nested mount root or a link is a real child of this
+                # parent whether or not the backend could list it.
+                base_dir = parent.rstrip("/")
+                next_level.extend(f"{base_dir}/{name}"
+                                  for name in children(f"{base_dir}/")
+                                  if fnmatch(name, seg))
+        # bash sorts a pathname expansion, and the two sources are
+        # enumerated separately, so the union is ordered here.
+        level = sorted(set(next_level))
         if not level:
             return []
     matches = [
@@ -157,6 +172,7 @@ async def expand_pattern(
 def make_resolve_glob(
     readdir: Callable[..., Any],
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES,
+    children: ChildMounts | None = None,
 ) -> Callable[..., Any]:
     """Build a resolve_glob generic over a backend's readdir.
 
@@ -164,6 +180,8 @@ def make_resolve_glob(
         readdir (Callable): backend readdir ``(accessor, path, index)``.
         max_glob_matches (int | None): cap on matches per pattern before
             truncation.
+        children (ChildMounts | None): child names the namespace owes a
+            directory, so an expansion sees nested mount roots and links.
     """
 
     async def resolve_glob(
@@ -172,7 +190,7 @@ def make_resolve_glob(
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec]:
         return await resolve_glob_with(readdir, accessor, paths, index,
-                                       max_glob_matches)
+                                       max_glob_matches, children)
 
     return resolve_glob
 
@@ -183,6 +201,7 @@ async def resolve_glob_with(
     paths: list[PathSpec],
     index: IndexCacheStore,
     cap: int | None = None,
+    children: ChildMounts | None = None,
 ) -> list[PathSpec]:
     """Shared resolve_glob loop over a backend's readdir.
 
@@ -199,13 +218,16 @@ async def resolve_glob_with(
         paths (list[PathSpec]): specs to resolve.
         index (IndexCacheStore): the per-call cache index.
         cap (int | None): cap on matches per pattern before truncation.
+        children (ChildMounts | None): child names the namespace owes a
+            directory, so an expansion sees nested mount roots and links.
     """
     result: list[PathSpec] = []
     for p in paths:
         if p.resolved:
             result.append(p)
         elif p.pattern:
-            matched = await expand_pattern(readdir, accessor, p, index)
+            matched = await expand_pattern(readdir, accessor, p, index,
+                                           children)
             if not matched and is_word_shaped(p):
                 # bash with nullglob off: an unmatched glob word stays
                 # the literal; the command then errors on it like GNU

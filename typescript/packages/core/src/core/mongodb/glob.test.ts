@@ -63,7 +63,10 @@ describe('resolveGlob', () => {
       resourcePath: mountKey('/mongo/app/u*.jsonl', '/mongo'),
     })
     const out = await resolveGlob(makeAccessor(), [p])
-    expect(out.map((x) => x.virtual)).toEqual(['/mongo/app/users.jsonl', '/mongo/app/usage.jsonl'])
+    // bash sorts a pathname expansion rather than echoing readdir order
+    // (pinned on GNU coreutils 9.7), so the mocked order above does not
+    // survive: usage sorts before users.
+    expect(out.map((x) => x.virtual)).toEqual(['/mongo/app/usage.jsonl', '/mongo/app/users.jsonl'])
     expect(
       out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].resourcePath),
     ).toBe('/mongo')

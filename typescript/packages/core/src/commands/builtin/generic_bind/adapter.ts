@@ -29,6 +29,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import { eisdir } from '../../../utils/errors.ts'
+import type { ChildMounts } from '../../../ops/types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -96,9 +97,10 @@ export type ResolveGlobOp<A extends Accessor = Accessor> = (
 export function makeResolveGlob<A extends Accessor = Accessor>(
   readdir: ReaddirOp<A>,
   maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
+  children?: ChildMounts,
 ): ResolveGlobOp<A> {
   return async (accessor, paths, index) =>
-    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches)
+    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches, children)
 }
 
 // A backend's native du, both halves at once. The generic derives its
@@ -149,10 +151,15 @@ export interface CommandIO<A extends Accessor = Accessor> {
   append?: (accessor: A, path: PathSpec, data: Uint8Array) => Promise<void>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setAttrs?: (...args: any[]) => unknown
+  // Child names the namespace owes a directory (nested mount roots and
+  // symlinks). Stamped per invocation from opts.childMounts by the
+  // factory, because it is session-scoped state while the adapter itself
+  // is built once per backend.
+  globChildren?: ChildMounts
 }
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
-  return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+  return makeResolveGlob(ops.readdir, ops.maxGlobMatches, ops.globChildren)
 }
 
 /**

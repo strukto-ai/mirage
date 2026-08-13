@@ -23,7 +23,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import (DEFAULT_MAX_DU_ENTRIES,
                                                 DuEntries)
 from mirage.commands.config import CommandFnResult, CommandOpts, ProvisionFn
-from mirage.ops.types import StatOverlay
+from mirage.ops.types import ChildMounts, StatOverlay
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS, eisdir
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
@@ -338,10 +338,16 @@ class CommandIO:
     append: WriteOp | None = None
     # Kwargs vary per backend (mode/times/owner); loose like TS's any.
     set_attrs: OperationFn | None = None
+    # Child names the namespace owes a directory (nested mount roots and
+    # symlinks). Stamped per invocation from opts.child_mounts by the
+    # factory, because it is session-scoped state and the adapter itself
+    # is built once per backend.
+    glob_children: ChildMounts | None = None
 
     @property
     def resolve_glob(self) -> ResolveGlobOp:
-        return make_resolve_glob(self.readdir, self.max_glob_matches)
+        return make_resolve_glob(self.readdir, self.max_glob_matches,
+                                 self.glob_children)
 
     def operation(self, op: Operation) -> OperationFn | None:
         operations = {

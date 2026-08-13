@@ -74,8 +74,19 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     if (!supports(baseOps, b.requirements ?? [])) continue
     const cmdOps =
       b.read === true ? withReadCache(baseOps) : b.write === true ? baseOps : withStatCache(baseOps)
+    // A glob resolved by one backend cannot see a nested mount root or a
+    // symlink: the mount keys live in another resource and no resource
+    // stores a link. The adapter is built once per backend and the names
+    // are session-scoped, so the fact is stamped on per invocation and
+    // every builder keeps calling resolveGlobOf(ops) unchanged.
     const fn: CommandFn = (accessor, paths, texts, opts) =>
-      b.fn(cmdOps, accessor, paths, texts, opts)
+      b.fn(
+        opts.childMounts === undefined ? cmdOps : { ...cmdOps, globChildren: opts.childMounts },
+        accessor,
+        paths,
+        texts,
+        opts,
+      )
     const provision =
       b.name in provOver
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)
