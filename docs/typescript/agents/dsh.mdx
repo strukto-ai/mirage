@@ -58,3 +58,9 @@ const script = await shell.run(
 ```
 
 [`examples/typescript/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
+
+| Harness | Where Mirage sits | A session is |
+| --- | --- | --- |
+| DeepSeek Harness (this page) | its filesystem and shell | objects in your process — no subprocess, roughly 0.5 ms and 240 KB each |
+| [Codex](/typescript/agents/codex) | tools beside the CLI's native ones | a Codex CLI process plus a Node tool server |
+| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | MCP tools served from your process | a spawned Claude Code CLI process |
